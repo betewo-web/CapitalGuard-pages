@@ -55,16 +55,12 @@ function setStatus(icon, title, msg, isErr) {
 }
 
 async function main() {
-  // 取得 URL 中的 session token
-  const params = new URLSearchParams(location.search);
-  const token  = params.get("token") || params.get("liff.state")
-                   ? new URLSearchParams(params.get("liff.state") || "").get("token") || params.get("token")
-                   : null;
-
-  if (!token) {
-    setStatus("❌", "缺少驗證參數", "請從台股監控網頁重新掃碼，勿直接開啟此頁面", true);
-    return;
-  }
+  // 取得 URL 中的 session token（QR 綁定模式才有）
+  const params       = new URLSearchParams(location.search);
+  const liffState    = params.get("liff.state");
+  const sessionToken = params.get("token") ||
+                       (liffState ? new URLSearchParams(liffState).get("token") : null);
+  const isBindMode   = !!sessionToken;  // 有 token = QR 綁定；無 token = 直接登入跳轉
 
   // 初始化 LIFF
   try {
@@ -89,27 +85,29 @@ async function main() {
     return;
   }
 
-  // 更新 Supabase pending_line_auth
-  try {
-    const url = new URL(`${SUPABASE_URL}/rest/v1/pending_line_auth`);
-    url.searchParams.set("session_token", `eq.${token}`);
-    const r = await fetch(url, {
-      method: "PATCH",
-      headers: {
-        "apikey":        SUPABASE_ANON,
-        "Authorization": `Bearer ${SUPABASE_ANON}`,
-        "Content-Type":  "application/json",
-        "Prefer":        "return=minimal",
-      },
-      body: JSON.stringify({
-        line_user_id: profile.userId,
-        display_name: profile.displayName,
-      }),
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  } catch (e) {
-    setStatus("❌", "綁定失敗", `請重試或聯絡管理員（${e.message}）`, true);
-    return;
+  // QR 綁定模式：更新 pending_line_auth（通知 PC watchlist.html 掃碼完成）
+  if (isBindMode) {
+    try {
+      const url = new URL(`${SUPABASE_URL}/rest/v1/pending_line_auth`);
+      url.searchParams.set("session_token", `eq.${sessionToken}`);
+      const r = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          "apikey":        SUPABASE_ANON,
+          "Authorization": `Bearer ${SUPABASE_ANON}`,
+          "Content-Type":  "application/json",
+          "Prefer":        "return=minimal",
+        },
+        body: JSON.stringify({
+          line_user_id: profile.userId,
+          display_name: profile.displayName,
+        }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } catch (e) {
+      setStatus("❌", "綁定失敗", `請重試或聯絡管理員（${e.message}）`, true);
+      return;
+    }
   }
 
   // 取得或建立 Supabase 用戶，並拿到 access_token
