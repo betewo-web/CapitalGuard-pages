@@ -304,6 +304,24 @@ window.addEventListener("DOMContentLoaded", async () => {
     } catch { localStorage.removeItem("sma_session"); }
   }
   loadUniverse();
+
+  // 從 URL ?token= 參數自動登入（LIFF 跳轉後使用）
+  const urlToken = new URLSearchParams(location.search).get("token");
+  if (urlToken) {
+    // 清除 URL 參數，避免 token 留在瀏覽器歷史
+    history.replaceState(null, "", location.pathname);
+    try {
+      const rows = await sbGet("users", {}, urlToken);
+      if (rows?.length) {
+        const row = rows[0];
+        state = { userId: row.id, accessToken: urlToken, displayName: row.display_name };
+        localStorage.setItem("sma_session", JSON.stringify(state));
+        await showMain();
+        return;
+      }
+    } catch { /* token 無效，fall through 到 QR code 畫面 */ }
+  }
+
   initLiffLogin();
 });
 

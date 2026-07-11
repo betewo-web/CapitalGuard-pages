@@ -112,18 +112,38 @@ async function main() {
     return;
   }
 
-  // 成功
-  setStatus("✅", "綁定成功！", `${profile.displayName}，帳號已設定完成`);
+  // 取得或建立 Supabase 用戶，並拿到 access_token
+  let accessToken = null;
+  try {
+    const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_or_create_user`, {
+      method: "POST",
+      headers: {
+        "apikey":        SUPABASE_ANON,
+        "Authorization": `Bearer ${SUPABASE_ANON}`,
+        "Content-Type":  "application/json",
+      },
+      body: JSON.stringify({
+        p_line_user_id: profile.userId,
+        p_display_name: profile.displayName,
+      }),
+    });
+    if (rpcRes.ok) {
+      const rows = await rpcRes.json();
+      accessToken = rows?.[0]?.access_token ?? null;
+    }
+  } catch { /* 取不到 token 仍繼續，只是無法自動登入 */ }
 
-  // 3 秒後自動跳轉到 CapitalGuard 聊天室
+  // 成功
+  setStatus("✅", "綁定成功！", `${profile.displayName}，即將開啟監控頁面…`);
+
+  // 2 秒後開啟 watchlist.html（帶 access_token 自動登入）
   setTimeout(() => {
     try {
-      // 在 LINE App 內：開啟官方帳號聊天
       if (liff.isInClient()) {
-        liff.openWindow({
-          url: 'https://line.me/R/oaMessage/@408csebn',
-          external: false,
-        });
+        const dest = accessToken
+          ? `https://betewo-web.github.io/CapitalGuard-pages/watchlist.html?token=${encodeURIComponent(accessToken)}`
+          : `https://betewo-web.github.io/CapitalGuard-pages/watchlist.html`;
+        liff.openWindow({ url: dest, external: true });
       }
     } catch {}
   }, 2000);
