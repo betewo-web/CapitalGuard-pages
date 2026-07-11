@@ -4,49 +4,34 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>台股監控 — 個人自選股設定</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="watchlist.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-  <style>
-    body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
-    .card { background: #1a1d27; border: 1px solid #2a2d3d; }
-    .card-header { background: #12151f; border-bottom: 1px solid #2a2d3d; }
-    .form-control, .form-select {
-      background: #12151f; border: 1px solid #2a2d3d; color: #e0e0e0;
-    }
-    .form-control:focus, .form-select:focus {
-      background: #12151f; color: #e0e0e0;
-      border-color: #4c6ef5; box-shadow: 0 0 0 0.2rem rgba(76,110,245,0.25);
-    }
-    .form-control::placeholder { color: #555; }
-    .table { color: #e0e0e0; }
-    .table td, .table th { border-color: #2a2d3d; vertical-align: middle; }
-    .badge-sid { background:#1e3a5f; color:#7eb8f7; font-size:.85rem; padding:.35em .6em; border-radius:4px; }
-    #autocomplete-list { background:#1a1d27; border:1px solid #2a2d3d; z-index:1000; }
-    #autocomplete-list .dropdown-item { color:#e0e0e0; padding:.5rem .75rem; cursor:pointer; }
-    #autocomplete-list .dropdown-item:hover { background:#2a2d3d; }
-    .toggle-cell .form-check-input { width:2.2em; height:1.1em; cursor:pointer; }
-    .step-badge { background:#4c6ef5; color:#fff; border-radius:50%; width:24px; height:24px;
-                  display:inline-flex; align-items:center; justify-content:center;
-                  font-size:.8rem; font-weight:700; flex-shrink:0; }
-  </style>
 </head>
 <body>
 
 <!-- ── 頂部導航 ── -->
-<nav class="navbar navbar-dark" style="background:#12151f;border-bottom:1px solid #2a2d3d;">
-  <div class="container-lg">
-    <span class="navbar-brand fw-bold">📊 台股監控</span>
-    <span id="nav-user" class="text-muted small"></span>
+<nav class="navbar modern-navbar navbar-dark sticky-top">
+  <div class="container-lg py-2 py-md-3">
+    <span class="navbar-brand app-brand mb-0">
+      <span class="brand-icon">◎</span>
+      <span class="brand-title">台股監控</span>
+    </span>
+    <span id="nav-user" class="user-chip"></span>
   </div>
 </nav>
 
-<div class="container-lg py-4" style="max-width:860px">
+<div class="container-lg page-shell py-3 py-md-4">
 
   <!-- ── 登入區（未登入時顯示） ── -->
   <div id="login-section">
-    <div class="card mb-4">
-      <div class="card-header py-3">
-        <h5 class="mb-0">� 掃碼登入</h5>
+    <div class="card panel-card mb-4">
+      <div class="card-header py-3 d-flex align-items-center justify-content-between">
+        <h5 class="mb-0 panel-title">掃碼登入</h5>
+        <span class="small text-muted">Quick Sign-In</span>
       </div>
       <div class="card-body p-4 text-center">
 
@@ -61,7 +46,7 @@
           <div id="qr-status" class="text-muted small mb-3">
             <span class="spinner-border spinner-border-sm me-1"></span> 產生 QR Code 中...
           </div>
-          <button class="btn btn-sm btn-outline-secondary" onclick="initLiffLogin()">🔄 重新產生</button>
+          <button class="btn btn-outline-light" onclick="initLiffLogin()">重新產生 QR Code</button>
         </div>
 
         <!-- 掃碼成功後顯示 -->
@@ -83,14 +68,14 @@
           <div class="row g-2 align-items-end text-start">
             <div class="col-md-5">
               <label class="form-label text-muted small">LINE User ID</label>
-              <input id="inp-line-id" class="form-control" placeholder="U1a2b3c4d5e6f...">
+              <input id="inp-line-id" class="form-control form-control-lg" placeholder="U1a2b3c4d5e6f...">
             </div>
             <div class="col-md-3">
               <label class="form-label text-muted small">顯示名稱</label>
-              <input id="inp-name" class="form-control" placeholder="Alice">
+              <input id="inp-name" class="form-control form-control-lg" placeholder="Alice">
             </div>
             <div class="col-md-4">
-              <button class="btn btn-primary w-100" onclick="doLogin()">登入 / 建立帳號</button>
+              <button class="btn btn-primary btn-lg w-100" onclick="doLogin()">登入 / 建立帳號</button>
             </div>
           </div>
           <div id="manual-login-msg" class="mt-2 small"></div>
@@ -104,49 +89,35 @@
   <div id="main-section" style="display:none">
 
     <!-- 新增股票 -->
-    <div class="card mb-4">
-      <div class="card-header py-2 d-flex justify-content-between align-items-center">
-        <span class="fw-semibold">➕ 新增追蹤股票</span>
+    <div class="card panel-card mb-4">
+      <div class="card-header py-3 d-flex justify-content-between align-items-center">
+        <span class="fw-semibold panel-title">新增追蹤股票</span>
+        <span class="chip-muted">Dashboard</span>
       </div>
       <div class="card-body p-3">
-        <div class="d-flex gap-2 position-relative">
+        <div class="d-flex gap-2 position-relative flex-column flex-md-row">
           <div class="flex-grow-1 position-relative">
-            <input id="inp-stock" class="form-control" placeholder="輸入股票代號或名稱，如 2330 或 台積電"
+            <input id="inp-stock" class="form-control form-control-lg" placeholder="輸入股票代號或名稱，如 2330 或 台積電"
                    autocomplete="off" oninput="onStockInput()" onkeydown="onStockKey(event)">
-            <div id="autocomplete-list" class="position-absolute w-100 rounded" style="display:none;top:100%;max-height:200px;overflow-y:auto;"></div>
+            <div id="autocomplete-list" class="position-absolute w-100 rounded" style="display:none;"></div>
           </div>
-          <button class="btn btn-success px-4" onclick="addStock()">加入</button>
+          <button class="btn btn-success btn-lg btn-add" onclick="addStock()">加入</button>
         </div>
         <div id="add-msg" class="mt-2 small"></div>
       </div>
     </div>
 
     <!-- 自選股清單 -->
-    <div class="card">
-      <div class="card-header py-2 d-flex justify-content-between align-items-center">
-        <span class="fw-semibold">📋 我的自選股 <span id="wl-count" class="badge bg-secondary ms-1">0</span></span>
-        <button class="btn btn-sm btn-outline-secondary" onclick="logout()">登出</button>
+    <div class="card panel-card">
+      <div class="card-header py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
+        <button class="btn btn-outline-light" onclick="logout()">登出</button>
       </div>
       <div class="card-body p-0">
-        <div id="wl-empty" class="text-center py-5 text-muted" style="display:none">
+        <div id="wl-empty" class="empty-state text-center py-5 text-muted" style="display:none">
           尚未加入任何股票，從上方搜尋並加入吧！
         </div>
-        <div class="table-responsive">
-          <table class="table table-sm mb-0" id="wl-table" style="display:none">
-            <thead>
-              <tr style="font-size:.8rem;color:#888">
-                <th>代號</th>
-                <th>名稱</th>
-                <th class="text-center">⚠️ 跌破支撐</th>
-                <th class="text-center">🟢 逼近支撐</th>
-                <th class="text-center">⚡ 突破壓力</th>
-                <th class="text-center">🔴 逼近壓力</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="wl-body"></tbody>
-          </table>
-        </div>
+        <div id="wl-grid" class="watchlist-grid" style="display:none"></div>
       </div>
     </div>
 
@@ -427,37 +398,54 @@ async function loadWatchlist() {
 }
 
 function renderWatchlist(rows) {
-  const tbody = document.getElementById("wl-body");
-  tbody.innerHTML = "";
+  const grid = document.getElementById("wl-grid");
+  grid.innerHTML = "";
   document.getElementById("wl-count").textContent = rows.length;
   document.getElementById("wl-empty").style.display = rows.length ? "none" : "";
-  document.getElementById("wl-table").style.display = rows.length ? "" : "none";
+  document.getElementById("wl-grid").style.display = rows.length ? "grid" : "none";
 
   rows.forEach(row => {
-    const tr = document.createElement("tr");
-    tr.dataset.id = row.id;
-    tr.dataset.sid = row.stock_id;
-    tr.innerHTML = `
-      <td><span class="badge-sid">${row.stock_id}</span></td>
-      <td class="text-muted small">${row.stock_name || "—"}</td>
-      ${toggleCell(row, "alert_break_support")}
-      ${toggleCell(row, "alert_near_support")}
-      ${toggleCell(row, "alert_break_resistance")}
-      ${toggleCell(row, "alert_near_resistance")}
-      <td><button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeStock('${row.id}')">✕</button></td>
+    const card = document.createElement("article");
+    card.className = "wl-card";
+    card.dataset.id = row.id;
+    card.dataset.sid = row.stock_id;
+    card.innerHTML = `
+      <div class="wl-card-head">
+        <div>
+          <span class="badge-sid">${escapeHtml(row.stock_id)}</span>
+          <div class="wl-name">${escapeHtml(row.stock_name || "未命名")}</div>
+        </div>
+        <button class="btn btn-sm btn-outline-danger wl-remove" onclick="removeStock('${row.id}')">移除</button>
+      </div>
+      <div class="wl-toggle-grid">
+        ${togglePill(row, "alert_break_support", "⚠️ 跌破支撐")}
+        ${togglePill(row, "alert_near_support", "🟢 逼近支撐")}
+        ${togglePill(row, "alert_break_resistance", "⚡ 突破壓力")}
+        ${togglePill(row, "alert_near_resistance", "🔴 逼近壓力")}
+      </div>
     `;
-    tbody.appendChild(tr);
+    grid.appendChild(card);
   });
 }
 
-function toggleCell(row, field) {
+function togglePill(row, field, label) {
   const checked = row[field] ? "checked" : "";
-  return `<td class="text-center toggle-cell">
-    <div class="form-check form-switch d-flex justify-content-center mb-0">
+  return `<label class="alert-pill ${row[field] ? "active" : ""}">
+    <span class="alert-label">${label}</span>
+    <span class="toggle-wrap form-check form-switch mb-0">
       <input class="form-check-input" type="checkbox" ${checked}
              onchange="updateAlert('${row.id}', '${field}', this.checked)">
-    </div>
-  </td>`;
+    </span>
+  </label>`;
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function updateAlert(rowId, field, value) {
@@ -547,9 +535,12 @@ function onStockKey(e) {
 }
 
 document.addEventListener("click", e => {
-  if (!document.getElementById("inp-stock").contains(e.target))
+  const inputEl = document.getElementById("inp-stock");
+  const listEl = document.getElementById("autocomplete-list");
+  if (!inputEl.contains(e.target) && !listEl.contains(e.target))
     document.getElementById("autocomplete-list").style.display = "none";
 });
 </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
