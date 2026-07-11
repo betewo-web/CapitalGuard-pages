@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>台股監控 — 個人自選股設定</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <style>
     body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
     .card { background: #1a1d27; border: 1px solid #2a2d3d; }
@@ -45,45 +46,56 @@
   <div id="login-section">
     <div class="card mb-4">
       <div class="card-header py-3">
-        <h5 class="mb-0">🔑 登入 / 建立帳號</h5>
+        <h5 class="mb-0">� 掃碼登入</h5>
       </div>
-      <div class="card-body p-4">
-        <p class="text-muted small mb-3">
-          輸入您的 LINE User ID 來建立或取回您的帳號。
-          不知道自己的 LINE User ID？請向 LINE Bot 傳送「<code>我的ID</code>」。
-        </p>
-        <div class="row g-2 align-items-end">
-          <div class="col-md-5">
-            <label class="form-label text-muted small">您的 LINE User ID</label>
-            <input id="inp-line-id" class="form-control" placeholder="U1a2b3c4d5e6f...">
+      <div class="card-body p-4 text-center">
+
+        <!-- QR Code 掃碼登入 -->
+        <div id="qr-wrap">
+          <p class="text-muted small mb-3">
+            用 LINE 掃描 QR Code，自動取得帳號<br>
+            <span style="font-size:.8rem">首次使用將自動建立帳號，無需任何輸入</span>
+          </p>
+          <div id="qrcode" class="d-inline-block p-2 bg-white rounded mb-3"
+               style="min-width:208px;min-height:208px;"></div>
+          <div id="qr-status" class="text-muted small mb-3">
+            <span class="spinner-border spinner-border-sm me-1"></span> 產生 QR Code 中...
           </div>
-          <div class="col-md-3">
-            <label class="form-label text-muted small">顯示名稱</label>
-            <input id="inp-name" class="form-control" placeholder="Alice">
-          </div>
-          <div class="col-md-4">
-            <button class="btn btn-primary w-100" onclick="doLogin()">登入 / 建立帳號</button>
-          </div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="initLiffLogin()">🔄 重新產生</button>
         </div>
+
+        <!-- 掃碼成功後顯示 -->
+        <div id="qr-success" style="display:none">
+          <div style="font-size:3.5rem">✅</div>
+          <p class="mt-2 fw-semibold">綁定成功！</p>
+          <p class="text-muted small">正在登入...</p>
+        </div>
+
         <div id="login-msg" class="mt-2 small"></div>
 
-        <!-- 說明步驟 -->
+        <!-- 手動登入（收合備用） -->
         <hr class="mt-4" style="border-color:#2a2d3d">
-        <p class="text-muted small mb-2">如何取得 LINE User ID？</p>
-        <div class="d-flex flex-column gap-2">
-          <div class="d-flex align-items-start gap-2">
-            <span class="step-badge">1</span>
-            <span class="small text-muted">將 LINE Bot 加為好友（掃描 Messaging API 中的 QR Code）</span>
+        <button class="btn btn-link text-muted small p-0" type="button"
+                data-bs-toggle="collapse" data-bs-target="#manual-login-wrap">
+          無法掃碼？手動輸入 LINE User ID ▸
+        </button>
+        <div class="collapse mt-3" id="manual-login-wrap">
+          <div class="row g-2 align-items-end text-start">
+            <div class="col-md-5">
+              <label class="form-label text-muted small">LINE User ID</label>
+              <input id="inp-line-id" class="form-control" placeholder="U1a2b3c4d5e6f...">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label text-muted small">顯示名稱</label>
+              <input id="inp-name" class="form-control" placeholder="Alice">
+            </div>
+            <div class="col-md-4">
+              <button class="btn btn-primary w-100" onclick="doLogin()">登入 / 建立帳號</button>
+            </div>
           </div>
-          <div class="d-flex align-items-start gap-2">
-            <span class="step-badge">2</span>
-            <span class="small text-muted">在聊天視窗輸入 <code>我的ID</code>，Bot 即回覆您的 User ID</span>
-          </div>
-          <div class="d-flex align-items-start gap-2">
-            <span class="step-badge">3</span>
-            <span class="small text-muted">貼入上方欄位，輸入名稱，點「登入 / 建立帳號」</span>
-          </div>
+          <div id="manual-login-msg" class="mt-2 small"></div>
         </div>
+
       </div>
     </div>
   </div>
@@ -147,6 +159,7 @@
 // ═══════════════════════════════════════════════════════════════
 const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
 const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
+const LIFF_ID       = "2010668840-DXPfjNlx";
 
 // ── Supabase REST 輔助 ──────────────────────────────────────────
 
@@ -198,23 +211,100 @@ async function sbDelete(table, params, accessToken) {
   if (!r.ok) throw new Error(`DELETE ${table}: ${r.status}`);
 }
 
+async function sbRpc(fn, params) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      "apikey":        SUPABASE_ANON,
+      "Authorization": `Bearer ${SUPABASE_ANON}`,
+      "Content-Type":  "application/json",
+    },
+    body: JSON.stringify(params),
+  });
+  if (!r.ok) throw new Error(`RPC ${fn}: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
 // ── 全域狀態 ────────────────────────────────────────────────────
 let state = { userId: null, accessToken: null, displayName: "" };
 let universe = {};   // sid → { n: name, i: industry }
 
+// ── LIFF 掃碼登入 ────────────────────────────────────────────────
+let pollTimer = null;
+
+async function initLiffLogin() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  const qrDiv    = document.getElementById("qrcode");
+  const statusEl = document.getElementById("qr-status");
+  const msgEl    = document.getElementById("login-msg");
+  qrDiv.innerHTML = "";
+  msgEl.innerHTML = "";
+  statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 產生中...';
+
+  const sessionToken = crypto.randomUUID();
+  try {
+    await sbPost("pending_line_auth", { session_token: sessionToken }, null, true);
+  } catch (e) {
+    statusEl.innerHTML = `<span class="text-danger">❌ 無法建立 QR Code：${e.message}</span>`;
+    return;
+  }
+
+  const liffUrl = `https://liff.line.me/${LIFF_ID}?token=${sessionToken}`;
+  new QRCode(qrDiv, { text: liffUrl, width: 200, height: 200, colorDark: "#000", colorLight: "#fff" });
+  statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 等待掃碼（10 分鐘內有效）…';
+
+  pollTimer = setInterval(() => pollForLogin(sessionToken), 3000);
+  setTimeout(() => {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    statusEl.innerHTML = '<span class="text-warning">⏰ QR Code 已過期，請點「重新產生」</span>';
+  }, 10 * 60 * 1000);
+}
+
+async function pollForLogin(sessionToken) {
+  try {
+    const rows = await sbGet("pending_line_auth",
+      { session_token: `eq.${sessionToken}`, select: "line_user_id,display_name" }, null);
+    const rec = rows?.[0];
+    if (!rec?.line_user_id) return;
+    clearInterval(pollTimer); pollTimer = null;
+    document.getElementById("qr-wrap").style.display    = "none";
+    document.getElementById("qr-success").style.display = "";
+    await doLiffLogin(rec.line_user_id, rec.display_name);
+  } catch { /* 忽略輪詢錯誤 */ }
+}
+
+async function doLiffLogin(lineUserId, displayName) {
+  try {
+    const rows = await sbRpc("get_or_create_user", {
+      p_line_user_id: lineUserId,
+      p_display_name: displayName || "用戶",
+    });
+    if (!rows?.length) throw new Error("取得用戶資料失敗");
+    const row = rows[0];
+    state = { userId: row.user_id, accessToken: row.access_token, displayName: row.display_name };
+    localStorage.setItem("sma_session", JSON.stringify(state));
+    await showMain();
+  } catch (e) {
+    document.getElementById("qr-success").style.display = "none";
+    document.getElementById("qr-wrap").style.display    = "";
+    document.getElementById("login-msg").innerHTML = `<span class="text-danger">❌ 登入失敗：${e.message}</span>`;
+  }
+}
+
 // ── 初始化 ──────────────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", async () => {
-  // 嘗試從 localStorage 恢復登入狀態
   const saved = localStorage.getItem("sma_session");
   if (saved) {
     try {
       const s = JSON.parse(saved);
       state = s;
       await showMain();
+      loadUniverse();
+      return;
     } catch { localStorage.removeItem("sma_session"); }
   }
-  // 載入股票宇宙（供搜尋）
   loadUniverse();
+  initLiffLogin();
 });
 
 async function loadUniverse() {
@@ -224,11 +314,11 @@ async function loadUniverse() {
   } catch { /* 無 universe.json，搜尋功能退化為純代號輸入 */ }
 }
 
-// ── 登入 / 建立帳號 ─────────────────────────────────────────────
+// ── 手動登入 / 建立帳號（備用）────────────────────────────────────
 async function doLogin() {
   const lineId = document.getElementById("inp-line-id").value.trim();
   const name   = document.getElementById("inp-name").value.trim() || "用戶";
-  const msg    = document.getElementById("login-msg");
+  const msg    = document.getElementById("manual-login-msg");
 
   if (!lineId.startsWith("U") || lineId.length < 10) {
     msg.innerHTML = '<span class="text-warning">LINE User ID 格式不正確，應以 U 開頭且長度 > 10</span>';
@@ -267,7 +357,7 @@ async function doLogin() {
 }
 
 function showTokenLoginPrompt(lineId) {
-  const msg = document.getElementById("login-msg");
+  const msg = document.getElementById("manual-login-msg");
   msg.innerHTML = `
     <div class="alert alert-warning py-2 mt-2 small">
       此 LINE User ID 已有帳號。請輸入您的存取碼（Access Token）來繼續。
@@ -281,7 +371,7 @@ function showTokenLoginPrompt(lineId) {
 
 async function doTokenLogin(lineId) {
   const token = document.getElementById("inp-token").value.trim();
-  const msg   = document.getElementById("login-msg");
+  const msg   = document.getElementById("manual-login-msg");
   if (!token) return;
   try {
     // 以 access_token 查詢 user（RLS 會驗證 x-access-token header）
