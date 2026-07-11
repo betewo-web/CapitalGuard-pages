@@ -113,12 +113,20 @@ async function main() {
   }
 
   // 成功
-  setStatus("✅", "綁定成功！", `${profile.displayName}，請返回台股監控網頁繼續操作`);
+  setStatus("✅", "綁定成功！", `${profile.displayName}，帳號已設定完成`);
 
-  // 在 LINE App 內自動關閉視窗
+  // 3 秒後自動跳轉到 CapitalGuard 聊天室
   setTimeout(() => {
-    try { if (liff.isInClient()) liff.closeWindow(); } catch {}
-  }, 3000);
+    try {
+      // 在 LINE App 內：開啟官方帳號聊天
+      if (liff.isInClient()) {
+        liff.openWindow({
+          url: 'https://line.me/R/oaMessage/@408csebn',
+          external: false,
+        });
+      }
+    } catch {}
+  }, 2000);
 }
 
 main();
