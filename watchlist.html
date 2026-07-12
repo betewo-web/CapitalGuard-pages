@@ -200,6 +200,7 @@ async function sbRpc(fn, params) {
 let state = { userId: null, accessToken: null, displayName: "" };
 let universe = {};   // sid → { n: name, i: industry }
 let universeLoading = false;
+let twseUniverseCache = null;
 
 function normalizeStockInput(v) {
   return String(v || "").trim().replace(/\s+/g, " ");
@@ -226,6 +227,47 @@ function resolveStock(rawInput) {
   }
 
   return null;
+}
+
+async function fetchTwseUniverseMap(force = false) {
+  if (!force && twseUniverseCache && Object.keys(twseUniverseCache).length) {
+    return twseUniverseCache;
+  }
+
+  try {
+    const r = await fetch("https://openapi.twse.com.tw/v1/opendata/t187ap03_L");
+    if (!r.ok) return {};
+    const rows = await r.json();
+    const m = {};
+    for (const row of rows || []) {
+      const sid = String(row["公司代號"] || "").trim();
+      if (!/^\d{4}$/.test(sid)) continue;
+      m[sid] = {
+        n: String(row["公司簡稱"] || "").trim(),
+        i: String(row["產業類別"] || "其他").trim(),
+      };
+    }
+    if (Object.keys(m).length) {
+      twseUniverseCache = m;
+      return m;
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+async function validateStockCode(sid) {
+  if (universe[sid]) {
+    return { found: true, name: universe[sid].n || "", verifiable: true };
+  }
+  const m = await fetchTwseUniverseMap();
+  if (!Object.keys(m).length) {
+    return { found: false, name: "", verifiable: false };
+  }
+  if (m[sid]) {
+    universe[sid] = m[sid];
+    return { found: true, name: m[sid].n || "", verifiable: true };
+  }
+  return { found: false, name: "", verifiable: true };
 }
 
 // ── LIFF 掃碼登入 ────────────────────────────────────────────────
@@ -331,27 +373,15 @@ async function loadUniverse() {
     const r = await fetch("universe.json");
     if (r.ok) {
       universe = await r.json();
+      twseUniverseCache = universe;
       universeLoading = false;
       return;
     }
   } catch { /* ignore */ }
 
   // 後備：直接抓 TWSE OpenAPI，避免缺 universe.json 時無法驗證股票是否存在
-  try {
-    const r2 = await fetch("https://openapi.twse.com.tw/v1/opendata/t187ap03_L");
-    if (!r2.ok) return;
-    const rows = await r2.json();
-    const m = {};
-    for (const row of rows || []) {
-      const sid = String(row["公司代號"] || "").trim();
-      if (!/^\d{4}$/.test(sid)) continue;
-      m[sid] = {
-        n: String(row["公司簡稱"] || "").trim(),
-        i: String(row["產業類別"] || "其他").trim(),
-      };
-    }
-    if (Object.keys(m).length) universe = m;
-  } catch { /* ignore */ }
+  const m = await fetchTwseUniverseMap();
+  if (Object.keys(m).length) universe = m;
   universeLoading = false;
 }
 
@@ -528,9 +558,14 @@ async function addStock() {
   const universeReady = Object.keys(universe).length > 0;
 
   if (!rawVal) { msgEl.innerHTML = '<span class="text-warning">請輸入股票代號或名稱</span>'; return; }
+
+  if (!matched && !universeReady) {
+    await loadUniverse();
+    matched = resolveStock(rawVal);
+  }
+
   if (!matched) {
-    if (!universeReady) {
-      loadUniverse();
+    if (!Object.keys(universe).length) {
       msgEl.innerHTML = '<span class="text-warning">⚠️ 股票清單載入中，名稱搜尋暫不可用；請先輸入 4 碼代號（如 2330）</span>';
       return;
     }
@@ -539,7 +574,25 @@ async function addStock() {
   }
 
   const sid  = matched.sid;
-  const name = matched.name;
+  let name = matched.name;
+
+  if (!/^\d{4}$/.test(sid)) {
+    msgEl.innerHTML = '<span class="text-warning">⚠️ 股票代號格式錯誤，請輸入 4 碼數字（如 2330）</span>';
+    return;
+  }
+
+  if (!universe[sid]) {
+    const check = await validateStockCode(sid);
+    if (!check.found) {
+      if (!check.verifiable) {
+        msgEl.innerHTML = '<span class="text-warning">⚠️ 無法連線驗證股票代號，請稍後再試</span>';
+      } else {
+        msgEl.innerHTML = `<span class="text-warning">⚠️ 查無股票代號 ${sid}，請確認後重試</span>`;
+      }
+      return;
+    }
+    if (check.name) name = check.name;
+  }
 
   msgEl.innerHTML = '<span class="text-muted">新增中…</span>';
   try {
