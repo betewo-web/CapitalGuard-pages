@@ -200,6 +200,33 @@ async function sbRpc(fn, params) {
 let state = { userId: null, accessToken: null, displayName: "" };
 let universe = {};   // sid → { n: name, i: industry }
 
+function normalizeStockInput(v) {
+  return String(v || "").trim().replace(/\s+/g, " ");
+}
+
+function resolveStock(rawInput) {
+  const raw = normalizeStockInput(rawInput);
+  if (!raw) return null;
+
+  if (selectedSid && universe[selectedSid]) {
+    return { sid: selectedSid, name: universe[selectedSid].n || "" };
+  }
+
+  const codeMatch = raw.match(/^(\d{4})\b/);
+  if (codeMatch) {
+    const sid = codeMatch[1];
+    if (universe[sid]) return { sid, name: universe[sid].n || "" };
+  }
+
+  const lower = raw.toLowerCase();
+  for (const [sid, v] of Object.entries(universe)) {
+    const name = String(v?.n || "").toLowerCase();
+    if (name && name === lower) return { sid, name: v.n || "" };
+  }
+
+  return null;
+}
+
 // ── LIFF 掃碼登入 ────────────────────────────────────────────────
 let pollTimer = null;
 
@@ -299,8 +326,28 @@ window.addEventListener("DOMContentLoaded", async () => {
 async function loadUniverse() {
   try {
     const r = await fetch("universe.json");
-    if (r.ok) universe = await r.json();
-  } catch { /* 無 universe.json，搜尋功能退化為純代號輸入 */ }
+    if (r.ok) {
+      universe = await r.json();
+      return;
+    }
+  } catch { /* ignore */ }
+
+  // 後備：直接抓 TWSE OpenAPI，避免缺 universe.json 時無法驗證股票是否存在
+  try {
+    const r2 = await fetch("https://openapi.twse.com.tw/v1/opendata/t187ap03_L");
+    if (!r2.ok) return;
+    const rows = await r2.json();
+    const m = {};
+    for (const row of rows || []) {
+      const sid = String(row["公司代號"] || "").trim();
+      if (!/^\d{4}$/.test(sid)) continue;
+      m[sid] = {
+        n: String(row["公司簡稱"] || "").trim(),
+        i: String(row["產業類別"] || "其他").trim(),
+      };
+    }
+    if (Object.keys(m).length) universe = m;
+  } catch { /* ignore */ }
 }
 
 // ── 手動登入 / 建立帳號（備用）────────────────────────────────────
@@ -472,10 +519,20 @@ async function addStock() {
   const inp    = document.getElementById("inp-stock");
   const msgEl  = document.getElementById("add-msg");
   const rawVal = inp.value.trim();
-  const sid    = selectedSid || rawVal.split(" ")[0].trim();
-  const name   = universe[sid]?.n || "";
+  const matched = resolveStock(rawVal);
 
-  if (!sid) { msgEl.innerHTML = '<span class="text-warning">請輸入股票代號</span>'; return; }
+  if (!rawVal) { msgEl.innerHTML = '<span class="text-warning">請輸入股票代號或名稱</span>'; return; }
+  if (!Object.keys(universe).length) {
+    msgEl.innerHTML = '<span class="text-warning">⚠️ 股票清單尚未載入完成，請稍後再試</span>';
+    return;
+  }
+  if (!matched) {
+    msgEl.innerHTML = '<span class="text-warning">⚠️ 找不到此股票，請從下拉清單選擇正確標的</span>';
+    return;
+  }
+
+  const sid  = matched.sid;
+  const name = matched.name;
 
   msgEl.innerHTML = '<span class="text-muted">新增中…</span>';
   try {
