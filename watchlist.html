@@ -199,6 +199,7 @@ async function sbRpc(fn, params) {
 // ── 全域狀態 ────────────────────────────────────────────────────
 let state = { userId: null, accessToken: null, displayName: "" };
 let universe = {};   // sid → { n: name, i: industry }
+let universeLoading = false;
 
 function normalizeStockInput(v) {
   return String(v || "").trim().replace(/\s+/g, " ");
@@ -208,14 +209,14 @@ function resolveStock(rawInput) {
   const raw = normalizeStockInput(rawInput);
   if (!raw) return null;
 
-  if (selectedSid && universe[selectedSid]) {
-    return { sid: selectedSid, name: universe[selectedSid].n || "" };
+  if (selectedSid) {
+    return { sid: selectedSid, name: universe[selectedSid]?.n || "" };
   }
 
   const codeMatch = raw.match(/^(\d{4})\b/);
   if (codeMatch) {
     const sid = codeMatch[1];
-    if (universe[sid]) return { sid, name: universe[sid].n || "" };
+    return { sid, name: universe[sid]?.n || "" };
   }
 
   const lower = raw.toLowerCase();
@@ -324,10 +325,13 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 
 async function loadUniverse() {
+  if (universeLoading || Object.keys(universe).length > 0) return;
+  universeLoading = true;
   try {
     const r = await fetch("universe.json");
     if (r.ok) {
       universe = await r.json();
+      universeLoading = false;
       return;
     }
   } catch { /* ignore */ }
@@ -348,6 +352,7 @@ async function loadUniverse() {
     }
     if (Object.keys(m).length) universe = m;
   } catch { /* ignore */ }
+  universeLoading = false;
 }
 
 // ── 手動登入 / 建立帳號（備用）────────────────────────────────────
@@ -519,15 +524,17 @@ async function addStock() {
   const inp    = document.getElementById("inp-stock");
   const msgEl  = document.getElementById("add-msg");
   const rawVal = inp.value.trim();
-  const matched = resolveStock(rawVal);
+  let matched = resolveStock(rawVal);
+  const universeReady = Object.keys(universe).length > 0;
 
   if (!rawVal) { msgEl.innerHTML = '<span class="text-warning">請輸入股票代號或名稱</span>'; return; }
-  if (!Object.keys(universe).length) {
-    msgEl.innerHTML = '<span class="text-warning">⚠️ 股票清單尚未載入完成，請稍後再試</span>';
-    return;
-  }
   if (!matched) {
-    msgEl.innerHTML = '<span class="text-warning">⚠️ 找不到此股票，請從下拉清單選擇正確標的</span>';
+    if (!universeReady) {
+      loadUniverse();
+      msgEl.innerHTML = '<span class="text-warning">⚠️ 股票清單載入中，名稱搜尋暫不可用；請先輸入 4 碼代號（如 2330）</span>';
+      return;
+    }
+    msgEl.innerHTML = '<span class="text-warning">⚠️ 找不到此股票，請改輸入 4 碼代號或從下拉清單選擇</span>';
     return;
   }
 
