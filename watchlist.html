@@ -620,17 +620,42 @@ async function addStock() {
 }
 
 // ── 股票搜尋自動完成 ─────────────────────────────────────────────
+let stockInputDebounce = null;
+
 function onStockInput() {
-  const q    = document.getElementById("inp-stock").value.trim().toLowerCase();
+  clearTimeout(stockInputDebounce);
+  stockInputDebounce = setTimeout(() => runStockAutocomplete(), 100);
+}
+
+async function runStockAutocomplete() {
+  const qRaw = document.getElementById("inp-stock").value.trim();
+  const q = qRaw.toLowerCase();
   const list = document.getElementById("autocomplete-list");
   selectedSid = null;
-  if (!q || Object.keys(universe).length === 0) { list.style.display = "none"; return; }
+
+  if (!q) { list.style.display = "none"; return; }
+
+  if (Object.keys(universe).length === 0) {
+    list.innerHTML = '<div class="dropdown-item text-muted">載入股票清單中...</div>';
+    list.style.display = "block";
+    await loadUniverse();
+  }
+
+  if (Object.keys(universe).length === 0) {
+    list.innerHTML = '<div class="dropdown-item text-warning">目前無法載入股票清單，請先輸入 4 碼代號</div>';
+    list.style.display = "block";
+    return;
+  }
 
   const matches = Object.entries(universe)
     .filter(([sid, v]) => sid.startsWith(q) || (v.n || "").toLowerCase().includes(q))
     .slice(0, 15);
 
-  if (!matches.length) { list.style.display = "none"; return; }
+  if (!matches.length) {
+    list.innerHTML = '<div class="dropdown-item text-muted">查無符合結果</div>';
+    list.style.display = "block";
+    return;
+  }
 
   list.innerHTML = matches.map(([sid, v]) =>
     `<div class="dropdown-item" onclick="selectStock('${sid}', '${(v.n||"").replace(/'/g,"\\'")}')">
