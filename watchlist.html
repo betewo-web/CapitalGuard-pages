@@ -369,20 +369,31 @@ window.addEventListener("DOMContentLoaded", async () => {
 async function loadUniverse() {
   if (universeLoading || Object.keys(universe).length > 0) return;
   universeLoading = true;
+  let loaded = false;
   try {
     const r = await fetch("universe.json");
     if (r.ok) {
       universe = await r.json();
       twseUniverseCache = universe;
+      loaded = Object.keys(universe).length > 0;
       universeLoading = false;
+      if (loaded && state.accessToken && document.getElementById("main-section").style.display !== "none") {
+        await loadWatchlist();
+      }
       return;
     }
   } catch { /* ignore */ }
 
   // 後備：直接抓 TWSE OpenAPI，避免缺 universe.json 時無法驗證股票是否存在
   const m = await fetchTwseUniverseMap();
-  if (Object.keys(m).length) universe = m;
+  if (Object.keys(m).length) {
+    universe = m;
+    loaded = true;
+  }
   universeLoading = false;
+  if (loaded && state.accessToken && document.getElementById("main-section").style.display !== "none") {
+    await loadWatchlist();
+  }
 }
 
 // ── 手動登入 / 建立帳號（備用）────────────────────────────────────
@@ -487,6 +498,8 @@ function renderWatchlist(rows) {
   document.getElementById("wl-grid").style.display = rows.length ? "grid" : "none";
 
   rows.forEach(row => {
+    const fallbackName = universe[row.stock_id]?.n || "";
+    const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
     const card = document.createElement("article");
     card.className = "wl-card";
     card.dataset.id = row.id;
@@ -495,7 +508,7 @@ function renderWatchlist(rows) {
       <div class="wl-card-head">
         <div>
           <span class="badge-sid">${escapeHtml(row.stock_id)}</span>
-          <div class="wl-name">${escapeHtml(row.stock_name || "未命名")}</div>
+          <div class="wl-name">${escapeHtml(displayName)}</div>
         </div>
         <button class="btn btn-sm btn-outline-danger wl-remove" onclick="removeStock('${row.id}')">移除</button>
       </div>
