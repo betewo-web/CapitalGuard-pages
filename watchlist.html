@@ -201,6 +201,7 @@ let state = { userId: null, accessToken: null, displayName: "" };
 let universe = {};   // sid → { n: name, i: industry }
 let universeLoading = false;
 let twseUniverseCache = null;
+let tpexUniverseCache = null;
 
 function normalizeStockInput(v) {
   return String(v || "").trim().replace(/\s+/g, " ");
@@ -255,11 +256,45 @@ async function fetchTwseUniverseMap(force = false) {
   return {};
 }
 
+async function fetchTpexUniverseMap(force = false) {
+  if (!force && tpexUniverseCache && Object.keys(tpexUniverseCache).length) {
+    return tpexUniverseCache;
+  }
+
+  try {
+    const r = await fetch("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O");
+    if (!r.ok) return {};
+    const rows = await r.json();
+    const m = {};
+    for (const row of rows || []) {
+      const sid = String(row["SecuritiesCompanyCode"] || "").trim();
+      if (!/^\d{4}$/.test(sid)) continue;
+      m[sid] = {
+        n: String(row["CompanyAbbreviation"] || row["CompanyName"] || "").trim(),
+        i: String(row["Industry"] || "上櫃").trim(),
+      };
+    }
+    if (Object.keys(m).length) {
+      tpexUniverseCache = m;
+      return m;
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+async function fetchAllUniverseMap() {
+  const [twse, tpex] = await Promise.all([
+    fetchTwseUniverseMap(),
+    fetchTpexUniverseMap(),
+  ]);
+  return { ...twse, ...tpex };
+}
+
 async function validateStockCode(sid) {
   if (universe[sid]) {
     return { found: true, name: universe[sid].n || "", verifiable: true };
   }
-  const m = await fetchTwseUniverseMap();
+  const m = await fetchAllUniverseMap();
   if (!Object.keys(m).length) {
     return { found: false, name: "", verifiable: false };
   }
@@ -376,18 +411,13 @@ async function loadUniverse() {
       universe = await r.json();
       twseUniverseCache = universe;
       loaded = Object.keys(universe).length > 0;
-      universeLoading = false;
-      if (loaded && state.accessToken && document.getElementById("main-section").style.display !== "none") {
-        await loadWatchlist();
-      }
-      return;
     }
   } catch { /* ignore */ }
 
-  // 後備：直接抓 TWSE OpenAPI，避免缺 universe.json 時無法驗證股票是否存在
-  const m = await fetchTwseUniverseMap();
+  // 合併 TWSE + TPEx，避免上櫃股票（如 4939 亞電）搜尋不到
+  const m = await fetchAllUniverseMap();
   if (Object.keys(m).length) {
-    universe = m;
+    universe = { ...m, ...universe };
     loaded = true;
   }
   universeLoading = false;
