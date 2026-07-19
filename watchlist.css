@@ -244,6 +244,24 @@ body {
 	gap: 0.54rem;
 }
 
+.wl-card-actions {
+	display: flex;
+	justify-content: flex-end;
+}
+
+.wl-kline-btn {
+	font-size: 0.76rem;
+	padding: 0.34rem 0.66rem;
+	border-color: rgba(86, 168, 255, 0.45);
+	color: #9fc5ff;
+}
+
+.wl-kline-btn:hover {
+	border-color: rgba(86, 168, 255, 0.72);
+	color: #d2e7ff;
+	background: rgba(86, 168, 255, 0.16);
+}
+
 .alert-pill {
 	margin: 0;
 	padding: 0.52rem 0.6rem;
@@ -282,6 +300,55 @@ body {
 
 .empty-state {
 	color: var(--text-muted) !important;
+}
+
+.kline-modal-content {
+	border: 1px solid var(--border);
+	background: rgba(9, 16, 31, 0.96);
+	color: var(--text-0);
+}
+
+.kline-modal-content .modal-header {
+	border-bottom: 1px solid rgba(121, 157, 255, 0.24);
+	background: linear-gradient(160deg, rgba(86, 168, 255, 0.18), rgba(86, 168, 255, 0.04));
+}
+
+.kline-modal-content .btn-close {
+	filter: invert(1);
+	opacity: 0.82;
+}
+
+.wl-period-btn.active {
+	background: linear-gradient(145deg, #2b6de5, #56a8ff) !important;
+	border-color: #56a8ff !important;
+	color: #f2f7ff !important;
+}
+
+.kline-level-card {
+	border: 1px solid rgba(121, 157, 255, 0.28);
+	background: rgba(15, 24, 45, 0.78);
+}
+
+.kline-level-card.support {
+	border-color: rgba(60, 230, 209, 0.45);
+	color: #86eadf;
+}
+
+.kline-level-card.resistance {
+	border-color: rgba(255, 95, 133, 0.45);
+	color: #ff9eb6;
+}
+
+.kline-loading,
+.kline-empty {
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	text-align: center;
+	color: var(--text-muted);
+	font-size: 0.9rem;
+	padding: 1.25rem;
 }
 
 @media (hover: hover) {
