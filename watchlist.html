@@ -346,6 +346,8 @@ let klineMobileTooltipLocked = false;
 let klineLongPressTimer = null;
 let klineTouchMoved = false;
 let klineTouchStartPoint = null;
+let klineTouchDomEl = null;
+let klineTouchDomHandlers = null;
 let watchlistRows = [];
 let alertModalRowId = null;
 let removeModalRowId = null;
@@ -1184,6 +1186,7 @@ function renderKLineChart(sid, period) {
   const chips = stock.chips || {};
 
   const el = document.getElementById("kline-chart");
+  detachKLineTouchInteraction();
   if (klineChart) {
     klineChart.dispose();
     klineChart = null;
@@ -1201,9 +1204,10 @@ function isKLineMobileMode() {
 }
 
 function getKLineTouchPoint(evt) {
-  const e = evt?.event || evt;
-  const x = e?.zrX ?? e?.offsetX;
-  const y = e?.zrY ?? e?.offsetY;
+  const e = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
+  const rect = klineTouchDomEl?.getBoundingClientRect();
+  const x = e && rect ? e.clientX - rect.left : undefined;
+  const y = e && rect ? e.clientY - rect.top : undefined;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   return { x, y };
 }
@@ -1217,6 +1221,7 @@ function clearKLineLongPressTimer() {
 
 function onKLineTouchStart(evt) {
   if (!klineChart || !isKLineMobileMode()) return;
+  if (!evt?.touches || evt.touches.length !== 1) return;
   klineTouchMoved = false;
   klineTouchStartPoint = getKLineTouchPoint(evt);
   clearKLineLongPressTimer();
@@ -1254,19 +1259,35 @@ function onKLineTouchEnd() {
   klineTouchStartPoint = null;
 }
 
+function detachKLineTouchInteraction() {
+  if (!klineTouchDomEl || !klineTouchDomHandlers) return;
+  klineTouchDomEl.removeEventListener("touchstart", klineTouchDomHandlers.start);
+  klineTouchDomEl.removeEventListener("touchmove", klineTouchDomHandlers.move);
+  klineTouchDomEl.removeEventListener("touchend", klineTouchDomHandlers.end);
+  klineTouchDomEl.removeEventListener("touchcancel", klineTouchDomHandlers.end);
+  klineTouchDomEl = null;
+  klineTouchDomHandlers = null;
+}
+
 function bindKLineTouchInteraction() {
   if (!klineChart) return;
-  const zr = klineChart.getZr();
-  zr.off("touchstart", onKLineTouchStart);
-  zr.off("touchmove", onKLineTouchMove);
-  zr.off("touchend", onKLineTouchEnd);
-  zr.off("touchcancel", onKLineTouchEnd);
-
+  detachKLineTouchInteraction();
   if (!isKLineMobileMode()) return;
-  zr.on("touchstart", onKLineTouchStart);
-  zr.on("touchmove", onKLineTouchMove);
-  zr.on("touchend", onKLineTouchEnd);
-  zr.on("touchcancel", onKLineTouchEnd);
+
+  const dom = klineChart.getDom();
+  const handlers = {
+    start: evt => onKLineTouchStart(evt),
+    move: evt => onKLineTouchMove(evt),
+    end: () => onKLineTouchEnd(),
+  };
+
+  dom.addEventListener("touchstart", handlers.start, { passive: true });
+  dom.addEventListener("touchmove", handlers.move, { passive: true });
+  dom.addEventListener("touchend", handlers.end, { passive: true });
+  dom.addEventListener("touchcancel", handlers.end, { passive: true });
+
+  klineTouchDomEl = dom;
+  klineTouchDomHandlers = handlers;
 }
 
 async function fetchWatchlistFinMindStock(sid, name, industry) {
@@ -1713,6 +1734,7 @@ function buildKLineOption(pd, chips, levels, period) {
 }
 
 document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => {
+  detachKLineTouchInteraction();
   if (klineChart) {
     klineChart.dispose();
     klineChart = null;
