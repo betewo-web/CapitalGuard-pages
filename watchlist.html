@@ -342,9 +342,16 @@ let klineChart = null;
 let currentKLineSid = null;
 let currentChipsView = "foreign";
 let klineScoreSummaryOpen = false;
+let klineMobileTooltipLocked = false;
+let klineLongPressTimer = null;
+let klineTouchMoved = false;
+let klineTouchStartPoint = null;
 let watchlistRows = [];
 let alertModalRowId = null;
 let removeModalRowId = null;
+
+const KLINE_LONG_PRESS_MS = 480;
+const KLINE_TOUCH_MOVE_THRESHOLD = 12;
 
 const KLINE_DIM_LABELS = {
   fundamental: "基本面",
@@ -1182,8 +1189,84 @@ function renderKLineChart(sid, period) {
     klineChart = null;
   }
   el.innerHTML = "";
+  klineMobileTooltipLocked = false;
+  clearKLineLongPressTimer();
   klineChart = echarts.init(el, null, { renderer: "canvas" });
   klineChart.setOption(buildKLineOption(periodData, chips, levels, period), true);
+  bindKLineTouchInteraction();
+}
+
+function isKLineMobileMode() {
+  return window.matchMedia("(max-width: 860px), (pointer: coarse)").matches;
+}
+
+function getKLineTouchPoint(evt) {
+  const e = evt?.event || evt;
+  const x = e?.zrX ?? e?.offsetX;
+  const y = e?.zrY ?? e?.offsetY;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function clearKLineLongPressTimer() {
+  if (klineLongPressTimer) {
+    clearTimeout(klineLongPressTimer);
+    klineLongPressTimer = null;
+  }
+}
+
+function onKLineTouchStart(evt) {
+  if (!klineChart || !isKLineMobileMode()) return;
+  klineTouchMoved = false;
+  klineTouchStartPoint = getKLineTouchPoint(evt);
+  clearKLineLongPressTimer();
+
+  klineLongPressTimer = setTimeout(() => {
+    if (!klineChart || klineTouchMoved || !klineTouchStartPoint) return;
+    if (klineMobileTooltipLocked) {
+      klineChart.dispatchAction({ type: "hideTip" });
+      klineMobileTooltipLocked = false;
+      return;
+    }
+    klineChart.dispatchAction({
+      type: "showTip",
+      x: klineTouchStartPoint.x,
+      y: klineTouchStartPoint.y,
+    });
+    klineMobileTooltipLocked = true;
+  }, KLINE_LONG_PRESS_MS);
+}
+
+function onKLineTouchMove(evt) {
+  if (!klineTouchStartPoint) return;
+  const p = getKLineTouchPoint(evt);
+  if (!p) return;
+  const dx = Math.abs(p.x - klineTouchStartPoint.x);
+  const dy = Math.abs(p.y - klineTouchStartPoint.y);
+  if (dx > KLINE_TOUCH_MOVE_THRESHOLD || dy > KLINE_TOUCH_MOVE_THRESHOLD) {
+    klineTouchMoved = true;
+    clearKLineLongPressTimer();
+  }
+}
+
+function onKLineTouchEnd() {
+  clearKLineLongPressTimer();
+  klineTouchStartPoint = null;
+}
+
+function bindKLineTouchInteraction() {
+  if (!klineChart) return;
+  const zr = klineChart.getZr();
+  zr.off("touchstart", onKLineTouchStart);
+  zr.off("touchmove", onKLineTouchMove);
+  zr.off("touchend", onKLineTouchEnd);
+  zr.off("touchcancel", onKLineTouchEnd);
+
+  if (!isKLineMobileMode()) return;
+  zr.on("touchstart", onKLineTouchStart);
+  zr.on("touchmove", onKLineTouchMove);
+  zr.on("touchend", onKLineTouchEnd);
+  zr.on("touchcancel", onKLineTouchEnd);
 }
 
 async function fetchWatchlistFinMindStock(sid, name, industry) {
@@ -1599,6 +1682,7 @@ function buildKLineOption(pd, chips, levels, period) {
     backgroundColor: "transparent",
     tooltip: {
       trigger: "axis",
+      triggerOn: isKLineMobileMode() ? "none" : "mousemove|click",
       axisPointer: { type: "cross" },
       formatter: params => {
         if (!params?.length) return "";
@@ -1633,6 +1717,9 @@ document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => 
     klineChart.dispose();
     klineChart = null;
   }
+  clearKLineLongPressTimer();
+  klineMobileTooltipLocked = false;
+  klineTouchStartPoint = null;
   setKLineScoreSummaryOpen(false);
   closeKLineDimDetail();
   currentKLineSid = null;
@@ -1643,7 +1730,10 @@ document.getElementById("klineModal").addEventListener("shown.bs.modal", () => {
 });
 
 window.addEventListener("resize", () => {
-  if (klineChart) klineChart.resize();
+  if (klineChart) {
+    klineChart.resize();
+    bindKLineTouchInteraction();
+  }
 });
 
 function escapeHtml(text) {

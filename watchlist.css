@@ -378,16 +378,16 @@ body {
 .kline-ma-chip {
 	display: inline-flex;
 	align-items: center;
-	max-width: min(60vw, 460px);
+	max-width: 100%;
 	padding: 0.2rem 0.52rem;
 	border-radius: 999px;
 	border: 1px solid rgba(121, 157, 255, 0.32);
 	background: rgba(24, 38, 74, 0.5);
 	font-size: 0.72rem;
 	color: #bfd0ee;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	white-space: normal;
+	word-break: break-word;
+	overflow: visible;
 }
 
 .kline-toolbar-row {
