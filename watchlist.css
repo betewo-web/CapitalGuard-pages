@@ -375,6 +375,14 @@ body {
 	opacity: 0.82;
 }
 
+.kline-toolbar-row {
+	row-gap: 0.55rem;
+}
+
+.kline-source-note {
+	flex: 1 1 220px;
+}
+
 .kline-score-toggle {
 	border: 1px solid rgba(121, 157, 255, 0.35);
 	border-radius: 10px;
@@ -385,6 +393,7 @@ body {
 	padding: 0.4rem 0.72rem;
 	box-shadow: 0 6px 18px rgba(8, 18, 40, 0.2);
 	transition: transform 0.2s ease, filter 0.2s ease, border-color 0.2s ease;
+	white-space: nowrap;
 }
 
 .kline-score-toggle:hover {
@@ -594,6 +603,10 @@ body {
 	.wl-action-btn {
 		font-size: 0.78rem;
 	}
+
+	.kline-score-toggle {
+		margin-left: auto;
+	}
 }
 
 
@@ -618,5 +631,13 @@ body {
 
 	.wl-action-btn {
 		flex: 1 1 120px;
+	}
+
+	.kline-source-note {
+		flex-basis: 100%;
+	}
+
+	.kline-score-toggle {
+		margin-left: 0 !important;
 	}
 }

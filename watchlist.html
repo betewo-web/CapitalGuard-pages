@@ -201,10 +201,6 @@
             <span class="ms-auto" style="font-size:0.85rem;">現價 <strong id="kline-price"></strong></span>
           </div>
           <div class="text-muted mt-1" style="font-size:0.78rem;" id="kline-ma"></div>
-          <div class="mt-2">
-            <button type="button" id="kline-score-toggle" class="kline-score-toggle" onclick="toggleKLineScoreSummary()">7大面向分析 展開 ▼</button>
-            <div class="row g-1 mt-2" id="kline-score-bars" style="display:none"></div>
-          </div>
         </div>
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
@@ -212,7 +208,7 @@
         <div id="kline-dim-detail-panel" style="display:none;" class="mb-2">
           <div id="kline-dim-detail-content" class="p-2 rounded kline-dim-detail-box"></div>
         </div>
-        <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+        <div class="d-flex align-items-center flex-wrap gap-2 mb-2 kline-toolbar-row">
           <div class="btn-group btn-group-sm" id="kline-period-group">
             <button class="btn btn-outline-primary wl-period-btn active" data-period="daily" onclick="switchKLinePeriod('daily')">日K</button>
             <button class="btn btn-outline-primary wl-period-btn" data-period="weekly" onclick="switchKLinePeriod('weekly')">週K</button>
@@ -225,9 +221,11 @@
             <button class="btn btn-outline-secondary wl-chips-btn" data-chips="total" onclick="switchKLineChipsView('total')">三大合計</button>
             <button class="btn btn-outline-secondary wl-chips-btn" data-chips="hide" onclick="switchKLineChipsView('hide')">隱藏</button>
           </div>
-          <span class="text-muted" style="font-size:0.72rem;">資料來源：report_data_latest.json（由 generator.py 產生）</span>
+          <span class="text-muted kline-source-note" style="font-size:0.72rem;">資料來源：report_data_latest.json（由 generator.py 產生）</span>
+          <button type="button" id="kline-score-toggle" class="kline-score-toggle ms-auto" onclick="toggleKLineScoreSummary()">7大面向分析 展開 ▼</button>
         </div>
-        <div id="kline-chart" style="width:100%;height:560px;border:1px solid #2f3f66;border-radius:8px;"></div>
+        <div class="row g-1 mb-2" id="kline-score-bars" style="display:none"></div>
+        <div id="kline-chart" style="width:100%;height:470px;border:1px solid #2f3f66;border-radius:8px;"></div>
         <div class="row g-2 mt-2" id="kline-levels">
           <div class="col-md-6">
             <div class="p-2 rounded kline-level-card resistance">
@@ -1441,6 +1439,17 @@ function buildKLineOption(pd, chips, levels, period) {
   const ohlcv = pd.ohlcv || [];
   const n = dates.length;
   const kData = ohlcv.map(d => [d[0], d[3], d[2], d[1]]);
+  const priceCandidates = [
+    ...ohlcv.flatMap(d => [Number(d[1]), Number(d[2])]),
+    ...(levels.support || []).map(Number),
+    ...(levels.resistance || []).map(Number),
+  ].filter(v => Number.isFinite(v) && v > 0);
+  const rawMin = priceCandidates.length ? Math.min(...priceCandidates) : null;
+  const rawMax = priceCandidates.length ? Math.max(...priceCandidates) : null;
+  const priceRange = rawMin !== null && rawMax !== null ? Math.max(rawMax - rawMin, rawMax * 0.02, 1) : null;
+  const pricePadding = priceRange !== null ? priceRange * 0.05 : null;
+  const priceAxisMin = rawMin !== null ? Math.max(0, rawMin - pricePadding) : null;
+  const priceAxisMax = rawMax !== null ? rawMax + pricePadding : null;
   const volData = ohlcv.map((d, i) => {
     const prevClose = i > 0 ? ohlcv[i - 1][3] : d[0];
     const c = d[3] > prevClose ? "rgba(239,83,80,0.75)" : d[3] < prevClose ? "rgba(38,166,154,0.75)" : "rgba(255,235,59,0.85)";
@@ -1489,13 +1498,13 @@ function buildKLineOption(pd, chips, levels, period) {
 
   const grids = hasChips
     ? [
-      { left: 70, right: 55, top: 50, height: "42%" },
-      { left: 70, right: 55, top: "56%", height: "14%" },
-      { left: 70, right: 55, top: "74%", height: "16%" },
+      { left: 62, right: 52, top: 42, height: "40%" },
+      { left: 62, right: 52, top: "54%", height: "12%" },
+      { left: 62, right: 52, top: "70%", height: "13%" },
     ]
     : [
-      { left: 70, right: 55, top: 50, height: "58%" },
-      { left: 70, right: 55, top: "72%", height: "20%" },
+      { left: 62, right: 52, top: 42, height: "54%" },
+      { left: 62, right: 52, top: "67%", height: "16%" },
     ];
 
   const gridIndexes = hasChips ? [0, 1, 2] : [0, 1];
@@ -1509,13 +1518,26 @@ function buildKLineOption(pd, chips, levels, period) {
     splitLine: { show: false },
   }));
 
-  const yAxis = gridIndexes.map(i => ({
-    scale: true,
-    gridIndex: i,
-    splitNumber: i === 0 ? 5 : 3,
-    axisLabel: { fontSize: 10, color: "#a6badf" },
-    splitLine: { lineStyle: { color: "rgba(148,171,220,0.18)" } },
-  }));
+  const yAxis = gridIndexes.map(i => {
+    if (i === 0) {
+      return {
+        scale: true,
+        gridIndex: i,
+        min: priceAxisMin !== null ? priceAxisMin : undefined,
+        max: priceAxisMax !== null ? priceAxisMax : undefined,
+        splitNumber: 4,
+        axisLabel: { fontSize: 10, color: "#a6badf" },
+        splitLine: { lineStyle: { color: "rgba(148,171,220,0.18)" } },
+      };
+    }
+    return {
+      scale: true,
+      gridIndex: i,
+      splitNumber: 2,
+      axisLabel: { fontSize: 10, color: "#a6badf" },
+      splitLine: { lineStyle: { color: "rgba(148,171,220,0.18)" } },
+    };
+  });
 
   const legendData = ["K線", "MA5", "MA10", "MA20", "成交量(張)"];
   if (hasChips) {
