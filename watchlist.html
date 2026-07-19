@@ -1620,16 +1620,59 @@ function buildKLineOption(pd, chips, levels, period) {
   });
 
   const markLines = [];
+  const supportLevels = (levels.support || []).map(v => Number(v)).filter(v => Number.isFinite(v));
+  const resistanceLevels = (levels.resistance || []).map(v => Number(v)).filter(v => Number.isFinite(v));
+  const supportHighlight = supportLevels.length ? supportLevels[0] : null;
+  const resistanceHighlight = resistanceLevels.length ? resistanceLevels[0] : null;
+
   (levels.support || []).forEach(v => {
+    const nv = Number(v);
+    const showLabel = supportHighlight !== null && nv === supportHighlight;
     markLines.push([
       { coord: [dates[0], v], lineStyle: { color: "#26a69a", type: "dashed", width: 1.5 } },
-      { coord: [dates[n - 1], v], label: { show: false } },
+      {
+        coord: [dates[n - 1], v],
+        label: showLabel
+          ? {
+            show: true,
+            formatter: `支 ${nv.toFixed(2)}`,
+            position: "insideEndTop",
+            distance: 4,
+            fontSize: 10,
+            color: "#d3fff6",
+            backgroundColor: "rgba(38,166,154,0.22)",
+            borderColor: "rgba(38,166,154,0.45)",
+            borderWidth: 1,
+            borderRadius: 3,
+            padding: [1, 4],
+          }
+          : { show: false },
+      },
     ]);
   });
   (levels.resistance || []).forEach(v => {
+    const nv = Number(v);
+    const showLabel = resistanceHighlight !== null && nv === resistanceHighlight;
     markLines.push([
       { coord: [dates[0], v], lineStyle: { color: "#ef5350", type: "dashed", width: 1.5 } },
-      { coord: [dates[n - 1], v], label: { show: false } },
+      {
+        coord: [dates[n - 1], v],
+        label: showLabel
+          ? {
+            show: true,
+            formatter: `壓 ${nv.toFixed(2)}`,
+            position: "insideEndBottom",
+            distance: 4,
+            fontSize: 10,
+            color: "#ffd6df",
+            backgroundColor: "rgba(239,83,80,0.22)",
+            borderColor: "rgba(239,83,80,0.45)",
+            borderWidth: 1,
+            borderRadius: 3,
+            padding: [1, 4],
+          }
+          : { show: false },
+      },
     ]);
   });
 
@@ -1637,6 +1680,8 @@ function buildKLineOption(pd, chips, levels, period) {
   const dzStart = period === "daily"
     ? 0
     : Math.max(0, Math.round(100 - (100 * defaultBars / Math.max(n, 1))));
+  const minVisibleBars = period === "daily" ? 40 : period === "weekly" ? 24 : 12;
+  const minValueSpan = Math.min(Math.max(2, n), minVisibleBars);
 
   const chipDates = chips?.dates || [];
   const chipMapByView = {
@@ -1790,10 +1835,18 @@ function buildKLineOption(pd, chips, levels, period) {
         xAxisIndex: gridIndexes,
         start: dzStart,
         end: 100,
-        throttle: 160,
+        throttle: 320,
         realtime: false,
+        minValueSpan,
       },
-      { type: "slider", xAxisIndex: gridIndexes, bottom: 4, height: 14 },
+      {
+        type: "slider",
+        xAxisIndex: gridIndexes,
+        bottom: 4,
+        height: 14,
+        realtime: false,
+        minValueSpan,
+      },
     ],
     series,
   };
