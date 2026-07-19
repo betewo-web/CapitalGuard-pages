@@ -348,6 +348,7 @@ let klineTouchMoved = false;
 let klineTouchStartPoint = null;
 let klineTouchDomEl = null;
 let klineTouchDomHandlers = null;
+let klineTouchGlobalHandlers = null;
 let watchlistRows = [];
 let alertModalRowId = null;
 let removeModalRowId = null;
@@ -1219,20 +1220,23 @@ function clearKLineLongPressTimer() {
   }
 }
 
+function hideKLineMobileTooltip() {
+  if (!klineChart) return;
+  klineChart.dispatchAction({ type: "hideTip" });
+  klineChart.dispatchAction({ type: "updateAxisPointer", currTrigger: "leave" });
+  klineMobileTooltipLocked = false;
+}
+
 function onKLineTouchStart(evt) {
   if (!klineChart || !isKLineMobileMode()) return;
   if (!evt?.touches || evt.touches.length !== 1) return;
+  if (klineMobileTooltipLocked) hideKLineMobileTooltip();
   klineTouchMoved = false;
   klineTouchStartPoint = getKLineTouchPoint(evt);
   clearKLineLongPressTimer();
 
   klineLongPressTimer = setTimeout(() => {
     if (!klineChart || klineTouchMoved || !klineTouchStartPoint) return;
-    if (klineMobileTooltipLocked) {
-      klineChart.dispatchAction({ type: "hideTip" });
-      klineMobileTooltipLocked = false;
-      return;
-    }
     klineChart.dispatchAction({
       type: "showTip",
       x: klineTouchStartPoint.x,
@@ -1251,6 +1255,7 @@ function onKLineTouchMove(evt) {
   if (dx > KLINE_TOUCH_MOVE_THRESHOLD || dy > KLINE_TOUCH_MOVE_THRESHOLD) {
     klineTouchMoved = true;
     clearKLineLongPressTimer();
+    if (klineMobileTooltipLocked) hideKLineMobileTooltip();
   }
 }
 
@@ -1260,13 +1265,20 @@ function onKLineTouchEnd() {
 }
 
 function detachKLineTouchInteraction() {
-  if (!klineTouchDomEl || !klineTouchDomHandlers) return;
-  klineTouchDomEl.removeEventListener("touchstart", klineTouchDomHandlers.start);
-  klineTouchDomEl.removeEventListener("touchmove", klineTouchDomHandlers.move);
-  klineTouchDomEl.removeEventListener("touchend", klineTouchDomHandlers.end);
-  klineTouchDomEl.removeEventListener("touchcancel", klineTouchDomHandlers.end);
+  if (klineTouchDomEl && klineTouchDomHandlers) {
+    klineTouchDomEl.removeEventListener("touchstart", klineTouchDomHandlers.start);
+    klineTouchDomEl.removeEventListener("touchmove", klineTouchDomHandlers.move);
+    klineTouchDomEl.removeEventListener("touchend", klineTouchDomHandlers.end);
+    klineTouchDomEl.removeEventListener("touchcancel", klineTouchDomHandlers.end);
+  }
   klineTouchDomEl = null;
   klineTouchDomHandlers = null;
+
+  if (klineTouchGlobalHandlers) {
+    document.removeEventListener("touchstart", klineTouchGlobalHandlers.start, { capture: true });
+    document.removeEventListener("touchmove", klineTouchGlobalHandlers.move, { capture: true });
+    klineTouchGlobalHandlers = null;
+  }
 }
 
 function bindKLineTouchInteraction() {
@@ -1281,13 +1293,26 @@ function bindKLineTouchInteraction() {
     end: () => onKLineTouchEnd(),
   };
 
+  const globalHandlers = {
+    start: evt => {
+      if (!klineMobileTooltipLocked || !klineTouchDomEl) return;
+      if (!klineTouchDomEl.contains(evt.target)) hideKLineMobileTooltip();
+    },
+    move: () => {
+      if (klineMobileTooltipLocked) hideKLineMobileTooltip();
+    },
+  };
+
   dom.addEventListener("touchstart", handlers.start, { passive: true });
   dom.addEventListener("touchmove", handlers.move, { passive: true });
   dom.addEventListener("touchend", handlers.end, { passive: true });
   dom.addEventListener("touchcancel", handlers.end, { passive: true });
+  document.addEventListener("touchstart", globalHandlers.start, { passive: true, capture: true });
+  document.addEventListener("touchmove", globalHandlers.move, { passive: true, capture: true });
 
   klineTouchDomEl = dom;
   klineTouchDomHandlers = handlers;
+  klineTouchGlobalHandlers = globalHandlers;
 }
 
 async function fetchWatchlistFinMindStock(sid, name, industry) {
