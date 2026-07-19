@@ -131,6 +131,17 @@
 const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
 const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
 const LIFF_ID       = "2010668840-DXPfjNlx";
+const APP_VERSION   = "2026-07-19-2";
+
+// 避免瀏覽器/CDN 快取舊版 JS，確保搜尋邏輯更新可立即生效
+(function ensureVersionedUrl() {
+  try {
+    const u = new URL(window.location.href);
+    if (u.searchParams.get("v") === APP_VERSION) return;
+    u.searchParams.set("v", APP_VERSION);
+    window.location.replace(u.toString());
+  } catch { /* ignore */ }
+})();
 
 // ── Supabase REST 輔助 ──────────────────────────────────────────
 
@@ -207,6 +218,52 @@ function normalizeStockInput(v) {
   return String(v || "").trim().replace(/\s+/g, " ");
 }
 
+function normalizeNameForSearch(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/股份有限公司|有限公司|股份有限|公司/g, "");
+}
+
+function isSubsequence(query, text) {
+  if (!query) return true;
+  let i = 0;
+  for (const ch of text) {
+    if (ch === query[i]) i += 1;
+    if (i >= query.length) return true;
+  }
+  return false;
+}
+
+function findStockMatches(rawInput, limit = 15) {
+  const q = normalizeNameForSearch(rawInput);
+  if (!q) return [];
+
+  const exactCode = q.match(/^\d{4}$/);
+  if (exactCode && universe[exactCode[0]]) {
+    return [[exactCode[0], universe[exactCode[0]]]];
+  }
+
+  const ranked = [];
+  for (const [sid, v] of Object.entries(universe)) {
+    const nameRaw = String(v?.n || "");
+    const name = normalizeNameForSearch(nameRaw);
+    let score = -1;
+    if (sid.startsWith(q)) score = 0;
+    else if (name === q) score = 1;
+    else if (name.startsWith(q)) score = 2;
+    else if (name.includes(q)) score = 3;
+    else if (isSubsequence(q, name)) score = 4;
+    if (score >= 0) ranked.push({ sid, v, score });
+  }
+
+  ranked.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return a.sid.localeCompare(b.sid);
+  });
+  return ranked.slice(0, limit).map(x => [x.sid, x.v]);
+}
+
 function resolveStock(rawInput) {
   const raw = normalizeStockInput(rawInput);
   if (!raw) return null;
@@ -221,10 +278,10 @@ function resolveStock(rawInput) {
     return { sid, name: universe[sid]?.n || "" };
   }
 
-  const lower = raw.toLowerCase();
-  for (const [sid, v] of Object.entries(universe)) {
-    const name = String(v?.n || "").toLowerCase();
-    if (name && name === lower) return { sid, name: v.n || "" };
+  const matches = findStockMatches(raw, 3);
+  if (matches.length === 1) {
+    const [sid, v] = matches[0];
+    return { sid, name: v?.n || "" };
   }
 
   return null;
@@ -672,11 +729,10 @@ function onStockInput() {
 
 async function runStockAutocomplete() {
   const qRaw = document.getElementById("inp-stock").value.trim();
-  const q = qRaw.toLowerCase();
   const list = document.getElementById("autocomplete-list");
   selectedSid = null;
 
-  if (!q) { list.style.display = "none"; return; }
+  if (!qRaw) { list.style.display = "none"; return; }
 
   if (Object.keys(universe).length === 0) {
     list.innerHTML = '<div class="dropdown-item text-muted">載入股票清單中...</div>';
@@ -685,14 +741,22 @@ async function runStockAutocomplete() {
   }
 
   if (Object.keys(universe).length === 0) {
-    list.innerHTML = '<div class="dropdown-item text-warning">目前無法載入股票清單，請先輸入 4 碼代號</div>';
+    // fallback：清單載入失敗時，仍可用 4 碼代號即時驗證
+    if (/^\d{4}$/.test(qRaw)) {
+      const check = await validateStockCode(qRaw);
+      if (check.found) {
+        const name = check.name || qRaw;
+        list.innerHTML = `<div class="dropdown-item" onclick="selectStock('${qRaw}', '${String(name).replace(/'/g, "\\'")}')"><span class="badge-sid me-2">${qRaw}</span>${name}</div>`;
+        list.style.display = "block";
+        return;
+      }
+    }
+    list.innerHTML = '<div class="dropdown-item text-warning">目前無法載入股票清單，請先輸入 4 碼代號（如 4939）後按加入</div>';
     list.style.display = "block";
     return;
   }
 
-  const matches = Object.entries(universe)
-    .filter(([sid, v]) => sid.startsWith(q) || (v.n || "").toLowerCase().includes(q))
-    .slice(0, 15);
+  const matches = findStockMatches(qRaw, 15);
 
   if (!matches.length) {
     list.innerHTML = '<div class="dropdown-item text-muted">查無符合結果</div>';
