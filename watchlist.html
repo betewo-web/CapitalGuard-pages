@@ -233,13 +233,13 @@
           <div class="col-md-6">
             <div class="p-2 rounded kline-level-card resistance">
               <div class="fw-semibold mb-1" style="font-size:0.8rem;">▲ 壓力區間</div>
-              <div id="kline-resistance" class="fw-bold" style="font-size:0.9rem;letter-spacing:.05rem;"></div>
+              <div id="kline-resistance" class="kline-level-values"></div>
             </div>
           </div>
           <div class="col-md-6">
             <div class="p-2 rounded kline-level-card support">
               <div class="fw-semibold mb-1" style="font-size:0.8rem;">▼ 支撐區間</div>
-              <div id="kline-support" class="fw-bold" style="font-size:0.9rem;letter-spacing:.05rem;"></div>
+              <div id="kline-support" class="kline-level-values"></div>
             </div>
           </div>
         </div>
@@ -944,8 +944,7 @@ async function openKLineFromWatchlist(sid) {
   setKLineMaInfo("讀取共用報表資料中...");
   document.getElementById("kline-score-bars").innerHTML = "";
   closeKLineDimDetail();
-  document.getElementById("kline-support").textContent = "—";
-  document.getElementById("kline-resistance").textContent = "—";
+  renderKLineLevels({ support: [], resistance: [] });
   document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">讀取 K 線資料中...</div>';
 
   modal.show();
@@ -988,8 +987,7 @@ async function openKLineFromWatchlist(sid) {
       renderKLineScoreBars(liveStock);
       document.getElementById("kline-price").textContent = liveStock.levels?.current ? Number(liveStock.levels.current).toFixed(2) : "—";
       setKLineMaInfo(formatKLineMaText(liveStock.levels?.ma || {}));
-      document.getElementById("kline-support").textContent = (liveStock.levels?.support || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
-      document.getElementById("kline-resistance").textContent = (liveStock.levels?.resistance || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
+      renderKLineLevels(liveStock.levels || {});
       document.getElementById("kline-industry").textContent = normalizeIndustry(liveStock.industry || displayIndustry || "");
       currentChipsView = "foreign";
       document.getElementById("kline-chips-select").value = "foreign";
@@ -1004,8 +1002,7 @@ async function openKLineFromWatchlist(sid) {
 
     const ma = levels.ma || {};
     setKLineMaInfo(formatKLineMaText(ma));
-    document.getElementById("kline-support").textContent = (levels.support || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
-    document.getElementById("kline-resistance").textContent = (levels.resistance || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
+    renderKLineLevels(levels);
     renderKLineScoreBars(stock);
 
     document.getElementById("kline-period-select").value = "daily";
@@ -1034,6 +1031,24 @@ function setKLineMaInfo(text) {
   if (!el) return;
   const safeText = String(text || "").trim() || "MA —";
   el.textContent = safeText.startsWith("📊") ? safeText : `📊 ${safeText}`;
+}
+
+function formatKLineLevelBadges(values, type) {
+  const list = Array.isArray(values) ? values : [];
+  const parts = list
+    .map(v => Number(v))
+    .filter(v => Number.isFinite(v))
+    .map(v => `<span class="kline-level-badge ${type}">${v.toFixed(2)}</span>`);
+  return parts.length ? parts.join("") : '<span class="kline-level-empty">—</span>';
+}
+
+function renderKLineLevels(levels) {
+  const supportEl = document.getElementById("kline-support");
+  const resistanceEl = document.getElementById("kline-resistance");
+  if (!supportEl || !resistanceEl) return;
+
+  supportEl.innerHTML = formatKLineLevelBadges(levels?.support, "support");
+  resistanceEl.innerHTML = formatKLineLevelBadges(levels?.resistance, "resistance");
 }
 
 function renderKLineScoreBars(stock) {
@@ -1608,18 +1623,48 @@ function buildKLineOption(pd, chips, levels, period) {
   (levels.support || []).forEach(v => {
     markLines.push([
       { coord: [dates[0], v], lineStyle: { color: "#26a69a", type: "dashed", width: 1.5 } },
-      { coord: [dates[n - 1], v], label: { formatter: `支 ${Number(v).toFixed(2)}`, position: "end", fontSize: 10, color: "#26a69a" } },
+      {
+        coord: [dates[n - 1], v],
+        label: {
+          formatter: `支 ${Number(v).toFixed(2)}`,
+          position: "insideEndTop",
+          distance: 4,
+          fontSize: 10,
+          color: "#d3fff6",
+          backgroundColor: "rgba(38,166,154,0.22)",
+          borderColor: "rgba(38,166,154,0.45)",
+          borderWidth: 1,
+          borderRadius: 3,
+          padding: [1, 4],
+        },
+      },
     ]);
   });
   (levels.resistance || []).forEach(v => {
     markLines.push([
       { coord: [dates[0], v], lineStyle: { color: "#ef5350", type: "dashed", width: 1.5 } },
-      { coord: [dates[n - 1], v], label: { formatter: `壓 ${Number(v).toFixed(2)}`, position: "end", fontSize: 10, color: "#ef5350" } },
+      {
+        coord: [dates[n - 1], v],
+        label: {
+          formatter: `壓 ${Number(v).toFixed(2)}`,
+          position: "insideEndBottom",
+          distance: 4,
+          fontSize: 10,
+          color: "#ffd6df",
+          backgroundColor: "rgba(239,83,80,0.22)",
+          borderColor: "rgba(239,83,80,0.45)",
+          borderWidth: 1,
+          borderRadius: 3,
+          padding: [1, 4],
+        },
+      },
     ]);
   });
 
   const defaultBars = period === "monthly" ? 5760 : period === "weekly" ? 720 : 90;
-  const dzStart = Math.max(0, Math.round(100 - (100 * defaultBars / Math.max(n, 1))));
+  const dzStart = period === "daily"
+    ? 0
+    : Math.max(0, Math.round(100 - (100 * defaultBars / Math.max(n, 1))));
 
   const chipDates = chips?.dates || [];
   const chipMapByView = {

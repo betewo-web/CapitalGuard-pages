@@ -598,6 +598,46 @@ body {
 	color: #ff9eb6;
 }
 
+.kline-level-values {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	min-height: 24px;
+	align-items: center;
+}
+
+.kline-level-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-size: 0.82rem;
+	font-weight: 700;
+	line-height: 1.2;
+	letter-spacing: 0.01em;
+	border: 1px solid transparent;
+	background: rgba(148, 171, 220, 0.14);
+	color: #e4eeff;
+}
+
+.kline-level-badge.support {
+	border-color: rgba(60, 230, 209, 0.42);
+	background: rgba(60, 230, 209, 0.15);
+	color: #b8fff3;
+}
+
+.kline-level-badge.resistance {
+	border-color: rgba(255, 95, 133, 0.42);
+	background: rgba(255, 95, 133, 0.15);
+	color: #ffd9e3;
+}
+
+.kline-level-empty {
+	font-size: 0.82rem;
+	color: #a9bddf;
+	padding: 2px 2px;
+}
+
 .kline-loading,
 .kline-empty {
 	height: 100%;
