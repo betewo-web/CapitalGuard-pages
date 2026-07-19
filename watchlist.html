@@ -209,23 +209,26 @@
           <div id="kline-dim-detail-content" class="p-2 rounded kline-dim-detail-box"></div>
         </div>
         <div class="d-flex align-items-center flex-wrap gap-2 mb-2 kline-toolbar-row">
-          <div class="btn-group btn-group-sm" id="kline-period-group">
-            <button class="btn btn-outline-primary wl-period-btn active" data-period="daily" onclick="switchKLinePeriod('daily')">日K</button>
-            <button class="btn btn-outline-primary wl-period-btn" data-period="weekly" onclick="switchKLinePeriod('weekly')">週K</button>
-            <button class="btn btn-outline-primary wl-period-btn" data-period="monthly" onclick="switchKLinePeriod('monthly')">月K</button>
+          <div class="kline-select-group">
+            <label class="kline-select-label" for="kline-period-select">週期</label>
+            <select id="kline-period-select" class="form-select form-select-sm kline-select" onchange="switchKLinePeriod(this.value)">
+              <option value="daily">日K</option>
+              <option value="weekly">週K</option>
+              <option value="monthly">月K</option>
+            </select>
           </div>
-          <div class="btn-group btn-group-sm" id="kline-chips-group">
-            <button class="btn btn-outline-secondary wl-chips-btn active" data-chips="foreign" onclick="switchKLineChipsView('foreign')">外資</button>
-            <button class="btn btn-outline-secondary wl-chips-btn" data-chips="trust" onclick="switchKLineChipsView('trust')">投信</button>
-            <button class="btn btn-outline-secondary wl-chips-btn" data-chips="dealer" onclick="switchKLineChipsView('dealer')">自營</button>
-            <button class="btn btn-outline-secondary wl-chips-btn" data-chips="total" onclick="switchKLineChipsView('total')">三大合計</button>
-            <button class="btn btn-outline-secondary wl-chips-btn" data-chips="hide" onclick="switchKLineChipsView('hide')">隱藏</button>
+          <div class="kline-select-group">
+            <label class="kline-select-label" for="kline-chips-select">籌碼</label>
+            <select id="kline-chips-select" class="form-select form-select-sm kline-select" onchange="switchKLineChipsView(this.value)">
+              <option value="foreign">外資</option>
+              <option value="trust">投信</option>
+              <option value="dealer">自營</option>
+              <option value="total">三大合計</option>
+              <option value="hide">隱藏</option>
+            </select>
           </div>
-          <span class="text-muted kline-source-note" style="font-size:0.72rem;">資料來源：report_data_latest.json（由 generator.py 產生）</span>
-          <button type="button" id="kline-score-toggle" class="kline-score-toggle ms-auto" onclick="toggleKLineScoreSummary()">7大面向分析 展開 ▼</button>
         </div>
-        <div class="row g-1 mb-2" id="kline-score-bars" style="display:none"></div>
-        <div id="kline-chart" style="width:100%;height:470px;border:1px solid #2f3f66;border-radius:8px;"></div>
+        <div id="kline-chart" style="width:100%;height:420px;border:1px solid #2f3f66;border-radius:8px;"></div>
         <div class="row g-2 mt-2" id="kline-levels">
           <div class="col-md-6">
             <div class="p-2 rounded kline-level-card resistance">
@@ -239,6 +242,10 @@
               <div id="kline-support" class="fw-bold" style="font-size:0.9rem;letter-spacing:.05rem;"></div>
             </div>
           </div>
+        </div>
+        <div class="mt-2" id="kline-score-block">
+          <div class="row g-1 mb-2" id="kline-score-bars" style="display:none"></div>
+          <button type="button" id="kline-score-toggle" class="kline-score-toggle w-100" onclick="toggleKLineScoreSummary()">7大面向分析 展開 ▼</button>
         </div>
       </div>
     </div>
@@ -938,10 +945,12 @@ async function openKLineFromWatchlist(sid) {
     const stock = data.stock_data?.[sidKey];
     currentKLineSid = sidKey;
 
+    const normalizeIndustry = value => (String(value || "").trim() === "其他" ? "" : String(value || "").trim());
+
     if (!stock) {
       const inUniverse = !!data.universe?.[sidKey] || !!universe[sidKey];
       const displayName = universe[sidKey]?.n || data.universe?.[sidKey]?.n || sidKey;
-      const displayIndustry = universe[sidKey]?.i || data.universe?.[sidKey]?.i || "";
+      const displayIndustry = normalizeIndustry(universe[sidKey]?.i || data.universe?.[sidKey]?.i || "");
 
       document.getElementById("kline-name").textContent = displayName;
       document.getElementById("kline-industry").textContent = displayIndustry;
@@ -971,15 +980,15 @@ async function openKLineFromWatchlist(sid) {
       document.getElementById("kline-ma").textContent = Object.entries(liveStock.levels?.ma || {}).map(([k, v]) => `${k}:${v}`).join("   ") || "—";
       document.getElementById("kline-support").textContent = (liveStock.levels?.support || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
       document.getElementById("kline-resistance").textContent = (liveStock.levels?.resistance || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
+      document.getElementById("kline-industry").textContent = normalizeIndustry(liveStock.industry || displayIndustry || "");
       currentChipsView = "foreign";
-      document.querySelectorAll(".wl-chips-btn").forEach(btn => btn.classList.remove("active"));
-      document.querySelector('.wl-chips-btn[data-chips="foreign"]').classList.add("active");
+      document.getElementById("kline-chips-select").value = "foreign";
       renderKLineChartWhenVisible(sidKey, "daily");
       return;
     }
 
     document.getElementById("kline-name").textContent = stock.name || universe[sidKey]?.n || sidKey;
-    document.getElementById("kline-industry").textContent = stock.industry || universe[sidKey]?.i || "";
+    document.getElementById("kline-industry").textContent = normalizeIndustry(stock.industry || universe[sidKey]?.i || "");
     const levels = stock.levels || {};
     document.getElementById("kline-price").textContent = levels.current ? Number(levels.current).toFixed(2) : "—";
 
@@ -989,11 +998,9 @@ async function openKLineFromWatchlist(sid) {
     document.getElementById("kline-resistance").textContent = (levels.resistance || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
     renderKLineScoreBars(stock);
 
-    document.querySelectorAll(".wl-period-btn").forEach(btn => btn.classList.remove("active"));
-    document.querySelector('.wl-period-btn[data-period="daily"]').classList.add("active");
+    document.getElementById("kline-period-select").value = "daily";
     currentChipsView = "foreign";
-    document.querySelectorAll(".wl-chips-btn").forEach(btn => btn.classList.remove("active"));
-    document.querySelector('.wl-chips-btn[data-chips="foreign"]').classList.add("active");
+    document.getElementById("kline-chips-select").value = "foreign";
     renderKLineChartWhenVisible(sidKey, "daily");
   } catch (e) {
     document.getElementById("kline-name").textContent = universe[sidKey]?.n || "未命名";
@@ -1109,18 +1116,16 @@ function closeKLineDimDetail() {
 
 function switchKLinePeriod(period) {
   if (!currentKLineSid) return;
-  document.querySelectorAll(".wl-period-btn").forEach(btn => btn.classList.remove("active"));
-  const btn = document.querySelector(`.wl-period-btn[data-period="${period}"]`);
-  if (btn) btn.classList.add("active");
+  const select = document.getElementById("kline-period-select");
+  if (select) select.value = period;
   renderKLineChartWhenVisible(currentKLineSid, period);
 }
 
 function switchKLineChipsView(view) {
   currentChipsView = view;
-  document.querySelectorAll(".wl-chips-btn").forEach(btn => btn.classList.remove("active"));
-  const btn = document.querySelector(`.wl-chips-btn[data-chips="${view}"]`);
-  if (btn) btn.classList.add("active");
-  const period = document.querySelector(".wl-period-btn.active")?.dataset?.period || "daily";
+  const select = document.getElementById("kline-chips-select");
+  if (select) select.value = view;
+  const period = document.getElementById("kline-period-select")?.value || "daily";
   if (currentKLineSid) renderKLineChartWhenVisible(currentKLineSid, period);
 }
 
@@ -1601,7 +1606,7 @@ function buildKLineOption(pd, chips, levels, period) {
     yAxis,
     dataZoom: [
       { type: "inside", xAxisIndex: gridIndexes, start: dzStart, end: 100 },
-      { type: "slider", xAxisIndex: gridIndexes, bottom: 5, height: 18 },
+      { type: "slider", xAxisIndex: gridIndexes, bottom: 4, height: 14 },
     ],
     series,
   };
