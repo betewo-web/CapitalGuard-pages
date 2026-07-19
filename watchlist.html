@@ -228,7 +228,7 @@
             </select>
           </div>
         </div>
-        <div id="kline-chart" style="width:100%;height:420px;border:1px solid #2f3f66;border-radius:8px;"></div>
+        <div id="kline-chart" style="width:100%;height:460px;border:1px solid #2f3f66;border-radius:8px;"></div>
         <div class="row g-2 mt-2" id="kline-levels">
           <div class="col-md-6">
             <div class="p-2 rounded kline-level-card resistance">
@@ -1591,13 +1591,11 @@ function buildKLineOption(pd, chips, levels, period) {
   const kData = ohlcv.map(d => [d[0], d[3], d[2], d[1]]);
   const priceCandidates = [
     ...ohlcv.flatMap(d => [Number(d[1]), Number(d[2])]),
-    ...(levels.support || []).map(Number),
-    ...(levels.resistance || []).map(Number),
   ].filter(v => Number.isFinite(v) && v > 0);
   const rawMin = priceCandidates.length ? Math.min(...priceCandidates) : null;
   const rawMax = priceCandidates.length ? Math.max(...priceCandidates) : null;
-  const priceRange = rawMin !== null && rawMax !== null ? Math.max(rawMax - rawMin, rawMax * 0.02, 1) : null;
-  const pricePadding = priceRange !== null ? priceRange * 0.05 : null;
+  const priceRange = rawMin !== null && rawMax !== null ? Math.max(rawMax - rawMin, rawMax * 0.01, 0.5) : null;
+  const pricePadding = priceRange !== null ? priceRange * 0.02 : null;
   const priceAxisMin = rawMin !== null ? Math.max(0, rawMin - pricePadding) : null;
   const priceAxisMax = rawMax !== null ? rawMax + pricePadding : null;
   const volData = ohlcv.map((d, i) => {
@@ -1648,13 +1646,13 @@ function buildKLineOption(pd, chips, levels, period) {
 
   const grids = hasChips
     ? [
-      { left: 62, right: 52, top: 42, height: "40%" },
-      { left: 62, right: 52, top: "54%", height: "12%" },
-      { left: 62, right: 52, top: "70%", height: "13%" },
+      { left: 38, right: 18, top: 38, height: "54%" },
+      { left: 38, right: 18, top: "67%", height: "9%" },
+      { left: 38, right: 18, top: "80%", height: "8%" },
     ]
     : [
-      { left: 62, right: 52, top: 42, height: "54%" },
-      { left: 62, right: 52, top: "67%", height: "16%" },
+      { left: 38, right: 18, top: 38, height: "68%" },
+      { left: 38, right: 18, top: "79%", height: "9%" },
     ];
 
   const gridIndexes = hasChips ? [0, 1, 2] : [0, 1];
@@ -1729,7 +1727,26 @@ function buildKLineOption(pd, chips, levels, period) {
     tooltip: {
       trigger: "axis",
       triggerOn: isKLineMobileMode() ? "none" : "mousemove|click",
+      confine: true,
       axisPointer: { type: "cross" },
+      position: (point, params, dom, rect, size) => {
+        const [x, y] = point || [0, 0];
+        const viewW = size?.viewSize?.[0] || 0;
+        const viewH = size?.viewSize?.[1] || 0;
+        const boxW = size?.contentSize?.[0] || 0;
+        const boxH = size?.contentSize?.[1] || 0;
+        const margin = 8;
+
+        let left = x + 12;
+        if (left + boxW + margin > viewW) left = x - boxW - 12;
+        if (left < margin) left = margin;
+
+        let top = y - boxH - 12;
+        if (top < margin) top = y + 12;
+        if (top + boxH + margin > viewH) top = Math.max(margin, viewH - boxH - margin);
+
+        return [left, top];
+      },
       formatter: params => {
         if (!params?.length) return "";
         let h = `<div style="font-size:12px;padding:4px;"><b>${params[0].axisValue}</b><br/>`;
