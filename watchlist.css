@@ -324,6 +324,57 @@ body {
 	color: #f2f7ff !important;
 }
 
+.wl-chips-btn {
+	font-size: 0.72rem;
+	padding: 1px 7px;
+	border-color: rgba(171, 193, 236, 0.35);
+	color: var(--text-1);
+}
+
+.wl-chips-btn.active {
+	background: rgba(86, 168, 255, 0.18) !important;
+	border-color: rgba(86, 168, 255, 0.58) !important;
+	color: #dce9ff !important;
+}
+
+.kline-score-item {
+	min-width: 88px;
+}
+
+.kline-score-label {
+	font-size: 0.65rem;
+	color: #9bb0d5;
+	margin-bottom: 2px;
+}
+
+.kline-score-bar {
+	height: 5px;
+	border-radius: 3px;
+	background: rgba(148, 171, 220, 0.26);
+	margin: 2px 0;
+	overflow: hidden;
+}
+
+.kline-score-fill {
+	height: 100%;
+	border-radius: 3px;
+}
+
+.kline-score-fill.na {
+	background: #9baecf;
+	opacity: 0.45;
+}
+
+.kline-score-val {
+	font-size: 0.68rem;
+	font-weight: 700;
+}
+
+.kline-score-val.na {
+	color: #9baecf;
+	font-weight: 500;
+}
+
 .kline-level-card {
 	border: 1px solid rgba(121, 157, 255, 0.28);
 	background: rgba(15, 24, 45, 0.78);
