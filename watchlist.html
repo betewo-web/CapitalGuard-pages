@@ -723,14 +723,16 @@ function renderWatchlist(rows) {
     item.dataset.id = row.id;
     item.dataset.sid = sid;
     item.innerHTML = `
-      <div class="wl-stock-meta">
-        <span class="badge-sid">${escapeHtml(sid)}</span>
-        <div class="wl-name-inline">${escapeHtml(displayName)}</div>
+      <div class="wl-row-left">
+        <button class="wl-remove-mini" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${row.id}')">✕</button>
+        <div class="wl-stock-meta">
+          <span class="badge-sid">${escapeHtml(sid)}</span>
+          <div class="wl-name-inline">${escapeHtml(displayName)}</div>
+        </div>
       </div>
       <div class="wl-row-actions">
-        <button class="btn btn-sm btn-outline-info wl-action-btn" onclick="openKLineFromWatchlist('${sid}')">K線分析</button>
-        <button class="btn btn-sm btn-outline-secondary wl-action-btn" onclick="openAlertSettings('${row.id}')">LINE通知設定</button>
-        <button class="btn btn-sm btn-outline-danger wl-action-btn" onclick="openRemoveStockConfirm('${row.id}')">移除</button>
+        <button class="wl-action-btn wl-kline-action" onclick="openKLineFromWatchlist('${sid}')">📈 K線分析</button>
+        <button class="wl-action-btn wl-alert-action" onclick="openAlertSettings('${row.id}')">🔔 LINE通知設定</button>
       </div>
     `;
     grid.appendChild(item);
