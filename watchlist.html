@@ -176,7 +176,7 @@
 const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
 const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
 const LIFF_ID       = "2010668840-DXPfjNlx";
-const APP_VERSION   = "2026-07-19-2";
+const APP_VERSION   = "2026-07-19-3";
 const REPORT_DATA_URL = `report_data_latest.json?v=${APP_VERSION}`;
 
 // 避免瀏覽器/CDN 快取舊版 JS，確保搜尋邏輯更新可立即生效
@@ -668,26 +668,35 @@ async function loadSharedReportData(force = false) {
   if (!force && sharedDataLoadingPromise) return sharedDataLoadingPromise;
 
   sharedDataLoadingPromise = (async () => {
+    const base = `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, "")}`;
+    const datedPath = `../output/report_data_${new Date().toISOString().slice(0, 10)}.json`;
     const candidates = [
       REPORT_DATA_URL,
+      "./report_data_latest.json",
+      `${base}report_data_latest.json`,
       `../output/report_data_latest.json?v=${APP_VERSION}`,
+      `${datedPath}?v=${APP_VERSION}`,
     ];
 
-    let lastError = null;
+    const attempts = [];
     for (const url of candidates) {
       try {
         const r = await fetch(url, { cache: "no-store" });
-        if (!r.ok) continue;
+        if (!r.ok) {
+          attempts.push(`${url} -> HTTP ${r.status}`);
+          continue;
+        }
         const json = await r.json();
         if (json && json.stock_data) {
           sharedReportData = json;
           return sharedReportData;
         }
+        attempts.push(`${url} -> JSON 缺少 stock_data`);
       } catch (e) {
-        lastError = e;
+        attempts.push(`${url} -> ${e.message || "fetch failed"}`);
       }
     }
-    throw lastError || new Error("找不到報表共享資料");
+    throw new Error(`找不到報表共享資料；嘗試路徑：${attempts.join(" | ")}`);
   })();
 
   try {
@@ -740,7 +749,7 @@ async function openKLineFromWatchlist(sid) {
   } catch (e) {
     document.getElementById("kline-name").textContent = universe[sid]?.n || "未命名";
     document.getElementById("kline-ma").textContent = "讀取共用資料失敗";
-    document.getElementById("kline-chart").innerHTML = `<div class="kline-empty">K線資料讀取失敗：${escapeHtml(e.message || "unknown")}</div>`;
+    document.getElementById("kline-chart").innerHTML = `<div class="kline-empty">K線資料讀取失敗：${escapeHtml(e.message || "unknown")}<br><span style="font-size:.75rem;opacity:.8;">請確認目前瀏覽的站點已部署 report_data_latest.json</span></div>`;
   }
 }
 
