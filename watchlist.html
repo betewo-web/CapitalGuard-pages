@@ -187,18 +187,12 @@
 const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
 const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
 const LIFF_ID       = "2010668840-DXPfjNlx";
-const APP_VERSION   = "2026-07-19-5";
-const REPORT_DATA_URL = `report_data_latest.json?v=${APP_VERSION}`;
+const REPORT_DATA_URL = "report_data_latest.json";
 
-// 避免瀏覽器/CDN 快取舊版 JS，確保搜尋邏輯更新可立即生效
-(function ensureVersionedUrl() {
-  try {
-    const u = new URL(window.location.href);
-    if (u.searchParams.get("v") === APP_VERSION) return;
-    u.searchParams.set("v", APP_VERSION);
-    window.location.replace(u.toString());
-  } catch { /* ignore */ }
-})();
+function withCacheBust(url) {
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}t=${Date.now()}`;
+}
 
 // ── Supabase REST 輔助 ──────────────────────────────────────────
 
@@ -693,11 +687,11 @@ async function loadSharedReportData(force = false) {
     const base = `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, "")}`;
     const datedPath = `../output/report_data_${new Date().toISOString().slice(0, 10)}.json`;
     const candidates = [
-      REPORT_DATA_URL,
-      "./report_data_latest.json",
-      `${base}report_data_latest.json`,
-      `../output/report_data_latest.json?v=${APP_VERSION}`,
-      `${datedPath}?v=${APP_VERSION}`,
+      withCacheBust(REPORT_DATA_URL),
+      withCacheBust("./report_data_latest.json"),
+      withCacheBust(`${base}report_data_latest.json`),
+      withCacheBust("../output/report_data_latest.json"),
+      withCacheBust(datedPath),
     ];
 
     const attempts = [];
