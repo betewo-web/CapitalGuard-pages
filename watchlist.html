@@ -651,16 +651,17 @@ function renderWatchlist(rows) {
   document.getElementById("wl-grid").style.display = rows.length ? "grid" : "none";
 
   rows.forEach(row => {
-    const fallbackName = universe[row.stock_id]?.n || "";
+    const sid = String(row.stock_id || "").trim();
+    const fallbackName = universe[sid]?.n || "";
     const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
     const card = document.createElement("article");
     card.className = "wl-card";
     card.dataset.id = row.id;
-    card.dataset.sid = row.stock_id;
+    card.dataset.sid = sid;
     card.innerHTML = `
       <div class="wl-card-head">
         <div>
-          <span class="badge-sid">${escapeHtml(row.stock_id)}</span>
+          <span class="badge-sid">${escapeHtml(sid)}</span>
           <div class="wl-name">${escapeHtml(displayName)}</div>
         </div>
         <button class="btn btn-sm btn-outline-danger wl-remove" onclick="removeStock('${row.id}')">移除</button>
@@ -672,7 +673,7 @@ function renderWatchlist(rows) {
         ${togglePill(row, "alert_near_resistance", "🔴 逼近壓力")}
       </div>
       <div class="wl-card-actions mt-2">
-        <button class="btn btn-sm btn-outline-info wl-kline-btn" onclick="openKLineFromWatchlist('${row.stock_id}')">K線分析</button>
+        <button class="btn btn-sm btn-outline-info wl-kline-btn" onclick="openKLineFromWatchlist('${sid}')">K線分析</button>
       </div>
     `;
     grid.appendChild(card);
@@ -723,12 +724,13 @@ async function loadSharedReportData(force = false) {
 }
 
 async function openKLineFromWatchlist(sid) {
+  const sidKey = String(sid || "").trim();
   const modalEl = document.getElementById("klineModal");
   const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
 
-  document.getElementById("kline-code").textContent = sid;
+  document.getElementById("kline-code").textContent = sidKey;
   document.getElementById("kline-name").textContent = "載入中...";
-  document.getElementById("kline-industry").textContent = universe[sid]?.i || "";
+  document.getElementById("kline-industry").textContent = universe[sidKey]?.i || "";
   document.getElementById("kline-price").textContent = "—";
   document.getElementById("kline-ma").textContent = "讀取共用報表資料中...";
   document.getElementById("kline-score-bars").innerHTML = "";
@@ -741,19 +743,51 @@ async function openKLineFromWatchlist(sid) {
 
   try {
     const data = await loadSharedReportData();
-    const stock = data.stock_data?.[sid];
-    currentKLineSid = sid;
+    const stock = data.stock_data?.[sidKey];
+    currentKLineSid = sidKey;
 
     if (!stock) {
-      document.getElementById("kline-name").textContent = universe[sid]?.n || "未命名";
-      document.getElementById("kline-ma").textContent = "此股票不在今日報表 K 線資料中";
-      document.getElementById("kline-chart").innerHTML = '<div class="kline-empty">今日報表無此股票的 K 線細節資料</div>';
+      const inUniverse = !!data.universe?.[sidKey] || !!universe[sidKey];
+      const displayName = universe[sidKey]?.n || data.universe?.[sidKey]?.n || sidKey;
+      const displayIndustry = universe[sidKey]?.i || data.universe?.[sidKey]?.i || "";
+
+      document.getElementById("kline-name").textContent = displayName;
+      document.getElementById("kline-industry").textContent = displayIndustry;
+      document.getElementById("kline-ma").textContent = inUniverse
+        ? "共享檔未提供 K 線細節，現在改用 FinMind 即時抓取中..."
+        : "找不到共享資料，現在改用 FinMind 即時抓取中...";
+      document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">即時抓取 K 線資料中...</div>';
       closeKLineDimDetail();
+
+      const liveStock = await fetchWatchlistFinMindStock(sidKey, displayName, displayIndustry);
+      if (!liveStock) {
+        document.getElementById("kline-ma").textContent = inUniverse
+          ? "FinMind 即時抓取失敗，請稍後再試"
+          : "FinMind 即時抓取失敗，請確認代號是否正確";
+        document.getElementById("kline-chart").innerHTML = inUniverse
+          ? `<div class="kline-empty">${escapeHtml(sidKey)} 尚未在共享檔內，且 FinMind 即時抓取失敗。</div>`
+          : `<div class="kline-empty">無法即時抓取 ${escapeHtml(sidKey)} 的 K 線資料。</div>`;
+        return;
+      }
+
+      if (!data.stock_data) data.stock_data = {};
+      data.stock_data[sidKey] = liveStock;
+      sharedReportData = data;
+
+      renderKLineScoreBars(liveStock);
+      document.getElementById("kline-price").textContent = liveStock.levels?.current ? Number(liveStock.levels.current).toFixed(2) : "—";
+      document.getElementById("kline-ma").textContent = Object.entries(liveStock.levels?.ma || {}).map(([k, v]) => `${k}:${v}`).join("   ") || "—";
+      document.getElementById("kline-support").textContent = (liveStock.levels?.support || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
+      document.getElementById("kline-resistance").textContent = (liveStock.levels?.resistance || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
+      currentChipsView = "foreign";
+      document.querySelectorAll(".wl-chips-btn").forEach(btn => btn.classList.remove("active"));
+      document.querySelector('.wl-chips-btn[data-chips="foreign"]').classList.add("active");
+      renderKLineChartWhenVisible(sidKey, "daily");
       return;
     }
 
-    document.getElementById("kline-name").textContent = stock.name || universe[sid]?.n || sid;
-    document.getElementById("kline-industry").textContent = stock.industry || universe[sid]?.i || "";
+    document.getElementById("kline-name").textContent = stock.name || universe[sidKey]?.n || sidKey;
+    document.getElementById("kline-industry").textContent = stock.industry || universe[sidKey]?.i || "";
     const levels = stock.levels || {};
     document.getElementById("kline-price").textContent = levels.current ? Number(levels.current).toFixed(2) : "—";
 
@@ -768,9 +802,9 @@ async function openKLineFromWatchlist(sid) {
     currentChipsView = "foreign";
     document.querySelectorAll(".wl-chips-btn").forEach(btn => btn.classList.remove("active"));
     document.querySelector('.wl-chips-btn[data-chips="foreign"]').classList.add("active");
-    renderKLineChartWhenVisible(sid, "daily");
+    renderKLineChartWhenVisible(sidKey, "daily");
   } catch (e) {
-    document.getElementById("kline-name").textContent = universe[sid]?.n || "未命名";
+    document.getElementById("kline-name").textContent = universe[sidKey]?.n || "未命名";
     document.getElementById("kline-ma").textContent = "讀取共用資料失敗";
     document.getElementById("kline-chart").innerHTML = `<div class="kline-empty">K線資料讀取失敗：${escapeHtml(e.message || "unknown")}<br><span style="font-size:.75rem;opacity:.8;">請確認目前瀏覽的站點已部署 report_data_latest.json</span></div>`;
     closeKLineDimDetail();
@@ -923,6 +957,275 @@ function renderKLineChart(sid, period) {
   el.innerHTML = "";
   klineChart = echarts.init(el, null, { renderer: "canvas" });
   klineChart.setOption(buildKLineOption(periodData, chips, levels, period), true);
+}
+
+async function fetchWatchlistFinMindStock(sid, name, industry) {
+  try {
+    const start = new Date();
+    start.setDate(start.getDate() - 820);
+    const startDate = start.toISOString().slice(0, 10);
+    const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice&data_id=${encodeURIComponent(sid)}&start_date=${startDate}`;
+    const resp = await fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(20000) : undefined });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    if (json.status !== 200 || !json.data || !json.data.length) return null;
+    const raw = json.data.map(d => ({
+      date: d.date,
+      open: d.open,
+      high: d.max,
+      low: d.min,
+      close: d.close,
+      volume: d.Trading_Volume,
+    }));
+    return processWatchlistFinMindRaw(raw, sid, name, industry);
+  } catch (e) {
+    console.warn("[Watchlist FinMind]", sid, e.message);
+    return null;
+  }
+}
+
+function processWatchlistFinMindRaw(raw, sid, name, industry) {
+  const dates = raw.map(d => d.date);
+  const ohlcv = raw.map(d => [d.open, d.high, d.low, d.close, d.volume]);
+  const closes = raw.map(d => d.close);
+  const ma5 = maWatchlist(closes, 5);
+  const ma10 = maWatchlist(closes, 10);
+  const ma20 = maWatchlist(closes, 20);
+  const daily = { dates, ohlcv, ma5, ma10, ma20 };
+
+  const weeklyAgg = aggWatchlist(raw, "W");
+  const weeklyCloses = weeklyAgg.ohlcv.map(d => d[3]);
+  weeklyAgg.ma5 = maWatchlist(weeklyCloses, 5);
+  weeklyAgg.ma10 = maWatchlist(weeklyCloses, 10);
+  weeklyAgg.ma20 = maWatchlist(weeklyCloses, 20);
+
+  const monthlyAgg = aggWatchlist(raw, "M");
+  const monthlyCloses = monthlyAgg.ohlcv.map(d => d[3]);
+  monthlyAgg.ma5 = maWatchlist(monthlyCloses, 5);
+  monthlyAgg.ma10 = maWatchlist(monthlyCloses, 10);
+  monthlyAgg.ma20 = maWatchlist(monthlyCloses, 20);
+
+  const dimDetails = computeWatchlistDimDetails(daily);
+  const scores = {};
+  if (dimDetails.technical) scores.technical = dimDetails.technical.score;
+  if (dimDetails.risk) scores.risk = dimDetails.risk.score;
+  if (dimDetails.capital) scores.capital = dimDetails.capital.score;
+
+  return {
+    name: name || sid,
+    industry: industry || "",
+    scores,
+    dim_details: dimDetails,
+    daily,
+    weekly: weeklyAgg,
+    monthly: monthlyAgg,
+    chips: {},
+    levels: computeWatchlistLevels(raw, ma5, ma20, ma20),
+  };
+}
+
+function maWatchlist(closes, period) {
+  return closes.map((_, i) => {
+    if (i < period - 1) return null;
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += closes[j];
+    return Math.round((sum / period) * 100) / 100;
+  });
+}
+
+function aggWatchlist(raw, freq) {
+  const groups = {};
+  const keys = [];
+  raw.forEach(d => {
+    const dt = new Date(d.date);
+    let key;
+    if (freq === "W") {
+      const dow = dt.getDay() || 7;
+      const monday = new Date(dt);
+      monday.setDate(dt.getDate() - dow + 1);
+      key = monday.toISOString().slice(0, 10);
+    } else {
+      key = d.date.slice(0, 7);
+    }
+    if (!groups[key]) {
+      keys.push(key);
+      groups[key] = { date: d.date, open: d.open, high: d.high, low: d.low, close: d.close, volume: 0 };
+    } else {
+      groups[key].high = Math.max(groups[key].high, d.high);
+      groups[key].low = Math.min(groups[key].low, d.low);
+      groups[key].close = d.close;
+      groups[key].date = d.date;
+    }
+    groups[key].volume += d.volume;
+  });
+  return {
+    dates: keys.map(k => groups[k].date),
+    ohlcv: keys.map(k => {
+      const g = groups[k];
+      return [g.open, g.high, g.low, g.close, g.volume];
+    }),
+  };
+}
+
+function computeWatchlistLevels(raw, ma5, ma20, ma60) {
+  const w = 5;
+  const res = [];
+  const sup = [];
+  const n = raw.length;
+  const current = n ? raw[n - 1].close : 0;
+
+  for (let i = w; i < n - w; i++) {
+    let h = raw[i].high;
+    let l = raw[i].low;
+    let maxH = h;
+    let minL = l;
+    for (let j = i - w; j <= i + w; j++) {
+      maxH = Math.max(maxH, raw[j].high);
+      minL = Math.min(minL, raw[j].low);
+    }
+    if (h >= maxH) res.push(h);
+    if (l <= minL) sup.push(l);
+  }
+
+  function clusterLevels(list) {
+    if (!list.length) return [];
+    const sorted = list
+      .map(v => Math.round(v * 100) / 100)
+      .sort((a, b) => a - b)
+      .filter((v, i, arr) => i === 0 || v !== arr[i - 1]);
+    const out = [];
+    let group = [sorted[0]];
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] <= group[group.length - 1] * 1.025) group.push(sorted[i]);
+      else {
+        out.push(Math.round((group.reduce((a, b) => a + b, 0) / group.length) * 100) / 100);
+        group = [sorted[i]];
+      }
+    }
+    out.push(Math.round((group.reduce((a, b) => a + b, 0) / group.length) * 100) / 100);
+    return out;
+  }
+
+  const ma = {};
+  if (ma5[n - 1]) ma.MA5 = ma5[n - 1];
+  if (ma20[n - 1]) ma.MA20 = ma20[n - 1];
+  if (ma60[n - 1]) ma.MA60 = ma60[n - 1];
+
+  return {
+    support: clusterLevels(sup).filter(v => v < current * 1.02).reverse().slice(0, 3),
+    resistance: clusterLevels(res).filter(v => v > current * 0.98).slice(0, 3),
+    ma,
+    current: Math.round(current * 100) / 100,
+  };
+}
+
+function computeWatchlistDimDetails(daily) {
+  if (!daily || !daily.ohlcv || daily.ohlcv.length < 20) return {};
+  const n = daily.ohlcv.length;
+  const closes = daily.ohlcv.map(d => d[3]);
+  const volumes = daily.ohlcv.map(d => d[4]);
+  const ma5v = daily.ma5 && daily.ma5[n - 1];
+  const ma10v = daily.ma10 && daily.ma10[n - 1];
+  const ma20v = daily.ma20 && daily.ma20[n - 1];
+
+  const maAlign = ((ma5v && ma10v && ma5v > ma10v) ? 1 : 0) + ((ma10v && ma20v && ma10v > ma20v) ? 1 : 0) + ((ma5v && closes[n - 1] > ma5v) ? 1 : 0);
+  const maAS = maAlign * 33.3;
+  const rsiV = rsiWatchlist(closes, 14);
+  const rsiSc = (rsiV >= 45 && rsiV <= 65) ? 78 : ((rsiV > 80 || rsiV < 20) ? 18 : 42);
+  const macdR = macdWatchlist(closes);
+  const macdSc = Math.min(85, Math.max(15, 50 + macdR.hist * 100));
+  const volMA = volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
+  const volR = volMA > 0 ? volumes[n - 1] / volMA : 1;
+  const volSc = volR >= 2 ? 90 : volR >= 1.5 ? 75 : volR >= 1.2 ? 60 : 45;
+  const techSc = Math.round(maAS * 0.25 + rsiSc * 0.2 + macdSc * 0.25 + volSc * 0.15 + 50 * 0.15);
+  const signals = [];
+  if (ma5v && ma20v && daily.ma5[n - 6] < daily.ma20[n - 6] && ma5v > ma20v) signals.push("MA5黃金交叉");
+  if (ma20v && closes[n - 1] > ma20v && closes[n - 6] < (daily.ma20[n - 6] || closes[n - 1])) signals.push("突破MA20");
+  if (macdR.crossUp) signals.push("MACD黃金交叉");
+  if (volR >= 1.5) signals.push(`量能放大${volR.toFixed(1)}x`);
+
+  const rets = closes.slice(1).map((c, i) => (c - closes[i]) / closes[i]);
+  const r20 = rets.slice(-20);
+  const m20 = r20.reduce((a, b) => a + b, 0) / r20.length;
+  const std20 = Math.sqrt(r20.reduce((s, r) => s + Math.pow(r - m20, 2), 0) / r20.length);
+  const annVol = std20 * Math.sqrt(252) * 100;
+  let peak = closes[0];
+  let maxDd = 0;
+  closes.forEach(c => {
+    peak = Math.max(peak, c);
+    maxDd = Math.min(maxDd, ((c - peak) / peak) * 100);
+  });
+  const vsc = Math.min(100, Math.max(0, 100 - annVol * 3));
+  const dsc = Math.min(100, Math.max(0, 100 + maxDd * 2));
+  const riskSc = Math.round(vsc * 0.4 + dsc * 0.4 + 50 * 0.2);
+
+  const rf = 0.02 / 252;
+  const exc = rets.map(r => r - rf);
+  const mEx = exc.reduce((a, b) => a + b, 0) / exc.length;
+  const sEx = Math.sqrt(exc.reduce((s, r) => s + Math.pow(r - mEx, 2), 0) / exc.length);
+  const sharpe = sEx > 0 ? mEx / sEx * Math.sqrt(252) : 0;
+  const neg = exc.filter(r => r < 0);
+  const dSt = neg.length ? Math.sqrt(neg.reduce((s, r) => s + r * r, 0) / neg.length) : 0.001;
+  const sortino = dSt > 0 ? mEx / dSt * Math.sqrt(252) : 0;
+  const shSc = Math.min(100, Math.max(0, 50 + sharpe * 20));
+  const capSc = Math.round(shSc * 0.5 + Math.min(100, Math.max(0, 50 + sortino * 15)) * 0.5);
+
+  return {
+    technical: {
+      score: techSc,
+      items: [
+        { label: "均線多頭排列", value: `${maAlign}/3`, score: Math.round(maAS) },
+        { label: "RSI(14)", value: rsiV.toFixed(1), score: Math.round(rsiSc) },
+        { label: "MACD 柱狀", value: macdR.hist.toFixed(4), score: Math.round(macdSc) },
+        { label: "量能比", value: `${volR.toFixed(2)}x`, score: Math.round(volSc) },
+      ],
+      signals,
+    },
+    risk: {
+      score: riskSc,
+      items: [
+        { label: "年化波動率", value: `${annVol.toFixed(1)}%`, score: Math.round(vsc) },
+        { label: "最大回撤", value: `${maxDd.toFixed(1)}%`, score: Math.round(dsc) },
+      ],
+    },
+    capital: {
+      score: capSc,
+      items: [
+        { label: "Sharpe 比率", value: sharpe.toFixed(2), score: Math.round(shSc) },
+        { label: "Sortino 比率", value: sortino.toFixed(2), score: Math.round(Math.min(100, Math.max(0, 50 + sortino * 15))) },
+      ],
+    },
+  };
+}
+
+function rsiWatchlist(closes, period) {
+  if (closes.length < period + 1) return 50;
+  let gain = 0;
+  let loss = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff > 0) gain += diff;
+    else loss -= diff;
+  }
+  return 100 - 100 / (1 + (gain / (loss || 0.0001)));
+}
+
+function macdWatchlist(closes) {
+  function ema(data, period) {
+    const k = 2 / (period + 1);
+    const result = [data[0]];
+    for (let i = 1; i < data.length; i++) result.push(data[i] * k + result[i - 1] * (1 - k));
+    return result;
+  }
+  const e12 = ema(closes, 12);
+  const e26 = ema(closes, 26);
+  const mac = e12.map((v, i) => v - e26[i]);
+  const sig = ema(mac, 9);
+  const n = closes.length;
+  return {
+    hist: mac[n - 1] - sig[n - 1],
+    crossUp: n >= 4 && mac[n - 1] > sig[n - 1] && mac[n - 4] < sig[n - 4],
+  };
 }
 
 function buildKLineOption(pd, chips, levels, period) {
