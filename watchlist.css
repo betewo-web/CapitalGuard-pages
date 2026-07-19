@@ -111,6 +111,9 @@ body {
 .panel-title {
 	font-family: "Space Grotesk", sans-serif;
 	letter-spacing: 0.01em;
+	color: #f4f8ff;
+	font-size: 1.04rem;
+	text-shadow: 0 1px 10px rgba(86, 168, 255, 0.18);
 }
 
 .chip-muted {
@@ -370,6 +373,24 @@ body {
 .kline-modal-content .btn-close {
 	filter: invert(1);
 	opacity: 0.82;
+}
+
+.kline-score-toggle {
+	border: 1px solid rgba(121, 157, 255, 0.35);
+	border-radius: 10px;
+	background: rgba(17, 28, 54, 0.72);
+	color: #dce7ff;
+	font-size: 0.78rem;
+	font-weight: 700;
+	padding: 0.4rem 0.72rem;
+	box-shadow: 0 6px 18px rgba(8, 18, 40, 0.2);
+	transition: transform 0.2s ease, filter 0.2s ease, border-color 0.2s ease;
+}
+
+.kline-score-toggle:hover {
+	transform: translateY(-1px);
+	filter: brightness(1.05);
+	border-color: rgba(86, 168, 255, 0.58);
 }
 
 .wl-period-btn.active {

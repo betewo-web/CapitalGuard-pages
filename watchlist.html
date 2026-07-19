@@ -201,7 +201,10 @@
             <span class="ms-auto" style="font-size:0.85rem;">現價 <strong id="kline-price"></strong></span>
           </div>
           <div class="text-muted mt-1" style="font-size:0.78rem;" id="kline-ma"></div>
-          <div class="row g-1 mt-1" id="kline-score-bars"></div>
+          <div class="mt-2">
+            <button type="button" id="kline-score-toggle" class="kline-score-toggle" onclick="toggleKLineScoreSummary()">7大面向分析 展開 ▼</button>
+            <div class="row g-1 mt-2" id="kline-score-bars" style="display:none"></div>
+          </div>
         </div>
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
@@ -333,6 +336,7 @@ let sharedDataLoadingPromise = null;
 let klineChart = null;
 let currentKLineSid = null;
 let currentChipsView = "foreign";
+let klineScoreSummaryOpen = false;
 let watchlistRows = [];
 let alertModalRowId = null;
 let removeModalRowId = null;
@@ -917,6 +921,7 @@ async function openKLineFromWatchlist(sid) {
   const modalEl = document.getElementById("klineModal");
   const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
 
+  setKLineScoreSummaryOpen(false);
   document.getElementById("kline-code").textContent = sidKey;
   document.getElementById("kline-name").textContent = "載入中...";
   document.getElementById("kline-industry").textContent = universe[sidKey]?.i || "";
@@ -1024,6 +1029,20 @@ function renderKLineScoreBars(stock) {
   }).join("");
 
   document.getElementById("kline-score-bars").innerHTML = html;
+}
+
+function setKLineScoreSummaryOpen(open) {
+  klineScoreSummaryOpen = !!open;
+  const toggleBtn = document.getElementById("kline-score-toggle");
+  const bars = document.getElementById("kline-score-bars");
+  if (!toggleBtn || !bars) return;
+  toggleBtn.textContent = klineScoreSummaryOpen ? "7大面向分析 收合 ▲" : "7大面向分析 展開 ▼";
+  bars.style.display = klineScoreSummaryOpen ? "flex" : "none";
+  if (!klineScoreSummaryOpen) closeKLineDimDetail();
+}
+
+function toggleKLineScoreSummary() {
+  setKLineScoreSummaryOpen(!klineScoreSummaryOpen);
 }
 
 function showKLineDimDetail(dim) {
@@ -1571,6 +1590,7 @@ document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => 
     klineChart.dispose();
     klineChart = null;
   }
+  setKLineScoreSummaryOpen(false);
   closeKLineDimDetail();
   currentKLineSid = null;
 });
