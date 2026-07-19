@@ -21,7 +21,10 @@
       <span class="brand-icon">◎</span>
       <span class="brand-title">台股監控</span>
     </span>
-    <span id="nav-user" class="user-chip"></span>
+    <div class="nav-user-actions">
+      <span id="nav-user" class="user-chip"></span>
+      <button id="nav-logout" class="btn btn-sm btn-outline-light" style="display:none" onclick="logout()">登出</button>
+    </div>
   </div>
 </nav>
 
@@ -93,7 +96,6 @@
     <div class="card panel-card mb-4">
       <div class="card-header py-3 d-flex justify-content-between align-items-center">
         <span class="fw-semibold panel-title">新增追蹤股票</span>
-        <span class="chip-muted">Dashboard</span>
       </div>
       <div class="card-body p-3">
         <div class="d-flex gap-2 position-relative flex-column flex-md-row">
@@ -112,18 +114,75 @@
     <div class="card panel-card">
       <div class="card-header py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
-        <button class="btn btn-outline-light" onclick="logout()">登出</button>
       </div>
       <div class="card-body p-0">
         <div id="wl-empty" class="empty-state text-center py-5 text-muted" style="display:none">
           尚未加入任何股票，從上方搜尋並加入吧！
         </div>
-        <div id="wl-grid" class="watchlist-grid" style="display:none"></div>
+        <div id="wl-grid" class="watchlist-list" style="display:none"></div>
       </div>
     </div>
 
   </div><!-- /main-section -->
 </div><!-- /container -->
+
+<div class="modal fade" id="alertSettingsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="alert-settings-title">LINE 通知設定</h5>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <div class="wl-toggle-grid">
+          <label class="alert-pill">
+            <span class="alert-label">⚠️ 跌破支撐</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-break-support" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_break_support', this.checked)">
+            </span>
+          </label>
+          <label class="alert-pill">
+            <span class="alert-label">🟢 逼近支撐</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-near-support" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_near_support', this.checked)">
+            </span>
+          </label>
+          <label class="alert-pill">
+            <span class="alert-label">⚡ 突破壓力</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-break-resistance" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_break_resistance', this.checked)">
+            </span>
+          </label>
+          <label class="alert-pill">
+            <span class="alert-label">🔴 逼近壓力</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-near-resistance" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_near_resistance', this.checked)">
+            </span>
+          </label>
+        </div>
+        <div id="alert-settings-msg" class="small mt-2 text-muted"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="removeStockModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">移除追蹤股票</h5>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <p class="mb-3" id="remove-stock-text"></p>
+        <div class="d-flex justify-content-end gap-2">
+          <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">取消</button>
+          <button type="button" class="btn btn-outline-danger" onclick="confirmRemoveStock()">確認移除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="modal fade" id="klineModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:92vw;">
@@ -269,6 +328,9 @@ let sharedDataLoadingPromise = null;
 let klineChart = null;
 let currentKLineSid = null;
 let currentChipsView = "foreign";
+let watchlistRows = [];
+let alertModalRowId = null;
+let removeModalRowId = null;
 
 const KLINE_DIM_LABELS = {
   fundamental: "基本面",
@@ -629,6 +691,7 @@ async function showMain() {
   document.getElementById("login-section").style.display = "none";
   document.getElementById("main-section").style.display  = "";
   document.getElementById("nav-user").textContent = `👤 ${state.displayName}`;
+  document.getElementById("nav-logout").style.display = "inline-flex";
   await loadWatchlist();
 }
 
@@ -640,6 +703,7 @@ function logout() {
 // ── 自選股清單 ──────────────────────────────────────────────────
 async function loadWatchlist() {
   const rows = await sbGet("watchlist", {}, state.accessToken);
+  watchlistRows = rows || [];
   renderWatchlist(rows);
 }
 
@@ -648,36 +712,103 @@ function renderWatchlist(rows) {
   grid.innerHTML = "";
   document.getElementById("wl-count").textContent = rows.length;
   document.getElementById("wl-empty").style.display = rows.length ? "none" : "";
-  document.getElementById("wl-grid").style.display = rows.length ? "grid" : "none";
+  document.getElementById("wl-grid").style.display = rows.length ? "block" : "none";
 
   rows.forEach(row => {
     const sid = String(row.stock_id || "").trim();
     const fallbackName = universe[sid]?.n || "";
     const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
-    const card = document.createElement("article");
-    card.className = "wl-card";
-    card.dataset.id = row.id;
-    card.dataset.sid = sid;
-    card.innerHTML = `
-      <div class="wl-card-head">
-        <div>
-          <span class="badge-sid">${escapeHtml(sid)}</span>
-          <div class="wl-name">${escapeHtml(displayName)}</div>
-        </div>
-        <button class="btn btn-sm btn-outline-danger wl-remove" onclick="removeStock('${row.id}')">移除</button>
+    const item = document.createElement("article");
+    item.className = "wl-row";
+    item.dataset.id = row.id;
+    item.dataset.sid = sid;
+    item.innerHTML = `
+      <div class="wl-stock-meta">
+        <span class="badge-sid">${escapeHtml(sid)}</span>
+        <div class="wl-name-inline">${escapeHtml(displayName)}</div>
       </div>
-      <div class="wl-toggle-grid">
-        ${togglePill(row, "alert_break_support", "⚠️ 跌破支撐")}
-        ${togglePill(row, "alert_near_support", "🟢 逼近支撐")}
-        ${togglePill(row, "alert_break_resistance", "⚡ 突破壓力")}
-        ${togglePill(row, "alert_near_resistance", "🔴 逼近壓力")}
-      </div>
-      <div class="wl-card-actions mt-2">
-        <button class="btn btn-sm btn-outline-info wl-kline-btn" onclick="openKLineFromWatchlist('${sid}')">K線分析</button>
+      <div class="wl-row-actions">
+        <button class="btn btn-sm btn-outline-info wl-action-btn" onclick="openKLineFromWatchlist('${sid}')">K線分析</button>
+        <button class="btn btn-sm btn-outline-secondary wl-action-btn" onclick="openAlertSettings('${row.id}')">LINE通知設定</button>
+        <button class="btn btn-sm btn-outline-danger wl-action-btn" onclick="openRemoveStockConfirm('${row.id}')">移除</button>
       </div>
     `;
-    grid.appendChild(card);
+    grid.appendChild(item);
   });
+}
+
+function getWatchlistRowById(rowId) {
+  return watchlistRows.find(r => String(r.id) === String(rowId));
+}
+
+function openAlertSettings(rowId) {
+  const row = getWatchlistRowById(rowId);
+  if (!row) return;
+
+  alertModalRowId = rowId;
+  const sid = String(row.stock_id || "").trim();
+  const fallbackName = universe[sid]?.n || "";
+  const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
+  document.getElementById("alert-settings-title").textContent = `LINE 通知設定｜${sid} ${displayName}`;
+  document.getElementById("alert-break-support").checked = !!row.alert_break_support;
+  document.getElementById("alert-near-support").checked = !!row.alert_near_support;
+  document.getElementById("alert-break-resistance").checked = !!row.alert_break_resistance;
+  document.getElementById("alert-near-resistance").checked = !!row.alert_near_resistance;
+  document.getElementById("alert-settings-msg").textContent = "";
+
+  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("alertSettingsModal"));
+  modal.show();
+}
+
+async function onAlertSettingToggle(field, checked) {
+  if (!alertModalRowId) return;
+  const msgEl = document.getElementById("alert-settings-msg");
+  msgEl.innerHTML = '<span class="text-muted">更新中…</span>';
+
+  try {
+    await updateAlert(alertModalRowId, field, checked, false);
+    const row = getWatchlistRowById(alertModalRowId);
+    if (row) row[field] = checked;
+    msgEl.innerHTML = '<span class="text-success">✅ 已更新</span>';
+  } catch (e) {
+    const inputMap = {
+      alert_break_support: "alert-break-support",
+      alert_near_support: "alert-near-support",
+      alert_break_resistance: "alert-break-resistance",
+      alert_near_resistance: "alert-near-resistance",
+    };
+    const inputId = inputMap[field];
+    if (inputId) {
+      const inputEl = document.getElementById(inputId);
+      if (inputEl) inputEl.checked = !checked;
+    }
+    msgEl.innerHTML = `<span class="text-danger">❌ 更新失敗：${e.message}</span>`;
+  }
+}
+
+function openRemoveStockConfirm(rowId) {
+  const row = getWatchlistRowById(rowId);
+  if (!row) return;
+
+  removeModalRowId = rowId;
+  const sid = String(row.stock_id || "").trim();
+  const fallbackName = universe[sid]?.n || "";
+  const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
+  document.getElementById("remove-stock-text").textContent = `確定要移除 ${sid} ${displayName} 嗎？`;
+  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("removeStockModal"));
+  modal.show();
+}
+
+async function confirmRemoveStock() {
+  if (!removeModalRowId) return;
+  try {
+    await removeStock(removeModalRowId, false);
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("removeStockModal"));
+    modal.hide();
+    removeModalRowId = null;
+  } catch (e) {
+    alert(`刪除失敗：${e.message}`);
+  }
 }
 
 async function loadSharedReportData(force = false) {
@@ -1394,17 +1525,6 @@ window.addEventListener("resize", () => {
   if (klineChart) klineChart.resize();
 });
 
-function togglePill(row, field, label) {
-  const checked = row[field] ? "checked" : "";
-  return `<label class="alert-pill ${row[field] ? "active" : ""}">
-    <span class="alert-label">${label}</span>
-    <span class="toggle-wrap form-check form-switch mb-0">
-      <input class="form-check-input" type="checkbox" ${checked}
-             onchange="updateAlert('${row.id}', '${field}', this.checked)">
-    </span>
-  </label>`;
-}
-
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, "&amp;")
@@ -1414,20 +1534,22 @@ function escapeHtml(text) {
     .replace(/'/g, "&#39;");
 }
 
-async function updateAlert(rowId, field, value) {
+async function updateAlert(rowId, field, value, notifyOnError = true) {
   try {
     await sbPatch("watchlist", { "id": `eq.${rowId}` }, { [field]: value }, state.accessToken);
   } catch (e) {
-    alert(`更新失敗：${e.message}`);
+    if (notifyOnError) alert(`更新失敗：${e.message}`);
+    throw e;
   }
 }
 
-async function removeStock(rowId) {
+async function removeStock(rowId, notifyOnError = true) {
   try {
     await sbDelete("watchlist", { "id": `eq.${rowId}` }, state.accessToken);
     await loadWatchlist();
   } catch (e) {
-    alert(`刪除失敗：${e.message}`);
+    if (notifyOnError) alert(`刪除失敗：${e.message}`);
+    throw e;
   }
 }
 

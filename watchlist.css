@@ -83,6 +83,12 @@ body {
 	background: rgba(86, 168, 255, 0.1);
 }
 
+.nav-user-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.55rem;
+}
+
 .page-shell {
 	width: min(1140px, 100%);
 }
@@ -205,61 +211,59 @@ body {
 	background: rgba(86, 168, 255, 0.17);
 }
 
-.watchlist-grid {
-	padding: 0.95rem;
+.watchlist-list {
+	padding: 0.6rem 0.8rem 0.95rem;
 	display: grid;
-	grid-template-columns: 1fr;
-	gap: 0.85rem;
+	gap: 0.55rem;
 }
 
-.wl-card {
-	padding: 0.95rem;
-	transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease;
-}
-
-.wl-card-head {
+.wl-row {
+	border: 1px solid rgba(121, 157, 255, 0.28);
+	border-radius: 14px;
+	background: rgba(12, 20, 39, 0.82);
+	padding: 0.72rem 0.8rem;
 	display: flex;
-	align-items: start;
+	align-items: center;
 	justify-content: space-between;
-	gap: 0.65rem;
-	margin-bottom: 0.8rem;
+	gap: 0.8rem;
+	transition: border-color 0.24s ease, box-shadow 0.24s ease, transform 0.24s ease;
 }
 
-.wl-name {
-	margin-top: 0.45rem;
+.wl-stock-meta {
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	gap: 0.62rem;
+}
+
+.wl-name-inline {
 	color: var(--text-1);
 	font-size: 0.92rem;
-	line-height: 1.34;
-	word-break: break-word;
+	line-height: 1.3;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
-.wl-remove {
-	font-size: 0.77rem;
-	padding: 0.34rem 0.55rem;
+.wl-row-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 0.46rem;
+	flex-wrap: wrap;
+}
+
+.wl-action-btn {
+	font-size: 0.76rem;
+	padding: 0.34rem 0.62rem;
+	min-height: 34px;
+	white-space: nowrap;
 }
 
 .wl-toggle-grid {
 	display: grid;
 	grid-template-columns: 1fr;
 	gap: 0.54rem;
-}
-
-.wl-card-actions {
-	display: flex;
-	justify-content: flex-end;
-}
-
-.wl-kline-btn {
-	font-size: 0.76rem;
-	padding: 0.34rem 0.66rem;
-	border-color: rgba(86, 168, 255, 0.45);
-	color: #9fc5ff;
-}
-
-.wl-kline-btn:hover {
-	border-color: rgba(86, 168, 255, 0.72);
-	color: #d2e7ff;
-	background: rgba(86, 168, 255, 0.16);
 }
 
 .alert-pill {
@@ -485,10 +489,10 @@ body {
 }
 
 @media (hover: hover) {
-	.wl-card:hover {
-		transform: translateY(-3px);
+	.wl-row:hover {
+		transform: translateY(-1px);
 		border-color: rgba(86, 168, 255, 0.5);
-		box-shadow: var(--shadow-hover);
+		box-shadow: 0 8px 24px rgba(15, 30, 72, 0.32);
 	}
 
 	.btn:hover {
@@ -508,23 +512,36 @@ body {
 		padding: 0.42rem 0.82rem;
 	}
 
-	.watchlist-grid {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 1rem;
-		padding: 1.05rem;
+	.watchlist-list {
+		padding: 0.72rem 1rem 1rem;
 	}
 
-	.wl-card {
-		padding: 1.05rem;
+	.wl-row {
+		padding: 0.78rem 0.92rem;
 	}
 
-	.wl-toggle-grid {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+	.wl-action-btn {
+		font-size: 0.78rem;
 	}
 }
 
-@media (min-width: 1200px) {
-	.watchlist-grid {
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+
+@media (max-width: 860px) {
+	.wl-row {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.wl-stock-meta {
+		width: 100%;
+	}
+
+	.wl-row-actions {
+		width: 100%;
+		justify-content: flex-start;
+	}
+
+	.wl-action-btn {
+		flex: 1 1 120px;
 	}
 }
