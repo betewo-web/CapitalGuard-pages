@@ -349,6 +349,8 @@ let klineTouchStartPoint = null;
 let klineTouchDomEl = null;
 let klineTouchDomHandlers = null;
 let klineTouchGlobalHandlers = null;
+let klineZoomSyncing = false;
+let klineLastZoomRange = null;
 let watchlistRows = [];
 let alertModalRowId = null;
 let removeModalRowId = null;
@@ -1210,9 +1212,61 @@ function renderKLineChart(sid, period) {
   el.innerHTML = "";
   klineMobileTooltipLocked = false;
   clearKLineLongPressTimer();
+  klineLastZoomRange = null;
   klineChart = echarts.init(el, null, { renderer: "canvas" });
   klineChart.setOption(buildKLineOption(periodData, chips, levels, period), true);
   bindKLineTouchInteraction();
+  bindKLineZoomBehavior();
+}
+
+function getKLineDataZoomRange(payload) {
+  const src = payload?.batch?.[0] || payload || {};
+  if (Number.isFinite(src.start) && Number.isFinite(src.end)) {
+    return { start: src.start, end: src.end };
+  }
+  return null;
+}
+
+function bindKLineZoomBehavior() {
+  if (!klineChart) return;
+  klineChart.off("datazoom");
+  klineChart.on("datazoom", evt => {
+    if (!klineChart || klineZoomSyncing) return;
+    const range = getKLineDataZoomRange(evt);
+    if (!range) return;
+
+    const currentSpan = Math.max(0.0001, range.end - range.start);
+    const prev = klineLastZoomRange || range;
+    const prevSpan = Math.max(0.0001, prev.end - prev.start);
+
+    // 只放慢放大（span 變小）；縮小（span 變大）維持原速度。
+    if (currentSpan < prevSpan) {
+      const damping = 0.15; // 越小越慢
+      const targetSpan = prevSpan - ((prevSpan - currentSpan) * damping);
+      const center = (range.start + range.end) / 2;
+      const nextStart = Math.max(0, center - (targetSpan / 2));
+      const nextEnd = Math.min(100, center + (targetSpan / 2));
+
+      klineZoomSyncing = true;
+      klineChart.dispatchAction({
+        type: "dataZoom",
+        dataZoomIndex: 0,
+        start: nextStart,
+        end: nextEnd,
+      });
+      klineChart.dispatchAction({
+        type: "dataZoom",
+        dataZoomIndex: 1,
+        start: nextStart,
+        end: nextEnd,
+      });
+      klineZoomSyncing = false;
+      klineLastZoomRange = { start: nextStart, end: nextEnd };
+      return;
+    }
+
+    klineLastZoomRange = range;
+  });
 }
 
 function isKLineMobileMode() {
