@@ -134,51 +134,36 @@
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-3">
-        <div class="alert-summary-box mb-2" id="alert-settings-summary"></div>
-
-        <div class="alert-group-tabs mb-2" role="tablist" aria-label="通知分組">
-          <button id="alert-tab-support" class="alert-tab-btn active" type="button" onclick="switchAlertGroup('support')">支撐通知</button>
-          <button id="alert-tab-resistance" class="alert-tab-btn" type="button" onclick="switchAlertGroup('resistance')">壓力通知</button>
-        </div>
-
         <div class="d-flex justify-content-end gap-2 mb-2">
-          <button type="button" class="btn btn-sm btn-outline-light" onclick="setAlertGroupState(true)">本區全開</button>
-          <button type="button" class="btn btn-sm btn-outline-light" onclick="setAlertGroupState(false)">本區全關</button>
+          <button type="button" class="btn btn-sm btn-outline-light" onclick="setAllAlertSettings(true)">全開</button>
+          <button type="button" class="btn btn-sm btn-outline-light" onclick="setAllAlertSettings(false)">全關</button>
         </div>
 
-        <div id="alert-panel-support" class="wl-toggle-grid">
+        <div class="wl-toggle-grid">
           <label class="alert-pill">
             <span class="alert-label">⚠️ 跌破支撐</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-break-support" class="form-check-input" type="checkbox" onchange="markAlertSettingsDirty()">
+              <input id="alert-break-support" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_break_support', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
             <span class="alert-label">🟢 逼近支撐</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-near-support" class="form-check-input" type="checkbox" onchange="markAlertSettingsDirty()">
+              <input id="alert-near-support" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_near_support', this.checked)">
             </span>
           </label>
-        </div>
-
-        <div id="alert-panel-resistance" class="wl-toggle-grid" style="display:none;">
           <label class="alert-pill">
             <span class="alert-label">⚡ 突破壓力</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-break-resistance" class="form-check-input" type="checkbox" onchange="markAlertSettingsDirty()">
+              <input id="alert-break-resistance" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_break_resistance', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
             <span class="alert-label">🔴 逼近壓力</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-near-resistance" class="form-check-input" type="checkbox" onchange="markAlertSettingsDirty()">
+              <input id="alert-near-resistance" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_near_resistance', this.checked)">
             </span>
           </label>
-        </div>
-
-        <div class="d-flex justify-content-end gap-2 mt-3">
-          <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">取消</button>
-          <button type="button" class="btn btn-primary" onclick="saveAlertSettings()">套用設定</button>
         </div>
         <div id="alert-settings-msg" class="small mt-2 text-muted"></div>
       </div>
@@ -350,7 +335,6 @@ let currentKLineSid = null;
 let currentChipsView = "foreign";
 let watchlistRows = [];
 let alertModalRowId = null;
-let alertSettingsInitial = null;
 let removeModalRowId = null;
 
 const KLINE_DIM_LABELS = {
@@ -773,103 +757,91 @@ function openAlertSettings(rowId) {
   const fallbackName = universe[sid]?.n || "";
   const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
   document.getElementById("alert-settings-title").textContent = `LINE 通知設定｜${sid} ${displayName}`;
-  alertSettingsInitial = {
-    alert_break_support: !!row.alert_break_support,
-    alert_near_support: !!row.alert_near_support,
-    alert_break_resistance: !!row.alert_break_resistance,
-    alert_near_resistance: !!row.alert_near_resistance,
-  };
-  applyAlertSettingsToInputs(alertSettingsInitial);
-  switchAlertGroup("support");
-  refreshAlertSettingsSummary();
-  document.getElementById("alert-settings-msg").textContent = "調整後按「套用設定」一次儲存";
+  document.getElementById("alert-break-support").checked = !!row.alert_break_support;
+  document.getElementById("alert-near-support").checked = !!row.alert_near_support;
+  document.getElementById("alert-break-resistance").checked = !!row.alert_break_resistance;
+  document.getElementById("alert-near-resistance").checked = !!row.alert_near_resistance;
+  document.getElementById("alert-settings-msg").textContent = "";
 
   const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("alertSettingsModal"));
   modal.show();
 }
 
-function getAlertSettingsFromInputs() {
-  return {
-    alert_break_support: document.getElementById("alert-break-support").checked,
-    alert_near_support: document.getElementById("alert-near-support").checked,
-    alert_break_resistance: document.getElementById("alert-break-resistance").checked,
-    alert_near_resistance: document.getElementById("alert-near-resistance").checked,
-  };
-}
-
-function applyAlertSettingsToInputs(settings) {
-  document.getElementById("alert-break-support").checked = !!settings.alert_break_support;
-  document.getElementById("alert-near-support").checked = !!settings.alert_near_support;
-  document.getElementById("alert-break-resistance").checked = !!settings.alert_break_resistance;
-  document.getElementById("alert-near-resistance").checked = !!settings.alert_near_resistance;
-}
-
-function switchAlertGroup(group) {
-  const supportActive = group !== "resistance";
-  document.getElementById("alert-tab-support").classList.toggle("active", supportActive);
-  document.getElementById("alert-tab-resistance").classList.toggle("active", !supportActive);
-  document.getElementById("alert-panel-support").style.display = supportActive ? "grid" : "none";
-  document.getElementById("alert-panel-resistance").style.display = supportActive ? "none" : "grid";
-}
-
-function setAlertGroupState(enabled) {
-  const supportActive = document.getElementById("alert-tab-support").classList.contains("active");
-  if (supportActive) {
-    document.getElementById("alert-break-support").checked = enabled;
-    document.getElementById("alert-near-support").checked = enabled;
-  } else {
-    document.getElementById("alert-break-resistance").checked = enabled;
-    document.getElementById("alert-near-resistance").checked = enabled;
-  }
-  markAlertSettingsDirty();
-}
-
-function refreshAlertSettingsSummary() {
-  const settings = getAlertSettingsFromInputs();
-  const enabledCount = Object.values(settings).filter(Boolean).length;
-  document.getElementById("alert-settings-summary").textContent = `目前啟用 ${enabledCount}/4 項通知`; 
-}
-
-function markAlertSettingsDirty() {
-  refreshAlertSettingsSummary();
-  document.getElementById("alert-settings-msg").textContent = "尚未儲存變更";
-}
-
-function isSameAlertSettings(a, b) {
-  return a
-    && b
-    && a.alert_break_support === b.alert_break_support
-    && a.alert_near_support === b.alert_near_support
-    && a.alert_break_resistance === b.alert_break_resistance
-    && a.alert_near_resistance === b.alert_near_resistance;
-}
-
-async function saveAlertSettings() {
+async function onAlertSettingToggle(field, checked) {
   if (!alertModalRowId) return;
   const msgEl = document.getElementById("alert-settings-msg");
-  const nextSettings = getAlertSettingsFromInputs();
+  msgEl.innerHTML = '<span class="text-muted">更新中…</span>';
 
-  if (isSameAlertSettings(alertSettingsInitial, nextSettings)) {
-    msgEl.innerHTML = '<span class="text-muted">目前沒有變更</span>';
-    return;
-  }
-
-  msgEl.innerHTML = '<span class="text-muted">儲存中…</span>';
   try {
-    await sbPatch("watchlist", { "id": `eq.${alertModalRowId}` }, nextSettings, state.accessToken);
+    await updateAlert(alertModalRowId, field, checked, false);
     const row = getWatchlistRowById(alertModalRowId);
-    if (row) Object.assign(row, nextSettings);
-    alertSettingsInitial = { ...nextSettings };
-    refreshAlertSettingsSummary();
-    msgEl.innerHTML = '<span class="text-success">✅ 已套用通知設定</span>';
+    if (row) row[field] = checked;
+    msgEl.innerHTML = '<span class="text-success">✅ 已更新</span>';
   } catch (e) {
+    const inputMap = {
+      alert_break_support: "alert-break-support",
+      alert_near_support: "alert-near-support",
+      alert_break_resistance: "alert-break-resistance",
+      alert_near_resistance: "alert-near-resistance",
+    };
+    const inputId = inputMap[field];
+    if (inputId) {
+      const inputEl = document.getElementById(inputId);
+      if (inputEl) inputEl.checked = !checked;
+    }
     msgEl.innerHTML = `<span class="text-danger">❌ 更新失敗：${e.message}</span>`;
+  }
+}
+
+async function setAllAlertSettings(enabled) {
+  if (!alertModalRowId) return;
+  const fields = [
+    "alert_break_support",
+    "alert_near_support",
+    "alert_break_resistance",
+    "alert_near_resistance",
+  ];
+
+  document.getElementById("alert-break-support").checked = enabled;
+  document.getElementById("alert-near-support").checked = enabled;
+  document.getElementById("alert-break-resistance").checked = enabled;
+  document.getElementById("alert-near-resistance").checked = enabled;
+
+  const msgEl = document.getElementById("alert-settings-msg");
+  msgEl.innerHTML = '<span class="text-muted">批次更新中…</span>';
+  try {
+    await sbPatch(
+      "watchlist",
+      { "id": `eq.${alertModalRowId}` },
+      {
+        alert_break_support: enabled,
+        alert_near_support: enabled,
+        alert_break_resistance: enabled,
+        alert_near_resistance: enabled,
+      },
+      state.accessToken,
+    );
+    const row = getWatchlistRowById(alertModalRowId);
+    if (row) {
+      fields.forEach(f => { row[f] = enabled; });
+    }
+    msgEl.innerHTML = `<span class="text-success">✅ 已全部${enabled ? "開啟" : "關閉"}</span>`;
+  } catch (e) {
+    if (fields.some(f => (getWatchlistRowById(alertModalRowId)?.[f] ?? false) !== enabled)) {
+      const row = getWatchlistRowById(alertModalRowId);
+      if (row) {
+        document.getElementById("alert-break-support").checked = !!row.alert_break_support;
+        document.getElementById("alert-near-support").checked = !!row.alert_near_support;
+        document.getElementById("alert-break-resistance").checked = !!row.alert_break_resistance;
+        document.getElementById("alert-near-resistance").checked = !!row.alert_near_resistance;
+      }
+    }
+    msgEl.innerHTML = `<span class="text-danger">❌ 批次更新失敗：${e.message}</span>`;
   }
 }
 
 document.getElementById("alertSettingsModal").addEventListener("hidden.bs.modal", () => {
   alertModalRowId = null;
-  alertSettingsInitial = null;
 });
 
 function openRemoveStockConfirm(rowId) {
