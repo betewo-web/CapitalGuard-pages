@@ -142,6 +142,9 @@
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-2">
+        <div id="kline-dim-detail-panel" style="display:none;" class="mb-2">
+          <div id="kline-dim-detail-content" class="p-2 rounded kline-dim-detail-box"></div>
+        </div>
         <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
           <div class="btn-group btn-group-sm" id="kline-period-group">
             <button class="btn btn-outline-primary wl-period-btn active" data-period="daily" onclick="switchKLinePeriod('daily')">日K</button>
@@ -184,7 +187,7 @@
 const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
 const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
 const LIFF_ID       = "2010668840-DXPfjNlx";
-const APP_VERSION   = "2026-07-19-4";
+const APP_VERSION   = "2026-07-19-5";
 const REPORT_DATA_URL = `report_data_latest.json?v=${APP_VERSION}`;
 
 // 避免瀏覽器/CDN 快取舊版 JS，確保搜尋邏輯更新可立即生效
@@ -272,6 +275,16 @@ let sharedDataLoadingPromise = null;
 let klineChart = null;
 let currentKLineSid = null;
 let currentChipsView = "foreign";
+
+const KLINE_DIM_LABELS = {
+  fundamental: "基本面",
+  valuation: "估值面",
+  industry: "產業面",
+  chips: "籌碼面",
+  technical: "技術面",
+  risk: "風險面",
+  capital: "資金面",
+};
 
 function normalizeStockInput(v) {
   return String(v || "").trim().replace(/\s+/g, " ");
@@ -725,6 +738,7 @@ async function openKLineFromWatchlist(sid) {
   document.getElementById("kline-price").textContent = "—";
   document.getElementById("kline-ma").textContent = "讀取共用報表資料中...";
   document.getElementById("kline-score-bars").innerHTML = "";
+  closeKLineDimDetail();
   document.getElementById("kline-support").textContent = "—";
   document.getElementById("kline-resistance").textContent = "—";
   document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">讀取 K 線資料中...</div>';
@@ -740,6 +754,7 @@ async function openKLineFromWatchlist(sid) {
       document.getElementById("kline-name").textContent = universe[sid]?.n || "未命名";
       document.getElementById("kline-ma").textContent = "此股票不在今日報表 K 線資料中";
       document.getElementById("kline-chart").innerHTML = '<div class="kline-empty">今日報表無此股票的 K 線細節資料</div>';
+      closeKLineDimDetail();
       return;
     }
 
@@ -752,22 +767,24 @@ async function openKLineFromWatchlist(sid) {
     document.getElementById("kline-ma").textContent = Object.entries(ma).map(([k, v]) => `${k}:${v}`).join("   ") || "—";
     document.getElementById("kline-support").textContent = (levels.support || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
     document.getElementById("kline-resistance").textContent = (levels.resistance || []).map(v => Number(v).toFixed(2)).join(" ／ ") || "—";
-    renderKLineScoreBars(stock.scores || {});
+    renderKLineScoreBars(stock);
 
     document.querySelectorAll(".wl-period-btn").forEach(btn => btn.classList.remove("active"));
     document.querySelector('.wl-period-btn[data-period="daily"]').classList.add("active");
     currentChipsView = "foreign";
     document.querySelectorAll(".wl-chips-btn").forEach(btn => btn.classList.remove("active"));
     document.querySelector('.wl-chips-btn[data-chips="foreign"]').classList.add("active");
-    renderKLineChart(sid, "daily");
+    renderKLineChartWhenVisible(sid, "daily");
   } catch (e) {
     document.getElementById("kline-name").textContent = universe[sid]?.n || "未命名";
     document.getElementById("kline-ma").textContent = "讀取共用資料失敗";
     document.getElementById("kline-chart").innerHTML = `<div class="kline-empty">K線資料讀取失敗：${escapeHtml(e.message || "unknown")}<br><span style="font-size:.75rem;opacity:.8;">請確認目前瀏覽的站點已部署 report_data_latest.json</span></div>`;
+    closeKLineDimDetail();
   }
 }
 
-function renderKLineScoreBars(scores) {
+function renderKLineScoreBars(stock) {
+  const scores = stock?.scores || {};
   const dims = [
     ["fundamental", "基本面"],
     ["valuation", "估值面"],
@@ -781,14 +798,79 @@ function renderKLineScoreBars(scores) {
   const html = dims.map(([key, label]) => {
     const raw = scores?.[key];
     const v = (raw === undefined || raw === null || raw === "") ? null : Math.round(Number(raw));
+    const clickAttr = `onclick="showKLineDimDetail('${key}')"`;
     if (v === null || Number.isNaN(v)) {
-      return `<div class="col text-center kline-score-item"><div class="kline-score-label">${label}</div><div class="kline-score-bar"><div class="kline-score-fill na" style="width:50%"></div></div><div class="kline-score-val na">—</div></div>`;
+      return `<div class="col text-center kline-score-item kline-score-clickable" ${clickAttr}><div class="kline-score-label">${label}</div><div class="kline-score-bar"><div class="kline-score-fill na" style="width:50%"></div></div><div class="kline-score-val na">—</div><div class="kline-score-tip">▼</div></div>`;
     }
     const color = v >= 65 ? "#2e7d32" : v >= 45 ? "#f57f17" : "#c62828";
-    return `<div class="col text-center kline-score-item"><div class="kline-score-label">${label}</div><div class="kline-score-bar"><div class="kline-score-fill" style="width:${v}%;background:${color}"></div></div><div class="kline-score-val" style="color:${color}">${v}</div></div>`;
+    return `<div class="col text-center kline-score-item kline-score-clickable" ${clickAttr}><div class="kline-score-label">${label}</div><div class="kline-score-bar"><div class="kline-score-fill" style="width:${v}%;background:${color}"></div></div><div class="kline-score-val" style="color:${color}">${v}</div><div class="kline-score-tip">▼</div></div>`;
   }).join("");
 
   document.getElementById("kline-score-bars").innerHTML = html;
+}
+
+function showKLineDimDetail(dim) {
+  const panel = document.getElementById("kline-dim-detail-panel");
+  const content = document.getElementById("kline-dim-detail-content");
+  if (!currentKLineSid || !sharedReportData?.stock_data?.[currentKLineSid]) return;
+
+  if (panel.dataset.dim === dim && panel.style.display !== "none") {
+    closeKLineDimDetail();
+    return;
+  }
+
+  const stock = sharedReportData.stock_data[currentKLineSid];
+  const details = stock?.dim_details?.[dim];
+  const label = KLINE_DIM_LABELS[dim] || dim;
+  const score = stock?.scores?.[dim];
+  const scoreText = (score === undefined || score === null || Number.isNaN(Number(score))) ? "—" : Math.round(Number(score));
+
+  let html = `<div class="d-flex justify-content-between align-items-center mb-2"><span class="fw-bold" style="font-size:.88rem;">${label} 細節（${scoreText}分）</span><button class="btn btn-sm py-0 px-1 btn-outline-secondary" style="font-size:.7rem;" onclick="closeKLineDimDetail()">關閉</button></div>`;
+
+  if (!details || !details.items || !details.items.length) {
+    html += `<div class="text-muted" style="font-size:.8rem;">此股票目前無 ${label} 細節資料。</div>`;
+    content.innerHTML = html;
+    panel.dataset.dim = dim;
+    panel.style.display = "block";
+    return;
+  }
+
+  html += '<div class="row g-0">';
+  details.items.forEach(item => {
+    const sv = Math.round(item?.score ?? 50);
+    const c = sv >= 65 ? "#2e7d32" : sv >= 45 ? "#f57f17" : "#c62828";
+    const noData = !item?.value || item.value === "—";
+    const valueHtml = noData
+      ? '<span class="kline-detail-no-data">無資料</span>'
+      : `<span class="kline-detail-value">${escapeHtml(String(item.value))}</span>`;
+    html += '<div class="col-12 col-sm-6 py-1 px-1"><div class="kline-detail-row">'
+      + `<span class="kline-detail-label">${escapeHtml(String(item?.label || ""))}</span>`
+      + (noData
+          ? '<div class="kline-detail-bar bg"><div class="kline-detail-fill" style="width:50%;opacity:.35"></div></div><span class="kline-detail-score na">—</span>'
+          : `<div class="kline-detail-bar"><div class="kline-detail-fill" style="width:${sv}%;background:${c}"></div></div><span class="kline-detail-score" style="color:${c}">${sv}</span>`)
+      + valueHtml
+      + '</div></div>';
+  });
+  html += '</div>';
+
+  if (details.signals && details.signals.length) {
+    html += '<div class="mt-1"><span class="text-muted" style="font-size:.75rem;">技術訊號：</span>'
+      + details.signals.map(s => `<span class="badge bg-info text-dark me-1" style="font-size:.68rem;">${escapeHtml(String(s))}</span>`).join("")
+      + '</div>';
+  }
+
+  content.innerHTML = html;
+  panel.dataset.dim = dim;
+  panel.style.display = "block";
+}
+
+function closeKLineDimDetail() {
+  const panel = document.getElementById("kline-dim-detail-panel");
+  const content = document.getElementById("kline-dim-detail-content");
+  if (!panel || !content) return;
+  panel.style.display = "none";
+  panel.dataset.dim = "";
+  content.innerHTML = "";
 }
 
 function switchKLinePeriod(period) {
@@ -796,7 +878,7 @@ function switchKLinePeriod(period) {
   document.querySelectorAll(".wl-period-btn").forEach(btn => btn.classList.remove("active"));
   const btn = document.querySelector(`.wl-period-btn[data-period="${period}"]`);
   if (btn) btn.classList.add("active");
-  renderKLineChart(currentKLineSid, period);
+  renderKLineChartWhenVisible(currentKLineSid, period);
 }
 
 function switchKLineChipsView(view) {
@@ -805,7 +887,31 @@ function switchKLineChipsView(view) {
   const btn = document.querySelector(`.wl-chips-btn[data-chips="${view}"]`);
   if (btn) btn.classList.add("active");
   const period = document.querySelector(".wl-period-btn.active")?.dataset?.period || "daily";
-  if (currentKLineSid) renderKLineChart(currentKLineSid, period);
+  if (currentKLineSid) renderKLineChartWhenVisible(currentKLineSid, period);
+}
+
+function renderKLineChartWhenVisible(sid, period) {
+  const modalEl = document.getElementById("klineModal");
+  const run = () => {
+    renderKLineChart(sid, period);
+    requestAnimationFrame(() => {
+      if (klineChart) klineChart.resize();
+    });
+    setTimeout(() => {
+      if (klineChart) klineChart.resize();
+    }, 150);
+  };
+
+  if (modalEl.classList.contains("show")) {
+    run();
+    return;
+  }
+
+  const onShown = () => {
+    modalEl.removeEventListener("shown.bs.modal", onShown);
+    run();
+  };
+  modalEl.addEventListener("shown.bs.modal", onShown);
 }
 
 function renderKLineChart(sid, period) {
@@ -979,7 +1085,12 @@ document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => 
     klineChart.dispose();
     klineChart = null;
   }
+  closeKLineDimDetail();
   currentKLineSid = null;
+});
+
+document.getElementById("klineModal").addEventListener("shown.bs.modal", () => {
+  if (klineChart) klineChart.resize();
 });
 
 window.addEventListener("resize", () => {
