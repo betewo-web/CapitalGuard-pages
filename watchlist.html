@@ -23,7 +23,6 @@
     </span>
     <div class="nav-user-actions">
       <span id="nav-user" class="user-chip"></span>
-      <button id="nav-add-friend" class="btn btn-sm btn-outline-success" style="display:none" onclick="openLiffAddFriend()" title="加入 LINE 好友以接收股票通知">LINE 好友</button>
       <button id="nav-logout" class="btn btn-sm btn-outline-light" style="display:none" onclick="logout()">登出</button>
     </div>
   </div>
@@ -727,14 +726,7 @@ async function showMain() {
   document.getElementById("main-section").style.display  = "";
   document.getElementById("nav-user").textContent = `👤 ${state.displayName}`;
   document.getElementById("nav-logout").style.display = "inline-flex";
-  document.getElementById("nav-add-friend").style.display = "inline-flex";
   await loadWatchlist();
-}
-
-// 開啟 LIFF 頁面：對已登入用戶觸發 botPrompt 加好友（不影響現有綁定）
-function openLiffAddFriend() {
-  const liffUrl = `https://liff.line.me/${LIFF_ID}`;
-  window.open(liffUrl, "_blank");
 }
 
 function logout() {
