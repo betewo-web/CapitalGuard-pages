@@ -35,7 +35,10 @@
   <div class="icon" id="icon" style="display:none"></div>
   <div class="title" id="title">正在驗證 LINE 身份…</div>
   <div class="msg"   id="msg"></div>
-  <button id="retry-btn" onclick="retryAddFriend()" style="display:none;margin-top:1.2rem;padding:.6rem 1.4rem;background:#06c755;color:#fff;border:none;border-radius:8px;font-size:.9rem;cursor:pointer;">➕ 重新加入好友</button>
+  <div id="friend-actions" style="display:none;margin-top:1.2rem;">
+    <button onclick="openAddFriendPage()" style="padding:.6rem 1rem;background:#06c755;color:#fff;border:none;border-radius:8px;font-size:.9rem;cursor:pointer;">➕ 前往加好友</button>
+    <button onclick="recheckFriendship()" style="margin-left:.5rem;padding:.6rem 1rem;background:#2a2d3d;color:#fff;border:1px solid #3a3f55;border-radius:8px;font-size:.9rem;cursor:pointer;">我已加入，重新驗證</button>
+  </div>
 </div>
 
 <script>
@@ -43,8 +46,15 @@
 const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
 const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
 const LIFF_ID       = "2010668840-DXPfjNlx";
+const OA_BASIC_ID   = "@408csebn";
+
+function hideFriendActions() {
+  const panel = document.getElementById("friend-actions");
+  if (panel) panel.style.display = "none";
+}
 
 function setStatus(icon, title, msg, isErr) {
+  hideFriendActions();
   document.getElementById("spinner").style.display = "none";
   const iconEl = document.getElementById("icon");
   iconEl.textContent  = icon;
@@ -52,7 +62,7 @@ function setStatus(icon, title, msg, isErr) {
   document.getElementById("title").textContent = title;
   const m = document.getElementById("msg");
   m.textContent = msg;
-  if (isErr) m.classList.add("err");
+  m.classList.toggle("err", !!isErr);
 }
 
 async function main() {
@@ -96,10 +106,10 @@ async function main() {
       setStatus(
         "➕",
         "需要先加入好友",
-        "請點下方按鈕加入 CapitalGuard 官方帳號為好友，加入後即可自動完成綁定。",
+        "請先點「前往加好友」，完成後再點「我已加入，重新驗證」。",
         false
       );
-      document.getElementById("retry-btn").style.display = "";
+      document.getElementById("friend-actions").style.display = "";
       return;
     }
   } catch {
@@ -168,13 +178,28 @@ async function main() {
   }, 2000);
 }
 
-function retryAddFriend() {
-  document.getElementById("retry-btn").style.display = "none";
+function openAddFriendPage() {
+  const addFriendUrl = `https://line.me/R/ti/p/${OA_BASIC_ID}`;
+  try {
+    if (typeof liff !== "undefined" && liff.isInClient()) {
+      liff.openWindow({ url: addFriendUrl, external: true });
+    } else {
+      window.open(addFriendUrl, "_blank");
+    }
+  } catch {
+    window.open(addFriendUrl, "_blank");
+  }
+}
+
+function recheckFriendship() {
+  hideFriendActions();
   document.getElementById("spinner").style.display = "";
   document.getElementById("icon").style.display = "none";
-  document.getElementById("title").textContent = "正在開啟加好友畫面…";
-  document.getElementById("msg").textContent = "";
-  liff.login({ redirectUri: location.href, botPrompt: "aggressive" });
+  document.getElementById("title").textContent = "正在重新驗證 LINE 好友狀態…";
+  const msgEl = document.getElementById("msg");
+  msgEl.textContent = "";
+  msgEl.classList.remove("err");
+  location.reload();
 }
 
 main();
