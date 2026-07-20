@@ -538,12 +538,12 @@ async function initLiffLogin() {
 
   const liffUrl = `https://liff.line.me/${LIFF_ID}?token=${sessionToken}`;
   new QRCode(qrDiv, { text: liffUrl, width: 200, height: 200, colorDark: "#000", colorLight: "#fff" });
-  statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 等待掃碼（10 分鐘內有效）…';
+  statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 請先加入好友並完成綁定（10 分鐘內有效）…';
 
   pollTimer = setInterval(() => pollForLogin(sessionToken), 3000);
   setTimeout(() => {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    statusEl.innerHTML = '<span class="text-warning">⏰ QR Code 已過期，請點「重新產生」</span>';
+    statusEl.innerHTML = '<span class="text-warning">⏰ 尚未完成加好友或綁定，QR Code 已過期，請點「重新產生」</span>';
   }, 10 * 60 * 1000);
 }
 

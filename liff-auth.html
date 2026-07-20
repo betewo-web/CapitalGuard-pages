@@ -35,6 +35,7 @@
   <div class="icon" id="icon" style="display:none"></div>
   <div class="title" id="title">正在驗證 LINE 身份…</div>
   <div class="msg"   id="msg"></div>
+  <button id="retry-btn" onclick="retryAddFriend()" style="display:none;margin-top:1.2rem;padding:.6rem 1.4rem;background:#06c755;color:#fff;border:none;border-radius:8px;font-size:.9rem;cursor:pointer;">➕ 重新加入好友</button>
 </div>
 
 <script>
@@ -70,9 +71,9 @@ async function main() {
     return;
   }
 
-  // 若未登入，導向 LINE 授權
+  // 若未登入，導向 LINE 授權；botPrompt:"aggressive" 會在授權後自動彈出「加入官方帳號好友」確認畫面
   if (!liff.isLoggedIn()) {
-    liff.login({ redirectUri: location.href });
+    liff.login({ redirectUri: location.href, botPrompt: "aggressive" });
     return;
   }
 
@@ -83,6 +84,26 @@ async function main() {
   } catch (e) {
     setStatus("❌", "無法取得 LINE 資料", e.message, true);
     return;
+  }
+
+  // 確認是否已加入官方帳號好友
+  // 若未加入：自動重新導向並彈出加好友畫面（需 LINE Developers Console 已將 LOGIN channel 連結至 Messaging API channel）
+  try {
+    const friendship = await liff.getFriendship();
+    if (!friendship?.friendFlag) {
+      // 使用者尚未加好友（可能在彈出畫面按了「略過」）
+      // 顯示說明 + 重試按鈕，讓使用者可以再觸發一次加好友畫面
+      setStatus(
+        "➕",
+        "需要先加入好友",
+        "請點下方按鈕加入 CapitalGuard 官方帳號為好友，加入後即可自動完成綁定。",
+        false
+      );
+      document.getElementById("retry-btn").style.display = "";
+      return;
+    }
+  } catch {
+    // getFriendship 在部分瀏覽器環境不支援（如 External Browser 模式），忽略並繼續
   }
 
   // QR 綁定模式：更新 pending_line_auth（通知 PC watchlist.html 掃碼完成）
@@ -145,6 +166,15 @@ async function main() {
       }
     } catch {}
   }, 2000);
+}
+
+function retryAddFriend() {
+  document.getElementById("retry-btn").style.display = "none";
+  document.getElementById("spinner").style.display = "";
+  document.getElementById("icon").style.display = "none";
+  document.getElementById("title").textContent = "正在開啟加好友畫面…";
+  document.getElementById("msg").textContent = "";
+  liff.login({ redirectUri: location.href, botPrompt: "aggressive" });
 }
 
 main();
