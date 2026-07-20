@@ -581,8 +581,16 @@ async function doLiffLogin(lineUserId, displayName) {
 
 // ── 初始化 ──────────────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", async () => {
+  const qs = new URLSearchParams(location.search);
+  const forceShowQr = qs.get("show_qr") === "1";
+
+  if (forceShowQr) {
+    localStorage.removeItem("sma_session");
+    history.replaceState(null, "", location.pathname);
+  }
+
   const saved = localStorage.getItem("sma_session");
-  if (saved) {
+  if (!forceShowQr && saved) {
     try {
       const s = JSON.parse(saved);
       state = s;
@@ -594,7 +602,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   loadUniverse();
 
   // 從 URL ?token= 參數自動登入（LIFF 跳轉後使用）
-  const urlToken = new URLSearchParams(location.search).get("token");
+  const urlToken = forceShowQr ? null : qs.get("token");
   if (urlToken) {
     // 清除 URL 參數，避免 token 留在瀏覽器歷史
     history.replaceState(null, "", location.pathname);
