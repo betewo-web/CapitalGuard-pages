@@ -146,6 +146,7 @@
     <div class="card panel-card">
       <div class="card-header py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
+        <span id="events-fetch-status" class="events-fetch-status" title="事件資料狀態（需在本機執行 --fetch-events 更新）"></span>
       </div>
       <div class="card-body p-0">
         <div id="wl-empty" class="empty-state text-center py-5 text-muted" style="display:none">
@@ -171,6 +172,8 @@
           <button type="button" class="btn btn-sm btn-outline-light" onclick="setAllAlertSettings(false)">全關</button>
         </div>
 
+        <!-- 盤中即時提醒 -->
+        <div class="alert-group-label">📡 盤中即時</div>
         <div class="wl-toggle-grid">
           <label class="alert-pill">
             <span class="alert-label">⚠️ 跌破支撐</span>
@@ -196,8 +199,70 @@
               <input id="alert-near-resistance" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_near_resistance', this.checked)">
             </span>
           </label>
+          <label class="alert-pill">
+            <span class="alert-label">🚀 爆量（>均量3倍）</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-volume-spike" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_volume_spike', this.checked)">
+            </span>
+          </label>
+          <label class="alert-pill">
+            <span class="alert-label">🔒 漲停</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-limit-up" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_limit_up', this.checked)">
+            </span>
+          </label>
+          <label class="alert-pill">
+            <span class="alert-label">💥 跌停</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-limit-down" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_limit_down', this.checked)">
+            </span>
+          </label>
         </div>
+
+        <!-- 盤後每日提醒 -->
+        <div class="alert-group-label mt-2">🌙 盤後每日（15:30後）</div>
+        <div class="wl-toggle-grid">
+          <label class="alert-pill">
+            <span class="alert-label">📈 法人連買（≥3日）</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-inst-buy" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_inst_buy', this.checked)">
+            </span>
+          </label>
+          <label class="alert-pill">
+            <span class="alert-label">📉 法人連賣（≥3日）</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-inst-sell" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_inst_sell', this.checked)">
+            </span>
+          </label>
+          <label class="alert-pill">
+            <span class="alert-label">💳 融資暴增（>20%）</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-margin-up" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_margin_up', this.checked)">
+            </span>
+          </label>
+          <label class="alert-pill">
+            <span class="alert-label">💳 融資暴減（>20%）</span>
+            <span class="toggle-wrap form-check form-switch mb-0">
+              <input id="alert-margin-down" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_margin_down', this.checked)">
+            </span>
+          </label>
+        </div>
+
         <div id="alert-settings-msg" class="small mt-2 text-muted"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="stockEventsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="events-modal-title">今日事件</h5>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3" id="events-modal-body">
+        <p class="text-muted small">載入中…</p>
       </div>
     </div>
   </div>
@@ -386,8 +451,233 @@ let klineLastZoomRange = null;
 let watchlistRows = [];
 let alertModalRowId = null;
 let removeModalRowId = null;
+let stockEvents = {};   // sid → [{event_type, title, content, source_url, importance, event_date, ai_analysis}]
 
-const KLINE_LONG_PRESS_MS = 480;
+// ── 事件彙整功能（Feature 2）────────────────────────────────────
+async function loadStockEvents(sids) {
+  if (!sids || sids.length === 0) return;
+  const statusEl = document.getElementById("events-fetch-status");
+  if (statusEl) statusEl.textContent = "事件載入中…";
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const url = new URL(`${SUPABASE_URL}/rest/v1/stock_events`);
+    url.searchParams.set("select", "stock_id,event_date,event_type,title,content,source_url,importance,ai_analysis");
+    url.searchParams.set("event_date", `gte.${today}`);
+    url.searchParams.set("stock_id", `in.(${sids.join(",")})`);
+    url.searchParams.set("order", "importance.asc,event_date.desc");
+    url.searchParams.set("limit", "300");
+    const r = await fetch(url, { headers: sbHeaders(null) });
+    if (!r.ok) {
+      if (statusEl) statusEl.textContent = "事件載入失敗";
+      return;
+    }
+    const rows = await r.json();
+    stockEvents = {};
+    for (const row of rows) {
+      if (!stockEvents[row.stock_id]) stockEvents[row.stock_id] = [];
+      stockEvents[row.stock_id].push(row);
+    }
+    const totalEvents = Object.values(stockEvents).reduce((s, a) => s + a.length, 0);
+    if (statusEl) {
+      statusEl.textContent = totalEvents > 0
+        ? `📋 今日 ${totalEvents} 則事件`
+        : `📋 今日無彙整事件`;
+      statusEl.title = totalEvents > 0
+        ? `已從 Supabase 載入 ${totalEvents} 則事件（每日盤後執行 --fetch-events 更新）`
+        : `今日尚無事件資料。請在本機執行: python main.py --fetch-events`;
+    }
+  } catch (e) {
+    console.warn("[Events] 無法載入股票事件:", e.message);
+    if (statusEl) statusEl.textContent = "";
+  }
+}
+
+const _EVENT_TYPE_LABEL = {
+  announcement: "📢 重大訊息",
+  dividend:     "💰 除權息",
+  eps:          "📊 EPS",
+  revenue:      "📈 月營收",
+  conference:   "🎙 法說會",
+  chips:        "🏦 法人籌碼",
+  margin:       "💳 融資融券",
+};
+const _EVENT_IMPORTANCE_CLASS = {
+  high: "event-high",
+  normal: "event-normal",
+  low: "event-low",
+};
+
+function openEventsPanel(sid) {
+  const events = stockEvents[sid] || [];
+  const sidName = universe[sid]?.n || sid;
+  document.getElementById("events-modal-title").textContent = `📋 ${sid} ${sidName} 事件彙整`;
+
+  const body = document.getElementById("events-modal-body");
+  if (events.length === 0) {
+    body.innerHTML = `
+      <div class="events-empty-guide">
+        <div class="events-empty-icon">📊</div>
+        <div class="events-empty-title">今日尚無彙整事件</div>
+        <div class="events-empty-desc">
+          事件彙整需在本機執行以下指令，每日盤後安排一次：
+        </div>
+        <div class="events-cmd-box">
+          <code>python main.py --fetch-events</code>
+        </div>
+        <div class="events-empty-tip">
+          執行後將自動抓取重大公告、除權息、法說會、月營收、法人籌碼、融資等資料並儲存到 Supabase，
+          watchlist 頁面將自動顯示事件 badge。
+        </div>
+        <div class="mt-2">
+          <button class="btn btn-sm btn-outline-secondary" onclick="refreshEvents('${escapeHtml(sid)}')">&#x21bb; 重新載入</button>
+        </div>
+      </div>
+    `;
+  } else {
+    body.innerHTML = events.map(ev => {
+      const typeLabel = _EVENT_TYPE_LABEL[ev.event_type] || ev.event_type;
+      const impClass  = _EVENT_IMPORTANCE_CLASS[ev.importance] || "";
+      const linkHtml  = ev.source_url
+        ? `<a href="${escapeHtml(ev.source_url)}" target="_blank" class="event-source-link">🔗 來源</a>`
+        : "";
+      const aiHtml    = ev.ai_analysis
+        ? `<div class="event-ai-text">${escapeHtml(ev.ai_analysis)}</div>`
+        : `<button class="btn btn-xs btn-outline-info mt-1" onclick="requestAiAnalysis('${escapeHtml(sid)}','${escapeHtml(ev.title)}',this)">✨ AI 解讀</button>`;
+      return `
+        <div class="event-item ${impClass}">
+          <div class="event-type-badge">${typeLabel}</div>
+          <div class="event-title">${escapeHtml(ev.title)}</div>
+          ${ev.content ? `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>` : ""}
+          <div class="d-flex align-items-center gap-2 mt-1">${linkHtml}${aiHtml}</div>
+        </div>
+      `;
+    }).join("");
+  }
+  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal"));
+  modal.show();
+}
+
+async function refreshEvents(sid) {
+  const sids = watchlistRows.map(r => r.stock_id).filter(Boolean);
+  await loadStockEvents(sids);
+  openEventsPanel(sid);
+}
+
+// Feature 3: AI 解讀
+const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
+
+async function requestAiAnalysis(sid, eventTitle, btnEl) {
+  if (!state.accessToken) {
+    alert("請先登入");
+    return;
+  }
+  btnEl.textContent = "⏳ AI 分析中…";
+  btnEl.disabled = true;
+  try {
+    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/interpret-event`, {
+      method: "POST",
+      headers: {
+        "apikey":          SUPABASE_ANON,
+        "Authorization":   `Bearer ${SUPABASE_ANON}`,
+        "Content-Type":    "application/json",
+        "x-access-token":  state.accessToken,
+      },
+      body: JSON.stringify({ stock_id: sid, event_title: eventTitle }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const { analysis, error } = await resp.json();
+    if (error) throw new Error(error);
+    // 取代按鈕為 AI 分析結果
+    const container = btnEl.parentElement;
+    const div = document.createElement("div");
+    div.className = "event-ai-text";
+    div.textContent = analysis;
+    container.replaceChild(div, btnEl);
+    // 更新快取
+    if (stockEvents[sid]) {
+      const ev = stockEvents[sid].find(e => e.title === eventTitle);
+      if (ev) ev.ai_analysis = analysis;
+    }
+  } catch (e) {
+    btnEl.textContent = "✨ AI 解讀";
+    btnEl.disabled = false;
+    alert(`AI 解讀失敗：${e.message}`);
+  }
+}
+
+// Feature 4: AI 問答（浮動聊天框）
+let qaVisible = false;
+let qaCurrentSid = null;
+
+function toggleQaPanel(sid) {
+  const panel = document.getElementById("qa-panel");
+  if (qaVisible && qaCurrentSid === sid) {
+    panel.style.display = "none";
+    qaVisible = false;
+    qaCurrentSid = null;
+    return;
+  }
+  qaCurrentSid = sid || null;
+  document.getElementById("qa-stock-hint").textContent =
+    sid ? `詢問：${sid} ${universe[sid]?.n || ""}` : "詢問自選股相關問題";
+  panel.style.display = "flex";
+  qaVisible = true;
+  document.getElementById("qa-input").focus();
+}
+
+async function sendQaQuestion() {
+  if (!state.accessToken) { alert("請先登入"); return; }
+  const input = document.getElementById("qa-input");
+  const question = input.value.trim();
+  if (!question) return;
+
+  const messages = document.getElementById("qa-messages");
+  // 新增用戶訊息
+  const userDiv = document.createElement("div");
+  userDiv.className = "qa-msg qa-user";
+  userDiv.textContent = question;
+  messages.appendChild(userDiv);
+  input.value = "";
+  messages.scrollTop = messages.scrollHeight;
+
+  // AI 回答佔位
+  const aiDiv = document.createElement("div");
+  aiDiv.className = "qa-msg qa-ai";
+  aiDiv.textContent = "⏳ 思考中…";
+  messages.appendChild(aiDiv);
+  messages.scrollTop = messages.scrollHeight;
+
+  try {
+    const body = { question };
+    if (qaCurrentSid) body.stock_id = qaCurrentSid;
+    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/stock-qa`, {
+      method: "POST",
+      headers: {
+        "apikey":         SUPABASE_ANON,
+        "Authorization":  `Bearer ${SUPABASE_ANON}`,
+        "Content-Type":   "application/json",
+        "x-access-token": state.accessToken,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const { answer, error } = await resp.json();
+    if (error) throw new Error(error);
+    aiDiv.textContent = answer;
+  } catch (e) {
+    aiDiv.className = "qa-msg qa-ai qa-error";
+    aiDiv.textContent = `❌ 失敗：${e.message}`;
+  }
+  messages.scrollTop = messages.scrollHeight;
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && qaVisible) {
+    document.getElementById("qa-panel").style.display = "none";
+    qaVisible = false;
+    qaCurrentSid = null;
+  }
+});
 const KLINE_TOUCH_MOVE_THRESHOLD = 12;
 
 const KLINE_DIM_LABELS = {
@@ -771,6 +1061,9 @@ async function loadWatchlist() {
   const rows = await sbGet("watchlist", {}, state.accessToken);
   watchlistRows = rows || [];
   renderWatchlist(rows);
+  // 非同步載入事件（不阻塞卡片渲染）
+  const sids = (rows || []).map(r => r.stock_id).filter(Boolean);
+  loadStockEvents(sids).then(() => renderWatchlist(watchlistRows));
 }
 
 function renderWatchlist(rows) {
@@ -784,6 +1077,15 @@ function renderWatchlist(rows) {
     const sid = String(row.stock_id || "").trim();
     const fallbackName = universe[sid]?.n || "";
     const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
+    const events = stockEvents[sid] || [];
+    const highEvents = events.filter(e => e.importance === "high");
+    // 事件按鈕永遠顯示：有事件顯示數量，無事件顯示 "0 則"
+    const evtLabel = events.length > 0
+      ? `📋${highEvents.length > 0 ? " ⚠" : ""} ${events.length} 則事件`
+      : `📋 無事件`;
+    const evtClass = events.length > 0
+      ? `wl-events-btn${highEvents.length > 0 ? " has-high" : ""}`
+      : "wl-events-btn wl-events-empty";
     const item = document.createElement("article");
     item.className = "wl-row";
     item.dataset.id = row.id;
@@ -797,8 +1099,9 @@ function renderWatchlist(rows) {
         </div>
       </div>
       <div class="wl-row-actions">
+        <button class="${evtClass}" onclick="openEventsPanel('${escapeHtml(sid)}')">${evtLabel}</button>
         <button class="wl-action-btn wl-kline-action" onclick="openKLineFromWatchlist('${sid}')">📈 K線分析</button>
-        <button class="wl-action-btn wl-alert-action" onclick="openAlertSettings('${row.id}')">🔔 LINE通知設定</button>
+        <button class="wl-action-btn wl-alert-action" onclick="openAlertSettings('${row.id}')">🔔 LINE通知</button>
       </div>
     `;
     grid.appendChild(item);
@@ -818,10 +1121,21 @@ function openAlertSettings(rowId) {
   const fallbackName = universe[sid]?.n || "";
   const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
   document.getElementById("alert-settings-title").textContent = `LINE 通知設定｜${sid} ${displayName}`;
-  document.getElementById("alert-break-support").checked = !!row.alert_break_support;
-  document.getElementById("alert-near-support").checked = !!row.alert_near_support;
+
+  // 盤中即時
+  document.getElementById("alert-break-support").checked    = !!row.alert_break_support;
+  document.getElementById("alert-near-support").checked     = !!row.alert_near_support;
   document.getElementById("alert-break-resistance").checked = !!row.alert_break_resistance;
-  document.getElementById("alert-near-resistance").checked = !!row.alert_near_resistance;
+  document.getElementById("alert-near-resistance").checked  = !!row.alert_near_resistance;
+  document.getElementById("alert-volume-spike").checked     = !!row.alert_volume_spike;
+  document.getElementById("alert-limit-up").checked         = !!row.alert_limit_up;
+  document.getElementById("alert-limit-down").checked       = !!row.alert_limit_down;
+  // 盤後每日
+  document.getElementById("alert-inst-buy").checked         = !!row.alert_inst_buy;
+  document.getElementById("alert-inst-sell").checked        = !!row.alert_inst_sell;
+  document.getElementById("alert-margin-up").checked        = !!row.alert_margin_up;
+  document.getElementById("alert-margin-down").checked      = !!row.alert_margin_down;
+
   document.getElementById("alert-settings-msg").textContent = "";
 
   const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("alertSettingsModal"));
@@ -840,10 +1154,17 @@ async function onAlertSettingToggle(field, checked) {
     msgEl.innerHTML = '<span class="text-success">✅ 已更新</span>';
   } catch (e) {
     const inputMap = {
-      alert_break_support: "alert-break-support",
-      alert_near_support: "alert-near-support",
+      alert_break_support:    "alert-break-support",
+      alert_near_support:     "alert-near-support",
       alert_break_resistance: "alert-break-resistance",
-      alert_near_resistance: "alert-near-resistance",
+      alert_near_resistance:  "alert-near-resistance",
+      alert_volume_spike:     "alert-volume-spike",
+      alert_limit_up:         "alert-limit-up",
+      alert_limit_down:       "alert-limit-down",
+      alert_inst_buy:         "alert-inst-buy",
+      alert_inst_sell:        "alert-inst-sell",
+      alert_margin_up:        "alert-margin-up",
+      alert_margin_down:      "alert-margin-down",
     };
     const inputId = inputMap[field];
     if (inputId) {
@@ -856,46 +1177,48 @@ async function onAlertSettingToggle(field, checked) {
 
 async function setAllAlertSettings(enabled) {
   if (!alertModalRowId) return;
-  const fields = [
-    "alert_break_support",
-    "alert_near_support",
-    "alert_break_resistance",
-    "alert_near_resistance",
+  const ALL_ALERT_FIELDS = [
+    "alert_break_support", "alert_near_support",
+    "alert_break_resistance", "alert_near_resistance",
+    "alert_volume_spike", "alert_limit_up", "alert_limit_down",
+    "alert_inst_buy", "alert_inst_sell",
+    "alert_margin_up", "alert_margin_down",
+  ];
+  const ALL_ALERT_IDS = [
+    "alert-break-support", "alert-near-support",
+    "alert-break-resistance", "alert-near-resistance",
+    "alert-volume-spike", "alert-limit-up", "alert-limit-down",
+    "alert-inst-buy", "alert-inst-sell",
+    "alert-margin-up", "alert-margin-down",
   ];
 
-  document.getElementById("alert-break-support").checked = enabled;
-  document.getElementById("alert-near-support").checked = enabled;
-  document.getElementById("alert-break-resistance").checked = enabled;
-  document.getElementById("alert-near-resistance").checked = enabled;
+  ALL_ALERT_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = enabled;
+  });
 
   const msgEl = document.getElementById("alert-settings-msg");
   msgEl.innerHTML = '<span class="text-muted">批次更新中…</span>';
   try {
+    const patch = {};
+    ALL_ALERT_FIELDS.forEach(f => { patch[f] = enabled; });
     await sbPatch(
       "watchlist",
       { "id": `eq.${alertModalRowId}` },
-      {
-        alert_break_support: enabled,
-        alert_near_support: enabled,
-        alert_break_resistance: enabled,
-        alert_near_resistance: enabled,
-      },
+      patch,
       state.accessToken,
     );
     const row = getWatchlistRowById(alertModalRowId);
-    if (row) {
-      fields.forEach(f => { row[f] = enabled; });
-    }
+    if (row) ALL_ALERT_FIELDS.forEach(f => { row[f] = enabled; });
     msgEl.innerHTML = `<span class="text-success">✅ 已全部${enabled ? "開啟" : "關閉"}</span>`;
   } catch (e) {
-    if (fields.some(f => (getWatchlistRowById(alertModalRowId)?.[f] ?? false) !== enabled)) {
-      const row = getWatchlistRowById(alertModalRowId);
-      if (row) {
-        document.getElementById("alert-break-support").checked = !!row.alert_break_support;
-        document.getElementById("alert-near-support").checked = !!row.alert_near_support;
-        document.getElementById("alert-break-resistance").checked = !!row.alert_break_resistance;
-        document.getElementById("alert-near-resistance").checked = !!row.alert_near_resistance;
-      }
+    // 還原 UI
+    const row = getWatchlistRowById(alertModalRowId);
+    if (row) {
+      ALL_ALERT_IDS.forEach((id, i) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!row[ALL_ALERT_FIELDS[i]];
+      });
     }
     msgEl.innerHTML = `<span class="text-danger">❌ 批次更新失敗：${e.message}</span>`;
   }
@@ -2056,6 +2379,13 @@ async function addStock() {
       alert_near_support:     true,
       alert_break_resistance: false,
       alert_near_resistance:  false,
+      alert_volume_spike:     false,
+      alert_limit_up:         false,
+      alert_limit_down:       true,
+      alert_inst_buy:         false,
+      alert_inst_sell:        true,
+      alert_margin_up:        false,
+      alert_margin_down:      true,
     }, state.accessToken);
     inp.value = "";
     selectedSid = null;
@@ -2271,5 +2601,23 @@ function _showPwaInstructionsModal() {
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Feature 4: 浮動 AI 問答面板 -->
+<button id="qa-float-btn" class="qa-float-btn" onclick="toggleQaPanel(null)" title="AI 問答">
+  <span>🤖</span>
+</button>
+<div id="qa-panel" class="qa-panel" style="display:none;">
+  <div class="qa-header">
+    <span id="qa-stock-hint" class="qa-hint">詢問自選股相關問題</span>
+    <button class="qa-close-btn" onclick="toggleQaPanel(null)">✕</button>
+  </div>
+  <div id="qa-messages" class="qa-messages"></div>
+  <div class="qa-input-row">
+    <input id="qa-input" class="qa-input" type="text" placeholder="例：今天為什麼跌？" maxlength="200"
+      onkeydown="if(event.key==='Enter')sendQaQuestion()">
+    <button class="qa-send-btn" onclick="sendQaQuestion()">送出</button>
+  </div>
+  <div class="qa-footer-hint">AI 回答僅供參考，不構成投資建議</div>
+</div>
 </body>
 </html>
