@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0e1528"/>
+      <stop offset="100%" style="stop-color:#111a32"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3ce6d1"/>
+      <stop offset="100%" style="stop-color:#56a8ff"/>
+    </linearGradient>
+  </defs>
+  <!-- Full bleed background (maskable icons should fill the entire canvas) -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- Content scaled to fit within the 80% safe zone (410x410 centred) -->
+  <!-- Outer ring: radius 130 (within safe area) -->
+  <circle cx="256" cy="256" r="130" stroke="url(#ring)" stroke-width="18" fill="none" opacity="0.9"/>
+  <!-- Middle ring: radius 78 -->
+  <circle cx="256" cy="256" r="78" stroke="url(#ring)" stroke-width="14" fill="none" opacity="0.7"/>
+  <!-- Center dot -->
+  <circle cx="256" cy="256" r="22" fill="url(#ring)"/>
+  <!-- Tick marks -->
+  <line x1="256" y1="110" x2="256" y2="125" stroke="#3ce6d1" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+  <line x1="402" y1="256" x2="387" y2="256" stroke="#56a8ff" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+  <line x1="256" y1="402" x2="256" y2="387" stroke="#3ce6d1" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+  <line x1="110" y1="256" x2="125" y2="256" stroke="#56a8ff" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+</svg>

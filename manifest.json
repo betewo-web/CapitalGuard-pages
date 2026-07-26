@@ -1,0 +1,34 @@
+{
+  "name": "台股監控",
+  "short_name": "台股監控",
+  "description": "台股自選股追蹤與 LINE 即時價格通知",
+  "start_url": "./watchlist.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#090d16",
+  "theme_color": "#0e1528",
+  "lang": "zh-TW",
+  "categories": ["finance"],
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "我的自選股",
+      "url": "./watchlist.html",
+      "description": "開啟自選股管理頁面"
+    }
+  ]
+}
