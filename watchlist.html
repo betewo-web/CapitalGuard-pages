@@ -252,18 +252,18 @@
         <div class="alert-group-label mt-2">🎯 自訂價位（盤中觸價，每日只通知一次）</div>
         <div class="row g-2 mt-1">
           <div class="col-6">
-            <label class="form-label mb-1" style="color:#4ade80;font-size:.82rem;font-weight:600;letter-spacing:.02em;">📈 觸及上漲價格時通知</label>
+            <label class="form-label mb-1" style="color:#f87171;font-size:.82rem;font-weight:600;letter-spacing:.02em;">📈 觸及上漲價格時通知</label>
             <div class="input-group input-group-sm">
               <input id="inp-target-high" type="number" class="form-control" placeholder="如 150.0" step="0.01" min="0"
-                style="background:#1a2540;color:#e2eafc;border-color:#3ce6d1;font-size:.95rem;">
+                style="background:#1a2540;color:#e2eafc;border-color:#f87171;font-size:.95rem;">
               <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('high')" title="清除" style="color:#8da1c6;border-color:#3a4a70;">✕</button>
             </div>
           </div>
           <div class="col-6">
-            <label class="form-label mb-1" style="color:#f87171;font-size:.82rem;font-weight:600;letter-spacing:.02em;">📉 觸及下跌價格時通知</label>
+            <label class="form-label mb-1" style="color:#4ade80;font-size:.82rem;font-weight:600;letter-spacing:.02em;">📉 觸及下跌價格時通知</label>
             <div class="input-group input-group-sm">
               <input id="inp-target-low" type="number" class="form-control" placeholder="如 120.0" step="0.01" min="0"
-                style="background:#1a2540;color:#e2eafc;border-color:#f87171;font-size:.95rem;">
+                style="background:#1a2540;color:#e2eafc;border-color:#3ce6d1;font-size:.95rem;">
               <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('low')" title="清除" style="color:#8da1c6;border-color:#3a4a70;">✕</button>
             </div>
           </div>
@@ -2589,6 +2589,7 @@ window.addEventListener('appinstalled', () => {
   if (btn) btn.style.display = 'none';
   const banner = document.getElementById('ios-install-banner');
   if (banner) banner.style.display = 'none';
+  _showInstallSuccessToast();
 });
 
 let _installBtnOrigHTML = null;
@@ -2634,8 +2635,64 @@ function _triggerNativeInstallPrompt() {
       _deferredInstallPrompt = null;
       const btn = document.getElementById('pwa-install-btn');
       if (btn) btn.style.display = 'none';
+      // appinstalled event will fire shortly and show the toast.
+      // Add a fallback in case appinstalled is slow or doesn't fire.
+      setTimeout(() => {
+        const toast = document.getElementById('pwa-success-toast');
+        if (!toast) _showInstallSuccessToast();
+      }, 1500);
     }
   });
+}
+
+function _showInstallSuccessToast() {
+  // Remove any existing toast first
+  document.getElementById('pwa-success-toast')?.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'pwa-success-toast';
+  toast.style.cssText = [
+    'position:fixed', 'bottom:80px', 'left:50%', 'transform:translateX(-50%)',
+    'z-index:9997', 'padding:12px 16px', 'border-radius:14px',
+    'background:linear-gradient(135deg,rgba(14,21,40,.97),rgba(17,26,50,.97))',
+    'border:1px solid rgba(60,230,209,.45)', 'backdrop-filter:blur(14px)',
+    'box-shadow:0 8px 32px rgba(0,0,0,.45)',
+    'display:flex', 'align-items:center', 'gap:10px',
+    'font-size:.875rem', 'color:#c4d2ee', 'max-width:calc(100vw - 32px)',
+  ].join(';');
+
+  toast.innerHTML = `
+    <span style="font-size:1.5rem;flex-shrink:0">\u2705</span>
+    <span style="white-space:nowrap;font-weight:500">\u5df2\u52a0\u5165\u4e3b\u756b\u9762\uff01</span>
+    <button id="pwa-open-btn"
+      style="background:linear-gradient(135deg,#3ce6d1,#56a8ff);border:none;
+             border-radius:9px;padding:6px 14px;color:#090d16;font-weight:700;
+             font-size:.82rem;cursor:pointer;white-space:nowrap;flex-shrink:0">
+      \u958b\u555f App \u2197
+    </button>
+    <button onclick="document.getElementById('pwa-success-toast')?.remove()"
+      style="background:none;border:none;color:#8da1c6;cursor:pointer;
+             font-size:1rem;padding:0 4px;flex-shrink:0">\u2715</button>`;
+
+  document.body.appendChild(toast);
+
+  // "Open App" button logic
+  document.getElementById('pwa-open-btn').addEventListener('click', () => {
+    // On Chrome Android: navigating to a URL within the PWA scope from a new
+    // browsing context triggers the OS intent and opens the installed PWA.
+    // On desktop / iOS: opens a new browser tab (user can then use the
+    // home screen icon / taskbar shortcut instead).
+    const startUrl = new URL('./watchlist.html', document.baseURI).href;
+    const opened = window.open(startUrl, '_blank');
+    if (!opened) {
+      // Popup blocked — fall back to same-tab navigation
+      window.location.href = startUrl;
+    }
+    toast.remove();
+  });
+
+  // Auto-dismiss after 20 s
+  setTimeout(() => toast?.remove(), 20000);
 }
 
 function _showPwaInstructionsModal(afterWait = false) {
