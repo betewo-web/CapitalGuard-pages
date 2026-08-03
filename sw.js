@@ -94,3 +94,39 @@ self.addEventListener('fetch', event => {
   );
 });
 
+// ── Web Push: receive push message ───────────────
+self.addEventListener('push', event => {
+  let data = {};
+  try { data = event.data?.json() || {}; } catch {}
+
+  const title = data.title || '台股監控';
+  const options = {
+    body:     data.body  || '',
+    icon:     './icons/icon.svg',
+    badge:    './icons/icon.svg',
+    data:     { url: data.url || './watchlist.html' },
+    tag:      data.tag   || 'stock-alert',
+    renotify: true,
+    vibrate:  [200, 100, 200],
+  };
+  event.waitUntil(
+    self.registration.showNotification(title, options)
+  );
+});
+
+// ── Web Push: notification click → open/focus PWA ─
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const target = event.notification.data?.url || './watchlist.html';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      // Focus existing PWA window if open
+      for (const c of list) {
+        if (c.url.includes('watchlist') && 'focus' in c) return c.focus();
+      }
+      // Otherwise open a new window
+      if (clients.openWindow) return clients.openWindow(target);
+    })
+  );
+});
+

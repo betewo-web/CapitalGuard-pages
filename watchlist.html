@@ -124,6 +124,18 @@
   <!-- ── 主畫面（已登入時顯示） ── -->
   <div id="main-section" style="display:none">
 
+    <!-- 瀏覽器推播通知列 -->
+    <div id="push-notify-bar" class="card panel-card mb-3" style="display:none">
+      <div class="card-body py-2 px-3 d-flex align-items-center justify-content-between gap-2">
+        <div class="d-flex align-items-center gap-2 flex-grow-1">
+          <span id="push-status-icon" style="font-size:1.1rem">&#128276;</span>
+          <span id="push-status-text" class="small text-muted">載入中…</span>
+        </div>
+        <button id="push-notify-btn" class="btn btn-sm btn-outline-light"
+          onclick="togglePushSubscription()">啟用通知</button>
+      </div>
+    </div>
+
     <!-- 新增股票 -->
     <div class="card panel-card mb-4">
       <div class="card-header py-3 d-flex justify-content-between align-items-center">
@@ -381,6 +393,8 @@ const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
 const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
 const LIFF_ID       = "2010668840-DXPfjNlx";
 const REPORT_DATA_URL = "report_data_latest.json";
+// Web Push 公鑰：執行 generate_vapid.py 產生後填入（決對不要提交真實金鑰）
+const VAPID_PUBLIC_KEY = '';
 
 function withCacheBust(url) {
   const sep = url.includes("?") ? "&" : "?";
@@ -1073,6 +1087,7 @@ async function showMain() {
   document.getElementById("nav-user").textContent = `👤 ${state.displayName}`;
   document.getElementById("nav-logout").style.display = "inline-flex";
   await loadWatchlist();
+  initPushUI();
 }
 
 function logout() {
@@ -2539,6 +2554,104 @@ document.addEventListener("click", e => {
   if (!inputEl.contains(e.target) && !listEl.contains(e.target))
     document.getElementById("autocomplete-list").style.display = "none";
 });
+
+/* ── Web Push 訂閱 ─────────────────────────────────────────────────────────── */
+
+function _urlBase64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+async function initPushUI() {
+  const bar  = document.getElementById('push-notify-bar');
+  const btn  = document.getElementById('push-notify-btn');
+  const icon = document.getElementById('push-status-icon');
+  const txt  = document.getElementById('push-status-text');
+
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !bar) return;
+
+  bar.style.display = '';
+
+  if (Notification.permission === 'denied') {
+    icon.textContent = '🔇';
+    txt.textContent  = '通知已被封鎖，請在瀏覽器設定中允許此網站發送通知';
+    btn.style.display = 'none';
+    return;
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      icon.textContent  = '🔔';
+      txt.textContent   = '推播通知已啟用';
+      btn.textContent   = '停用通知';
+      btn.className     = 'btn btn-sm btn-outline-danger';
+    } else {
+      icon.textContent  = '🔇';
+      txt.textContent   = '尚未啟用推播通知';
+      btn.textContent   = '啟用通知';
+      btn.className     = 'btn btn-sm btn-outline-light';
+    }
+  } catch (e) {
+    txt.textContent = '推播狀態未知';
+  }
+}
+
+async function togglePushSubscription() {
+  const btn  = document.getElementById('push-notify-btn');
+  const txt  = document.getElementById('push-status-text');
+  btn.disabled = true;
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+
+    if (existing) {
+      // 停用：取消訂閱 + 從 Supabase 刪除
+      await existing.unsubscribe();
+      try {
+        const url = new URL(`${SUPABASE_URL}/rest/v1/push_subscriptions`);
+        url.searchParams.set('user_id', `eq.${state.userId}`);
+        url.searchParams.set('endpoint', `eq.${existing.endpoint}`);
+        await fetch(url, { method: 'DELETE', headers: sbHeaders(state.accessToken) });
+      } catch { /* 即使刪除失敗，410 機制會自動清除過期訂閱 */ }
+      await initPushUI();
+
+    } else {
+      // 啟用：請求權限 → 訂閱 → 儲存到 Supabase
+      if (!VAPID_PUBLIC_KEY) {
+        alert('尚未設定 VAPID 公鑰。\n請先執行  python generate_vapid.py  並依照說明填入 .env 和 watchlist.html');
+        btn.disabled = false;
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        txt.textContent = '已拒絕授權通知權限';
+        btn.disabled = false;
+        return;
+      }
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+      const j = sub.toJSON();
+      await sbPost('push_subscriptions', {
+        endpoint:   j.endpoint,
+        p256dh:     j.keys.p256dh,
+        auth:       j.keys.auth,
+        user_agent: navigator.userAgent.slice(0, 200),
+      }, state.accessToken, true /* minimal */);
+      await initPushUI();
+    }
+  } catch (e) {
+    txt.textContent = `錯誤：${e.message}`;
+    console.error('[Push]', e);
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 /* ── PWA: Service Worker ── */
 if ('serviceWorker' in navigator) {
