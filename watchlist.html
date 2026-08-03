@@ -2638,6 +2638,7 @@ async function togglePushSubscription() {
       });
       const j = sub.toJSON();
       await sbPost('push_subscriptions', {
+        user_id:    state.userId,
         endpoint:   j.endpoint,
         p256dh:     j.keys.p256dh,
         auth:       j.keys.auth,
