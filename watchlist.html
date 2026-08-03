@@ -252,17 +252,19 @@
         <div class="alert-group-label mt-2">🎯 自訂價位（盤中觸價，每日只通知一次）</div>
         <div class="row g-2 mt-1">
           <div class="col-6">
-            <label class="form-label text-muted small mb-1">📈 觸及上限價時通知</label>
+            <label class="form-label mb-1" style="color:#4ade80;font-size:.82rem;font-weight:600;letter-spacing:.02em;">📈 觸及上漲價格時通知</label>
             <div class="input-group input-group-sm">
-              <input id="inp-target-high" type="number" class="form-control" placeholder="如 150.0" step="0.01" min="0">
-              <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('high')" title="清除">✕</button>
+              <input id="inp-target-high" type="number" class="form-control" placeholder="如 150.0" step="0.01" min="0"
+                style="background:#1a2540;color:#e2eafc;border-color:#3ce6d1;font-size:.95rem;">
+              <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('high')" title="清除" style="color:#8da1c6;border-color:#3a4a70;">✕</button>
             </div>
           </div>
           <div class="col-6">
-            <label class="form-label text-muted small mb-1">📉 觸及下限價時通知</label>
+            <label class="form-label mb-1" style="color:#f87171;font-size:.82rem;font-weight:600;letter-spacing:.02em;">📉 觸及下跌價格時通知</label>
             <div class="input-group input-group-sm">
-              <input id="inp-target-low" type="number" class="form-control" placeholder="如 120.0" step="0.01" min="0">
-              <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('low')" title="清除">✕</button>
+              <input id="inp-target-low" type="number" class="form-control" placeholder="如 120.0" step="0.01" min="0"
+                style="background:#1a2540;color:#e2eafc;border-color:#f87171;font-size:.95rem;">
+              <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('low')" title="清除" style="color:#8da1c6;border-color:#3a4a70;">✕</button>
             </div>
           </div>
         </div>
