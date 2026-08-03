@@ -248,6 +248,28 @@
           </label>
         </div>
 
+        <!-- 自訂價位提醒 -->
+        <div class="alert-group-label mt-2">🎯 自訂價位（盤中觸價，每日只通知一次）</div>
+        <div class="row g-2 mt-1">
+          <div class="col-6">
+            <label class="form-label text-muted small mb-1">📈 觸及上限價時通知</label>
+            <div class="input-group input-group-sm">
+              <input id="inp-target-high" type="number" class="form-control" placeholder="如 150.0" step="0.01" min="0">
+              <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('high')" title="清除">✕</button>
+            </div>
+          </div>
+          <div class="col-6">
+            <label class="form-label text-muted small mb-1">📉 觸及下限價時通知</label>
+            <div class="input-group input-group-sm">
+              <input id="inp-target-low" type="number" class="form-control" placeholder="如 120.0" step="0.01" min="0">
+              <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('low')" title="清除">✕</button>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex justify-content-end mt-2">
+          <button type="button" class="btn btn-sm btn-primary" onclick="savePriceTargets()">儲存價位</button>
+        </div>
+
         <div id="alert-settings-msg" class="small mt-2 text-muted"></div>
       </div>
     </div>
@@ -1135,6 +1157,11 @@ function openAlertSettings(rowId) {
   document.getElementById("alert-inst-sell").checked        = !!row.alert_inst_sell;
   document.getElementById("alert-margin-up").checked        = !!row.alert_margin_up;
   document.getElementById("alert-margin-down").checked      = !!row.alert_margin_down;
+  // 自訂價位
+  const tHigh = row.target_price_high;
+  const tLow  = row.target_price_low;
+  document.getElementById("inp-target-high").value = (tHigh != null && tHigh !== "") ? tHigh : "";
+  document.getElementById("inp-target-low").value  = (tLow  != null && tLow  !== "") ? tLow  : "";
 
   document.getElementById("alert-settings-msg").textContent = "";
 
@@ -1227,6 +1254,45 @@ async function setAllAlertSettings(enabled) {
 document.getElementById("alertSettingsModal").addEventListener("hidden.bs.modal", () => {
   alertModalRowId = null;
 });
+
+function clearPriceTargetInput(which) {
+  document.getElementById(which === "high" ? "inp-target-high" : "inp-target-low").value = "";
+}
+
+async function savePriceTargets() {
+  if (!alertModalRowId) return;
+  const msgEl = document.getElementById("alert-settings-msg");
+  const hiRaw = document.getElementById("inp-target-high").value.trim();
+  const loRaw = document.getElementById("inp-target-low").value.trim();
+  const hi = hiRaw !== "" ? parseFloat(hiRaw) : null;
+  const lo = loRaw !== "" ? parseFloat(loRaw) : null;
+  if (hi !== null && (isNaN(hi) || hi <= 0)) {
+    msgEl.innerHTML = '<span class="text-danger">❌ 上限價位格式錯誤（需大於 0）</span>';
+    return;
+  }
+  if (lo !== null && (isNaN(lo) || lo <= 0)) {
+    msgEl.innerHTML = '<span class="text-danger">❌ 下限價位格式錯誤（需大於 0）</span>';
+    return;
+  }
+  if (hi !== null && lo !== null && hi <= lo) {
+    msgEl.innerHTML = '<span class="text-danger">❌ 上限價須大於下限價</span>';
+    return;
+  }
+  msgEl.innerHTML = '<span class="text-muted">儲存中…</span>';
+  try {
+    await sbPatch("watchlist", { "id": `eq.${alertModalRowId}` },
+      { target_price_high: hi, target_price_low: lo }, state.accessToken);
+    const row = getWatchlistRowById(alertModalRowId);
+    if (row) { row.target_price_high = hi; row.target_price_low = lo; }
+    const desc = [
+      hi != null ? `上限 ${hi}` : null,
+      lo != null ? `下限 ${lo}` : null,
+    ].filter(Boolean).join("，") || "已清除";
+    msgEl.innerHTML = `<span class="text-success">✅ 價位已儲存（${desc}）</span>`;
+  } catch (e) {
+    msgEl.innerHTML = `<span class="text-danger">❌ 儲存失敗：${e.message}</span>`;
+  }
+}
 
 function openRemoveStockConfirm(rowId) {
   const row = getWatchlistRowById(rowId);
@@ -2486,10 +2552,12 @@ if ('serviceWorker' in navigator) {
    On iOS / other: show instructions modal.
 ────────────────────────────────────────────────────────────────── */
 let _deferredInstallPrompt = null;
+let _installIntentPending  = false;   // user clicked Install before prompt was ready
+let _installIntentTimer    = null;
 const _pwaIsStandalone = window.matchMedia('(display-mode: standalone)').matches
   || window.navigator.standalone === true;
 
-// Show button for non-standalone environments
+// Show button whenever not already in standalone mode
 if (!_pwaIsStandalone) {
   const btn = document.getElementById('pwa-install-btn');
   if (btn) btn.style.display = '';
@@ -2498,37 +2566,77 @@ if (!_pwaIsStandalone) {
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
   _deferredInstallPrompt = e;
-  // Ensure button stays visible
+  // Ensure button is visible
   const btn = document.getElementById('pwa-install-btn');
-  if (btn) btn.style.display = '';
+  if (btn) { btn.style.display = ''; btn.disabled = false; }
+
+  // If the user already clicked Install and was waiting for this event, fire now
+  if (_installIntentPending) {
+    clearTimeout(_installIntentTimer);
+    _installIntentPending = false;
+    _restoreInstallBtn();
+    _triggerNativeInstallPrompt();
+  }
 });
 
 window.addEventListener('appinstalled', () => {
   _deferredInstallPrompt = null;
+  _installIntentPending  = false;
+  clearTimeout(_installIntentTimer);
   const btn = document.getElementById('pwa-install-btn');
   if (btn) btn.style.display = 'none';
   const banner = document.getElementById('ios-install-banner');
   if (banner) banner.style.display = 'none';
 });
 
+let _installBtnOrigHTML = null;
+function _setInstallBtnWaiting() {
+  const btn = document.getElementById('pwa-install-btn');
+  if (!btn) return;
+  _installBtnOrigHTML = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" style="width:.85rem;height:.85rem;vertical-align:-1px"></span>等待中…';
+  btn.disabled = true;
+}
+function _restoreInstallBtn() {
+  const btn = document.getElementById('pwa-install-btn');
+  if (!btn) return;
+  if (_installBtnOrigHTML) btn.innerHTML = _installBtnOrigHTML;
+  btn.disabled = false;
+}
+
 function installPwa() {
   if (_deferredInstallPrompt) {
-    // Android / Chrome Desktop: trigger native install prompt
-    _deferredInstallPrompt.prompt();
-    _deferredInstallPrompt.userChoice.then(choice => {
-      if (choice.outcome === 'accepted') {
-        _deferredInstallPrompt = null;
-        const btn = document.getElementById('pwa-install-btn');
-        if (btn) btn.style.display = 'none';
-      }
-    });
+    // Chrome / Edge / Android: use the native install prompt
+    _triggerNativeInstallPrompt();
+  } else if (_pwaIsStandalone) {
+    // Already running as installed app — nothing to do
   } else {
-    // iOS / Firefox / other: show instructions modal
-    _showPwaInstructionsModal();
+    // Prompt not ready yet (may arrive shortly after re-install on Chrome,
+    // or never on iOS / Firefox).
+    // Wait up to 2.5 s for beforeinstallprompt, then show instructions.
+    _installIntentPending = true;
+    _setInstallBtnWaiting();
+    _installIntentTimer = setTimeout(() => {
+      _installIntentPending = false;
+      _restoreInstallBtn();
+      _showPwaInstructionsModal(true /* afterWait */);
+    }, 2500);
   }
 }
 
-function _showPwaInstructionsModal() {
+function _triggerNativeInstallPrompt() {
+  if (!_deferredInstallPrompt) return;
+  _deferredInstallPrompt.prompt();
+  _deferredInstallPrompt.userChoice.then(choice => {
+    if (choice.outcome === 'accepted') {
+      _deferredInstallPrompt = null;
+      const btn = document.getElementById('pwa-install-btn');
+      if (btn) btn.style.display = 'none';
+    }
+  });
+}
+
+function _showPwaInstructionsModal(afterWait = false) {
   const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
   let content = '';
   if (isIos) {
@@ -2557,7 +2665,9 @@ function _showPwaInstructionsModal() {
         <strong class="text-info">「安裝台股監控」</strong>選項。
       </p>
       <p class="mb-2 text-muted" style="font-size:.9rem">Android 裝置會自動出現安裝橫幅，或可至瀏覽器選單中找到「加入主畫面」。</p>
-      <p class="text-muted" style="font-size:.8rem">若使用 Firefox 或 Safari（非 iOS），請直接為此頁面建立書籤。</p>`;
+      ${afterWait ? `<div class="alert alert-warning py-2 mt-2 mb-0" style="font-size:.8rem;background:rgba(255,193,7,.12);border-color:rgba(255,193,7,.35);color:#ffe08a">
+        <strong>移除後重新安裝？</strong>請先<strong>重新整頁（F5 或下拉重整）</strong>，瀏覽器需重新載入頁面後才會再次觸發安裝機制。
+      </div>` : `<p class="text-muted" style="font-size:.8rem">若使用 Firefox 或 Safari（非 iOS），請直接為此頁面建立書籤。</p>`}`;
   }
 
   // Reuse a simple dynamic modal
