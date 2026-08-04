@@ -91,6 +91,10 @@
 </div>
 
 <script>
+// ── 全域狀態（需在 auth 之前宣告，避免 TDZ 錯誤）──────────────────────
+let availableDates = [];  // sorted desc
+let currentIdx = 0;       // 0 = latest
+
 // ── Auth ─────────────────────────────────────────────────────────
 // 優先順序：
 //   1. URL ?token=xxx（LINE 通知個人化連結）→ 存 localStorage
@@ -122,8 +126,6 @@ if (!_authToken) {
 }
 
 // ── Date Navigation ─────────────────────────────────────────────
-let availableDates = [];  // sorted desc
-let currentIdx = 0;       // 0 = latest
 
 async function initReport() {
   // 用本地時間（避免 toISOString UTC 日期與台灣日期差一天）
