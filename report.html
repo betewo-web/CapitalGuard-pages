@@ -32,8 +32,8 @@
   .bg-gold   { background:linear-gradient(90deg,#f57f17,#ff8f00); color:#fff; }
   .bg-rocket { background:linear-gradient(90deg,#1565c0,#1976d2); color:#fff; }
   .strat-hd .sub { font-size:.78rem; font-weight:400; opacity:.85; margin-left:.4rem; }
-  .table-responsive { max-height:70vh; overflow-y:auto; }
-  table { font-size:.82rem; margin:0; }
+  .table-responsive { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  table { font-size:.82rem; margin:0; min-width:420px; }
   thead th { position:sticky; top:0; background:#f8f9fa; white-space:nowrap;
              border-bottom:2px solid #dee2e6 !important; font-size:.78rem; z-index:1; }
   td, th { vertical-align:middle; padding:.45rem .6rem !important; }
@@ -52,9 +52,12 @@
   .login-box p { color:#666; font-size:.88rem; margin-bottom:1.5rem; }
   #main-section { display:none; }
   @media(max-width:576px){
-    .top-bar { padding:.6rem .9rem; }
-    .top-bar .brand { font-size:.95rem; }
-    td, th { padding:.35rem .4rem !important; font-size:.76rem; }
+    .top-bar { padding:.55rem .8rem; }
+    .top-bar .brand { font-size:.88rem; }
+    .top-bar .nav-right { width:100%; justify-content:space-between; }
+    td, th { padding:.3rem .35rem !important; font-size:.74rem; }
+    .strat-hd .sub.float-end { display:none; }
+    .sig-tag { font-size:.68rem; padding:1px 3px; }
   }
 </style>
 </head>
@@ -208,7 +211,7 @@ function renderReport(data) {
     card.innerHTML = `
       <div class="strat-hd ${isRocket ? "bg-rocket" : "bg-gold"}">
         ${strat.emoji} ${strat.name} <span class="sub">前 ${strat.rows.length} 名</span>
-        <span class="sub float-end opacity-75">${strat.description}</span>
+        <span class="sub float-end opacity-75 d-none d-sm-inline">${strat.description}</span>
       </div>
       <div class="table-responsive">
         ${buildTable(strat.rows)}
@@ -220,9 +223,14 @@ function renderReport(data) {
 function buildTable(rows) {
   if (!rows || !rows.length) return '<p class="text-muted p-3">（無資料）</p>';
   const thead = `<thead><tr>
-    <th>#</th><th>代號</th><th>名稱</th><th>產業</th>
-    <th title="綜合分數">分數</th><th>PE</th><th>ROE%</th><th>RSI</th>
-    <th title="量能比">量</th><th>技術訊號</th>
+    <th>#</th><th>代號</th><th>名稱</th>
+    <th class="d-none d-md-table-cell">產業</th>
+    <th title="綜合分數">分數</th>
+    <th class="d-none d-sm-table-cell">PE</th>
+    <th class="d-none d-sm-table-cell">ROE%</th>
+    <th class="d-none d-sm-table-cell">RSI</th>
+    <th class="d-none d-md-table-cell" title="量能比">量</th>
+    <th>訊號</th>
   </tr></thead>`;
   const trows = rows.map(r => {
     const score = r.composite_score;
@@ -237,12 +245,12 @@ function buildTable(rows) {
       <td><span class="rank-num">${r.rank ?? ""}</span></td>
       <td><strong>${r.stock_id || ""}</strong></td>
       <td>${r.stock_name || ""}</td>
-      <td><small class="text-muted">${r.industry_category || ""}</small></td>
+      <td class="d-none d-md-table-cell"><small class="text-muted">${r.industry_category || ""}</small></td>
       <td>${scoreBadge}</td>
-      <td>${fmtNum(r.pe)}</td>
-      <td>${fmtNum(r.roe)}</td>
-      <td>${fmtNum(r.rsi, 0)}</td>
-      <td>${fmtNum(r.vol_ratio)}</td>
+      <td class="d-none d-sm-table-cell">${fmtNum(r.pe)}</td>
+      <td class="d-none d-sm-table-cell">${fmtNum(r.roe)}</td>
+      <td class="d-none d-sm-table-cell">${fmtNum(r.rsi, 0)}</td>
+      <td class="d-none d-md-table-cell">${fmtNum(r.vol_ratio)}</td>
       <td>${sigs}</td>
     </tr>`;
   }).join("");
