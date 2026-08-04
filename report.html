@@ -91,19 +91,29 @@
 </div>
 
 <script>
-// ── Auth ────────────────────────────────────────────────────────
-let session = null;
-try {
-  const s = localStorage.getItem("sma_session");
-  if (s) session = JSON.parse(s);
-} catch(e) {}
+// ── Auth ─────────────────────────────────────────────────────────
+// 優先順序：
+//   1. URL ?token=xxx（LINE 通知個人化連結）→ 存 localStorage
+//   2. localStorage['rpt_token']（上次由 LINE 連結開啟後留下）
+//   3. localStorage['sma_session']（watchlist.html 已登入的用戶）
+
+const _qs = new URLSearchParams(location.search);
+const _urlToken = _qs.get("token");
+if (_urlToken) {
+  localStorage.setItem("rpt_token", _urlToken);
+  history.replaceState(null, "", location.pathname);
+}
+
+let _authToken = _urlToken
+  || localStorage.getItem("rpt_token")
+  || (() => { try { const s = JSON.parse(localStorage.getItem("sma_session")||"null"); return s && s.accessToken; } catch{} return null; })();
 
 function logout() {
-  localStorage.removeItem("sma_session");
+  localStorage.removeItem("rpt_token");
   location.href = "watchlist.html";
 }
 
-if (!session || !session.userId) {
+if (!_authToken) {
   document.getElementById("login-gate").style.display = "flex";
 } else {
   document.getElementById("login-gate").style.display = "none";
