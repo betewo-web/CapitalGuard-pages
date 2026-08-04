@@ -126,34 +126,33 @@ let availableDates = [];  // sorted desc
 let currentIdx = 0;       // 0 = latest
 
 async function initReport() {
-  // Build candidate dates: today + past 3 days
-  const candidates = [];
-  const now = new Date();
-  for (let i = 0; i < 4; i++) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    candidates.push(d.toISOString().slice(0, 10));
+  // 用本地時間（避免 toISOString UTC 日期與台灣日期差一天）
+  function localDateStr(offsetDays = 0) {
+    const d = new Date();
+    d.setDate(d.getDate() - offsetDays);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   }
 
-  // Probe which dated JSON files exist (HEAD request)
-  availableDates = [];
-  for (const dt of candidates) {
-    try {
-      const r = await fetch(`report_data_${dt}.json`, { method: "HEAD", cache: "no-store" });
-      if (r.ok) availableDates.push(dt);
-    } catch {}
-    if (availableDates.length === 0 && dt === candidates[0]) {
-      // If today's dated file doesn't exist, try latest as fallback
-      try {
-        const r = await fetch("report_data_latest.json", { method: "HEAD", cache: "no-store" });
-        if (r.ok) availableDates.push("latest");
-      } catch {}
-    }
-  }
-
-  if (!availableDates.length) availableDates = ["latest"];
+  // 先直接載入 latest（最可靠，不受 HEAD 請求限制）
+  availableDates = ["latest"];
   renderDateTabs();
-  await loadReport(0);
+  loadReport(0);  // 不等待，先顯示 latest
+
+  // 背景探測最近 3 天的日期版 JSON（用於日期導覽）
+  const dated = [];
+  for (let i = 0; i < 3; i++) {
+    const dt = localDateStr(i);
+    try {
+      const r = await fetch(`report_data_${dt}.json?t=${Date.now()}`, { method: "HEAD", cache: "no-store" });
+      if (r.ok) dated.push(dt);
+    } catch {}
+  }
+  if (dated.length) {
+    availableDates = dated;  // 有日期版就用日期版
+    renderDateTabs();
+    // 如果 latest 已顯示，保持不重新載入（已顯示的就是最新的）
+  }
 }
 
 function renderDateTabs() {
@@ -245,7 +244,7 @@ function buildTable(rows) {
       <td>${sigs}</td>
     </tr>`;
   }).join("");
-  return `<table class="table table-hover table-sm"><tbody>${thead}<tbody>${trows}</tbody></table>`;
+  return `<table class="table table-hover table-sm">${thead}<tbody>${trows}</tbody></table>`;
 }
 </script>
 </body>
