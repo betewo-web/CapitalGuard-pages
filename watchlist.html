@@ -394,7 +394,7 @@ const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
 const LIFF_ID       = "2010668840-DXPfjNlx";
 const REPORT_DATA_URL = "report_data_latest.json";
 // Web Push 公鑰：執行 generate_vapid.py 產生後填入（決對不要提交真實金鑰）
-const VAPID_PUBLIC_KEY = 'BLq0QRrKFBntJ8Nu654a499HEEGNHc83eQMnnDKl5xPGF9kFyn8YiSA_ztkaMSFybsXDINW-VYRSrN9T_gAC-Uk';
+const VAPID_PUBLIC_KEY = 'BEVYyLc3V5Jagd_VR_iEwISXxL5Sa1gDscEzzH2j1ZHewi5VoDLHVu1L0hZ9yYWvu51t-h_e45UK6rkhFBH80oQ';
 
 function withCacheBust(url) {
   const sep = url.includes("?") ? "&" : "?";
@@ -1481,12 +1481,17 @@ function setKLineMaInfo(text) {
   el.textContent = safeText.startsWith("📊") ? safeText : `📊 ${safeText}`;
 }
 
-function formatKLineLevelBadges(values, type) {
+function formatKLineLevelBadges(values, type, strengths) {
   const list = Array.isArray(values) ? values : [];
-  const parts = list
-    .map(v => Number(v))
-    .filter(v => Number.isFinite(v))
-    .map(v => `<span class="kline-level-badge ${type}">${v.toFixed(2)}</span>`);
+  const strList = Array.isArray(strengths) ? strengths : [];
+  const parts = list.map((v, i) => {
+    const nv = Number(v);
+    if (!Number.isFinite(nv)) return null;
+    const str = Number(strList[i]) || 1.0;
+    const opacity = Math.min(1.0, 0.5 + str * 0.12).toFixed(2);
+    const weight = str >= 2.0 ? "700" : "500";
+    return `<span class="kline-level-badge ${type}" style="opacity:${opacity};font-weight:${weight};" title="強度 ${str.toFixed(1)}">${nv.toFixed(2)}</span>`;
+  }).filter(Boolean);
   return parts.length ? parts.join("") : '<span class="kline-level-empty">—</span>';
 }
 
@@ -1495,8 +1500,8 @@ function renderKLineLevels(levels) {
   const resistanceEl = document.getElementById("kline-resistance");
   if (!supportEl || !resistanceEl) return;
 
-  supportEl.innerHTML = formatKLineLevelBadges(levels?.support, "support");
-  resistanceEl.innerHTML = formatKLineLevelBadges(levels?.resistance, "resistance");
+  supportEl.innerHTML = formatKLineLevelBadges(levels?.support, "support", levels?.support_strengths);
+  resistanceEl.innerHTML = formatKLineLevelBadges(levels?.resistance, "resistance", levels?.resistance_strengths);
 }
 
 function renderKLineScoreBars(stock) {
@@ -2125,11 +2130,15 @@ function buildKLineOption(pd, chips, levels, period) {
   const supportHighlight = supportLevels.length ? supportLevels[0] : null;
   const resistanceHighlight = resistanceLevels.length ? resistanceLevels[0] : null;
 
-  (levels.support || []).forEach(v => {
+  (levels.support || []).forEach((v, idx) => {
     const nv = Number(v);
+    const str = ((levels.support_strengths || [])[idx] || 1.0);
+    const lineW = str >= 2.0 ? 2.5 : str >= 1.5 ? 1.8 : 1.2;
+    const alpha = Math.min(0.9, 0.35 + str * 0.13).toFixed(2);
+    const col = `rgba(38,166,154,${alpha})`;
     const showLabel = supportHighlight !== null && nv === supportHighlight;
     markLines.push([
-      { coord: [dates[0], v], lineStyle: { color: "#26a69a", type: "dashed", width: 1.5 } },
+      { coord: [dates[0], v], lineStyle: { color: col, type: "dashed", width: lineW } },
       {
         coord: [dates[n - 1], v],
         label: showLabel
@@ -2150,11 +2159,15 @@ function buildKLineOption(pd, chips, levels, period) {
       },
     ]);
   });
-  (levels.resistance || []).forEach(v => {
+  (levels.resistance || []).forEach((v, idx) => {
     const nv = Number(v);
+    const str = ((levels.resistance_strengths || [])[idx] || 1.0);
+    const lineW = str >= 2.0 ? 2.5 : str >= 1.5 ? 1.8 : 1.2;
+    const alpha = Math.min(0.9, 0.35 + str * 0.13).toFixed(2);
+    const col = `rgba(239,83,80,${alpha})`;
     const showLabel = resistanceHighlight !== null && nv === resistanceHighlight;
     markLines.push([
-      { coord: [dates[0], v], lineStyle: { color: "#ef5350", type: "dashed", width: 1.5 } },
+      { coord: [dates[0], v], lineStyle: { color: col, type: "dashed", width: lineW } },
       {
         coord: [dates[n - 1], v],
         label: showLabel
