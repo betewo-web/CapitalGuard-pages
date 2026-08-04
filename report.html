@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <style>
   body { background:#f0f2f5; font-family:'Noto Sans TC',sans-serif; font-size:.9rem; }
   .top-bar { background:linear-gradient(135deg,#1a237e,#283593); color:#fff; padding:.8rem 1.2rem;
@@ -44,6 +46,8 @@
   .sig-tag { display:inline-block; background:#e3f2fd; color:#1565c0; border-radius:4px;
              padding:1px 5px; font-size:.72rem; margin:1px; white-space:nowrap; }
   .na { color:#bbb; }
+  .stock-link { color:#1565c0; text-decoration:none; font-weight:600; cursor:pointer; }
+  .stock-link:hover { text-decoration:underline; }
   /* login gate */
   #login-gate { display:flex; align-items:center; justify-content:center; min-height:80vh; }
   .login-box { background:#fff; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,.1);
@@ -90,6 +94,52 @@
   <div class="content-wrap">
     <div id="report-info" class="text-muted small mb-3"></div>
     <div id="report-body"></div>
+  </div>
+</div>
+
+<!-- ══ 股票詳情 Modal ══ -->
+<div class="modal fade" id="stockModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:95vw;">
+    <div class="modal-content">
+      <div class="modal-header py-2 bg-light">
+        <div class="w-100">
+          <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+            <h5 class="mb-0 fw-bold" style="color:#1565c0;" id="md-code"></h5>
+            <span class="fw-semibold" id="md-name"></span>
+            <span class="badge bg-secondary" id="md-industry" style="font-size:.72rem;"></span>
+            <span class="ms-auto text-muted" style="font-size:.85rem;">現價 <strong id="md-price"></strong></span>
+          </div>
+          <div class="text-muted" style="font-size:.75rem;" id="md-ma-info"></div>
+          <div class="row g-1 mt-1" id="md-score-bars"></div>
+        </div>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-2">
+        <div class="d-flex flex-wrap gap-2 mb-2">
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary period-btn active" data-period="daily"   onclick="switchPeriod('daily')">日K</button>
+            <button class="btn btn-outline-primary period-btn"        data-period="weekly"  onclick="switchPeriod('weekly')">週K</button>
+            <button class="btn btn-outline-primary period-btn"        data-period="monthly" onclick="switchPeriod('monthly')">月K</button>
+          </div>
+          <span class="text-muted" style="font-size:.72rem;">紅漲綠跌 │ 虛線=支撐/壓力 │ 滾輪縮放</span>
+        </div>
+        <div id="md-chart" style="width:100%;height:400px;border:1px solid #eee;border-radius:6px;"></div>
+        <div class="row g-2 mt-2">
+          <div class="col-6">
+            <div class="p-2 rounded" style="background:#fff8e1;border:1px solid #ffe082;">
+              <div class="fw-semibold mb-1" style="font-size:.78rem;color:#f57f17;">▲ 壓力</div>
+              <div id="md-resistance" class="text-danger fw-bold" style="font-size:.85rem;"></div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="p-2 rounded" style="background:#e8f5e9;border:1px solid #a5d6a7;">
+              <div class="fw-semibold mb-1" style="font-size:.78rem;color:#2e7d32;">▼ 支撐</div>
+              <div id="md-support" class="text-success fw-bold" style="font-size:.85rem;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -193,6 +243,7 @@ async function loadReport(idx) {
 function renderReport(data) {
   const date = data.date || "—";
   const strategies = data.strategies || [];
+  _stockData = data.stock_data || {};  // 儲存詳細資料供 Modal 使用
   document.getElementById("report-info").textContent =
     `分析日期：${date}　共分析 ${Object.keys(data.universe || {}).length} 支股票`;
 
@@ -243,8 +294,8 @@ function buildTable(rows) {
       .map(s => `<span class="sig-tag">${s}</span>`).join("");
     return `<tr>
       <td><span class="rank-num">${r.rank ?? ""}</span></td>
-      <td><strong>${r.stock_id || ""}</strong></td>
-      <td>${r.stock_name || ""}</td>
+      <td><strong><span class="stock-link" onclick="openDetail('${r.stock_id}')">${r.stock_id || ""}</span></strong></td>
+      <td><span class="stock-link" onclick="openDetail('${r.stock_id}')">${r.stock_name || ""}</span></td>
       <td class="d-none d-md-table-cell"><small class="text-muted">${r.industry_category || ""}</small></td>
       <td>${scoreBadge}</td>
       <td class="d-none d-sm-table-cell">${fmtNum(r.pe)}</td>
@@ -255,6 +306,139 @@ function buildTable(rows) {
     </tr>`;
   }).join("");
   return `<table class="table table-hover table-sm">${thead}<tbody>${trows}</tbody></table>`;
+}
+
+// ── 全域 stock data（從 JSON 載入後儲存） ───────────────────────
+let _stockData = {};
+
+function openDetail(sid) {
+  const d = _stockData[sid];
+  if (!d) {
+    // 無詳細資料：開 Yahoo Finance
+    window.open('https://tw.stock.yahoo.com/quote/' + sid, '_blank');
+    return;
+  }
+  document.getElementById('md-code').textContent     = sid;
+  document.getElementById('md-name').textContent     = d.name || '';
+  document.getElementById('md-industry').textContent = d.industry || '';
+  const lvl = d.levels || {};
+  document.getElementById('md-price').textContent    = lvl.current ? lvl.current.toFixed(2) : '—';
+  const ma = lvl.ma || {};
+  document.getElementById('md-ma-info').textContent  =
+    Object.entries(ma).map(e => e[0]+':'+e[1]).join('   ');
+  document.getElementById('md-support').textContent =
+    (lvl.support||[]).length ? lvl.support.map(v=>v.toFixed(2)).join(' ／ ') : '—';
+  document.getElementById('md-resistance').textContent =
+    (lvl.resistance||[]).length ? lvl.resistance.map(v=>v.toFixed(2)).join(' ／ ') : '—';
+  _renderScoreBars(d.scores || {});
+  // 重設 K 線 tab
+  document.querySelectorAll('.period-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelector('[data-period="daily"]').classList.add('active');
+  _curDetailSid = sid;
+  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('stockModal'));
+  modal.show();
+  document.getElementById('stockModal').addEventListener('shown.bs.modal', function h(){
+    _renderChart(sid, 'daily');
+    document.getElementById('stockModal').removeEventListener('shown.bs.modal', h);
+  });
+}
+
+let _curDetailSid = null, _chart = null;
+
+function switchPeriod(period) {
+  if (!_curDetailSid) return;
+  document.querySelectorAll('.period-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelector('[data-period="'+period+'"]').classList.add('active');
+  _renderChart(_curDetailSid, period);
+}
+
+document.getElementById('stockModal').addEventListener('hidden.bs.modal', function(){
+  if (_chart) { _chart.dispose(); _chart = null; }
+  document.getElementById('md-chart').innerHTML = '';
+});
+
+window.addEventListener('resize', function(){ if (_chart) _chart.resize(); });
+
+function _renderScoreBars(sc) {
+  const dims = [
+    ['fundamental','基本面'],['valuation','估値面'],['industry','產業面'],
+    ['chips','籌碼面'],['technical','技術面'],['risk','風險面'],['capital','資金面']
+  ];
+  document.getElementById('md-score-bars').innerHTML = dims.map(kl => {
+    const raw = sc[kl[0]];
+    const v = (raw!=null && raw!='') ? Math.round(Number(raw)) : null;
+    if (v===null || isNaN(v)) {
+      return `<div class="col text-center"><div style="font-size:.65rem;color:#777;">${kl[1]}</div>`
+        + `<div style="background:#e0e0e0;height:5px;border-radius:3px;margin:2px 0;"><div style="width:50%;background:#ccc;height:100%;border-radius:3px;"></div></div>`
+        + `<div style="font-size:.68rem;color:#bbb;">&#8212;</div></div>`;
+    }
+    const c = v>=65?'#2e7d32':v>=45?'#f57f17':'#c62828';
+    return `<div class="col text-center"><div style="font-size:.65rem;color:#777;">${kl[1]}</div>`
+      + `<div style="background:#e0e0e0;height:5px;border-radius:3px;margin:2px 0;">`
+      + `<div style="width:${v}%;background:${c};height:100%;border-radius:3px;"></div></div>`
+      + `<div style="font-size:.68rem;font-weight:700;color:${c};">${v}</div></div>`;
+  }).join('');
+}
+
+function _renderChart(sid, period) {
+  const d = _stockData[sid]; if (!d) return;
+  if (_chart) { _chart.dispose(); _chart = null; }
+  const el = document.getElementById('md-chart');
+  _chart = echarts.init(el, null, { renderer:'canvas' });
+  _chart.setOption(_buildOption(d[period]||{}, d.levels||{}, period), true);
+}
+
+function _buildOption(pd, levels, period) {
+  const dates = pd.dates||[], ohlcv = pd.ohlcv||[], n = dates.length;
+  const kData = ohlcv.map(d=>[d[0],d[3],d[2],d[1]]);
+  const volData = ohlcv.map((d,i)=>{
+    const prev = i>0?ohlcv[i-1][3]:d[0];
+    const c = d[3]>prev?'rgba(239,83,80,.75)':d[3]<prev?'rgba(38,166,154,.75)':'rgba(255,235,59,.85)';
+    return {value:d[4], itemStyle:{color:c}};
+  });
+  const ml = [];
+  (levels.support||[]).forEach((v,i)=>{
+    const a = Math.min(.9,.35+((levels.support_strengths||[])[i]||1)*.13).toFixed(2);
+    ml.push([{coord:[dates[0],v],lineStyle:{color:'rgba(38,166,154,'+a+')',type:'dashed',width:1.5}},
+             {coord:[dates[n-1],v],label:{formatter:'支 '+v.toFixed(2),position:'end',fontSize:10,color:'#26a69a'}}]);
+  });
+  (levels.resistance||[]).forEach((v,i)=>{
+    const a = Math.min(.9,.35+((levels.resistance_strengths||[])[i]||1)*.13).toFixed(2);
+    ml.push([{coord:[dates[0],v],lineStyle:{color:'rgba(239,83,80,'+a+')',type:'dashed',width:1.5}},
+             {coord:[dates[n-1],v],label:{formatter:'壓 '+v.toFixed(2),position:'end',fontSize:10,color:'#ef5350'}}]);
+  });
+  const defBars = period==='monthly'?5760:period==='weekly'?720:90;
+  const dzStart = Math.max(0, Math.round(100 - 100*defBars/Math.max(n,1)));
+  return {
+    animation:false, backgroundColor:'#fff',
+    grid:[{left:55,right:45,top:40,height:'56%'},{left:55,right:45,top:'72%',height:'18%'}],
+    legend:{data:['日K','MA5','MA10','MA20','成交量(張)'],top:4,itemWidth:12,textStyle:{fontSize:10}},
+    tooltip:{trigger:'axis',axisPointer:{type:'cross'},backgroundColor:'rgba(255,255,255,.95)',
+      formatter:function(p){
+        if(!p.length) return '';
+        let h='<b>'+p[0].axisValue+'</b><br/>';
+        p.forEach(x=>{
+          if(x.seriesName==='日K'&&Array.isArray(x.data)) h+='開:<b>'+x.data[1]+'</b> 高:<b>'+x.data[4]+'</b> 低:<b>'+x.data[3]+'</b> 收:<b>'+x.data[2]+'</b><br/>';
+          else if(x.seriesName==='成交量(張)'){ const v=x.data&&x.data.value!==undefined?x.data.value:x.data; h+='成交量:<b>'+Math.round(v/1000).toLocaleString()+'</b>張<br/>'; }
+          else if(x.data!==null&&!Array.isArray(x.data)) h+=x.seriesName+':<b>'+x.data+'</b><br/>';
+        }); return h;
+      }
+    },
+    xAxis:[{type:'category',gridIndex:0,data:dates,axisLabel:{show:false},axisLine:{onZero:false},splitLine:{show:false}},
+           {type:'category',gridIndex:1,data:dates,axisLabel:{fontSize:9},axisLine:{onZero:false},splitLine:{show:false}}],
+    yAxis:[{scale:true,gridIndex:0,splitNumber:4,axisLabel:{fontSize:9},splitLine:{lineStyle:{color:'#f0f0f0'}}},
+           {scale:true,gridIndex:1,splitNumber:2,axisLabel:{fontSize:9},splitLine:{lineStyle:{color:'#f0f0f0'}}}],
+    dataZoom:[{type:'inside',xAxisIndex:[0,1],start:dzStart,end:100},{type:'slider',xAxisIndex:[0,1],bottom:3,height:16}],
+    series:[
+      {name:'日K',type:'candlestick',xAxisIndex:0,yAxisIndex:0,data:kData,
+       itemStyle:{color:'#ef5350',color0:'#26a69a',borderColor:'#ef5350',borderColor0:'#26a69a'},
+       markLine:{silent:true,symbol:'none',data:ml,animation:false}},
+      {name:'MA5', type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma5 ||[],symbol:'none',lineStyle:{width:1.2,color:'#ff9800'}},
+      {name:'MA10',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma10||[],symbol:'none',lineStyle:{width:1.2,color:'#2196f3'}},
+      {name:'MA20',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma20||[],symbol:'none',lineStyle:{width:1.5,color:'#9c27b0'}},
+      {name:'成交量(張)',type:'bar',xAxisIndex:1,yAxisIndex:1,data:volData,barMaxWidth:8}
+    ]
+  };
 }
 </script>
 </body>
