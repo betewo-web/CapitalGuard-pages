@@ -48,6 +48,11 @@
       <span class="brand-title">台股監控</span>
     </span>
     <div class="nav-user-actions">
+      <button id="alert-history-btn" class="btn btn-sm btn-outline-light" style="display:none" onclick="openAlertHistory()" title="通知紀錄">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:-2px">
+          <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zM8 1.918l-.797.161A4.002 4.002 0 0 0 4 6c0 .628-.134 2.197-.459 3.742-.16.767-.376 1.566-.663 2.258h10.244c-.287-.692-.502-1.49-.663-2.258C12.134 8.197 12 6.628 12 6a4.002 4.002 0 0 0-3.203-3.92L8 1.917zM14.22 12c.223.447.481.801.78 1H1c.299-.199.557-.553.78-1C2.68 10.2 3 6.88 3 6c0-2.42 1.72-4.44 4.005-4.901a1 1 0 1 1 1.99 0A5.002 5.002 0 0 1 13 6c0 .88.32 4.2 1.22 6z"/>
+        </svg><span class="d-none d-sm-inline ms-1">通知紀錄</span>
+      </button>
       <button id="pwa-install-btn" class="btn btn-sm btn-outline-info" style="display:none" onclick="installPwa()" title="安裝 App 到主畫面">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" class="me-1" style="vertical-align:-2px">
           <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
@@ -299,6 +304,24 @@
       </div>
       <div class="modal-body p-3" id="events-modal-body">
         <p class="text-muted small">載入中…</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 通知紀錄 Modal ── -->
+<div class="modal fade" id="alertHistoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">🔔 通知紀錄</h5>
+        <div class="ms-auto d-flex gap-2 align-items-center">
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearAlertHistory()" title="清空全部紀錄">清空</button>
+          <button type="button" class="btn-close ms-1" data-bs-dismiss="modal"></button>
+        </div>
+      </div>
+      <div class="modal-body p-2" id="alert-history-body" style="max-height:70vh">
+        <p class="text-muted small p-2">載入中…</p>
       </div>
     </div>
   </div>
@@ -1086,6 +1109,7 @@ async function showMain() {
   document.getElementById("main-section").style.display  = "";
   document.getElementById("nav-user").textContent = `👤 ${state.displayName}`;
   document.getElementById("nav-logout").style.display = "inline-flex";
+  document.getElementById("alert-history-btn").style.display = "inline-flex";
   await loadWatchlist();
   initPushUI();
 }
@@ -1093,6 +1117,62 @@ async function showMain() {
 function logout() {
   localStorage.removeItem("sma_session");
   location.reload();
+}
+
+// ── 通知紀錄 ────────────────────────────────────────
+async function openAlertHistory() {
+  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("alertHistoryModal"));
+  modal.show();
+  await loadAlertHistory();
+}
+
+async function loadAlertHistory() {
+  const bodyEl = document.getElementById("alert-history-body");
+  bodyEl.innerHTML = '<p class="text-muted small p-2">載入中…</p>';
+  try {
+    const rows = await sbGet("alert_history", {
+      order: "sent_at.desc",
+      limit: "100",
+    }, state.accessToken);
+
+    if (!rows || !rows.length) {
+      bodyEl.innerHTML = '<div class="text-center text-muted py-4" style="font-size:.85rem">尚無通知紀錄<br><span style="font-size:.75rem;opacity:.7">監控觸發的警報會自動保存在這裡</span></div>';
+      return;
+    }
+
+    bodyEl.innerHTML = rows.map(r => {
+      const dt = new Date(r.sent_at);
+      const timeStr = dt.toLocaleString("zh-TW", {
+        month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hour12: false,
+      });
+      const sid = (r.stock_id || "").trim();
+      const sidBadge = sid
+        ? `<span class="badge-sid" style="font-size:.68rem;cursor:pointer" onclick="bootstrap.Modal.getInstance(document.getElementById('alertHistoryModal'))?.hide();openKLineFromWatchlist('${sid}')">${escapeHtml(sid)}</span>`
+        : "";
+      return `
+        <div class="alert-history-item" style="padding:10px 12px;border-bottom:1px solid rgba(121,157,255,.14)">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="fw-semibold" style="font-size:.85rem">${escapeHtml(r.title || "")}</span>
+            ${sidBadge}
+            <span class="ms-auto text-muted" style="font-size:.7rem;white-space:nowrap">${timeStr}</span>
+          </div>
+          <div class="text-muted" style="font-size:.78rem;white-space:pre-wrap;line-height:1.45">${escapeHtml(r.body || "")}</div>
+        </div>`;
+    }).join("");
+  } catch (e) {
+    bodyEl.innerHTML = `<div class="text-danger small p-2">載入失敗：${escapeHtml(e.message || "")}<br><span class="text-muted" style="font-size:.72rem">若為 404，請先在 Supabase 執行 migrate_alert_history.sql</span></div>`;
+  }
+}
+
+async function clearAlertHistory() {
+  if (!confirm("確定清空全部通知紀錄？")) return;
+  try {
+    await sbDelete("alert_history", { "user_id": `eq.${state.userId}` }, state.accessToken);
+    await loadAlertHistory();
+  } catch (e) {
+    alert(`清空失敗：${e.message}`);
+  }
 }
 
 // ── 自選股清單 ──────────────────────────────────────────────────
