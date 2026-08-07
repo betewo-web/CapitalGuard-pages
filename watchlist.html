@@ -327,6 +327,29 @@
   </div>
 </div>
 
+<!-- ── 通知紀錄詳情 Modal ── -->
+<div class="modal fade" id="alertHistoryDetailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="alert-history-detail-title">通知詳情</h5>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <span class="badge bg-secondary" id="alert-history-detail-source" style="font-size:.72rem"></span>
+          <span class="text-muted" id="alert-history-detail-time" style="font-size:.75rem"></span>
+        </div>
+        <div id="alert-history-detail-body" class="text-light" style="white-space:pre-wrap;line-height:1.5;font-size:.9rem"></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-report-btn" style="display:none" onclick="openDailyReportFromHistory()">開啟分析報告</button>
+        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">關閉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="removeStockModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content kline-modal-content">
@@ -1146,12 +1169,21 @@ async function loadAlertHistory() {
         month: "2-digit", day: "2-digit",
         hour: "2-digit", minute: "2-digit", hour12: false,
       });
+      const source = String(r.source || "monitor");
+      const dataTitle = encodeURIComponent(String(r.title || ""));
+      const dataBody = encodeURIComponent(String(r.body || ""));
+      const dataTime = encodeURIComponent(timeStr);
+      const dataSource = encodeURIComponent(source);
       const sid = (r.stock_id || "").trim();
       const sidBadge = sid
-        ? `<span class="badge-sid" style="font-size:.68rem;cursor:pointer" onclick="bootstrap.Modal.getInstance(document.getElementById('alertHistoryModal'))?.hide();openKLineFromWatchlist('${sid}')">${escapeHtml(sid)}</span>`
+        ? `<span class="badge-sid" style="font-size:.68rem;cursor:pointer" onclick="event.stopPropagation();bootstrap.Modal.getInstance(document.getElementById('alertHistoryModal'))?.hide();openKLineFromWatchlist('${sid}')">${escapeHtml(sid)}</span>`
         : "";
       return `
-        <div class="alert-history-item" style="padding:10px 12px;border-bottom:1px solid rgba(121,157,255,.14)">
+        <div class="alert-history-item" role="button" tabindex="0"
+             style="padding:10px 12px;border-bottom:1px solid rgba(121,157,255,.14);cursor:pointer"
+             data-title="${dataTitle}" data-body="${dataBody}" data-time="${dataTime}" data-source="${dataSource}"
+             onclick="openAlertHistoryDetail(this)"
+             onkeydown="if(event.key==='Enter' || event.key===' '){ event.preventDefault(); openAlertHistoryDetail(this); }">
           <div class="d-flex align-items-center gap-2 mb-1">
             <span class="fw-semibold" style="font-size:.85rem">${escapeHtml(r.title || "")}</span>
             ${sidBadge}
@@ -1163,6 +1195,38 @@ async function loadAlertHistory() {
   } catch (e) {
     bodyEl.innerHTML = `<div class="text-danger small p-2">載入失敗：${escapeHtml(e.message || "")}<br><span class="text-muted" style="font-size:.72rem">若為 404，請先在 Supabase 執行 migrate_alert_history.sql</span></div>`;
   }
+}
+
+function openAlertHistoryDetail(el) {
+  const title = decodeURIComponent(el?.dataset?.title || "");
+  const body = decodeURIComponent(el?.dataset?.body || "");
+  const timeStr = decodeURIComponent(el?.dataset?.time || "");
+  const source = decodeURIComponent(el?.dataset?.source || "monitor");
+
+  const titleEl = document.getElementById("alert-history-detail-title");
+  const bodyEl = document.getElementById("alert-history-detail-body");
+  const timeEl = document.getElementById("alert-history-detail-time");
+  const sourceEl = document.getElementById("alert-history-detail-source");
+  const openReportBtn = document.getElementById("alert-history-open-report-btn");
+
+  titleEl.textContent = title || "通知詳情";
+  bodyEl.textContent = body || "（無內容）";
+  timeEl.textContent = timeStr || "";
+  sourceEl.textContent = source;
+
+  const isDailyReport = source === "daily_report_line" || source === "daily_report_web_push";
+  openReportBtn.style.display = isDailyReport ? "inline-flex" : "none";
+
+  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("alertHistoryDetailModal"));
+  modal.show();
+}
+
+function openDailyReportFromHistory() {
+  const url = new URL("report.html", window.location.href);
+  if (state?.accessToken) {
+    url.searchParams.set("token", state.accessToken);
+  }
+  window.open(url.toString(), "_blank");
 }
 
 async function clearAlertHistory() {
