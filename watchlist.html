@@ -43,7 +43,7 @@
 
 <!-- ── 頂部導航 ── -->
 <nav class="navbar modern-navbar navbar-dark sticky-top">
-  <div class="container-lg py-2 py-md-3">
+  <div class="container-lg py-1 py-md-3">
     <span class="navbar-brand app-brand mb-0">
       <span class="brand-icon">◎</span>
       <span class="brand-title">台股監控</span>
@@ -125,23 +125,21 @@
   <!-- ── 主畫面（已登入時顯示） ── -->
   <div id="main-section" style="display:none">
 
-    <!-- 瀏覽器推播通知列（所有分頁頂部） -->
-    <div id="push-notify-bar" class="card panel-card mb-3" style="display:none">
-      <div class="card-body py-2 px-3 d-flex align-items-center justify-content-between gap-2">
-        <div class="d-flex align-items-center gap-2 flex-grow-1">
-          <span id="push-status-icon" style="font-size:1.1rem">&#128276;</span>
-          <span id="push-status-text" class="small text-muted">載入中…</span>
-        </div>
-        <button id="push-notify-btn" class="btn btn-sm btn-outline-light"
-          onclick="togglePushSubscription()">啟用通知</button>
-      </div>
-    </div>
-
     <!-- ═══ 🏠 首頁 Today ═══ -->
     <section id="view-home" class="app-view">
       <div class="view-head">
         <h2 class="view-title">今日總覽</h2>
         <span class="view-sub" id="home-date"></span>
+      </div>
+
+      <!-- 瀏覽器推播通知列（精簡單行）：未啟用時顯示於首頁，啟用後由 initPushUI() 移到「通知」分頁 -->
+      <div id="push-notify-bar" class="push-bar" style="display:none">
+        <div class="push-bar-msg">
+          <span id="push-status-icon">&#128276;</span>
+          <span id="push-status-text">載入中…</span>
+        </div>
+        <button id="push-notify-btn" class="btn btn-sm btn-outline-light"
+          onclick="togglePushSubscription()">啟用瀏覽器通知</button>
       </div>
 
       <div class="card panel-card mb-3">
@@ -3571,12 +3569,22 @@ async function initPushUI() {
   const btn  = document.getElementById('push-notify-btn');
   const icon = document.getElementById('push-status-icon');
   const txt  = document.getElementById('push-status-text');
+  const homeHead  = document.querySelector('#view-home .view-head');
+  const inboxHead = document.querySelector('#view-inbox .view-head');
 
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !bar) return;
 
   bar.style.display = '';
 
+  // 尚未啟用/被封鎖時顯示在首頁（提醒去啟用）；已啟用後移到「通知」分頁（首頁不再顯示）
+  function placeBar(afterEl) {
+    if (afterEl && bar.previousElementSibling !== afterEl) {
+      afterEl.insertAdjacentElement('afterend', bar);
+    }
+  }
+
   if (Notification.permission === 'denied') {
+    placeBar(homeHead);
     icon.textContent = '🔇';
     txt.textContent  = '通知已被封鎖，請在瀏覽器設定中允許此網站發送通知';
     btn.style.display = 'none';
@@ -3586,15 +3594,18 @@ async function initPushUI() {
   try {
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
+    btn.style.display = '';
     if (sub) {
+      placeBar(inboxHead);
       icon.textContent  = '🔔';
       txt.textContent   = '推播通知已啟用';
-      btn.textContent   = '停用通知';
+      btn.innerHTML     = '<span class="d-none d-sm-inline">停用通知</span><span class="d-sm-none">停用</span>';
       btn.className     = 'btn btn-sm btn-outline-danger';
     } else {
+      placeBar(homeHead);
       icon.textContent  = '🔇';
       txt.textContent   = '尚未啟用推播通知';
-      btn.textContent   = '啟用通知';
+      btn.innerHTML     = '<span class="d-none d-sm-inline">啟用瀏覽器通知</span><span class="d-sm-none">啟用通知</span>';
       btn.className     = 'btn btn-sm btn-outline-light';
     }
   } catch (e) {

@@ -104,6 +104,71 @@ body.has-bottom-nav .page-shell {
 	width: min(1140px, 100%);
 }
 
+/* 瀏覽器推播通知列：精簡單行 bar，而非完整 card */
+.push-bar {
+	display: flex;
+	flex-wrap: nowrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+	padding: 0.35rem 0.65rem;
+	margin-bottom: 0.65rem;
+	border-radius: 11px;
+	border: 1px solid rgba(128, 154, 212, 0.3);
+	background: rgba(20, 28, 50, 0.55);
+}
+
+.push-bar-msg {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	min-width: 0;
+	font-size: 0.78rem;
+	color: var(--text-1);
+}
+
+.push-bar-msg span:first-child {
+	font-size: 0.95rem;
+	flex-shrink: 0;
+}
+
+.push-bar-msg span:last-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.push-bar button {
+	flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+	.modern-navbar .container-lg {
+		padding-top: 0.4rem;
+		padding-bottom: 0.4rem;
+	}
+
+	.brand-icon {
+		width: 24px;
+		height: 24px;
+		font-size: 0.92rem;
+	}
+
+	.brand-title {
+		font-size: 1rem;
+	}
+
+	.user-chip {
+		padding: 0.28rem 0.55rem;
+		font-size: 0.76rem;
+	}
+
+	#nav-logout {
+		padding: 0.25rem 0.55rem;
+		font-size: 0.76rem;
+	}
+}
+
 .panel-card,
 .wl-card {
 	border: 1px solid var(--border);
