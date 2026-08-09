@@ -658,6 +658,8 @@ let klineLastZoomRange = null;
 let watchlistRows = [];
 let intradayQuoteMap = {};
 let intradayQuotesLoadingPromise = null;
+let finmindQuoteMap = {};
+let finmindQuotesLoadingPromise = null;
 const HOME_WATCHLIST_EXPAND_KEY = "home_watchlist_expanded";
 let homeWatchlistExpanded = localStorage.getItem(HOME_WATCHLIST_EXPAND_KEY) === "1";
 let alertModalRowId = null;
@@ -1369,6 +1371,79 @@ async function loadIntradayQuotes(force = false) {
   }
 }
 
+async function fetchFinMindQuote(sid) {
+  try {
+    const start = new Date();
+    start.setDate(start.getDate() - 20);
+    const startDate = start.toISOString().slice(0, 10);
+    const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice&data_id=${encodeURIComponent(sid)}&start_date=${startDate}`;
+    const resp = await fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(10000) : undefined });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    if (json.status !== 200 || !Array.isArray(json.data) || !json.data.length) return null;
+
+    const rows = json.data
+      .map(d => Number(d.close))
+      .filter(v => Number.isFinite(v));
+    if (!rows.length) return null;
+
+    const cur = rows[rows.length - 1];
+    let changePct = null;
+    if (rows.length >= 2 && rows[rows.length - 2] > 0) {
+      const prev = rows[rows.length - 2];
+      changePct = ((cur - prev) / prev) * 100;
+    }
+    return { price: cur, changePct };
+  } catch {
+    return null;
+  }
+}
+
+async function loadFinMindQuotesForMissing(force = false) {
+  const sids = [...new Set((watchlistRows || [])
+    .map(r => String(r.stock_id || "").trim())
+    .filter(sid => /^\d{4}$/.test(sid)))];
+  if (!sids.length) {
+    finmindQuoteMap = {};
+    return finmindQuoteMap;
+  }
+
+  if (!force && finmindQuotesLoadingPromise) return finmindQuotesLoadingPromise;
+
+  const missing = sids.filter(sid => !getQuoteFromSharedData(sid) && !intradayQuoteMap?.[sid]);
+  if (!missing.length) return finmindQuoteMap;
+
+  finmindQuotesLoadingPromise = (async () => {
+    const map = { ...finmindQuoteMap };
+    for (const sid of missing) {
+      const q = await fetchFinMindQuote(sid);
+      if (q && Number.isFinite(q.price)) map[sid] = q;
+    }
+    finmindQuoteMap = map;
+    return finmindQuoteMap;
+  })();
+
+  try {
+    return await finmindQuotesLoadingPromise;
+  } finally {
+    finmindQuotesLoadingPromise = null;
+  }
+}
+
+function getQuoteFromSharedData(sid) {
+  const s = sharedReportData?.stock_data?.[sid];
+  if (!s) return null;
+  const ohlcv = s.daily?.ohlcv;
+  const cur = Number(s.levels?.current ?? (ohlcv?.length ? ohlcv[ohlcv.length - 1][3] : NaN));
+  if (!isFinite(cur)) return null;
+  let chg = null;
+  if (ohlcv && ohlcv.length >= 2) {
+    const prev = Number(ohlcv[ohlcv.length - 2][3]);
+    if (isFinite(prev) && prev > 0) chg = (cur - prev) / prev * 100;
+  }
+  return { price: cur, changePct: chg };
+}
+
 // ── PWA v2: 訊號等級（統一對照）──────────────────────────────────
 const SEV_META = {
   red:    { emoji: "🔴", label: "強訊號" },
@@ -1426,28 +1501,48 @@ function stockLabelOf(sid) {
 
 // 收盤報價（來自共享報表資料；Phase 2 將改接 intraday_state 即時資料）
 function getQuote(sid) {
-  const s = sharedReportData?.stock_data?.[sid];
-  if (s) {
-    const ohlcv = s.daily?.ohlcv;
-    const cur = Number(s.levels?.current ?? (ohlcv?.length ? ohlcv[ohlcv.length - 1][3] : NaN));
-    if (isFinite(cur)) {
-      let chg = null;
-      if (ohlcv && ohlcv.length >= 2) {
-        const prev = Number(ohlcv[ohlcv.length - 2][3]);
-        if (isFinite(prev) && prev > 0) chg = (cur - prev) / prev * 100;
-      }
-      return { price: cur, changePct: chg };
-    }
-  }
+  const shared = getQuoteFromSharedData(sid);
+  if (shared) return shared;
 
   const fallback = intradayQuoteMap?.[sid];
-  if (!fallback || !isFinite(Number(fallback.price))) return null;
+  if (fallback && isFinite(Number(fallback.price))) {
+    return {
+      price: Number(fallback.price),
+      changePct: (fallback.changePct === null || fallback.changePct === undefined || !isFinite(Number(fallback.changePct)))
+        ? null
+        : Number(fallback.changePct),
+    };
+  }
+
+  const finmind = finmindQuoteMap?.[sid];
+  if (!finmind || !isFinite(Number(finmind.price))) return null;
   return {
-    price: Number(fallback.price),
-    changePct: (fallback.changePct === null || fallback.changePct === undefined || !isFinite(Number(fallback.changePct)))
+    price: Number(finmind.price),
+    changePct: (finmind.changePct === null || finmind.changePct === undefined || !isFinite(Number(finmind.changePct)))
       ? null
-      : Number(fallback.changePct),
+      : Number(finmind.changePct),
   };
+}
+
+function hasAnyQuote(sid) {
+  return !!getQuoteFromSharedData(sid) || !!intradayQuoteMap?.[sid] || !!finmindQuoteMap?.[sid];
+}
+
+async function hydrateMissingQuotes() {
+  const sids = [...new Set((watchlistRows || [])
+    .map(r => String(r.stock_id || "").trim())
+    .filter(sid => /^\d{4}$/.test(sid)))];
+  const hasMissing = sids.some(sid => !hasAnyQuote(sid));
+  if (!hasMissing) return;
+  await loadFinMindQuotesForMissing(true);
+}
+
+function scheduleQuoteHydration() {
+  Promise.resolve()
+    .then(() => loadIntradayQuotes(true))
+    .then(() => loadFinMindQuotesForMissing(true))
+    .then(() => renderCurrentTab())
+    .catch(() => {});
 }
 
 function fmtChgHtml(chg) {
@@ -1914,7 +2009,7 @@ async function loadWatchlist() {
   const rows = await sbGet("watchlist", {}, state.accessToken);
   watchlistRows = rows || [];
   renderCurrentTab();
-  loadIntradayQuotes(true).then(() => renderCurrentTab()).catch(() => {});
+  scheduleQuoteHydration();
   // 非同步載入事件（不阻塞卡片渲染）
   const sids = (rows || []).map(r => r.stock_id).filter(Boolean);
   loadStockEvents(sids).then(() => renderCurrentTab());
