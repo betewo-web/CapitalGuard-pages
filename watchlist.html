@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>台股監控 — 個人自選股設定</title>
+  <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -21,6 +21,7 @@
   <link rel="apple-touch-icon" href="icons/icon.svg">
 </head>
 <body>
+<!-- PWA v2 shell -->
 
 <!-- ── iOS 加入主畫面提示橫幅 ── -->
 <div id="ios-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;
@@ -48,11 +49,6 @@
       <span class="brand-title">台股監控</span>
     </span>
     <div class="nav-user-actions">
-      <button id="alert-history-btn" class="btn btn-sm btn-outline-light" style="display:none" onclick="openAlertHistory()" title="通知紀錄">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:-2px">
-          <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zM8 1.918l-.797.161A4.002 4.002 0 0 0 4 6c0 .628-.134 2.197-.459 3.742-.16.767-.376 1.566-.663 2.258h10.244c-.287-.692-.502-1.49-.663-2.258C12.134 8.197 12 6.628 12 6a4.002 4.002 0 0 0-3.203-3.92L8 1.917zM14.22 12c.223.447.481.801.78 1H1c.299-.199.557-.553.78-1C2.68 10.2 3 6.88 3 6c0-2.42 1.72-4.44 4.005-4.901a1 1 0 1 1 1.99 0A5.002 5.002 0 0 1 13 6c0 .88.32 4.2 1.22 6z"/>
-        </svg><span class="d-none d-sm-inline ms-1">通知紀錄</span>
-      </button>
       <button id="pwa-install-btn" class="btn btn-sm btn-outline-info" style="display:none" onclick="installPwa()" title="安裝 App 到主畫面">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" class="me-1" style="vertical-align:-2px">
           <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
@@ -129,7 +125,7 @@
   <!-- ── 主畫面（已登入時顯示） ── -->
   <div id="main-section" style="display:none">
 
-    <!-- 瀏覽器推播通知列 -->
+    <!-- 瀏覽器推播通知列（所有分頁頂部） -->
     <div id="push-notify-bar" class="card panel-card mb-3" style="display:none">
       <div class="card-body py-2 px-3 d-flex align-items-center justify-content-between gap-2">
         <div class="d-flex align-items-center gap-2 flex-grow-1">
@@ -141,40 +137,158 @@
       </div>
     </div>
 
-    <!-- 新增股票 -->
-    <div class="card panel-card mb-4">
-      <div class="card-header py-3 d-flex justify-content-between align-items-center">
-        <span class="fw-semibold panel-title">新增追蹤股票</span>
+    <!-- ═══ 🏠 首頁 Today ═══ -->
+    <section id="view-home" class="app-view">
+      <div class="view-head">
+        <h2 class="view-title">今日總覽</h2>
+        <span class="view-sub" id="home-date"></span>
       </div>
-      <div class="card-body p-3">
-        <div class="d-flex gap-2 position-relative flex-column flex-md-row">
-          <div class="flex-grow-1 position-relative">
-            <input id="inp-stock" class="form-control form-control-lg" placeholder="輸入股票代號或名稱，如 2330 或 台積電"
-                   autocomplete="off" oninput="onStockInput()" onkeydown="onStockKey(event)">
-            <div id="autocomplete-list" class="position-absolute w-100 rounded" style="display:none;"></div>
-          </div>
-          <button class="btn btn-success btn-lg btn-add" onclick="addStock()">加入</button>
-        </div>
-        <div id="add-msg" class="mt-2 small"></div>
-      </div>
-    </div>
 
-    <!-- 自選股清單 -->
-    <div class="card panel-card">
-      <div class="card-header py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
-        <span id="events-fetch-status" class="events-fetch-status" title="事件資料狀態（需在本機執行 --fetch-events 更新）"></span>
-      </div>
-      <div class="card-body p-0">
-        <div id="wl-empty" class="empty-state text-center py-5 text-muted" style="display:none">
-          尚未加入任何股票，從上方搜尋並加入吧！
+      <div class="card panel-card mb-3">
+        <div class="card-body p-3">
+          <div class="home-sec-title"><span id="home-events-headline">📋 今日事件</span></div>
+          <div class="home-stat-row" id="home-events-stats"></div>
         </div>
-        <div id="wl-grid" class="watchlist-list" style="display:none"></div>
       </div>
-    </div>
+
+      <div class="card panel-card mb-3">
+        <div class="card-body p-3">
+          <div class="home-sec-title">⚡ 盤中訊號 <span class="hs-link" onclick="switchTab('live')">查看全部 →</span></div>
+          <div id="home-signals"></div>
+        </div>
+      </div>
+
+      <div class="card panel-card mb-3">
+        <div class="card-body p-3">
+          <div class="home-sec-title">⭐ 我的自選 <span class="hs-link" onclick="switchTab('watch')">查看自選 →</span></div>
+          <div id="home-watchlist"></div>
+        </div>
+      </div>
+
+      <div class="card panel-card mb-3">
+        <div class="card-body p-3">
+          <div class="home-sec-title">📰 今日重要資訊</div>
+          <div id="home-news"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ 📊 持股 ═══ -->
+    <section id="view-holdings" class="app-view">
+      <div class="view-head">
+        <h2 class="view-title">我的持股</h2>
+        <span class="view-sub" id="holdings-price-note"></span>
+      </div>
+      <div class="card panel-card mb-3" id="holdings-summary-card" style="display:none">
+        <div class="holding-summary">
+          <div class="hd-block"><div class="hd-label">總市值</div><div class="hd-value" id="hd-total">—</div></div>
+          <div class="hd-block"><div class="hd-label">今日損益</div><div class="hd-value" id="hd-day-pl">—</div></div>
+          <div class="hd-block"><div class="hd-label">未實現損益</div><div class="hd-value" id="hd-unrealized">—</div></div>
+        </div>
+      </div>
+      <div class="card panel-card">
+        <div class="card-body p-0" id="holdings-list"></div>
+      </div>
+    </section>
+
+    <!-- ═══ ⚡ 盤中雷達 ═══ -->
+    <section id="view-live" class="app-view">
+      <div class="view-head">
+        <h2 class="view-title">⚡ 盤中雷達</h2>
+        <span class="view-sub" id="live-status"></span>
+      </div>
+      <div class="home-stat-row live-stat-row" id="live-stats"></div>
+      <div id="live-list"></div>
+    </section>
+
+    <!-- ═══ 🔔 通知 Inbox ═══ -->
+    <section id="view-inbox" class="app-view">
+      <div class="view-head">
+        <h2 class="view-title">通知</h2>
+        <div class="inbox-toolbar">
+          <button class="btn btn-sm btn-outline-light" onclick="markAllRead()">全部已讀</button>
+          <button class="btn btn-sm btn-outline-danger" onclick="clearAlertHistory()">清空</button>
+        </div>
+      </div>
+      <div class="chip-row" id="inbox-filters">
+        <button class="filter-chip active" data-f="all" onclick="setInboxFilter('all')">全部</button>
+        <button class="filter-chip" data-f="unread" onclick="setInboxFilter('unread')">未讀</button>
+        <button class="filter-chip" data-f="important" onclick="setInboxFilter('important')">重要</button>
+        <button class="filter-chip" data-f="stocks" onclick="setInboxFilter('stocks')">持股</button>
+      </div>
+      <div id="inbox-migrate-hint" class="small mb-2" style="display:none;color:var(--sig-yellow)">
+        ⚠ 已讀/未讀功能需先在 Supabase SQL Editor 執行 migrate_pwa_v2.sql
+      </div>
+      <div id="inbox-list"><p class="text-muted small p-2">載入中…</p></div>
+    </section>
+
+    <!-- ═══ ⭐ 自選 ═══ -->
+    <section id="view-watch" class="app-view">
+
+      <!-- 新增股票 -->
+      <div class="card panel-card mb-3">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+          <span class="fw-semibold panel-title">新增追蹤股票</span>
+        </div>
+        <div class="card-body p-3">
+          <div class="d-flex gap-2 position-relative flex-column flex-md-row">
+            <div class="flex-grow-1 position-relative">
+              <input id="inp-stock" class="form-control form-control-lg" placeholder="輸入股票代號或名稱，如 2330 或 台積電"
+                     autocomplete="off" oninput="onStockInput()" onkeydown="onStockKey(event)">
+              <div id="autocomplete-list" class="position-absolute w-100 rounded" style="display:none;"></div>
+            </div>
+            <button class="btn btn-success btn-lg btn-add" onclick="addStock()">加入</button>
+          </div>
+          <div id="add-msg" class="mt-2 small"></div>
+        </div>
+      </div>
+
+      <!-- 自選篩選 -->
+      <div class="chip-row" id="watch-filters">
+        <button class="filter-chip active" data-f="all" onclick="setWatchFilter('all')">全部</button>
+        <button class="filter-chip" data-f="signal" onclick="setWatchFilter('signal')">有訊號</button>
+        <button class="filter-chip" data-f="up" onclick="setWatchFilter('up')">上漲</button>
+        <button class="filter-chip" data-f="down" onclick="setWatchFilter('down')">下跌</button>
+      </div>
+
+      <!-- 自選股清單 -->
+      <div class="card panel-card">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
+          <span id="events-fetch-status" class="events-fetch-status" title="事件資料狀態（需在本機執行 --fetch-events 更新）"></span>
+        </div>
+        <div class="card-body p-0">
+          <div id="wl-empty" class="empty-state text-center py-5 text-muted" style="display:none">
+            尚未加入任何股票，從上方搜尋並加入吧！
+          </div>
+          <div id="wl-grid" class="watchlist-list" style="display:none"></div>
+        </div>
+      </div>
+
+    </section>
 
   </div><!-- /main-section -->
 </div><!-- /container -->
+
+<!-- ── 底部導航（登入後顯示） ── -->
+<nav id="bottom-nav" class="bottom-nav" style="display:none" aria-label="主導航">
+  <button class="bottom-nav-item" data-tab="home" onclick="switchTab('home')">
+    <span class="bn-icon">🏠</span><span>首頁</span>
+  </button>
+  <button class="bottom-nav-item" data-tab="holdings" onclick="switchTab('holdings')">
+    <span class="bn-icon">📊</span><span>持股</span>
+  </button>
+  <button class="bottom-nav-item" data-tab="live" onclick="switchTab('live')">
+    <span class="bn-icon">⚡</span><span>盤中</span>
+  </button>
+  <button class="bottom-nav-item" data-tab="inbox" onclick="switchTab('inbox')">
+    <span class="bn-icon">🔔</span><span>通知</span>
+    <span class="bn-badge" id="inbox-badge"></span>
+  </button>
+  <button class="bottom-nav-item" data-tab="watch" onclick="switchTab('watch')">
+    <span class="bn-icon">⭐</span><span>自選</span>
+  </button>
+</nav>
 
 <div class="modal fade" id="alertSettingsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -289,6 +403,30 @@
           <button type="button" class="btn btn-sm btn-primary" onclick="savePriceTargets()">儲存價位</button>
         </div>
 
+        <!-- 持股設定 -->
+        <div class="alert-group-label mt-2">📊 持股（供「持股」分頁計算損益，留空 = 純觀察）</div>
+        <div class="row g-2 mt-1">
+          <div class="col-6">
+            <label class="form-label mb-1" style="color:#c9c9d4;font-size:.82rem;font-weight:600">持有股數（股，1張=1000）</label>
+            <div class="input-group input-group-sm">
+              <input id="inp-shares" type="number" class="form-control" placeholder="如 1000" step="1" min="0"
+                style="background:#1c1c2b;color:#f5f5f7;border-color:#3a3a52;font-size:.95rem;">
+              <button class="btn btn-outline-secondary" type="button" onclick="clearHoldingInput('shares')" title="清除" style="color:#9292a3;border-color:#3a3a52;">✕</button>
+            </div>
+          </div>
+          <div class="col-6">
+            <label class="form-label mb-1" style="color:#c9c9d4;font-size:.82rem;font-weight:600">平均成本（元）</label>
+            <div class="input-group input-group-sm">
+              <input id="inp-avg-cost" type="number" class="form-control" placeholder="如 580.5" step="0.01" min="0"
+                style="background:#1c1c2b;color:#f5f5f7;border-color:#3a3a52;font-size:.95rem;">
+              <button class="btn btn-outline-secondary" type="button" onclick="clearHoldingInput('cost')" title="清除" style="color:#9292a3;border-color:#3a3a52;">✕</button>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex justify-content-end mt-2">
+          <button type="button" class="btn btn-sm btn-primary" onclick="saveHoldings()">儲存持股</button>
+        </div>
+
         <div id="alert-settings-msg" class="small mt-2 text-muted"></div>
       </div>
     </div>
@@ -309,25 +447,7 @@
   </div>
 </div>
 
-<!-- ── 通知紀錄 Modal ── -->
-<div class="modal fade" id="alertHistoryModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-    <div class="modal-content kline-modal-content">
-      <div class="modal-header py-2">
-        <h5 class="mb-0">🔔 通知紀錄</h5>
-        <div class="ms-auto d-flex gap-2 align-items-center">
-          <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearAlertHistory()" title="清空全部紀錄">清空</button>
-          <button type="button" class="btn-close ms-1" data-bs-dismiss="modal"></button>
-        </div>
-      </div>
-      <div class="modal-body p-2" id="alert-history-body" style="max-height:70vh">
-        <p class="text-muted small p-2">載入中…</p>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ── 通知紀錄詳情 Modal ── -->
+<!-- ── 通知詳情 Modal ── -->
 <div class="modal fade" id="alertHistoryDetailModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content kline-modal-content">
@@ -341,8 +461,11 @@
           <span class="text-muted" id="alert-history-detail-time" style="font-size:.75rem"></span>
         </div>
         <div id="alert-history-detail-body" class="text-light" style="white-space:pre-wrap;line-height:1.5;font-size:.9rem"></div>
+        <div id="alert-history-why" style="display:none"></div>
       </div>
       <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-view-stock-btn" style="display:none" onclick="openStockFromDetail()">📈 查看股票</button>
+        <button type="button" class="btn btn-sm btn-outline-light" id="alert-history-settings-btn" style="display:none" onclick="openSettingsFromDetail()">調整通知設定</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-report-btn" style="display:none" onclick="openDailyReportFromHistory()">開啟分析報告</button>
         <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">關閉</button>
       </div>
@@ -536,6 +659,16 @@ let watchlistRows = [];
 let alertModalRowId = null;
 let removeModalRowId = null;
 let stockEvents = {};   // sid → [{event_type, title, content, source_url, importance, event_date, ai_analysis}]
+
+// ── PWA v2: App Shell 狀態 ──
+const APP_TABS = ["home", "holdings", "live", "inbox", "watch"];
+let currentTab = null;
+let inboxRows = [];             // alert_history rows（sent_at desc）
+let inboxLoadedAt = 0;
+let inboxSupportsRead = true;   // migrate_pwa_v2.sql 未執行時自動降級
+let inboxLoadError = null;
+let inboxFilter = "all";        // all / unread / important / stocks
+let watchFilter = "all";        // all / signal / up / down
 
 // ── 事件彙整功能（Feature 2）────────────────────────────────────
 async function loadStockEvents(sids) {
@@ -1132,9 +1265,16 @@ async function showMain() {
   document.getElementById("main-section").style.display  = "";
   document.getElementById("nav-user").textContent = `👤 ${state.displayName}`;
   document.getElementById("nav-logout").style.display = "inline-flex";
-  document.getElementById("alert-history-btn").style.display = "inline-flex";
+  document.body.classList.add("has-bottom-nav");
+  document.getElementById("bottom-nav").style.display = "flex";
+
+  const hashTab = (location.hash || "").replace("#", "");
+  switchTab(APP_TABS.includes(hashTab) ? hashTab : "home", true);
+
   await loadWatchlist();
   initPushUI();
+  refreshInbox(true);
+  loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
 }
 
 function logout() {
@@ -1142,83 +1282,325 @@ function logout() {
   location.reload();
 }
 
-// ── 通知紀錄 ────────────────────────────────────────
-async function openAlertHistory() {
-  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("alertHistoryModal"));
-  modal.show();
-  await loadAlertHistory();
+// ── PWA v2: Tab 路由 ─────────────────────────────────────────────
+function switchTab(tab, silent = false) {
+  if (!APP_TABS.includes(tab)) tab = "home";
+  const changed = currentTab !== tab;
+  currentTab = tab;
+  APP_TABS.forEach(t => {
+    const el = document.getElementById(`view-${t}`);
+    if (el) el.classList.toggle("active", t === tab);
+  });
+  document.querySelectorAll("#bottom-nav .bottom-nav-item").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.tab === tab);
+  });
+  if (!silent && location.hash !== `#${tab}`) location.hash = tab;
+  if (tab === "inbox") refreshInbox(false);
+  renderCurrentTab();
+  if (changed) window.scrollTo({ top: 0 });
 }
 
-async function loadAlertHistory() {
-  const bodyEl = document.getElementById("alert-history-body");
-  bodyEl.innerHTML = '<p class="text-muted small p-2">載入中…</p>';
+window.addEventListener("hashchange", () => {
+  const tab = (location.hash || "").replace("#", "");
+  if (APP_TABS.includes(tab) && tab !== currentTab && state.userId) switchTab(tab, true);
+});
+
+function renderCurrentTab() {
+  if (!currentTab) return;
+  if (currentTab === "home") renderHome();
+  else if (currentTab === "holdings") renderHoldings();
+  else if (currentTab === "live") renderLive();
+  else if (currentTab === "inbox") renderInbox();
+  else renderWatchlist(watchlistRows);
+}
+
+// ── PWA v2: 訊號等級（統一對照）──────────────────────────────────
+const SEV_META = {
+  red:    { emoji: "🔴", label: "強訊號" },
+  orange: { emoji: "🟠", label: "注意" },
+  green:  { emoji: "🟢", label: "突破" },
+  yellow: { emoji: "🟡", label: "接近" },
+  info:   { emoji: "🔵", label: "資訊" },
+};
+
+function inferSeverity(row) {
+  const s = String(row.severity || "").toLowerCase();
+  if (SEV_META[s] && s !== "info") return s;
+  const t = String(row.title || "");
+  if (/跌破支撐|跌停|下跌價位/.test(t)) return "red";
+  if (/逼近支撐|爆量|融資/.test(t))     return "orange";
+  if (/突破壓力|漲停|收復/.test(t))     return "green";
+  if (/逼近壓力|上漲價位/.test(t))      return "yellow";
+  return SEV_META[s] ? s : "info";
+}
+
+function alertTypeLabel(row) {
+  const t = String(row.title || "");
+  const m = t.match(/(跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
+  if (m) return m[1].replace("達到自訂", "");
+  if (String(row.source || "").startsWith("daily_report")) return "每日報告";
+  return "通知";
+}
+
+function fmtTime(ts, withDate = false) {
+  const d = new Date(ts);
+  if (isNaN(d)) return "";
+  const hm = d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return withDate ? `${d.getMonth() + 1}/${d.getDate()} ${hm}` : hm;
+}
+
+function isToday(ts) {
+  const d = new Date(ts), n = new Date();
+  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+}
+
+function dayLabelOf(ts) {
+  const d = new Date(ts); d.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - d) / 86400000);
+  if (diff <= 0) return "今天";
+  if (diff === 1) return "昨天";
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function stockLabelOf(sid) {
+  const wl = watchlistRows.find(w => String(w.stock_id).trim() === sid);
+  const name = (wl?.stock_name || "").trim() || universe[sid]?.n || "";
+  return name ? `${sid} ${name}` : sid;
+}
+
+// 收盤報價（來自共享報表資料；Phase 2 將改接 intraday_state 即時資料）
+function getQuote(sid) {
+  const s = sharedReportData?.stock_data?.[sid];
+  if (!s) return null;
+  const ohlcv = s.daily?.ohlcv;
+  const cur = Number(s.levels?.current ?? (ohlcv?.length ? ohlcv[ohlcv.length - 1][3] : NaN));
+  if (!isFinite(cur)) return null;
+  let chg = null;
+  if (ohlcv && ohlcv.length >= 2) {
+    const prev = Number(ohlcv[ohlcv.length - 2][3]);
+    if (isFinite(prev) && prev > 0) chg = (cur - prev) / prev * 100;
+  }
+  return { price: cur, changePct: chg };
+}
+
+function fmtChgHtml(chg) {
+  if (chg === null || chg === undefined || !isFinite(chg)) return '<span class="chg-flat">—</span>';
+  const cls = chg > 0.0001 ? "chg-up" : (chg < -0.0001 ? "chg-down" : "chg-flat");
+  return `<span class="${cls}">${chg > 0 ? "+" : ""}${chg.toFixed(2)}%</span>`;
+}
+
+function latestSignalOf(sid) {
+  for (const r of inboxRows) {
+    if (String(r.stock_id || "").trim() === sid && isToday(r.sent_at)) {
+      const src = String(r.source || "monitor");
+      if (src === "monitor" || src === "post_market") return r;
+    }
+  }
+  return null;
+}
+
+// ── PWA v2: 通知 Inbox ───────────────────────────────────────────
+async function refreshInbox(force = true) {
+  if (!state.userId) return;
+  if (!force && Date.now() - inboxLoadedAt < 60000) return;   // 60 秒內不重抓
   try {
     const rows = await sbGet("alert_history", {
       order: "sent_at.desc",
-      limit: "100",
+      limit: "200",
     }, state.accessToken);
-
-    if (!rows || !rows.length) {
-      bodyEl.innerHTML = '<div class="text-center text-muted py-4" style="font-size:.85rem">尚無通知紀錄<br><span style="font-size:.75rem;opacity:.7">監控觸發的警報會自動保存在這裡</span></div>';
-      return;
-    }
-
-    bodyEl.innerHTML = rows.map(r => {
-      const dt = new Date(r.sent_at);
-      const timeStr = dt.toLocaleString("zh-TW", {
-        month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", hour12: false,
-      });
-      const source = String(r.source || "monitor");
-      const dataTitle = encodeURIComponent(String(r.title || ""));
-      const dataBody = encodeURIComponent(String(r.body || ""));
-      const dataTime = encodeURIComponent(timeStr);
-      const dataSource = encodeURIComponent(source);
-      const sid = (r.stock_id || "").trim();
-      const sidBadge = sid
-        ? `<span class="badge-sid" style="font-size:.68rem;cursor:pointer" onclick="event.stopPropagation();bootstrap.Modal.getInstance(document.getElementById('alertHistoryModal'))?.hide();openKLineFromWatchlist('${sid}')">${escapeHtml(sid)}</span>`
-        : "";
-      return `
-        <div class="alert-history-item" role="button" tabindex="0"
-             style="padding:10px 12px;border-bottom:1px solid rgba(121,157,255,.14);cursor:pointer"
-             data-title="${dataTitle}" data-body="${dataBody}" data-time="${dataTime}" data-source="${dataSource}"
-             onclick="openAlertHistoryDetail(this)"
-             onkeydown="if(event.key==='Enter' || event.key===' '){ event.preventDefault(); openAlertHistoryDetail(this); }">
-          <div class="d-flex align-items-center gap-2 mb-1">
-            <span class="fw-semibold" style="font-size:.85rem">${escapeHtml(r.title || "")}</span>
-            ${sidBadge}
-            <span class="ms-auto text-muted" style="font-size:.7rem;white-space:nowrap">${timeStr}</span>
-          </div>
-          <div class="text-muted" style="font-size:.78rem;white-space:pre-wrap;line-height:1.45">${escapeHtml(r.body || "")}</div>
-        </div>`;
-    }).join("");
+    inboxRows = rows || [];
+    inboxLoadedAt = Date.now();
+    inboxSupportsRead = inboxRows.length === 0 || ("read_at" in inboxRows[0]);
+    inboxLoadError = null;
+    updateInboxBadge();
+    renderCurrentTab();
   } catch (e) {
-    bodyEl.innerHTML = `<div class="text-danger small p-2">載入失敗：${escapeHtml(e.message || "")}<br><span class="text-muted" style="font-size:.72rem">若為 404，請先在 Supabase 執行 migrate_alert_history.sql</span></div>`;
+    inboxLoadError = e.message || "載入失敗";
+    if (currentTab === "inbox") renderInbox();
   }
 }
 
-function openAlertHistoryDetail(el) {
-  const title = decodeURIComponent(el?.dataset?.title || "");
-  const body = decodeURIComponent(el?.dataset?.body || "");
-  const timeStr = decodeURIComponent(el?.dataset?.time || "");
-  const source = decodeURIComponent(el?.dataset?.source || "monitor");
+function updateInboxBadge() {
+  const el = document.getElementById("inbox-badge");
+  if (!el) return;
+  const n = inboxSupportsRead ? inboxRows.filter(r => !r.read_at).length : 0;
+  el.style.display = n > 0 ? "block" : "none";
+  el.textContent = n > 99 ? "99+" : String(n);
+}
 
-  const titleEl = document.getElementById("alert-history-detail-title");
-  const bodyEl = document.getElementById("alert-history-detail-body");
-  const timeEl = document.getElementById("alert-history-detail-time");
-  const sourceEl = document.getElementById("alert-history-detail-source");
-  const openReportBtn = document.getElementById("alert-history-open-report-btn");
+function setInboxFilter(f) {
+  inboxFilter = f;
+  document.querySelectorAll("#inbox-filters .filter-chip").forEach(c =>
+    c.classList.toggle("active", c.dataset.f === f));
+  renderInbox();
+}
 
-  titleEl.textContent = title || "通知詳情";
-  bodyEl.textContent = body || "（無內容）";
-  timeEl.textContent = timeStr || "";
-  sourceEl.textContent = source;
+function filteredInboxRows() {
+  if (inboxFilter === "unread") {
+    return inboxSupportsRead ? inboxRows.filter(r => !r.read_at) : [];
+  }
+  if (inboxFilter === "important") {
+    return inboxRows.filter(r => ["red", "orange"].includes(inferSeverity(r)));
+  }
+  if (inboxFilter === "stocks") {
+    const holdSids = new Set(watchlistRows.filter(r => Number(r.shares) > 0).map(r => String(r.stock_id).trim()));
+    const sids = holdSids.size ? holdSids : new Set(watchlistRows.map(r => String(r.stock_id).trim()));
+    return inboxRows.filter(r => r.stock_id && sids.has(String(r.stock_id).trim()));
+  }
+  return inboxRows;
+}
+
+function renderInbox() {
+  const listEl = document.getElementById("inbox-list");
+  if (!listEl) return;
+  document.getElementById("inbox-migrate-hint").style.display = inboxSupportsRead ? "none" : "";
+
+  if (inboxLoadError) {
+    listEl.innerHTML = `<div class="inbox-empty text-danger">載入失敗：${escapeHtml(inboxLoadError)}<br><span class="text-muted" style="font-size:.75rem">若為 404，請先在 Supabase 執行 migrate_alert_history.sql</span></div>`;
+    return;
+  }
+
+  const rows = filteredInboxRows();
+  if (!rows.length) {
+    const hints = {
+      all: "尚無通知<br><span style='font-size:.75rem;opacity:.7'>監控觸發的警報會自動保存在這裡</span>",
+      unread: inboxSupportsRead ? "沒有未讀通知 🎉" : "已讀功能需先執行 migrate_pwa_v2.sql",
+      important: "沒有重要通知",
+      stocks: "你的持股／自選股尚無通知",
+    };
+    listEl.innerHTML = `<div class="inbox-empty">${hints[inboxFilter] || hints.all}</div>`;
+    return;
+  }
+
+  let html = "";
+  let lastDay = null;
+  for (const r of rows) {
+    const day = dayLabelOf(r.sent_at);
+    if (day !== lastDay) {
+      html += `<div class="inbox-day-head">${day}</div>`;
+      lastDay = day;
+    }
+    const sev = inferSeverity(r);
+    const unread = inboxSupportsRead && !r.read_at;
+    const sid = String(r.stock_id || "").trim();
+    const sidBadge = sid ? `<span class="badge-sid" style="font-size:.66rem">${escapeHtml(sid)}</span>` : "";
+    html += `
+      <div class="inbox-item${unread ? " unread" : ""}" role="button" tabindex="0"
+           onclick="openInboxDetail('${escapeHtml(String(r.id))}')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetail('${escapeHtml(String(r.id))}');}">
+        <span class="sev-dot sev-${sev} ib-sev"></span>
+        <div class="ib-main">
+          <div class="ib-title">${escapeHtml(r.title || "")} ${sidBadge}</div>
+          <div class="ib-body">${escapeHtml(r.body || "")}</div>
+        </div>
+        <span class="ib-time">${fmtTime(r.sent_at, dayLabelOf(r.sent_at) !== "今天")}</span>
+      </div>`;
+  }
+  listEl.innerHTML = html;
+}
+
+let detailRow = null;   // 目前開啟詳情的通知 row
+
+function openInboxDetail(rowId) {
+  const row = inboxRows.find(r => String(r.id) === String(rowId));
+  if (!row) return;
+  detailRow = row;
+
+  // 標記已讀（fire-and-forget）
+  if (inboxSupportsRead && !row.read_at) {
+    row.read_at = new Date().toISOString();
+    sbPatch("alert_history", { "id": `eq.${row.id}` }, { read_at: row.read_at }, state.accessToken)
+      .catch(() => {});
+    updateInboxBadge();
+    if (currentTab === "inbox") renderInbox();
+  }
+
+  const source = String(row.source || "monitor");
+  document.getElementById("alert-history-detail-title").textContent = row.title || "通知詳情";
+  document.getElementById("alert-history-detail-body").textContent = row.body || "（無內容）";
+  document.getElementById("alert-history-detail-time").textContent = fmtTime(row.sent_at, true);
+  document.getElementById("alert-history-detail-source").textContent = source;
+
+  // 「為什麼通知你？」
+  const whyEl = document.getElementById("alert-history-why");
+  const whyHtml = buildWhyHtml(row);
+  whyEl.innerHTML = whyHtml;
+  whyEl.style.display = whyHtml ? "" : "none";
+
+  const sid = String(row.stock_id || "").trim();
+  const wl = sid ? watchlistRows.find(w => String(w.stock_id).trim() === sid) : null;
+  document.getElementById("alert-history-view-stock-btn").style.display = sid ? "inline-flex" : "none";
+  document.getElementById("alert-history-settings-btn").style.display = wl ? "inline-flex" : "none";
 
   const isDailyReport = source === "daily_report_line" || source === "daily_report_web_push";
-  openReportBtn.style.display = isDailyReport ? "inline-flex" : "none";
+  document.getElementById("alert-history-open-report-btn").style.display = isDailyReport ? "inline-flex" : "none";
 
-  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("alertHistoryDetailModal"));
-  modal.show();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("alertHistoryDetailModal")).show();
+}
+
+function buildWhyHtml(row) {
+  const sid = String(row.stock_id || "").trim();
+  if (!sid) return "";
+  const wl = watchlistRows.find(w => String(w.stock_id).trim() === sid);
+  if (!wl) return "";
+  const t = String(row.title || "");
+  const name = (wl.stock_name || "").trim() || universe[sid]?.n || "";
+
+  const condMap = [
+    [/跌破支撐/, "⚠️ 跌破支撐", wl.alert_break_support],
+    [/逼近支撐/, "🟢 逼近支撐", wl.alert_near_support],
+    [/突破壓力/, "⚡ 突破壓力", wl.alert_break_resistance],
+    [/逼近壓力/, "🔴 逼近壓力", wl.alert_near_resistance],
+    [/爆量/,     "🚀 爆量",     wl.alert_volume_spike],
+    [/漲停/,     "🔒 漲停",     wl.alert_limit_up],
+    [/跌停/,     "💥 跌停",     wl.alert_limit_down],
+    [/法人連買/, "📈 法人連買", wl.alert_inst_buy],
+    [/法人連賣/, "📉 法人連賣", wl.alert_inst_sell],
+    [/融資暴增/, "💳 融資暴增", wl.alert_margin_up],
+    [/融資暴減/, "💳 融資暴減", wl.alert_margin_down],
+  ];
+  const lines = [`你已將 <b>${escapeHtml(sid)} ${escapeHtml(name)}</b> 加入自選股`];
+  for (const [re, label] of condMap) {
+    if (re.test(t)) { lines.push(`已開啟「${label}」通知條件`); break; }
+  }
+  if (/上漲價位/.test(t) && wl.target_price_high != null) lines.push(`自訂上漲目標價：${wl.target_price_high}`);
+  if (/下跌價位/.test(t) && wl.target_price_low != null)  lines.push(`自訂下跌目標價：${wl.target_price_low}`);
+  if (String(row.source || "").startsWith("daily_report")) lines.push("已訂閱每日分析報告推播");
+  return `<div class="why-box"><div class="why-title">為什麼通知你？</div>${lines.map(l => `・${l}`).join("<br>")}</div>`;
+}
+
+function openStockFromDetail() {
+  const sid = String(detailRow?.stock_id || "").trim();
+  if (!sid) return;
+  bootstrap.Modal.getInstance(document.getElementById("alertHistoryDetailModal"))?.hide();
+  openKLineFromWatchlist(sid);
+}
+
+function openSettingsFromDetail() {
+  const sid = String(detailRow?.stock_id || "").trim();
+  const wl = watchlistRows.find(w => String(w.stock_id).trim() === sid);
+  if (!wl) return;
+  bootstrap.Modal.getInstance(document.getElementById("alertHistoryDetailModal"))?.hide();
+  openAlertSettings(wl.id);
+}
+
+async function markAllRead() {
+  if (!inboxSupportsRead) {
+    alert("已讀功能需先在 Supabase 執行 migrate_pwa_v2.sql");
+    return;
+  }
+  try {
+    const now = new Date().toISOString();
+    await sbPatch("alert_history",
+      { "user_id": `eq.${state.userId}`, "read_at": "is.null" },
+      { read_at: now }, state.accessToken);
+    inboxRows.forEach(r => { if (!r.read_at) r.read_at = now; });
+    updateInboxBadge();
+    renderInbox();
+  } catch (e) {
+    alert(`標記失敗：${e.message}`);
+  }
 }
 
 function openDailyReportFromHistory() {
@@ -1233,30 +1615,268 @@ async function clearAlertHistory() {
   if (!confirm("確定清空全部通知紀錄？")) return;
   try {
     await sbDelete("alert_history", { "user_id": `eq.${state.userId}` }, state.accessToken);
-    await loadAlertHistory();
+    inboxRows = [];
+    updateInboxBadge();
+    renderInbox();
   } catch (e) {
     alert(`清空失敗：${e.message}`);
   }
+}
+
+// ── PWA v2: 🏠 首頁 Today ────────────────────────────────────────
+function renderHome() {
+  const dateEl = document.getElementById("home-date");
+  if (!dateEl) return;
+  const now = new Date();
+  const week = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
+  dateEl.textContent = `${now.getMonth() + 1}/${now.getDate()}（${week}）`;
+
+  // 今日事件摘要
+  const evAll = Object.values(stockEvents).flat();
+  const high = evAll.filter(e => e.importance === "high").length;
+  const normal = evAll.filter(e => e.importance === "normal").length;
+  const other = evAll.length - high - normal;
+  document.getElementById("home-events-headline").textContent =
+    evAll.length > 0 ? `📋 今日你的股票有 ${evAll.length} 件事` : "📋 今日事件";
+  document.getElementById("home-events-stats").innerHTML = evAll.length > 0 ? `
+    <div class="home-stat"><div class="hs-num sev-red">${high}</div><div class="hs-label">🔴 重要</div></div>
+    <div class="home-stat"><div class="hs-num sev-orange">${normal}</div><div class="hs-label">🟠 注意</div></div>
+    <div class="home-stat"><div class="hs-num sev-info">${other}</div><div class="hs-label">📰 一般</div></div>
+  ` : `<div class="view-empty py-2" style="padding:0.5rem">今日尚無彙整事件<br><span style="font-size:.72rem;opacity:.75">每日盤後執行 python main.py --fetch-events 更新</span></div>`;
+
+  // 盤中訊號（今日前 3 筆）
+  const signals = inboxRows.filter(r =>
+    isToday(r.sent_at) && ["monitor", "post_market"].includes(String(r.source || "monitor")));
+  document.getElementById("home-signals").innerHTML = signals.length
+    ? signals.slice(0, 3).map(r => {
+        const sev = inferSeverity(r);
+        const sid = String(r.stock_id || "").trim();
+        return `
+          <div class="home-row" onclick="openInboxDetail('${escapeHtml(String(r.id))}')">
+            <span class="sev-dot sev-${sev}"></span>
+            <span class="hr-name">${escapeHtml(sid ? stockLabelOf(sid) : "")} ${escapeHtml(alertTypeLabel(r))}</span>
+            <span class="hr-meta">${fmtTime(r.sent_at)}</span>
+          </div>`;
+      }).join("")
+    : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無盤中訊號</div>';
+
+  // 我的自選摘要（最多 8 檔）
+  const wlHtml = watchlistRows.slice(0, 8).map(row => {
+    const sid = String(row.stock_id || "").trim();
+    const name = (row.stock_name || "").trim() || universe[sid]?.n || sid;
+    const q = getQuote(sid);
+    const sig = latestSignalOf(sid);
+    const sigDot = sig ? `<span class="sev-dot sev-${inferSeverity(sig)}"></span>` : '<span class="hr-meta">─</span>';
+    return `
+      <div class="home-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
+        <span class="badge-sid" style="font-size:.68rem">${escapeHtml(sid)}</span>
+        <span class="hr-name">${escapeHtml(name)}</span>
+        <span class="hr-meta">${q ? q.price.toFixed(2) : ""}</span>
+        ${q ? fmtChgHtml(q.changePct) : ""}
+        ${sigDot}
+      </div>`;
+  }).join("");
+  document.getElementById("home-watchlist").innerHTML = watchlistRows.length
+    ? wlHtml
+    : '<div class="view-empty py-2" style="padding:0.5rem">尚未加入自選股，到 ⭐ 自選 分頁新增</div>';
+
+  // 今日重要資訊（high importance 事件）
+  const newsRows = [];
+  for (const [sid, evs] of Object.entries(stockEvents)) {
+    for (const ev of evs) {
+      if (ev.importance === "high") newsRows.push({ sid, ev });
+    }
+  }
+  document.getElementById("home-news").innerHTML = newsRows.length
+    ? newsRows.slice(0, 6).map(({ sid, ev }) => `
+        <div class="home-row" onclick="openEventsPanel('${escapeHtml(sid)}')">
+          <span class="badge-sid" style="font-size:.68rem">${escapeHtml(sid)}</span>
+          <span class="hr-name">${escapeHtml(ev.title || "")}</span>
+        </div>`).join("")
+    : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無重要資訊</div>';
+}
+
+// ── PWA v2: 📊 持股 ──────────────────────────────────────────────
+function renderHoldings() {
+  const listEl = document.getElementById("holdings-list");
+  if (!listEl) return;
+  const holds = watchlistRows.filter(r => Number(r.shares) > 0);
+  const summaryCard = document.getElementById("holdings-summary-card");
+  const noteEl = document.getElementById("holdings-price-note");
+
+  if (!holds.length) {
+    summaryCard.style.display = "none";
+    noteEl.textContent = "";
+    listEl.innerHTML = `
+      <div class="view-empty">
+        尚未設定持股<br>
+        <span style="font-size:.78rem">到 ⭐ 自選 → 🔔 通知設定 → 📊 持股，輸入持有股數與平均成本</span><br>
+        <button class="btn btn-sm btn-outline-info mt-3" onclick="switchTab('watch')">前往自選股 →</button>
+      </div>`;
+    return;
+  }
+
+  noteEl.textContent = "以最近收盤價計算";
+  let total = 0, dayPl = 0, unreal = 0;
+  let hasQuote = false, hasCost = false;
+
+  const rowsHtml = holds.map(row => {
+    const sid = String(row.stock_id || "").trim();
+    const name = (row.stock_name || "").trim() || universe[sid]?.n || sid;
+    const shares = Number(row.shares);
+    const cost = row.avg_cost != null ? Number(row.avg_cost) : null;
+    const q = getQuote(sid);
+    const sig = latestSignalOf(sid);
+
+    let value = null, pl = null;
+    if (q) {
+      hasQuote = true;
+      value = q.price * shares;
+      total += value;
+      if (q.changePct !== null) {
+        const prev = q.price / (1 + q.changePct / 100);
+        dayPl += (q.price - prev) * shares;
+      }
+      if (cost != null && cost > 0) {
+        hasCost = true;
+        pl = (q.price - cost) * shares;
+        unreal += pl;
+      }
+    }
+
+    const sigHtml = sig
+      ? `<span class="wl-signal-badge sev-${inferSeverity(sig)}">${SEV_META[inferSeverity(sig)].emoji} ${escapeHtml(alertTypeLabel(sig))}</span>`
+      : "";
+    const plHtml = pl !== null
+      ? `<span class="${pl >= 0 ? "chg-up" : "chg-down"}">${pl >= 0 ? "+" : ""}${Math.round(pl).toLocaleString()}</span>`
+      : "";
+
+    return `
+      <div class="holding-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
+        <div class="hr-left">
+          <div class="hr-sid">${escapeHtml(sid)} · ${shares.toLocaleString()} 股${cost != null ? ` · 成本 ${cost}` : ""}</div>
+          <div class="hr-title">${escapeHtml(name)} ${sigHtml}</div>
+        </div>
+        <div class="hr-right">
+          <div class="hr-price">${q ? q.price.toFixed(2) : "—"} ${q ? fmtChgHtml(q.changePct) : ""}</div>
+          <div class="hr-sub">${value !== null ? "市值 " + Math.round(value).toLocaleString() : "無報價資料"} ${plHtml}</div>
+        </div>
+      </div>`;
+  }).join("");
+  listEl.innerHTML = rowsHtml;
+
+  summaryCard.style.display = "";
+  document.getElementById("hd-total").textContent = hasQuote ? `$${Math.round(total).toLocaleString()}` : "—";
+  const dayEl = document.getElementById("hd-day-pl");
+  dayEl.innerHTML = hasQuote
+    ? `<span class="${dayPl >= 0 ? "chg-up" : "chg-down"}">${dayPl >= 0 ? "+" : ""}$${Math.round(dayPl).toLocaleString()}</span>`
+    : "—";
+  const unrealEl = document.getElementById("hd-unrealized");
+  unrealEl.innerHTML = hasCost
+    ? `<span class="${unreal >= 0 ? "chg-up" : "chg-down"}">${unreal >= 0 ? "+" : ""}$${Math.round(unreal).toLocaleString()}</span>`
+    : "—";
+}
+
+// ── PWA v2: ⚡ 盤中雷達 ──────────────────────────────────────────
+function _isMarketOpenNow() {
+  const n = new Date();
+  const day = n.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = n.getHours() * 60 + n.getMinutes();
+  return mins >= 9 * 60 && mins <= 13 * 60 + 35;
+}
+
+function renderLive() {
+  const listEl = document.getElementById("live-list");
+  if (!listEl) return;
+  const statusEl = document.getElementById("live-status");
+  statusEl.textContent = _isMarketOpenNow() ? "🟢 盤中（09:00–13:30）" : "⚪ 已收盤 — 今日訊號回顧";
+
+  const rows = inboxRows.filter(r =>
+    isToday(r.sent_at) && ["monitor", "post_market"].includes(String(r.source || "monitor")));
+
+  // 統計
+  const counts = { red: 0, orange: 0, green: 0, yellow: 0 };
+  rows.forEach(r => {
+    const sev = inferSeverity(r);
+    if (counts[sev] !== undefined) counts[sev]++;
+  });
+  document.getElementById("live-stats").innerHTML = `
+    <div class="home-stat"><div class="hs-num sev-red">${counts.red}</div><div class="hs-label">🔴 強訊號</div></div>
+    <div class="home-stat"><div class="hs-num sev-orange">${counts.orange + counts.yellow}</div><div class="hs-label">🟠 注意</div></div>
+    <div class="home-stat"><div class="hs-num sev-green">${counts.green}</div><div class="hs-label">🟢 突破</div></div>
+  `;
+
+  if (!rows.length) {
+    listEl.innerHTML = `
+      <div class="view-empty">
+        今日尚無盤中訊號<br>
+        <span style="font-size:.78rem;opacity:.8">後端監控（python main.py --multi-monitor）觸發的警報會即時出現在這裡</span>
+      </div>`;
+    return;
+  }
+
+  listEl.innerHTML = rows.map(r => {
+    const sev = inferSeverity(r);
+    const sid = String(r.stock_id || "").trim();
+    return `
+      <div class="signal-card sev-${sev}" onclick="openInboxDetail('${escapeHtml(String(r.id))}')">
+        <div class="sc-head">
+          <span class="sc-type sev-${sev}">${SEV_META[sev].emoji} ${escapeHtml(alertTypeLabel(r))}</span>
+          <span class="sc-time">${fmtTime(r.sent_at)}</span>
+        </div>
+        ${sid ? `<div class="sc-stock">${escapeHtml(stockLabelOf(sid))}</div>` : ""}
+        <div class="sc-detail">${escapeHtml(r.body || "")}</div>
+        ${sid ? `<div class="sc-foot">查看走勢 →</div>` : ""}
+      </div>`;
+  }).join("");
 }
 
 // ── 自選股清單 ──────────────────────────────────────────────────
 async function loadWatchlist() {
   const rows = await sbGet("watchlist", {}, state.accessToken);
   watchlistRows = rows || [];
-  renderWatchlist(rows);
+  renderCurrentTab();
   // 非同步載入事件（不阻塞卡片渲染）
   const sids = (rows || []).map(r => r.stock_id).filter(Boolean);
-  loadStockEvents(sids).then(() => renderWatchlist(watchlistRows));
+  loadStockEvents(sids).then(() => renderCurrentTab());
+}
+
+function setWatchFilter(f) {
+  watchFilter = f;
+  document.querySelectorAll("#watch-filters .filter-chip").forEach(c =>
+    c.classList.toggle("active", c.dataset.f === f));
+  renderWatchlist(watchlistRows);
+}
+
+function filteredWatchRows(rows) {
+  if (watchFilter === "signal") {
+    return rows.filter(r => latestSignalOf(String(r.stock_id).trim()));
+  }
+  if (watchFilter === "up" || watchFilter === "down") {
+    return rows.filter(r => {
+      const q = getQuote(String(r.stock_id).trim());
+      if (!q || q.changePct === null) return false;
+      return watchFilter === "up" ? q.changePct > 0 : q.changePct < 0;
+    });
+  }
+  return rows;
 }
 
 function renderWatchlist(rows) {
   const grid = document.getElementById("wl-grid");
+  if (!grid) return;
   grid.innerHTML = "";
   document.getElementById("wl-count").textContent = rows.length;
-  document.getElementById("wl-empty").style.display = rows.length ? "none" : "";
-  document.getElementById("wl-grid").style.display = rows.length ? "block" : "none";
+  const visible = filteredWatchRows(rows);
+  const emptyEl = document.getElementById("wl-empty");
+  emptyEl.style.display = visible.length ? "none" : "";
+  emptyEl.textContent = rows.length
+    ? "沒有符合篩選條件的股票"
+    : "尚未加入任何股票，從上方搜尋並加入吧！";
+  grid.style.display = visible.length ? "block" : "none";
 
-  rows.forEach(row => {
+  visible.forEach(row => {
     const sid = String(row.stock_id || "").trim();
     const fallbackName = universe[sid]?.n || "";
     const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
@@ -1269,6 +1889,24 @@ function renderWatchlist(rows) {
     const evtClass = events.length > 0
       ? `wl-events-btn${highEvents.length > 0 ? " has-high" : ""}`
       : "wl-events-btn wl-events-empty";
+
+    // 報價 + 今日訊號 badge + 持股標記
+    const q = getQuote(sid);
+    const sig = latestSignalOf(sid);
+    const quoteParts = [];
+    if (q) {
+      quoteParts.push(`<span class="wq-price">${q.price.toFixed(2)}</span>`);
+      quoteParts.push(fmtChgHtml(q.changePct));
+    }
+    if (sig) {
+      const sev = inferSeverity(sig);
+      quoteParts.push(`<span class="wl-signal-badge sev-${sev}">${SEV_META[sev].emoji} ${escapeHtml(alertTypeLabel(sig))}</span>`);
+    }
+    if (Number(row.shares) > 0) {
+      quoteParts.push(`<span class="wl-signal-badge">📊 持股</span>`);
+    }
+    const quoteLine = quoteParts.length ? `<div class="wl-quote-line">${quoteParts.join("")}</div>` : "";
+
     const item = document.createElement("article");
     item.className = "wl-row";
     item.dataset.id = row.id;
@@ -1279,12 +1917,13 @@ function renderWatchlist(rows) {
         <div class="wl-stock-meta">
           <span class="badge-sid">${escapeHtml(sid)}</span>
           <div class="wl-name-inline">${escapeHtml(displayName)}</div>
+          ${quoteLine}
         </div>
       </div>
       <div class="wl-row-actions">
         <button class="${evtClass}" onclick="openEventsPanel('${escapeHtml(sid)}')">${evtLabel}</button>
         <button class="wl-action-btn wl-kline-action" onclick="openKLineFromWatchlist('${sid}')">📈 K線分析</button>
-        <button class="wl-action-btn wl-alert-action" onclick="openAlertSettings('${row.id}')">🔔 LINE通知</button>
+        <button class="wl-action-btn wl-alert-action" onclick="openAlertSettings('${row.id}')">🔔 通知設定</button>
       </div>
     `;
     grid.appendChild(item);
@@ -1303,7 +1942,7 @@ function openAlertSettings(rowId) {
   const sid = String(row.stock_id || "").trim();
   const fallbackName = universe[sid]?.n || "";
   const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
-  document.getElementById("alert-settings-title").textContent = `LINE 通知設定｜${sid} ${displayName}`;
+  document.getElementById("alert-settings-title").textContent = `通知設定｜${sid} ${displayName}`;
 
   // 盤中即時
   document.getElementById("alert-break-support").checked    = !!row.alert_break_support;
@@ -1323,6 +1962,9 @@ function openAlertSettings(rowId) {
   const tLow  = row.target_price_low;
   document.getElementById("inp-target-high").value = (tHigh != null && tHigh !== "") ? tHigh : "";
   document.getElementById("inp-target-low").value  = (tLow  != null && tLow  !== "") ? tLow  : "";
+  // 持股
+  document.getElementById("inp-shares").value   = (row.shares   != null && row.shares   !== "") ? row.shares   : "";
+  document.getElementById("inp-avg-cost").value = (row.avg_cost != null && row.avg_cost !== "") ? row.avg_cost : "";
 
   document.getElementById("alert-settings-msg").textContent = "";
 
@@ -1452,6 +2094,37 @@ async function savePriceTargets() {
     msgEl.innerHTML = `<span class="text-success">✅ 價位已儲存（${desc}）</span>`;
   } catch (e) {
     msgEl.innerHTML = `<span class="text-danger">❌ 儲存失敗：${e.message}</span>`;
+  }
+}
+
+function clearHoldingInput(which) {
+  document.getElementById(which === "shares" ? "inp-shares" : "inp-avg-cost").value = "";
+}
+
+async function saveHoldings() {
+  if (!alertModalRowId) return;
+  const msgEl = document.getElementById("alert-settings-msg");
+  const sharesRaw = document.getElementById("inp-shares").value.trim();
+  const costRaw   = document.getElementById("inp-avg-cost").value.trim();
+  const shares = sharesRaw !== "" ? parseFloat(sharesRaw) : null;
+  const cost   = costRaw   !== "" ? parseFloat(costRaw)   : null;
+  if (shares !== null && (isNaN(shares) || shares < 0)) {
+    msgEl.innerHTML = '<span class="text-danger">❌ 股數格式錯誤（需 ≥ 0）</span>';
+    return;
+  }
+  if (cost !== null && (isNaN(cost) || cost <= 0)) {
+    msgEl.innerHTML = '<span class="text-danger">❌ 平均成本格式錯誤（需大於 0）</span>';
+    return;
+  }
+  msgEl.innerHTML = '<span class="text-muted">儲存中…</span>';
+  try {
+    await sbPatch("watchlist", { "id": `eq.${alertModalRowId}` },
+      { shares: shares, avg_cost: cost }, state.accessToken);
+    const row = getWatchlistRowById(alertModalRowId);
+    if (row) { row.shares = shares; row.avg_cost = cost; }
+    msgEl.innerHTML = `<span class="text-success">✅ 持股已儲存${shares ? `（${shares} 股）` : "（已清除）"}</span>`;
+  } catch (e) {
+    msgEl.innerHTML = `<span class="text-danger">❌ 儲存失敗：${e.message}<br><span style="font-size:.72rem">若為欄位錯誤，請先在 Supabase 執行 migrate_pwa_v2.sql</span></span>`;
   }
 }
 
