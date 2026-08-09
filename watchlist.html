@@ -1287,6 +1287,19 @@ function logout() {
 }
 
 // ── PWA v2: Tab 路由 ─────────────────────────────────────────────
+let _liveRefreshTimer = null;
+function _startLiveRefresh() {
+  if (_liveRefreshTimer) return;
+  _liveRefreshTimer = setInterval(async () => {
+    if (currentTab !== "live") { _stopLiveRefresh(); return; }
+    await loadIntradayQuotes(true);
+    renderLive();
+  }, 30000);
+}
+function _stopLiveRefresh() {
+  if (_liveRefreshTimer) { clearInterval(_liveRefreshTimer); _liveRefreshTimer = null; }
+}
+
 function switchTab(tab, silent = false) {
   if (!APP_TABS.includes(tab)) tab = "home";
   const changed = currentTab !== tab;
@@ -1300,6 +1313,12 @@ function switchTab(tab, silent = false) {
   });
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
+  if (tab === "live") {
+    loadIntradayQuotes(true).then(() => renderLive());
+    _startLiveRefresh();
+  } else {
+    _stopLiveRefresh();
+  }
   renderCurrentTab();
   if (changed) window.scrollTo({ top: 0 });
 }
@@ -1339,7 +1358,7 @@ async function loadIntradayQuotes(force = false) {
   intradayQuotesLoadingPromise = (async () => {
     try {
       const rows = await sbGet("intraday_state", {
-        select: "stock_id,price,change_pct,updated_at",
+        select: "stock_id,stock_name,price,change_pct,volume,signal,severity,level,signal_at,updated_at",
         stock_id: `in.(${sids.join(",")})`,
         limit: String(Math.max(30, sids.length * 2)),
       }, state.accessToken);
@@ -1352,7 +1371,14 @@ async function loadIntradayQuotes(force = false) {
         const changePctRaw = Number(row.change_pct);
         map[sid] = {
           price,
-          changePct: Number.isFinite(changePctRaw) ? changePctRaw : null,
+          changePct:  Number.isFinite(changePctRaw) ? changePctRaw : null,
+          volume:     row.volume ?? null,
+          signal:     row.signal   || "none",
+          severity:   row.severity || "none",
+          level:      row.level    != null ? Number(row.level) : null,
+          signal_at:  row.signal_at || null,
+          stock_name: row.stock_name || "",
+          updated_at: row.updated_at || null,
         };
       }
       intradayQuoteMap = map;
@@ -1449,6 +1475,19 @@ const SEV_META = {
   green:  { emoji: "🟢", label: "突破" },
   yellow: { emoji: "🟡", label: "接近" },
   info:   { emoji: "🔵", label: "資訊" },
+};
+const SEV_ORDER = { red: 4, orange: 3, yellow: 2, green: 1, none: 0, info: 0 };
+const SIGNAL_LABEL_MAP = {
+  break_sup:   "跌破支撐",
+  near_sup:    "逼近支撐",
+  reclaim_sup: "收復支撐",
+  break_res:   "突破壓力",
+  near_res:    "逼近壓力",
+  limit_up:    "漲停",
+  limit_down:  "跌停",
+  volume_spike:"爆量",
+  target_high: "觸及上漲目標",
+  target_low:  "觸及下跌目標",
 };
 
 function inferSeverity(row) {
@@ -1956,50 +1995,102 @@ function _isMarketOpenNow() {
   return mins >= 9 * 60 && mins <= 13 * 60 + 35;
 }
 
+function _signalLabel(sig) {
+  return SIGNAL_LABEL_MAP[sig] || sig || "訊號";
+}
+
 function renderLive() {
   const listEl = document.getElementById("live-list");
   if (!listEl) return;
+  const isOpen = _isMarketOpenNow();
   const statusEl = document.getElementById("live-status");
-  statusEl.textContent = _isMarketOpenNow() ? "🟢 盤中（09:00–13:30）" : "⚪ 已收盤 — 今日訊號回顧";
 
-  const rows = inboxRows.filter(r =>
-    isToday(r.sent_at) && ["monitor", "post_market"].includes(String(r.source || "monitor")));
+  // ── 從 intradayQuoteMap 取有訊號的自選股 ────────────────────────
+  const hasIntradayData = Object.keys(intradayQuoteMap).length > 0;
 
-  // 統計
-  const counts = { red: 0, orange: 0, green: 0, yellow: 0 };
-  rows.forEach(r => {
-    const sev = inferSeverity(r);
-    if (counts[sev] !== undefined) counts[sev]++;
-  });
-  document.getElementById("live-stats").innerHTML = `
-    <div class="home-stat"><div class="hs-num sev-red">${counts.red}</div><div class="hs-label">🔴 強訊號</div></div>
-    <div class="home-stat"><div class="hs-num sev-orange">${counts.orange + counts.yellow}</div><div class="hs-label">🟠 注意</div></div>
-    <div class="home-stat"><div class="hs-num sev-green">${counts.green}</div><div class="hs-label">🟢 突破</div></div>
-  `;
+  if (hasIntradayData) {
+    // Phase 2：intraday_state 已有資料，直接展示即時狀態
+    statusEl.textContent = isOpen
+      ? `🟢 盤中（09:00–13:35）· 每 30 秒更新`
+      : "⚪ 已收盤 — 今日最終訊號";
 
-  if (!rows.length) {
-    listEl.innerHTML = `
-      <div class="view-empty">
-        今日尚無盤中訊號<br>
-        <span style="font-size:.78rem;opacity:.8">後端監控（python main.py --multi-monitor）觸發的警報會即時出現在這裡</span>
-      </div>`;
-    return;
+    const signalRows = (watchlistRows || [])
+      .map(r => {
+        const sid = String(r.stock_id || "").trim();
+        const q = intradayQuoteMap[sid];
+        if (!q) return null;
+        return { sid, ...q, wl_name: (r.stock_name || "").trim() };
+      })
+      .filter(r => r && r.signal && r.signal !== "none")
+      .sort((a, b) => (SEV_ORDER[b.severity] || 0) - (SEV_ORDER[a.severity] || 0));
+
+    const counts = { red: 0, orange: 0, green: 0, yellow: 0 };
+    signalRows.forEach(r => { if (counts[r.severity] !== undefined) counts[r.severity]++; });
+    document.getElementById("live-stats").innerHTML = `
+      <div class="home-stat"><div class="hs-num sev-red">${counts.red}</div><div class="hs-label">🔴 強訊號</div></div>
+      <div class="home-stat"><div class="hs-num sev-orange">${counts.orange + counts.yellow}</div><div class="hs-label">🟠 注意</div></div>
+      <div class="home-stat"><div class="hs-num sev-green">${counts.green}</div><div class="hs-label">🟢 突破</div></div>
+    `;
+
+    if (!signalRows.length) {
+      listEl.innerHTML = `<div class="view-empty">目前無訊號<br><span style="font-size:.78rem;opacity:.8">自選股均未觸及支撐、壓力或特殊條件</span></div>`;
+      return;
+    }
+
+    listEl.innerHTML = signalRows.map(r => {
+      const sev = r.severity || "none";
+      const meta = SEV_META[sev] || SEV_META.info;
+      const name = r.wl_name || r.stock_name || stockLabelOf(r.sid);
+      const priceStr = r.price != null ? r.price.toFixed(2) : "—";
+      const chgHtml  = r.changePct != null ? fmtChgHtml(r.changePct) : "";
+      const levelStr = r.level != null ? `關卡 ${Number(r.level).toFixed(2)}` : "";
+      const timeStr  = r.signal_at ? fmtTime(r.signal_at) : (r.updated_at ? fmtTime(r.updated_at) : "");
+      return `
+        <div class="signal-card sev-${sev}" onclick="openKLineFromWatchlist('${escapeHtml(r.sid)}')">
+          <div class="sc-head">
+            <span class="sc-type sev-${sev}">${meta.emoji} ${escapeHtml(_signalLabel(r.signal))}</span>
+            <span class="sc-time">${escapeHtml(timeStr)}</span>
+          </div>
+          <div class="sc-stock">${escapeHtml(r.sid)} ${escapeHtml(name)}</div>
+          <div class="sc-detail">
+            現價 <strong>${escapeHtml(priceStr)}</strong> ${chgHtml}
+            ${levelStr ? `<span style="margin-left:.5em;opacity:.7">· ${escapeHtml(levelStr)}</span>` : ""}
+          </div>
+          <div class="sc-foot">查看 K 線 →</div>
+        </div>`;
+    }).join("");
+
+  } else {
+    // 降級：intraday_state 尚無資料（後端未啟動或首次啟動），改用今日 alert_history
+    statusEl.textContent = isOpen ? "🟢 盤中（09:00–13:35）" : "⚪ 已收盤 — 今日訊號回顧";
+    const rows = inboxRows.filter(r =>
+      isToday(r.sent_at) && ["monitor", "post_market"].includes(String(r.source || "monitor")));
+    const counts = { red: 0, orange: 0, green: 0, yellow: 0 };
+    rows.forEach(r => { const sev = inferSeverity(r); if (counts[sev] !== undefined) counts[sev]++; });
+    document.getElementById("live-stats").innerHTML = `
+      <div class="home-stat"><div class="hs-num sev-red">${counts.red}</div><div class="hs-label">🔴 強訊號</div></div>
+      <div class="home-stat"><div class="hs-num sev-orange">${counts.orange + counts.yellow}</div><div class="hs-label">🟠 注意</div></div>
+      <div class="home-stat"><div class="hs-num sev-green">${counts.green}</div><div class="hs-label">🟢 突破</div></div>
+    `;
+    if (!rows.length) {
+      listEl.innerHTML = `<div class="view-empty">今日尚無盤中訊號<br><span style="font-size:.78rem;opacity:.8">後端監控（python main.py --multi-monitor）啟動後即時更新</span></div>`;
+      return;
+    }
+    listEl.innerHTML = rows.map(r => {
+      const sev = inferSeverity(r);
+      const sid = String(r.stock_id || "").trim();
+      return `
+        <div class="signal-card sev-${sev}" onclick="openInboxDetail('${escapeHtml(String(r.id))}')">
+          <div class="sc-head">
+            <span class="sc-type sev-${sev}">${SEV_META[sev].emoji} ${escapeHtml(alertTypeLabel(r))}</span>
+            <span class="sc-time">${fmtTime(r.sent_at)}</span>
+          </div>
+          ${sid ? `<div class="sc-stock">${escapeHtml(stockLabelOf(sid))}</div>` : ""}
+          <div class="sc-detail">${escapeHtml(r.body || "")}</div>
+          ${sid ? `<div class="sc-foot">查看走勢 →</div>` : ""}
+        </div>`;
+    }).join("");
   }
-
-  listEl.innerHTML = rows.map(r => {
-    const sev = inferSeverity(r);
-    const sid = String(r.stock_id || "").trim();
-    return `
-      <div class="signal-card sev-${sev}" onclick="openInboxDetail('${escapeHtml(String(r.id))}')">
-        <div class="sc-head">
-          <span class="sc-type sev-${sev}">${SEV_META[sev].emoji} ${escapeHtml(alertTypeLabel(r))}</span>
-          <span class="sc-time">${fmtTime(r.sent_at)}</span>
-        </div>
-        ${sid ? `<div class="sc-stock">${escapeHtml(stockLabelOf(sid))}</div>` : ""}
-        <div class="sc-detail">${escapeHtml(r.body || "")}</div>
-        ${sid ? `<div class="sc-foot">查看走勢 →</div>` : ""}
-      </div>`;
-  }).join("");
 }
 
 // ── 自選股清單 ──────────────────────────────────────────────────
