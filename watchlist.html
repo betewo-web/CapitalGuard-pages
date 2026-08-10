@@ -1416,7 +1416,7 @@ async function loadIntradayQuotes(force = false) {
   intradayQuotesLoadingPromise = (async () => {
     try {
       const rows = await sbGet("intraday_state", {
-        select: "stock_id,stock_name,price,change_pct,volume,signal,severity,level,signal_at,updated_at",
+        select: "stock_id,stock_name,price,prev_close,change_pct,volume,signal,severity,level,signal_at,updated_at",
         stock_id: `in.(${sids.join(",")})`,
         limit: String(Math.max(30, sids.length * 2)),
       }, state.accessToken);
@@ -1426,10 +1426,17 @@ async function loadIntradayQuotes(force = false) {
         if (!/^\d{4}$/.test(sid)) continue;
         const price = Number(row.price);
         if (!Number.isFinite(price)) continue;
+        const prevCloseRaw = Number(row.prev_close);
+        const prevClose = Number.isFinite(prevCloseRaw) && prevCloseRaw > 0 ? prevCloseRaw : null;
         const changePctRaw = Number(row.change_pct);
+        let changePct = Number.isFinite(changePctRaw) ? changePctRaw : null;
+        if (changePct === null && prevClose) {
+          changePct = ((price - prevClose) / prevClose) * 100;
+        }
         map[sid] = {
           price,
-          changePct:  Number.isFinite(changePctRaw) ? changePctRaw : null,
+          prevClose,
+          changePct,
           volume:     row.volume ?? null,
           signal:     row.signal   || "none",
           severity:   row.severity || "none",
@@ -1560,12 +1567,51 @@ function inferSeverity(row) {
 }
 
 function alertTypeLabel(row) {
+  const sig = String(row.signal || "");
+  if (sig && SIGNAL_LABEL_MAP[sig]) return SIGNAL_LABEL_MAP[sig];
   const t = String(row.title || "");
   const m = t.match(/(跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
   if (m) return m[1].replace("達到自訂", "");
   if (String(row.source || "").startsWith("daily_report")) return "每日報告";
   return "通知";
 }
+  function todayImportantInfoKey(rows) {
+    const today = new Date().toISOString().slice(0, 10);
+    const sig = (rows || [])
+      .map(({ sid, ev }) => `${sid}:${ev.event_type || ""}:${ev.title || ""}`)
+      .join("|");
+    return `home_important_info_notified_${today}_${btoa(unescape(encodeURIComponent(sig))).slice(0, 24)}`;
+  }
+  
+  function sendTodayImportantInfoNotification(newsRows) {
+    if (!Array.isArray(newsRows) || newsRows.length === 0) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  
+    const key = todayImportantInfoKey(newsRows);
+    if (localStorage.getItem(key) === "1") return;
+  
+    const topRows = newsRows.slice(0, 3).map(({ sid, ev }) => {
+      const name = universe[sid]?.n || "";
+      return `${sid}${name ? ` ${name}` : ""}：${ev.title || "重要資訊"}`;
+    });
+  
+    try {
+      const n = new Notification(`今日重要資訊：${newsRows.length} 則`, {
+        body: topRows.join("\n"),
+        tag: `home-important-info-${new Date().toISOString().slice(0, 10)}`,
+        renotify: false,
+        data: { url: new URL("watchlist.html#home", window.location.href).toString() },
+      });
+      n.onclick = () => {
+        window.focus();
+        window.location.href = n.data?.url || new URL("watchlist.html#home", window.location.href).toString();
+        n.close();
+      };
+      localStorage.setItem(key, "1");
+    } catch (e) {
+      console.warn("[Notification] 無法發送今日重要資訊通知:", e);
+    }
+  }
 
 function fmtTime(ts, withDate = false) {
   const d = new Date(ts);
@@ -1590,15 +1636,19 @@ function dayLabelOf(ts) {
 
 function stockLabelOf(sid) {
   const wl = watchlistRows.find(w => String(w.stock_id).trim() === sid);
-  const name = (wl?.stock_name || "").trim() || universe[sid]?.n || "";
+  const name = getPreferredStockName(sid, wl?.stock_name);
   return name ? `${sid} ${name}` : sid;
+}
+
+function getPreferredStockName(sid, rawName) {
+  const canonical = String(universe[sid]?.n || "").trim();
+  if (canonical) return canonical;
+  return String(rawName || "").trim();
 }
 
 // 收盤報價（來自共享報表資料；Phase 2 將改接 intraday_state 即時資料）
 function getQuote(sid) {
-  const shared = getQuoteFromSharedData(sid);
-  if (shared) return shared;
-
+  // 收盤後仍優先用 intraday_state，避免顯示成舊報表資料（前一交易日）
   const fallback = intradayQuoteMap?.[sid];
   if (fallback && isFinite(Number(fallback.price))) {
     return {
@@ -1608,6 +1658,9 @@ function getQuote(sid) {
         : Number(fallback.changePct),
     };
   }
+
+  const shared = getQuoteFromSharedData(sid);
+  if (shared) return shared;
 
   const finmind = finmindQuoteMap?.[sid];
   if (!finmind || !isFinite(Number(finmind.price))) return null;
@@ -1647,10 +1700,21 @@ function fmtChgHtml(chg) {
 }
 
 function latestSignalOf(sid) {
+  const q = intradayQuoteMap?.[sid];
+  if (q && q.signal && q.signal !== "none") {
+    return {
+      stock_id: sid,
+      signal: q.signal,
+      severity: q.severity || "none",
+      signal_at: q.signal_at || null,
+      updated_at: q.updated_at || null,
+      source: "intraday_state",
+    };
+  }
   for (const r of inboxRows) {
     if (String(r.stock_id || "").trim() === sid && isToday(r.sent_at)) {
       const src = String(r.source || "monitor");
-      if (src === "monitor" || src === "post_market") return r;
+      if (src === "monitor" || src === "post_market" || src === "postmarket") return r;
     }
   }
   return null;
@@ -1801,7 +1865,7 @@ function buildWhyHtml(row) {
   const wl = watchlistRows.find(w => String(w.stock_id).trim() === sid);
   if (!wl) return "";
   const t = String(row.title || "");
-  const name = (wl.stock_name || "").trim() || universe[sid]?.n || "";
+  const name = getPreferredStockName(sid, wl.stock_name);
 
   const condMap = [
     [/跌破支撐/, "⚠️ 跌破支撐", wl.alert_break_support],
@@ -1912,7 +1976,7 @@ function renderHome() {
 
   // 盤中訊號（今日前 3 筆）
   const signals = inboxRows.filter(r =>
-    isToday(r.sent_at) && ["monitor", "post_market"].includes(String(r.source || "monitor")));
+    isToday(r.sent_at) && ["monitor", "post_market", "postmarket"].includes(String(r.source || "monitor")));
   document.getElementById("home-signals").innerHTML = signals.length
     ? signals.slice(0, 3).map(r => {
         const sev = inferSeverity(r);
@@ -1941,7 +2005,7 @@ function renderHome() {
   } else {
     const wlHtml = watchlistRows.map(row => {
     const sid = String(row.stock_id || "").trim();
-    const name = (row.stock_name || "").trim() || universe[sid]?.n || sid;
+    const name = getPreferredStockName(sid, row.stock_name) || sid;
     const q = getQuote(sid);
     const sig = latestSignalOf(sid);
     const sigDot = sig ? `<span class="sev-dot sev-${inferSeverity(sig)}"></span>` : '<span class="hr-meta">─</span>';
@@ -1971,6 +2035,8 @@ function renderHome() {
           <span class="hr-name">${escapeHtml(ev.title || "")}</span>
         </div>`).join("")
     : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無重要資訊</div>';
+  
+    sendTodayImportantInfoNotification(newsRows);
 }
 
 // ── PWA v2: 📊 持股 ──────────────────────────────────────────────
@@ -1999,7 +2065,7 @@ function renderHoldings() {
 
   const rowsHtml = holds.map(row => {
     const sid = String(row.stock_id || "").trim();
-    const name = (row.stock_name || "").trim() || universe[sid]?.n || sid;
+    const name = getPreferredStockName(sid, row.stock_name) || sid;
     const shares = Number(row.shares);
     const cost = row.avg_cost != null ? Number(row.avg_cost) : null;
     const q = getQuote(sid);
@@ -2087,7 +2153,7 @@ function renderLive() {
         const sid = String(r.stock_id || "").trim();
         const q = intradayQuoteMap[sid];
         if (!q) return null;
-        return { sid, ...q, wl_name: (r.stock_name || "").trim() };
+        return { sid, ...q, wl_name: getPreferredStockName(sid, r.stock_name) };
       })
       .filter(r => r && r.signal && r.signal !== "none")
       .sort((a, b) => (SEV_ORDER[b.severity] || 0) - (SEV_ORDER[a.severity] || 0));
@@ -2132,7 +2198,7 @@ function renderLive() {
     // 降級：intraday_state 尚無資料（後端未啟動或首次啟動），改用今日 alert_history
     statusEl.textContent = isOpen ? "🟢 盤中（09:00–13:35）" : "⚪ 已收盤 — 今日訊號回顧";
     const rows = inboxRows.filter(r =>
-      isToday(r.sent_at) && ["monitor", "post_market"].includes(String(r.source || "monitor")));
+      isToday(r.sent_at) && ["monitor", "post_market", "postmarket"].includes(String(r.source || "monitor")));
     const counts = { red: 0, orange: 0, green: 0, yellow: 0 };
     rows.forEach(r => { const sev = inferSeverity(r); if (counts[sev] !== undefined) counts[sev]++; });
     document.getElementById("live-stats").innerHTML = `
@@ -2209,7 +2275,7 @@ function renderWatchlist(rows) {
   visible.forEach(row => {
     const sid = String(row.stock_id || "").trim();
     const fallbackName = universe[sid]?.n || "";
-    const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
+    const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
     const events = stockEvents[sid] || [];
     const highEvents = events.filter(e => e.importance === "high");
     // 事件按鈕永遠顯示：有事件顯示數量，無事件顯示 "0 則"
@@ -2271,7 +2337,7 @@ function openAlertSettings(rowId) {
   alertModalRowId = rowId;
   const sid = String(row.stock_id || "").trim();
   const fallbackName = universe[sid]?.n || "";
-  const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
+  const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
   document.getElementById("alert-settings-title").textContent = `通知設定｜${sid} ${displayName}`;
 
   // 盤中即時
@@ -2465,7 +2531,7 @@ function openRemoveStockConfirm(rowId) {
   removeModalRowId = rowId;
   const sid = String(row.stock_id || "").trim();
   const fallbackName = universe[sid]?.n || "";
-  const displayName = (row.stock_name || "").trim() || fallbackName || "未命名";
+  const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
   document.getElementById("remove-stock-text").textContent = `確定要移除 ${sid} ${displayName} 嗎？`;
   const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("removeStockModal"));
   modal.show();
@@ -3611,6 +3677,7 @@ async function addStock() {
     }
     if (check.name) name = check.name;
   }
+  name = getPreferredStockName(sid, name) || name;
 
   msgEl.innerHTML = '<span class="text-muted">新增中…</span>';
   try {
