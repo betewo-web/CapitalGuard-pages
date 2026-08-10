@@ -713,6 +713,25 @@ async function loadStockEvents(sids) {
   }
 }
 
+function _collectTodayEvents() {
+  const rows = [];
+  for (const [sid, evs] of Object.entries(stockEvents)) {
+    for (const ev of evs || []) {
+      rows.push({ sid, ev });
+    }
+  }
+  rows.sort((a, b) => {
+    const aRank = _EVENT_IMPORTANCE_CLASS[a.ev.importance] ? ({ high: 0, normal: 1, low: 2 }[a.ev.importance] ?? 3) : 3;
+    const bRank = _EVENT_IMPORTANCE_CLASS[b.ev.importance] ? ({ high: 0, normal: 1, low: 2 }[b.ev.importance] ?? 3) : 3;
+    if (aRank !== bRank) return aRank - bRank;
+    const aDate = new Date(a.ev.event_date || 0).getTime();
+    const bDate = new Date(b.ev.event_date || 0).getTime();
+    if (aDate !== bDate) return bDate - aDate;
+    return String(a.sid).localeCompare(String(b.sid));
+  });
+  return rows;
+}
+
 const _EVENT_TYPE_LABEL = {
   announcement: "📢 重大訊息",
   dividend:     "💰 除權息",
@@ -776,6 +795,45 @@ function openEventsPanel(sid) {
   }
   const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal"));
   modal.show();
+}
+
+function openTodayEventsPanel() {
+  const rows = _collectTodayEvents();
+  const titleEl = document.getElementById("events-modal-title");
+  const bodyEl = document.getElementById("events-modal-body");
+  titleEl.textContent = rows.length > 0 ? `📋 今日事件彙整（${rows.length} 件）` : "📋 今日事件";
+
+  if (!rows.length) {
+    bodyEl.innerHTML = `
+      <div class="events-empty-guide">
+        <div class="events-empty-icon">📊</div>
+        <div class="events-empty-title">今日尚無彙整事件</div>
+        <div class="events-empty-desc">每日盤後執行後，這裡會顯示所有股票事件。</div>
+      </div>
+    `;
+  } else {
+    bodyEl.innerHTML = rows.map(({ sid, ev }) => {
+      const typeLabel = _EVENT_TYPE_LABEL[ev.event_type] || ev.event_type;
+      const impClass = _EVENT_IMPORTANCE_CLASS[ev.importance] || "";
+      const sidName = universe[sid]?.n || sid;
+      const linkHtml = ev.source_url
+        ? `<a href="${escapeHtml(ev.source_url)}" target="_blank" class="event-source-link">🔗 來源</a>`
+        : "";
+      return `
+        <div class="event-item ${impClass}">
+          <div class="event-type-badge">${typeLabel}</div>
+          <div class="event-title">${escapeHtml(sid)} ${escapeHtml(sidName)} · ${escapeHtml(ev.title || "")}</div>
+          ${ev.content ? `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>` : ""}
+          <div class="d-flex align-items-center gap-2 mt-1">
+            ${linkHtml}
+            <button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal")).show();
 }
 
 async function refreshEvents(sid) {
@@ -1834,13 +1892,23 @@ function renderHome() {
   const high = evAll.filter(e => e.importance === "high").length;
   const normal = evAll.filter(e => e.importance === "normal").length;
   const other = evAll.length - high - normal;
-  document.getElementById("home-events-headline").textContent =
-    evAll.length > 0 ? `📋 今日你的股票有 ${evAll.length} 件事` : "📋 今日事件";
-  document.getElementById("home-events-stats").innerHTML = evAll.length > 0 ? `
+  const headlineEl = document.getElementById("home-events-headline");
+  const statsEl = document.getElementById("home-events-stats");
+  const hasEvents = evAll.length > 0;
+  if (headlineEl) {
+    headlineEl.innerHTML = hasEvents
+      ? `📋 今日你的股票有 ${evAll.length} 件事 <span class="hs-link">查看明細 →</span>`
+      : "📋 今日事件";
+    headlineEl.onclick = hasEvents ? openTodayEventsPanel : null;
+  }
+  if (statsEl) {
+    statsEl.innerHTML = hasEvents ? `
     <div class="home-stat"><div class="hs-num sev-red">${high}</div><div class="hs-label">🔴 重要</div></div>
     <div class="home-stat"><div class="hs-num sev-orange">${normal}</div><div class="hs-label">🟠 注意</div></div>
     <div class="home-stat"><div class="hs-num sev-info">${other}</div><div class="hs-label">📰 一般</div></div>
   ` : `<div class="view-empty py-2" style="padding:0.5rem">今日尚無彙整事件<br><span style="font-size:.72rem;opacity:.75">每日盤後執行 python main.py --fetch-events 更新</span></div>`;
+    statsEl.onclick = hasEvents ? openTodayEventsPanel : null;
+  }
 
   // 盤中訊號（今日前 3 筆）
   const signals = inboxRows.filter(r =>

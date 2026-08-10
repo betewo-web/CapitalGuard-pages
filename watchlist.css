@@ -33,6 +33,9 @@ body {
 
 body {
 	margin: 0;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	overscroll-behavior-y: contain;
 	color: var(--text-0);
 	font-family: "Noto Sans TC", sans-serif;
 	background:
@@ -42,9 +45,13 @@ body {
 	background-attachment: fixed;
 }
 
+body.has-bottom-nav {
+	padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 32px);
+}
+
 /* 已登入（底部導航顯示）時，內容區保留底部空間 */
 body.has-bottom-nav .page-shell {
-	padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 18px);
+	padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 32px);
 }
 
 .modern-navbar {
@@ -1318,6 +1325,16 @@ body.has-bottom-nav .qa-panel {
 	color: var(--accent-2);
 	text-decoration: none;
 	cursor: pointer;
+}
+
+#home-events-headline,
+#home-events-stats {
+	cursor: pointer;
+}
+
+#home-events-headline:hover .hs-link,
+#home-events-stats:hover .home-stat {
+	filter: brightness(1.05);
 }
 
 .home-stat-row {
