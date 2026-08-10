@@ -1231,6 +1231,10 @@ async function loadUniverse() {
       universe = await r.json();
       twseUniverseCache = universe;
       loaded = Object.keys(universe).length > 0;
+      // universe.json 一載入就立刻重繪，讓名稱從全名變成簡稱（不需等 API）
+      if (loaded && state.accessToken && document.getElementById("main-section")?.style.display !== "none") {
+        renderCurrentTab();
+      }
     }
   } catch { /* ignore */ }
 
@@ -1426,11 +1430,12 @@ async function loadIntradayQuotes(force = false) {
         if (!/^\d{4}$/.test(sid)) continue;
         const price = Number(row.price);
         if (!Number.isFinite(price)) continue;
-        const prevCloseRaw = Number(row.prev_close);
-        const prevClose = Number.isFinite(prevCloseRaw) && prevCloseRaw > 0 ? prevCloseRaw : null;
-        const changePctRaw = Number(row.change_pct);
-        let changePct = Number.isFinite(changePctRaw) ? changePctRaw : null;
-        if (changePct === null && prevClose) {
+        const prevCloseRaw = row.prev_close == null ? null : Number(row.prev_close);
+        const prevClose = (prevCloseRaw !== null && Number.isFinite(prevCloseRaw) && prevCloseRaw > 0) ? prevCloseRaw : null;
+        // 重要：row.change_pct 為 DB NULL 時 Number(null)=0，需先判 null 再轉換
+        const changePctRaw = row.change_pct == null ? null : Number(row.change_pct);
+        let changePct = (changePctRaw !== null && Number.isFinite(changePctRaw)) ? changePctRaw : null;
+        if (changePct === null && prevClose !== null) {
           changePct = ((price - prevClose) / prevClose) * 100;
         }
         map[sid] = {
@@ -1499,7 +1504,13 @@ async function loadFinMindQuotesForMissing(force = false) {
 
   if (!force && finmindQuotesLoadingPromise) return finmindQuotesLoadingPromise;
 
-  const missing = sids.filter(sid => !getQuoteFromSharedData(sid) && !intradayQuoteMap?.[sid]);
+  const missing = sids.filter(sid => {
+    // 無任何資料來源
+    if (!getQuoteFromSharedData(sid) && !intradayQuoteMap?.[sid]) return true;
+    // intraday 存在但 changePct 為 null（MIS 未提供昨收），且 shared 也沒有 → 用 FinMind 補
+    const q = intradayQuoteMap?.[sid];
+    return q && q.changePct === null && !getQuoteFromSharedData(sid);
+  });
   if (!missing.length) return finmindQuoteMap;
 
   finmindQuotesLoadingPromise = (async () => {
@@ -1646,30 +1657,29 @@ function getPreferredStockName(sid, rawName) {
   return String(rawName || "").trim();
 }
 
-// 收盤報價（來自共享報表資料；Phase 2 將改接 intraday_state 即時資料）
+function _toQuoteCandidate(raw) {
+  if (!raw || !isFinite(Number(raw.price))) return null;
+  // 注意：raw.changePct 可能是 0（真實平盤）或 null（無資料），需區分
+  const chg = (raw.changePct == null || !Number.isFinite(Number(raw.changePct)))
+    ? null
+    : Number(raw.changePct);
+  return { price: Number(raw.price), changePct: chg };
+}
+
 function getQuote(sid) {
-  // 收盤後仍優先用 intraday_state，避免顯示成舊報表資料（前一交易日）
-  const fallback = intradayQuoteMap?.[sid];
-  if (fallback && isFinite(Number(fallback.price))) {
-    return {
-      price: Number(fallback.price),
-      changePct: (fallback.changePct === null || fallback.changePct === undefined || !isFinite(Number(fallback.changePct)))
-        ? null
-        : Number(fallback.changePct),
-    };
-  }
+  const intraday = _toQuoteCandidate(intradayQuoteMap?.[sid]);
+  const shared   = _toQuoteCandidate(getQuoteFromSharedData(sid));
+  const finmind  = _toQuoteCandidate(finmindQuoteMap?.[sid]);
 
-  const shared = getQuoteFromSharedData(sid);
-  if (shared) return shared;
+  // 優先有非 null 漲跌幅的來源（intraday > shared > finmind）
+  if (intraday && intraday.changePct !== null) return intraday;
+  if (shared   && shared.changePct   !== null) return shared;
+  if (finmind  && finmind.changePct  !== null) return finmind;
 
-  const finmind = finmindQuoteMap?.[sid];
-  if (!finmind || !isFinite(Number(finmind.price))) return null;
-  return {
-    price: Number(finmind.price),
-    changePct: (finmind.changePct === null || finmind.changePct === undefined || !isFinite(Number(finmind.changePct)))
-      ? null
-      : Number(finmind.changePct),
-  };
+  // 所有來源都無漲跌幅 → 保留有價格的來源
+  if (intraday) return intraday;
+  if (shared)   return shared;
+  return finmind;
 }
 
 function hasAnyQuote(sid) {
@@ -2230,7 +2240,13 @@ function renderLive() {
 // ── 自選股清單 ──────────────────────────────────────────────────
 async function loadWatchlist() {
   const rows = await sbGet("watchlist", {}, state.accessToken);
-  watchlistRows = rows || [];
+  watchlistRows = (rows || []).map(row => {
+    const sid = String(row.stock_id || "").trim();
+    return {
+      ...row,
+      stock_name: getPreferredStockName(sid, row.stock_name) || String(row.stock_name || "").trim(),
+    };
+  });
   renderCurrentTab();
   scheduleQuoteHydration();
   // 非同步載入事件（不阻塞卡片渲染）
