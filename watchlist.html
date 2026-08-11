@@ -1442,6 +1442,7 @@ async function loadIntradayQuotes(force = false) {
           price,
           prevClose,
           changePct,
+          tradeDate:  taipeiDateKey(row.updated_at),
           volume:     row.volume ?? null,
           signal:     row.signal   || "none",
           severity:   row.severity || "none",
@@ -1477,17 +1478,17 @@ async function fetchFinMindQuote(sid) {
     if (json.status !== 200 || !Array.isArray(json.data) || !json.data.length) return null;
 
     const rows = json.data
-      .map(d => Number(d.close))
-      .filter(v => Number.isFinite(v));
+      .map(d => ({ close: Number(d.close), date: String(d.date || "").slice(0, 10) }))
+      .filter(row => Number.isFinite(row.close));
     if (!rows.length) return null;
 
-    const cur = rows[rows.length - 1];
+    const cur = rows[rows.length - 1].close;
     let changePct = null;
-    if (rows.length >= 2 && rows[rows.length - 2] > 0) {
-      const prev = rows[rows.length - 2];
+    if (rows.length >= 2 && rows[rows.length - 2].close > 0) {
+      const prev = rows[rows.length - 2].close;
       changePct = ((cur - prev) / prev) * 100;
     }
-    return { price: cur, changePct };
+    return { price: cur, changePct, tradeDate: rows[rows.length - 1].date };
   } catch {
     return null;
   }
@@ -1541,7 +1542,11 @@ function getQuoteFromSharedData(sid) {
     const prev = Number(ohlcv[ohlcv.length - 2][3]);
     if (isFinite(prev) && prev > 0) chg = (cur - prev) / prev * 100;
   }
-  return { price: cur, changePct: chg };
+  const dates = s.daily?.dates;
+  const tradeDate = String(
+    (dates?.length ? dates[dates.length - 1] : null) || sharedReportData?.date || ""
+  ).slice(0, 10);
+  return { price: cur, changePct: chg, tradeDate };
 }
 
 // ── PWA v2: 訊號等級（統一對照）──────────────────────────────────
@@ -1657,29 +1662,47 @@ function getPreferredStockName(sid, rawName) {
   return String(rawName || "").trim();
 }
 
-function _toQuoteCandidate(raw) {
+function taipeiDateKey(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const part = type => parts.find(item => item.type === type)?.value || "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function _toQuoteCandidate(raw, sourcePriority) {
   if (!raw || !isFinite(Number(raw.price))) return null;
   // 注意：raw.changePct 可能是 0（真實平盤）或 null（無資料），需區分
   const chg = (raw.changePct == null || !Number.isFinite(Number(raw.changePct)))
     ? null
     : Number(raw.changePct);
-  return { price: Number(raw.price), changePct: chg };
+  const tradeDate = /^\d{4}-\d{2}-\d{2}$/.test(String(raw.tradeDate || ""))
+    ? String(raw.tradeDate)
+    : "";
+  return { price: Number(raw.price), changePct: chg, tradeDate, sourcePriority };
 }
 
 function getQuote(sid) {
-  const intraday = _toQuoteCandidate(intradayQuoteMap?.[sid]);
-  const shared   = _toQuoteCandidate(getQuoteFromSharedData(sid));
-  const finmind  = _toQuoteCandidate(finmindQuoteMap?.[sid]);
+  const candidates = [
+    _toQuoteCandidate(intradayQuoteMap?.[sid], 3),
+    _toQuoteCandidate(getQuoteFromSharedData(sid), 2),
+    _toQuoteCandidate(finmindQuoteMap?.[sid], 1),
+  ].filter(Boolean);
 
-  // 優先有非 null 漲跌幅的來源（intraday > shared > finmind）
-  if (intraday && intraday.changePct !== null) return intraday;
-  if (shared   && shared.changePct   !== null) return shared;
-  if (finmind  && finmind.changePct  !== null) return finmind;
-
-  // 所有來源都無漲跌幅 → 保留有價格的來源
-  if (intraday) return intraday;
-  if (shared)   return shared;
-  return finmind;
+  candidates.sort((a, b) => {
+    const dateOrder = b.tradeDate.localeCompare(a.tradeDate);
+    if (dateOrder !== 0) return dateOrder;
+    const completenessOrder = Number(b.changePct !== null) - Number(a.changePct !== null);
+    if (completenessOrder !== 0) return completenessOrder;
+    return b.sourcePriority - a.sourcePriority;
+  });
+  return candidates[0] || null;
 }
 
 function hasAnyQuote(sid) {
