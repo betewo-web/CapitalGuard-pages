@@ -662,7 +662,7 @@ const HOME_WATCHLIST_EXPAND_KEY = "home_watchlist_expanded";
 let homeWatchlistExpanded = localStorage.getItem(HOME_WATCHLIST_EXPAND_KEY) === "1";
 let alertModalRowId = null;
 let removeModalRowId = null;
-let stockEvents = {};   // sid → [{event_type, title, content, source_url, importance, event_date, ai_analysis}]
+let stockEvents = {};   // sid → scored stock_events rows
 
 // ── PWA v2: App Shell 狀態 ──
 const APP_TABS = ["home", "holdings", "live", "inbox", "watch"];
@@ -681,13 +681,22 @@ async function loadStockEvents(sids) {
   if (statusEl) statusEl.textContent = "事件載入中…";
   try {
     const today = new Date().toISOString().split("T")[0];
-    const url = new URL(`${SUPABASE_URL}/rest/v1/stock_events`);
-    url.searchParams.set("select", "stock_id,event_date,event_type,title,content,source_url,importance,ai_analysis");
-    url.searchParams.set("event_date", `gte.${today}`);
-    url.searchParams.set("stock_id", `in.(${sids.join(",")})`);
-    url.searchParams.set("order", "importance.asc,event_date.desc");
-    url.searchParams.set("limit", "300");
-    const r = await fetch(url, { headers: sbHeaders(null) });
+    const buildUrl = rich => {
+      const url = new URL(`${SUPABASE_URL}/rest/v1/stock_events`);
+      const legacy = "stock_id,event_date,event_type,title,content,source_url,importance,ai_analysis";
+      const scored = `${legacy},event_code,direction,event_score,score_breakdown,metrics,source`;
+      url.searchParams.set("select", rich ? scored : legacy);
+      url.searchParams.set("event_date", `gte.${today}`);
+      url.searchParams.set("stock_id", `in.(${sids.join(",")})`);
+      url.searchParams.set("order", rich ? "event_score.desc.nullslast,event_date.desc" : "importance.asc,event_date.desc");
+      url.searchParams.set("limit", "300");
+      return url;
+    };
+    let r = await fetch(buildUrl(true), { headers: sbHeaders(null) });
+    if (!r.ok && [400, 404].includes(r.status)) {
+      console.info("[Events] Event Engine migration 尚未套用，使用舊欄位載入");
+      r = await fetch(buildUrl(false), { headers: sbHeaders(null) });
+    }
     if (!r.ok) {
       if (statusEl) statusEl.textContent = "事件載入失敗";
       return;
@@ -698,6 +707,7 @@ async function loadStockEvents(sids) {
       if (!stockEvents[row.stock_id]) stockEvents[row.stock_id] = [];
       stockEvents[row.stock_id].push(row);
     }
+    Object.values(stockEvents).forEach(events => events.sort(_compareEvents));
     const totalEvents = Object.values(stockEvents).reduce((s, a) => s + a.length, 0);
     if (statusEl) {
       statusEl.textContent = totalEvents > 0
@@ -720,15 +730,7 @@ function _collectTodayEvents() {
       rows.push({ sid, ev });
     }
   }
-  rows.sort((a, b) => {
-    const aRank = _EVENT_IMPORTANCE_CLASS[a.ev.importance] ? ({ high: 0, normal: 1, low: 2 }[a.ev.importance] ?? 3) : 3;
-    const bRank = _EVENT_IMPORTANCE_CLASS[b.ev.importance] ? ({ high: 0, normal: 1, low: 2 }[b.ev.importance] ?? 3) : 3;
-    if (aRank !== bRank) return aRank - bRank;
-    const aDate = new Date(a.ev.event_date || 0).getTime();
-    const bDate = new Date(b.ev.event_date || 0).getTime();
-    if (aDate !== bDate) return bDate - aDate;
-    return String(a.sid).localeCompare(String(b.sid));
-  });
+  rows.sort((a, b) => _compareEvents(a.ev, b.ev) || String(a.sid).localeCompare(String(b.sid)));
   return rows;
 }
 
@@ -740,12 +742,86 @@ const _EVENT_TYPE_LABEL = {
   conference:   "🎙 法說會",
   chips:        "🏦 法人籌碼",
   margin:       "💳 融資融券",
+  technical:    "📐 技術面",
+  volume:       "📶 成交量",
+  signal:       "⚡ 複合訊號",
+  valuation:    "⚖️ 估值",
+  market:       "🌐 市場異常",
+  fundamental:  "📑 基本面",
 };
 const _EVENT_IMPORTANCE_CLASS = {
   high: "event-high",
   normal: "event-normal",
   low: "event-low",
 };
+
+const _EVENT_DIRECTION_META = {
+  bullish:  { label: "偏多", className: "event-bullish" },
+  bearish:  { label: "偏空", className: "event-bearish" },
+  neutral:  { label: "中性", className: "event-neutral" },
+  calendar: { label: "日程", className: "event-calendar" },
+};
+
+function eventScoreOf(ev) {
+  const score = Number(ev?.event_score);
+  if (Number.isFinite(score)) return Math.max(0, Math.min(100, Math.round(score)));
+  return ({ high: 75, normal: 50, low: 25 }[ev?.importance] ?? 40);
+}
+
+function _compareEvents(a, b) {
+  const scoreDiff = eventScoreOf(b) - eventScoreOf(a);
+  if (scoreDiff) return scoreDiff;
+  return new Date(b?.event_date || 0).getTime() - new Date(a?.event_date || 0).getTime();
+}
+
+function eventImportanceClass(ev) {
+  const score = eventScoreOf(ev);
+  return score >= 70 ? "event-high" : score >= 40 ? "event-normal" : "event-low";
+}
+
+function renderEventBreakdown(ev) {
+  const breakdown = ev?.score_breakdown;
+  if (!breakdown || typeof breakdown !== "object" || !Object.keys(breakdown).length) return "";
+  const fields = [
+    ["base", "基礎"], ["abnormality", "異常"], ["rarity", "罕見"],
+    ["fundamental_impact", "基本面"], ["price_reaction", "股價反應"],
+    ["synergy", "多事件"], ["contradiction", "矛盾"],
+  ];
+  const chips = fields.map(([key, label]) => {
+    const value = Number(breakdown[key] || 0);
+    const shown = key === "base" ? value : `${key === "contradiction" ? "−" : "+"}${value}`;
+    return `<span class="event-score-part${key === "contradiction" && value ? " is-negative" : ""}">${label} ${shown}</span>`;
+  }).join("");
+  return `<details class="event-score-details"><summary>評分明細</summary><div class="event-score-parts">${chips}</div></details>`;
+}
+
+function renderEventCard(sid, ev, options = {}) {
+  const typeLabel = _EVENT_TYPE_LABEL[ev.event_type] || ev.event_type || "事件";
+  const score = eventScoreOf(ev);
+  const direction = _EVENT_DIRECTION_META[ev.direction] || _EVENT_DIRECTION_META.neutral;
+  const sidName = universe[sid]?.n || sid;
+  const titlePrefix = options.showStock ? `${escapeHtml(sid)} ${escapeHtml(sidName)} · ` : "";
+  const linkHtml = ev.source_url
+    ? `<a href="${escapeHtml(ev.source_url)}" target="_blank" rel="noopener" class="event-source-link">來源</a>`
+    : "";
+  const actionHtml = options.todayMode
+    ? `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>`
+    : (ev.ai_analysis
+      ? `<div class="event-ai-text">${escapeHtml(ev.ai_analysis)}</div>`
+      : `<button class="btn btn-xs btn-outline-info" onclick="requestAiAnalysis('${escapeHtml(sid)}','${escapeHtml(ev.title)}',this)">AI 解讀</button>`);
+  return `
+    <article class="event-item ${eventImportanceClass(ev)}">
+      <div class="event-meta-row">
+        <span class="event-type-badge">${escapeHtml(typeLabel)}</span>
+        <span class="event-direction ${direction.className}">${direction.label}</span>
+        <span class="event-score-badge">${score}</span>
+      </div>
+      <div class="event-title">${titlePrefix}${escapeHtml(ev.title || "")}</div>
+      ${ev.content ? `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>` : ""}
+      ${renderEventBreakdown(ev)}
+      <div class="event-actions">${linkHtml}${actionHtml}</div>
+    </article>`;
+}
 
 function openEventsPanel(sid) {
   const events = stockEvents[sid] || [];
@@ -774,24 +850,7 @@ function openEventsPanel(sid) {
       </div>
     `;
   } else {
-    body.innerHTML = events.map(ev => {
-      const typeLabel = _EVENT_TYPE_LABEL[ev.event_type] || ev.event_type;
-      const impClass  = _EVENT_IMPORTANCE_CLASS[ev.importance] || "";
-      const linkHtml  = ev.source_url
-        ? `<a href="${escapeHtml(ev.source_url)}" target="_blank" class="event-source-link">🔗 來源</a>`
-        : "";
-      const aiHtml    = ev.ai_analysis
-        ? `<div class="event-ai-text">${escapeHtml(ev.ai_analysis)}</div>`
-        : `<button class="btn btn-xs btn-outline-info mt-1" onclick="requestAiAnalysis('${escapeHtml(sid)}','${escapeHtml(ev.title)}',this)">✨ AI 解讀</button>`;
-      return `
-        <div class="event-item ${impClass}">
-          <div class="event-type-badge">${typeLabel}</div>
-          <div class="event-title">${escapeHtml(ev.title)}</div>
-          ${ev.content ? `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>` : ""}
-          <div class="d-flex align-items-center gap-2 mt-1">${linkHtml}${aiHtml}</div>
-        </div>
-      `;
-    }).join("");
+    body.innerHTML = events.map(ev => renderEventCard(sid, ev)).join("");
   }
   const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal"));
   modal.show();
@@ -812,25 +871,7 @@ function openTodayEventsPanel() {
       </div>
     `;
   } else {
-    bodyEl.innerHTML = rows.map(({ sid, ev }) => {
-      const typeLabel = _EVENT_TYPE_LABEL[ev.event_type] || ev.event_type;
-      const impClass = _EVENT_IMPORTANCE_CLASS[ev.importance] || "";
-      const sidName = universe[sid]?.n || sid;
-      const linkHtml = ev.source_url
-        ? `<a href="${escapeHtml(ev.source_url)}" target="_blank" class="event-source-link">🔗 來源</a>`
-        : "";
-      return `
-        <div class="event-item ${impClass}">
-          <div class="event-type-badge">${typeLabel}</div>
-          <div class="event-title">${escapeHtml(sid)} ${escapeHtml(sidName)} · ${escapeHtml(ev.title || "")}</div>
-          ${ev.content ? `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>` : ""}
-          <div class="d-flex align-items-center gap-2 mt-1">
-            ${linkHtml}
-            <button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>
-          </div>
-        </div>
-      `;
-    }).join("");
+    bodyEl.innerHTML = rows.map(({ sid, ev }) => renderEventCard(sid, ev, { showStock: true, todayMode: true })).join("");
   }
 
   bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal")).show();
@@ -1986,8 +2027,8 @@ function renderHome() {
 
   // 今日事件摘要
   const evAll = Object.values(stockEvents).flat();
-  const high = evAll.filter(e => e.importance === "high").length;
-  const normal = evAll.filter(e => e.importance === "normal").length;
+  const high = evAll.filter(e => eventScoreOf(e) >= 70).length;
+  const normal = evAll.filter(e => eventScoreOf(e) >= 40 && eventScoreOf(e) < 70).length;
   const other = evAll.length - high - normal;
   const headlineEl = document.getElementById("home-events-headline");
   const statsEl = document.getElementById("home-events-stats");
@@ -2058,9 +2099,10 @@ function renderHome() {
   const newsRows = [];
   for (const [sid, evs] of Object.entries(stockEvents)) {
     for (const ev of evs) {
-      if (ev.importance === "high") newsRows.push({ sid, ev });
+      if (eventScoreOf(ev) >= 70) newsRows.push({ sid, ev });
     }
   }
+  newsRows.sort((a, b) => _compareEvents(a.ev, b.ev));
   document.getElementById("home-news").innerHTML = newsRows.length
     ? newsRows.slice(0, 6).map(({ sid, ev }) => `
         <div class="home-row" onclick="openEventsPanel('${escapeHtml(sid)}')">
@@ -2316,7 +2358,7 @@ function renderWatchlist(rows) {
     const fallbackName = universe[sid]?.n || "";
     const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
     const events = stockEvents[sid] || [];
-    const highEvents = events.filter(e => e.importance === "high");
+    const highEvents = events.filter(e => eventScoreOf(e) >= 70);
     // 事件按鈕永遠顯示：有事件顯示數量，無事件顯示 "0 則"
     const evtLabel = events.length > 0
       ? `📋${highEvents.length > 0 ? " ⚠" : ""} ${events.length} 則事件`
