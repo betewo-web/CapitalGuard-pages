@@ -805,7 +805,7 @@ function renderEventCard(sid, ev, options = {}) {
     ? `<a href="${escapeHtml(ev.source_url)}" target="_blank" rel="noopener" class="event-source-link">來源</a>`
     : "";
   const actionHtml = options.todayMode
-    ? `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>`
+    ? (options.grouped ? "" : `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>`)
     : (ev.ai_analysis
       ? `<div class="event-ai-text">${escapeHtml(ev.ai_analysis)}</div>`
       : `<button class="btn btn-xs btn-outline-info" onclick="requestAiAnalysis('${escapeHtml(sid)}','${escapeHtml(ev.title)}',this)">AI 解讀</button>`);
@@ -858,9 +858,20 @@ function openEventsPanel(sid) {
 
 function openTodayEventsPanel() {
   const rows = _collectTodayEvents();
+  const groups = [];
+  for (const { sid, ev } of rows) {
+    let group = groups.find(item => item.sid === sid);
+    if (!group) {
+      group = { sid, events: [] };
+      groups.push(group);
+    }
+    group.events.push(ev);
+  }
   const titleEl = document.getElementById("events-modal-title");
   const bodyEl = document.getElementById("events-modal-body");
-  titleEl.textContent = rows.length > 0 ? `📋 今日事件彙整（${rows.length} 件）` : "📋 今日事件";
+  titleEl.textContent = rows.length > 0
+    ? `📋 今日事件彙整（${groups.length} 檔 · ${rows.length} 件）`
+    : "📋 今日事件";
 
   if (!rows.length) {
     bodyEl.innerHTML = `
@@ -871,7 +882,23 @@ function openTodayEventsPanel() {
       </div>
     `;
   } else {
-    bodyEl.innerHTML = rows.map(({ sid, ev }) => renderEventCard(sid, ev, { showStock: true, todayMode: true })).join("");
+    bodyEl.innerHTML = groups.map(({ sid, events }) => {
+      const sidName = getPreferredStockName(sid, universe[sid]?.n) || sid;
+      return `
+        <section class="today-event-group">
+          <div class="today-event-group-head">
+            <div class="today-event-stock">
+              <span class="badge-sid">${escapeHtml(sid)}</span>
+              <strong>${escapeHtml(sidName)}</strong>
+              <span class="today-event-count">${events.length} 件</span>
+            </div>
+            <button class="today-event-stock-link" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股 →</button>
+          </div>
+          <div class="today-event-group-list">
+            ${events.map(ev => renderEventCard(sid, ev, { todayMode: true, grouped: true })).join("")}
+          </div>
+        </section>`;
+    }).join("");
   }
 
   bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal")).show();
@@ -1395,7 +1422,7 @@ function _startLiveRefresh() {
   if (_liveRefreshTimer) return;
   _liveRefreshTimer = setInterval(async () => {
     if (currentTab !== "live") { _stopLiveRefresh(); return; }
-    await loadIntradayQuotes(true);
+    await Promise.all([loadIntradayQuotes(true), refreshInbox(true)]);
     renderLive();
   }, 30000);
 }
@@ -1417,7 +1444,7 @@ function switchTab(tab, silent = false) {
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
   if (tab === "live") {
-    loadIntradayQuotes(true).then(() => renderLive());
+    Promise.all([loadIntradayQuotes(true), refreshInbox(false)]).then(() => renderLive());
     _startLiveRefresh();
   } else {
     _stopLiveRefresh();
@@ -2208,6 +2235,39 @@ function _signalLabel(sig) {
   return SIGNAL_LABEL_MAP[sig] || sig || "訊號";
 }
 
+function _signalKindFromAlert(row) {
+  const direct = String(row?.signal || "");
+  if (SIGNAL_LABEL_MAP[direct]) return direct;
+  const eventKind = String(row?.event_key || "").split(":")[1] || "";
+  if (SIGNAL_LABEL_MAP[eventKind]) return eventKind;
+  const title = String(row?.title || "");
+  const titleKinds = [
+    [/跌破支撐/, "break_sup"], [/逼近支撐/, "near_sup"], [/收復支撐/, "reclaim_sup"],
+    [/突破壓力/, "break_res"], [/逼近壓力/, "near_res"], [/漲停/, "limit_up"],
+    [/跌停/, "limit_down"], [/爆量/, "volume_spike"],
+    [/上漲價位/, "target_high"], [/下跌價位/, "target_low"],
+  ];
+  return titleKinds.find(([pattern]) => pattern.test(title))?.[1] || "";
+}
+
+function _signalLevelFromAlert(row) {
+  const parts = String(row?.event_key || "").split(":");
+  const level = parts.length >= 4 ? Number(parts[2]) : NaN;
+  return Number.isFinite(level) ? level : null;
+}
+
+function _signalLevelLabel(signal, level) {
+  if (level == null || !Number.isFinite(Number(level))) return "";
+  const value = Number(level);
+  if (signal === "volume_spike") return `成交量 ${Math.round(value).toLocaleString()} 張`;
+  if (["break_sup", "near_sup", "reclaim_sup"].includes(signal)) return `支撐 ${value.toFixed(2)}`;
+  if (["break_res", "near_res"].includes(signal)) return `壓力 ${value.toFixed(2)}`;
+  if (["target_high", "target_low"].includes(signal)) return `目標價 ${value.toFixed(2)}`;
+  if (signal === "limit_up") return `漲停價 ${value.toFixed(2)}`;
+  if (signal === "limit_down") return `跌停價 ${value.toFixed(2)}`;
+  return `關卡 ${value.toFixed(2)}`;
+}
+
 function renderLive() {
   const listEl = document.getElementById("live-list");
   if (!listEl) return;
@@ -2215,7 +2275,9 @@ function renderLive() {
   const statusEl = document.getElementById("live-status");
 
   // ── 從 intradayQuoteMap 取有訊號的自選股 ────────────────────────
-  const hasIntradayData = Object.keys(intradayQuoteMap).length > 0;
+  const todayKey = taipeiDateKey(new Date());
+  const hasIntradayData = Object.values(intradayQuoteMap)
+    .some(q => q?.tradeDate === todayKey);
 
   if (hasIntradayData) {
     // Phase 2：intraday_state 已有資料，直接展示即時狀態
@@ -2227,8 +2289,26 @@ function renderLive() {
       .map(r => {
         const sid = String(r.stock_id || "").trim();
         const q = intradayQuoteMap[sid];
-        if (!q) return null;
-        return { sid, ...q, wl_name: getPreferredStockName(sid, r.stock_name) };
+        if (!q || q.tradeDate !== todayKey) return null;
+        if (q.signal && q.signal !== "none") {
+          return { sid, ...q, wl_name: getPreferredStockName(sid, r.stock_name) };
+        }
+        const latestAlert = inboxRows.find(row =>
+          String(row.stock_id || "").trim() === sid &&
+          isToday(row.sent_at) &&
+          ["monitor", "post_market", "postmarket"].includes(String(row.source || "monitor")));
+        if (!latestAlert) return null;
+        const signal = _signalKindFromAlert(latestAlert);
+        if (!signal) return null;
+        return {
+          sid,
+          ...q,
+          signal,
+          severity: inferSeverity(latestAlert),
+          level: _signalLevelFromAlert(latestAlert),
+          signal_at: latestAlert.sent_at,
+          wl_name: getPreferredStockName(sid, r.stock_name),
+        };
       })
       .filter(r => r && r.signal && r.signal !== "none")
       .sort((a, b) => (SEV_ORDER[b.severity] || 0) - (SEV_ORDER[a.severity] || 0));
@@ -2252,7 +2332,7 @@ function renderLive() {
       const name = r.wl_name || r.stock_name || stockLabelOf(r.sid);
       const priceStr = r.price != null ? r.price.toFixed(2) : "—";
       const chgHtml  = r.changePct != null ? fmtChgHtml(r.changePct) : "";
-      const levelStr = r.level != null ? `關卡 ${Number(r.level).toFixed(2)}` : "";
+      const levelStr = _signalLevelLabel(r.signal, r.level);
       const timeStr  = r.signal_at ? fmtTime(r.signal_at) : (r.updated_at ? fmtTime(r.updated_at) : "");
       return `
         <div class="signal-card sev-${sev}" onclick="openKLineFromWatchlist('${escapeHtml(r.sid)}')">

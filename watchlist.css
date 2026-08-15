@@ -541,6 +541,50 @@ body.has-bottom-nav .page-shell {
 .event-item.event-high   { border-left-color: #ffd060; }
 .event-item.event-normal { border-left-color: #3ce6d1; }
 .event-item.event-low    { border-left-color: rgba(128, 154, 212, 0.3); }
+.today-event-group + .today-event-group {
+	margin-top: 1rem;
+	padding-top: 0.85rem;
+	border-top: 1px solid rgba(128, 154, 212, 0.22);
+}
+.today-event-group-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	margin-bottom: 0.55rem;
+}
+.today-event-stock {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	min-width: 0;
+}
+.today-event-stock strong {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 0.9rem;
+	color: var(--text-0);
+}
+.today-event-count {
+	flex-shrink: 0;
+	font-size: 0.68rem;
+	color: var(--text-muted);
+}
+.today-event-stock-link {
+	flex-shrink: 0;
+	padding: 0;
+	border: 0;
+	color: var(--accent-2);
+	background: transparent;
+	font-size: 0.72rem;
+}
+.today-event-stock-link:hover {
+	color: var(--accent);
+}
+.today-event-group-list .event-item:last-child {
+	margin-bottom: 0;
+}
 .event-type-badge {
 	font-size: 0.7rem;
 	font-weight: 600;
@@ -642,6 +686,8 @@ body.has-bottom-nav .page-shell {
 	.event-meta-row { gap: 0.3rem; }
 	.event-actions { flex-wrap: wrap; }
 	.event-score-parts { gap: 0.2rem; }
+	.today-event-group-head { align-items: flex-start; }
+	.today-event-stock { flex-wrap: wrap; row-gap: 0.25rem; }
 }
 
 .kline-modal-content {
