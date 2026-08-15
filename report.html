@@ -43,6 +43,23 @@
   .s-high{background:#2e7d32;} .s-mid{background:#f57f17;} .s-low{background:#c62828;}
   .sig-tag { display:inline-block; background:#e3f2fd; color:#1565c0; border-radius:4px;
              padding:1px 5px; font-size:.72rem; margin:1px; white-space:nowrap; }
+  .score-hd { background:#173b35; color:#fff; }
+  .ranking-tools { display:flex; gap:.35rem; flex-wrap:wrap; padding:.75rem 1rem; border-bottom:1px solid #e9ecef; }
+  .ranking-btn { border:1px solid #b8c8c4; background:#fff; color:#31534c; border-radius:5px;
+                 padding:.3rem .65rem; font-size:.76rem; cursor:pointer; }
+  .ranking-btn.active { background:#173b35; border-color:#173b35; color:#fff; font-weight:700; }
+  .rating-mark { font-weight:700; font-size:.9rem; }
+  .direction-up { color:#177245; } .direction-down { color:#b42318; } .direction-flat { color:#667085; }
+  .score-reason { display:block; max-width:270px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#667085; }
+  .score-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.5rem; }
+  .score-cell { border-left:3px solid #d0d5dd; padding:.45rem .6rem; background:#f8f9fa; }
+  .score-cell strong { display:block; font-size:1.05rem; }
+  .score-categories { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.4rem .8rem; }
+  .category-row { display:grid; grid-template-columns:88px 1fr 32px; gap:.4rem; align-items:center; font-size:.78rem; }
+  .category-track { height:6px; background:#e4e7ec; border-radius:3px; overflow:hidden; }
+  .category-fill { height:100%; background:#247565; border-radius:3px; }
+  .explain-line { padding:.4rem .55rem; border-left:3px solid #98a2b3; background:#f8f9fa; margin-bottom:.35rem; font-size:.82rem; }
+  .explain-line.positive { border-color:#177245; } .explain-line.negative { border-color:#b42318; }
   .na { color:#bbb; }
   .stock-link { color:#1565c0; text-decoration:none; font-weight:600; cursor:pointer; }
   .stock-link:hover { text-decoration:underline; }
@@ -60,6 +77,8 @@
     td, th { padding:.3rem .35rem !important; font-size:.74rem; }
     .strat-hd .sub.float-end { display:none; }
     .sig-tag { font-size:.68rem; padding:1px 3px; }
+    .score-summary, .score-categories { grid-template-columns:1fr; }
+    .score-reason { max-width:150px; }
   }
 </style>
 </head>
@@ -73,6 +92,33 @@
     <p>請先登入以查看今日分析報告</p>
     <a href="watchlist.html" class="btn btn-primary w-100">前往登入</a>
     <div class="mt-2" style="font-size:.75rem;color:#aaa">登入後返回此頁即可查看</div>
+  </div>
+</div>
+
+<!-- ══ 統一評分詳情 Modal ══ -->
+<div class="modal fade" id="scoreModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <div>
+          <div class="d-flex align-items-center gap-2">
+            <h5 class="mb-0 fw-bold" id="sm-code"></h5>
+            <span id="sm-name"></span>
+            <span class="badge bg-secondary" id="sm-industry"></span>
+          </div>
+          <div class="text-muted small mt-1" id="sm-trend"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="score-summary mb-3" id="sm-summary"></div>
+        <h6 class="fw-bold">分類分數</h6>
+        <div class="score-categories mb-3" id="sm-categories"></div>
+        <h6 class="fw-bold">分數解釋</h6>
+        <div id="sm-explanations"></div>
+        <button class="btn btn-outline-primary btn-sm mt-2" id="sm-chart-btn">查看 K 線與完整分析</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -244,13 +290,29 @@ function renderReport(data) {
   const date = data.date || "—";
   const strategies = data.strategies || [];
   _stockData = data.stock_data || {};  // 儲存詳細資料供 Modal 使用
+  _investmentScores = data.investment_scores || {};
+  _rankings = data.rankings || {};
   document.getElementById("report-info").textContent =
     `分析日期：${date}　共分析 ${Object.keys(data.universe || {}).length} 支股票`;
 
   const body = document.getElementById("report-body");
   body.innerHTML = "";
 
-  if (!strategies.length) {
+  if (Object.keys(_investmentScores).length) {
+    const card = document.createElement("div");
+    card.className = "strat-card";
+    card.innerHTML = `
+      <div class="strat-hd score-hd">統一投資評分
+        <span class="sub">基本面 50% + 技術量能 50%</span>
+        <span class="sub float-end opacity-75 d-none d-sm-inline">後端標準化、歷史趨勢與可解釋分數</span>
+      </div>
+      <div class="ranking-tools" id="ranking-tools"></div>
+      <div class="table-responsive" id="investment-ranking"></div>`;
+    body.appendChild(card);
+    renderInvestmentRanking("overall");
+  }
+
+  if (!strategies.length && !Object.keys(_investmentScores).length) {
     body.innerHTML = '<div class="alert alert-info">此報告無策略資料（可能為舊版 JSON）。</div>';
     return;
   }
@@ -269,6 +331,102 @@ function renderReport(data) {
       </div>`;
     body.appendChild(card);
   });
+}
+
+const RANKING_LABELS = {
+  overall:"綜合 Top 100", fundamental:"基本面 Top 100", technical:"技術強勢 Top 100",
+  improving:"總分改善", fundamental_improving:"基本面改善", technical_breakout:"技術突破"
+};
+let _investmentScores = {}, _rankings = {}, _activeRanking = "overall";
+
+function renderInvestmentRanking(rankingId) {
+  _activeRanking = rankingId;
+  const tools = document.getElementById("ranking-tools");
+  const target = document.getElementById("investment-ranking");
+  if (!tools || !target) return;
+  tools.innerHTML = Object.entries(RANKING_LABELS).map(([id,label]) =>
+    `<button class="ranking-btn ${id===rankingId?'active':''}" onclick="renderInvestmentRanking('${id}')">${label}</button>`
+  ).join("");
+  const ids = _rankings[rankingId] || [];
+  target.innerHTML = buildInvestmentTable(ids);
+}
+
+function buildInvestmentTable(ids) {
+  if (!ids.length) return '<p class="text-muted p-3 mb-0">尚無足夠歷史資料。</p>';
+  const rows = ids.map((sid, index) => {
+    const score = _investmentScores[sid] || {};
+    const direction = score.score_direction || "new";
+    const arrow = direction === "improving" ? "↑" : direction === "deteriorating" ? "↓" : "→";
+    const directionClass = direction === "improving" ? "direction-up" : direction === "deteriorating" ? "direction-down" : "direction-flat";
+    const reason = (score.explanations || [])[0]?.text || "資料累積中";
+    const fmt = value => value == null || isNaN(value) ? "—" : (+value).toFixed(1);
+    const change = score.score_change == null || isNaN(score.score_change) ? "—" : `${score.score_change>=0?'+':''}${(+score.score_change).toFixed(1)}`;
+    return `<tr>
+      <td><span class="rank-num">${index+1}</span></td>
+      <td><span class="stock-link" onclick="openInvestmentDetail('${sid}')">${sid}</span></td>
+      <td><span class="stock-link" onclick="openInvestmentDetail('${sid}')">${escapeHtml(score.stock_name||'')}</span></td>
+      <td class="d-none d-md-table-cell"><small class="text-muted">${escapeHtml(score.industry_category||'')}</small></td>
+      <td><span class="score-badge ${scoreClass(score.total_score)}">${fmt(score.total_score)}</span></td>
+      <td><span class="rating-mark ${directionClass}">${score.rating||'—'}${arrow}</span></td>
+      <td class="d-none d-sm-table-cell">${fmt(score.fundamental_score_v2)}</td>
+      <td class="d-none d-sm-table-cell">${fmt(score.technical_volume_score)}</td>
+      <td class="${directionClass}">${change}</td>
+      <td class="d-none d-lg-table-cell"><span class="score-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</span></td>
+    </tr>`;
+  }).join("");
+  return `<table class="table table-hover table-sm"><thead><tr>
+    <th>#</th><th>代號</th><th>名稱</th><th class="d-none d-md-table-cell">產業</th>
+    <th>總分</th><th>評級</th><th class="d-none d-sm-table-cell">基本</th>
+    <th class="d-none d-sm-table-cell">技術量能</th><th>變化</th><th class="d-none d-lg-table-cell">主要解釋</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function scoreClass(value) {
+  return value >= 70 ? "s-high" : value >= 50 ? "s-mid" : "s-low";
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+}
+
+function openInvestmentDetail(sid) {
+  const score = _investmentScores[sid];
+  if (!score) return;
+  document.getElementById("sm-code").textContent = sid;
+  document.getElementById("sm-name").textContent = score.stock_name || "";
+  document.getElementById("sm-industry").textContent = score.industry_category || "";
+  const trend = (score.score_trend || []).map(point => `${point.date.slice(5)} ${(+point.score).toFixed(0)}`).join(" → ");
+  document.getElementById("sm-trend").textContent = trend ? `分數趨勢：${trend}` : "分數趨勢：資料累積中";
+  const direction = score.score_direction === "improving" ? "改善" : score.score_direction === "deteriorating" ? "惡化" : "持平";
+  document.getElementById("sm-summary").innerHTML = [
+    ["綜合", `${(+score.total_score).toFixed(1)} / ${score.rating||'—'} · ${direction}`],
+    ["基本面", formatScore(score.fundamental_score_v2)],
+    ["技術量能", formatScore(score.technical_volume_score)]
+  ].map(item => `<div class="score-cell"><small class="text-muted">${item[0]}</small><strong>${item[1]}</strong></div>`).join("");
+  const categories = [
+    ["營收",score.revenue_score],["獲利",score.profitability_score],["EPS",score.earnings_growth_score],
+    ["財務體質",score.financial_health_score],["現金流",score.cashflow_score],["估值",score.valuation_score_v2],
+    ["趨勢",score.trend_score],["動能",score.momentum_score],["價格結構",score.price_structure_score],
+    ["成交量",score.volume_score],["量價",score.price_volume_score],["法人",score.institutional_score],["融資",score.margin_score]
+  ];
+  document.getElementById("sm-categories").innerHTML = categories.map(([label,value]) => {
+    const valid = value != null && !isNaN(value), width = valid ? Math.max(0,Math.min(100,+value)) : 0;
+    return `<div class="category-row"><span>${label}</span><div class="category-track"><div class="category-fill" style="width:${width}%"></div></div><strong>${valid?Math.round(value):'—'}</strong></div>`;
+  }).join("");
+  document.getElementById("sm-explanations").innerHTML = (score.explanations || []).map(item =>
+    `<div class="explain-line ${item.tone||'neutral'}">${escapeHtml(item.text||'')}</div>`
+  ).join("") || '<div class="text-muted small">尚無解釋資料。</div>';
+  const chartButton = document.getElementById("sm-chart-btn");
+  chartButton.style.display = _stockData[sid] ? "inline-block" : "none";
+  chartButton.onclick = () => {
+    bootstrap.Modal.getInstance(document.getElementById("scoreModal"))?.hide();
+    openDetail(sid);
+  };
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("scoreModal")).show();
+}
+
+function formatScore(value) {
+  return value == null || isNaN(value) ? "—" : (+value).toFixed(1);
 }
 
 function buildTable(rows) {
