@@ -55,7 +55,7 @@
   .score-cell { border-left:3px solid #d0d5dd; padding:.45rem .6rem; background:#f8f9fa; }
   .score-cell strong { display:block; font-size:1.05rem; }
   .score-categories { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.4rem .8rem; }
-  .category-row { display:grid; grid-template-columns:88px 1fr 32px; gap:.4rem; align-items:center; font-size:.78rem; }
+  .category-row { display:grid; grid-template-columns:minmax(88px,auto) minmax(0,1fr) minmax(48px,auto); gap:.4rem; align-items:center; font-size:.78rem; }
   .category-track { height:6px; background:#e4e7ec; border-radius:3px; overflow:hidden; }
   .category-fill { height:100%; background:#247565; border-radius:3px; }
   .explain-line { padding:.4rem .55rem; border-left:3px solid #98a2b3; background:#f8f9fa; margin-bottom:.35rem; font-size:.82rem; }
@@ -116,6 +116,8 @@
         <div class="score-categories mb-3" id="sm-categories"></div>
         <h6 class="fw-bold">分數解釋</h6>
         <div id="sm-explanations"></div>
+        <h6 class="fw-bold mt-3">關鍵歷史指標</h6>
+        <div class="score-categories" id="sm-history"></div>
         <button class="btn btn-outline-primary btn-sm mt-2" id="sm-chart-btn">查看 K 線與完整分析</button>
       </div>
     </div>
@@ -416,6 +418,25 @@ function openInvestmentDetail(sid) {
   document.getElementById("sm-explanations").innerHTML = (score.explanations || []).map(item =>
     `<div class="explain-line ${item.tone||'neutral'}">${escapeHtml(item.text||'')}</div>`
   ).join("") || '<div class="text-muted small">尚無解釋資料。</div>';
+  const historyMetrics = [
+    ["營收 3M YoY",score.mrev_3m_yoy,"%"],["營收 6M YoY",score.mrev_6m_yoy,"%"],
+    ["營收 12M YoY",score.mrev_12m_yoy,"%"],["營收加速度",score.mrev_yoy_acceleration,"pp"],
+    ["負債比",score.debt_ratio_history,"%"],["流動比率",score.current_ratio_history,"x"],
+    ["利息保障",score.interest_coverage,"x"],["長債 YoY",score.long_term_debt_yoy,"%"],
+    ["OCF / 淨利",score.ocf_net_income_ratio,"x"],["FCF YoY",score.fcf_yoy,"%"],
+    ["正 FCF 連續",score.positive_fcf_streak,"季"],["融資 20D",score.margin_change_20d,"%"],
+    ["券資比",score.short_margin_ratio,"%"],["距 60D 高",score.distance_to_60d_high_pct,"%"],
+    ["突破狀態",score.breakout_state,""],["量價型態",score.price_volume_pattern,""]
+  ];
+  const historyLabels = {
+    retest_held:'回測守住', breakout:'突破待回測', retest_failed:'回測失敗', none:'無近期突破',
+    Bullish:'偏多', Neutral:'中性', Bearish:'偏空'
+  };
+  document.getElementById("sm-history").innerHTML = historyMetrics.map(([label,value,unit]) => {
+    const numeric = value != null && value !== '' && !isNaN(value);
+    const display = numeric ? `${(+value).toFixed(1)}${unit}` : (value && value !== 'insufficient_data' ? escapeHtml(historyLabels[value] || value) : '—');
+    return `<div class="category-row"><span>${label}</span><div></div><strong style="white-space:nowrap">${display}</strong></div>`;
+  }).join("");
   const chartButton = document.getElementById("sm-chart-btn");
   chartButton.style.display = _stockData[sid] ? "inline-block" : "none";
   chartButton.onclick = () => {
