@@ -888,8 +888,8 @@ function openTodayEventsPanel() {
         <section class="today-event-group">
           <div class="today-event-group-head">
             <div class="today-event-stock">
-              <span class="badge-sid">${escapeHtml(sid)}</span>
               <strong>${escapeHtml(sidName)}</strong>
+              <span class="badge-sid">${escapeHtml(sid)}</span>
               <span class="today-event-count">${events.length} 件</span>
             </div>
             <button class="today-event-stock-link" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股 →</button>
@@ -1721,7 +1721,7 @@ function dayLabelOf(ts) {
 function stockLabelOf(sid) {
   const wl = watchlistRows.find(w => String(w.stock_id).trim() === sid);
   const name = getPreferredStockName(sid, wl?.stock_name);
-  return name ? `${sid} ${name}` : sid;
+  return name ? `${name} ${sid}` : sid;
 }
 
 function getPreferredStockName(sid, rawName) {
@@ -1981,7 +1981,7 @@ function buildWhyHtml(row) {
     [/融資暴增/, "💳 融資暴增", wl.alert_margin_up],
     [/融資暴減/, "💳 融資暴減", wl.alert_margin_down],
   ];
-  const lines = [`你已將 <b>${escapeHtml(sid)} ${escapeHtml(name)}</b> 加入自選股`];
+  const lines = [`你已將 <b>${escapeHtml(name)} ${escapeHtml(sid)}</b> 加入自選股`];
   for (const [re, label] of condMap) {
     if (re.test(t)) { lines.push(`已開啟「${label}」通知條件`); break; }
   }
@@ -2112,8 +2112,8 @@ function renderHome() {
     const sigDot = sig ? `<span class="sev-dot sev-${inferSeverity(sig)}"></span>` : '<span class="hr-meta">─</span>';
     return `
       <div class="home-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
-        <span class="badge-sid" style="font-size:.68rem">${escapeHtml(sid)}</span>
         <span class="hr-name">${escapeHtml(name)}</span>
+        <span class="badge-sid" style="font-size:.68rem">${escapeHtml(sid)}</span>
         <span class="hr-meta">${q ? q.price.toFixed(2) : ""}</span>
         ${q ? fmtChgHtml(q.changePct) : ""}
         ${sigDot}
@@ -2404,8 +2404,8 @@ function renderWatchlist(rows) {
       <div class="wl-row-left">
         <button class="wl-remove-mini" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${row.id}')">✕</button>
         <div class="wl-stock-meta">
-          <span class="badge-sid">${escapeHtml(sid)}</span>
           <div class="wl-name-inline">${escapeHtml(displayName)}</div>
+          <span class="badge-sid">${escapeHtml(sid)}</span>
           ${quoteLine}
         </div>
       </div>
@@ -2431,7 +2431,7 @@ function openAlertSettings(rowId) {
   const sid = String(row.stock_id || "").trim();
   const fallbackName = universe[sid]?.n || "";
   const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
-  document.getElementById("alert-settings-title").textContent = `通知設定｜${sid} ${displayName}`;
+  document.getElementById("alert-settings-title").textContent = `通知設定｜${displayName} ${sid}`;
 
   // 盤中即時
   document.getElementById("alert-break-support").checked    = !!row.alert_break_support;
@@ -3831,7 +3831,7 @@ async function runStockAutocomplete() {
       const check = await validateStockCode(qRaw);
       if (check.found) {
         const name = check.name || qRaw;
-        list.innerHTML = `<div class="dropdown-item" onclick="selectStock('${qRaw}', '${String(name).replace(/'/g, "\\'")}')"><span class="badge-sid me-2">${qRaw}</span>${name}</div>`;
+        list.innerHTML = `<div class="dropdown-item" onclick="selectStock('${qRaw}', '${String(name).replace(/'/g, "\\'")}')">${name}<span class="badge-sid ms-2">${qRaw}</span></div>`;
         list.style.display = "block";
         return;
       }
@@ -3851,7 +3851,7 @@ async function runStockAutocomplete() {
 
   list.innerHTML = matches.map(([sid, v]) =>
     `<div class="dropdown-item" onclick="selectStock('${sid}', '${(v.n||"").replace(/'/g,"\\'")}')">
-       <span class="badge-sid me-2">${sid}</span>${v.n || ""}
+       ${(v.n || "")}<span class="badge-sid ms-2">${sid}</span>
      </div>`
   ).join("");
   list.style.display = "block";
