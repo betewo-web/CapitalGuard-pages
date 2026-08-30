@@ -253,7 +253,11 @@
       <div class="card panel-card">
         <div class="card-header py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
           <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
-          <span id="events-fetch-status" class="events-fetch-status" title="事件資料狀態（需在本機執行 --fetch-events 更新）"></span>
+          <span class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-sm btn-outline-light" onclick="openRulesModal()"
+                    title="用條件組合自訂通知，全部成立才發送">📐 自訂規則</button>
+            <span id="events-fetch-status" class="events-fetch-status" title="事件資料狀態（需在本機執行 --fetch-events 更新）"></span>
+          </span>
         </div>
         <div class="card-body p-0">
           <div id="wl-empty" class="empty-state text-center py-5 text-muted" style="display:none">
@@ -288,11 +292,78 @@
   </button>
 </nav>
 
+<!-- ── 自訂規則：清單 ────────────────────────────────────────────── -->
+<div class="modal fade" id="rulesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">📐 自訂通知規則</h5>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="small text-muted" id="rules-count"></span>
+          <button type="button" class="btn btn-sm btn-accent" onclick="openRuleEditor(null)">＋ 新增規則</button>
+        </div>
+        <div id="rules-list"></div>
+        <div id="rules-msg" class="small mt-2 text-muted"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 自訂規則：編輯器 ──────────────────────────────────────────── -->
+<div class="modal fade" id="ruleEditorModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="rule-editor-title">新增規則</h5>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <div class="rule-field">
+          <label for="rule-name">規則名稱</label>
+          <input id="rule-name" type="text" class="rule-input" maxlength="40"
+                 placeholder="例如：量增突破" oninput="renderRulePreview()">
+        </div>
+
+        <div class="rule-row">
+          <div class="rule-field">
+            <label for="rule-scope">套用範圍</label>
+            <select id="rule-scope" class="rule-input" onchange="renderRulePreview()"></select>
+          </div>
+          <div class="rule-field">
+            <label for="rule-severity">通知等級</label>
+            <select id="rule-severity" class="rule-input">
+              <option value="">依條件自動判定</option>
+              <option value="orange">🟠 強訊號（要處理部位）</option>
+              <option value="blue">🔵 注意（知道即可）</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="rule-cond-head">
+          <span>條件<span class="text-muted small">（全部成立才發送）</span></span>
+          <button type="button" class="btn btn-sm btn-outline-light" onclick="addRuleCondition()">＋ 加條件</button>
+        </div>
+        <div id="rule-conditions"></div>
+
+        <div class="rule-preview" id="rule-preview"></div>
+        <div id="rule-editor-msg" class="small mt-2 text-muted"></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-sm btn-accent" onclick="saveRule()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="alertSettingsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
-        <h5 class="mb-0" id="alert-settings-title">LINE 通知設定</h5>
+        <h5 class="mb-0" id="alert-settings-title">通知設定</h5>
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-3">
@@ -1697,6 +1768,88 @@ function signalIconSvg(row, size = 18) {
     + `<rect width="48" height="48" rx="11" fill="${bg}"/>${inner}</svg>`;
 }
 
+// ── 自訂通知規則 ────────────────────────────────────────────────
+// 條件目錄必須與後端 monitor/rules.py 的 CONDITION_REGISTRY 對齊：
+// type 與參數名不同就會存出後端看不懂的規則（後端遇到未知型別一律不觸發）。
+// tier 決定何時評估；preview 標示前端能否在瀏覽器裡先算給使用者看。
+const RULE_TIERS = {
+  intraday:    { label: "盤中", note: "每 15 秒評估" },
+  technical:   { label: "技術", note: "盤中以即時價接日線計算" },
+  chips:       { label: "籌碼", note: "盤後 T86 發布後" },
+  fundamental: { label: "基本面", note: "每日分析後" },
+};
+
+const RULE_CATALOG = [
+  { type: "break_prior_high", tier: "intraday", name: "突破前高", preview: true,
+    params: [{ k: "window", label: "回看天數", type: "number", def: 20, min: 2, max: 250 }] },
+  { type: "break_prior_low", tier: "intraday", name: "跌破前低", preview: true,
+    params: [{ k: "window", label: "回看天數", type: "number", def: 20, min: 2, max: 250 }] },
+  { type: "break_52w_high", tier: "intraday", name: "突破 52 週高", preview: true, params: [] },
+  { type: "break_52w_low", tier: "intraday", name: "跌破 52 週低", preview: true, params: [] },
+  { type: "change_pct_above", tier: "intraday", name: "漲幅超過", preview: true,
+    params: [{ k: "value", label: "漲幅 %", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
+  { type: "change_pct_below", tier: "intraday", name: "跌幅超過", preview: true,
+    params: [{ k: "value", label: "跌幅 %（填正數）", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
+  { type: "volume_vs_ma", tier: "intraday", name: "量能對比均量", preview: true,
+    params: [
+      { k: "window", label: "均量天數", type: "select", def: 20, options: [[5, "5 日"], [20, "20 日"]] },
+      { k: "ratio", label: "倍數", type: "number", def: 2, min: 0.1, max: 20, step: 0.1 },
+      { k: "op", label: "方向", type: "select", def: "above",
+        options: [["above", "高於（放量）"], ["below", "低於（量縮）"]] },
+    ] },
+  { type: "ma_cross", tier: "technical", name: "均線交叉",
+    params: [
+      { k: "fast", label: "快線", type: "number", def: 5, min: 2, max: 120 },
+      { k: "slow", label: "慢線", type: "number", def: 20, min: 3, max: 240 },
+      { k: "dir", label: "方向", type: "select", def: "up",
+        options: [["up", "黃金交叉（向上）"], ["down", "死亡交叉（向下）"]] },
+    ] },
+  { type: "rsi_above", tier: "technical", name: "RSI 高於",
+    params: [{ k: "value", label: "RSI", type: "number", def: 70, min: 1, max: 99 }] },
+  { type: "rsi_below", tier: "technical", name: "RSI 低於",
+    params: [{ k: "value", label: "RSI", type: "number", def: 30, min: 1, max: 99 }] },
+  { type: "macd_cross", tier: "technical", name: "MACD 交叉",
+    params: [{ k: "dir", label: "方向", type: "select", def: "up",
+      options: [["up", "黃金交叉"], ["down", "死亡交叉"]] }] },
+  { type: "net_buy_above", tier: "chips", name: "買超超過",
+    params: [
+      { k: "who", label: "法人", type: "select", def: "total",
+        options: [["total", "三大法人"], ["foreign", "外資"], ["trust", "投信"]] },
+      { k: "lots", label: "張數", type: "number", def: 1000, min: 1, max: 500000 },
+    ] },
+  { type: "consec_net_buy", tier: "chips", name: "連續買超",
+    params: [
+      { k: "who", label: "法人", type: "select", def: "total",
+        options: [["total", "三大法人"], ["foreign", "外資"], ["trust", "投信"]] },
+      { k: "days", label: "連續天數", type: "number", def: 3, min: 2, max: 30 },
+    ] },
+  { type: "net_buy_flip", tier: "chips", name: "由賣轉買",
+    params: [{ k: "who", label: "法人", type: "select", def: "total",
+      options: [["total", "三大法人"], ["foreign", "外資"], ["trust", "投信"]] }] },
+  { type: "net_buy_high", tier: "chips", name: "買超創新高",
+    params: [
+      { k: "who", label: "法人", type: "select", def: "total",
+        options: [["total", "三大法人"], ["foreign", "外資"], ["trust", "投信"]] },
+      { k: "days", label: "比較天數", type: "number", def: 20, min: 2, max: 120 },
+    ] },
+  { type: "revenue_yoy", tier: "fundamental", name: "月營收 YoY 高於",
+    params: [{ k: "value", label: "YoY %", type: "number", def: 30, min: -100, max: 500 }] },
+  { type: "revenue_mom", tier: "fundamental", name: "月營收 MoM",
+    params: [{ k: "value", label: "MoM %（負數＝衰退門檻）", type: "number", def: -20, min: -100, max: 500 }] },
+  { type: "eps_yoy", tier: "fundamental", name: "EPS 成長高於",
+    params: [{ k: "value", label: "成長 %", type: "number", def: 50, min: -100, max: 1000 }] },
+  { type: "margin_above", tier: "fundamental", name: "利潤率高於",
+    params: [
+      { k: "kind", label: "類型", type: "select", def: "gross",
+        options: [["gross", "毛利率"], ["op", "營業利益率"], ["net", "淨利率"]] },
+      { k: "value", label: "門檻 %", type: "number", def: 30, min: -100, max: 100 },
+    ] },
+  { type: "roe_above", tier: "fundamental", name: "ROE 高於",
+    params: [{ k: "value", label: "ROE %", type: "number", def: 15, min: -100, max: 200 }] },
+];
+
+const RULE_CATALOG_BY_TYPE = Object.fromEntries(RULE_CATALOG.map(c => [c.type, c]));
+
 const SIGNAL_LABEL_MAP = {
   break_sup:   "跌破支撐",
   near_sup:    "逼近支撐",
@@ -2406,6 +2559,321 @@ function renderLive() {
         <div class="sc-foot">${sid ? "查看走勢" : "查看通知"} →</div>
       </div>`;
   }).join("");
+}
+
+// ── 自訂規則：清單與編輯 ────────────────────────────────────────
+let alertRules = [];
+let editingRuleId = null;
+let editorConditions = [];
+
+async function openRulesModal() {
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("rulesModal")).show();
+  await refreshRules();
+}
+
+async function refreshRules() {
+  const listEl = document.getElementById("rules-list");
+  try {
+    alertRules = await sbGet("alert_rules", { order: "created_at.asc" }, state.accessToken) || [];
+  } catch (e) {
+    // 表不存在（migration 未執行）時給明確指示，而不是空白畫面
+    listEl.innerHTML = `<div class="view-empty">讀取失敗：${escapeHtml(String(e.message || e))}<br>
+      <span style="font-size:.75rem;opacity:.8">若為 404，請先在 Supabase 執行 migrate_alert_rules.sql</span></div>`;
+    return;
+  }
+  document.getElementById("rules-count").textContent =
+    alertRules.length ? `共 ${alertRules.length} 條` : "";
+
+  if (!alertRules.length) {
+    listEl.innerHTML = `<div class="view-empty">尚無自訂規則<br>
+      <span style="font-size:.75rem;opacity:.8">用「＋ 新增規則」組合條件，全部成立時才會通知你</span></div>`;
+    return;
+  }
+
+  listEl.innerHTML = alertRules.map(r => {
+    const conds = Array.isArray(r.conditions) ? r.conditions : [];
+    const tier = ruleTierOf(conds);
+    const scope = r.stock_id ? `${escapeHtml(r.stock_id)} ${escapeHtml(stockNameOf(r.stock_id))}` : "全部自選股";
+    const sev = r.severity === "orange" ? "🟠" : r.severity === "blue" ? "🔵" : "";
+    return `
+      <div class="rule-card${r.enabled ? "" : " is-off"}">
+        <div class="rule-card-head">
+          <span class="rule-card-name">${sev} ${escapeHtml(r.name || "(未命名)")}</span>
+          <span class="toggle-wrap form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" ${r.enabled ? "checked" : ""}
+                   onchange="toggleRule('${escapeHtml(String(r.id))}', this.checked)">
+          </span>
+        </div>
+        <div class="rule-card-meta">
+          <span class="rule-tier tier-${tier}">${RULE_TIERS[tier].label}</span>
+          <span>${scope}</span>
+        </div>
+        <div class="rule-card-conds">${conds.map(describeCondition).map(escapeHtml).join("　＋　")}</div>
+        <div class="rule-card-actions">
+          <button type="button" class="btn btn-sm btn-outline-light"
+                  onclick="openRuleEditor('${escapeHtml(String(r.id))}')">編輯</button>
+          <button type="button" class="btn btn-sm btn-outline-danger"
+                  onclick="deleteRule('${escapeHtml(String(r.id))}')">刪除</button>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+// 規則在其條件中「最快的那一層」評估——與後端 AlertRule.tier() 同一套規則
+function ruleTierOf(conds) {
+  const order = ["intraday", "technical", "chips", "fundamental"];
+  let best = 3;
+  for (const c of conds || []) {
+    const spec = RULE_CATALOG_BY_TYPE[c && c.type];
+    if (spec) best = Math.min(best, order.indexOf(spec.tier));
+  }
+  return order[best < 0 ? 3 : best];
+}
+
+function describeCondition(c) {
+  const spec = RULE_CATALOG_BY_TYPE[c && c.type];
+  if (!spec) return `未知條件（${c && c.type}）`;
+  const parts = spec.params.map(p => {
+    const v = c[p.k] !== undefined ? c[p.k] : p.def;
+    if (p.type === "select") {
+      const hit = (p.options || []).find(o => String(o[0]) === String(v));
+      return hit ? hit[1] : String(v);
+    }
+    return `${p.label.replace(/（.*?）/g, "")} ${v}`;
+  });
+  return parts.length ? `${spec.name}｜${parts.join("、")}` : spec.name;
+}
+
+function stockNameOf(sid) {
+  const row = watchlistRows.find(w => String(w.stock_id).trim() === String(sid).trim());
+  return (row && row.stock_name) || (universe[sid] && universe[sid].n) || "";
+}
+
+async function toggleRule(id, enabled) {
+  try {
+    await sbPatch("alert_rules", { id: `eq.${id}` }, { enabled }, state.accessToken);
+    const r = alertRules.find(x => String(x.id) === String(id));
+    if (r) r.enabled = enabled;
+    setRulesMsg(enabled ? "已啟用" : "已停用");
+    refreshRules();
+  } catch (e) { setRulesMsg(`更新失敗：${e.message || e}`, true); }
+}
+
+async function deleteRule(id) {
+  const r = alertRules.find(x => String(x.id) === String(id));
+  if (!confirm(`確定刪除規則「${(r && r.name) || ""}」？`)) return;
+  try {
+    await sbDelete("alert_rules", { id: `eq.${id}` }, state.accessToken);
+    setRulesMsg("已刪除");
+    refreshRules();
+  } catch (e) { setRulesMsg(`刪除失敗：${e.message || e}`, true); }
+}
+
+function setRulesMsg(text, isErr) {
+  const el = document.getElementById("rules-msg");
+  el.textContent = text;
+  el.className = `small mt-2 ${isErr ? "text-danger" : "text-muted"}`;
+  if (!isErr) setTimeout(() => { if (el.textContent === text) el.textContent = ""; }, 2500);
+}
+
+// ── 編輯器 ──
+function openRuleEditor(id) {
+  editingRuleId = id;
+  const r = id ? alertRules.find(x => String(x.id) === String(id)) : null;
+  document.getElementById("rule-editor-title").textContent = r ? "編輯規則" : "新增規則";
+  document.getElementById("rule-name").value = (r && r.name) || "";
+  document.getElementById("rule-severity").value = (r && r.severity) || "";
+  document.getElementById("rule-editor-msg").textContent = "";
+
+  const scopeEl = document.getElementById("rule-scope");
+  scopeEl.innerHTML = `<option value="">全部自選股</option>` + watchlistRows.map(w => {
+    const sid = String(w.stock_id).trim();
+    return `<option value="${escapeHtml(sid)}">${escapeHtml(sid)} ${escapeHtml(w.stock_name || "")}</option>`;
+  }).join("");
+  scopeEl.value = (r && r.stock_id) || "";
+
+  editorConditions = r && Array.isArray(r.conditions) && r.conditions.length
+    ? JSON.parse(JSON.stringify(r.conditions))
+    : [{ type: "change_pct_above", value: 5 }];
+  renderRuleConditions();
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("ruleEditorModal")).show();
+}
+
+function addRuleCondition() {
+  editorConditions.push({ type: "change_pct_above", value: 5 });
+  renderRuleConditions();
+}
+
+function removeRuleCondition(i) {
+  editorConditions.splice(i, 1);
+  if (!editorConditions.length) editorConditions.push({ type: "change_pct_above", value: 5 });
+  renderRuleConditions();
+}
+
+function onConditionTypeChange(i, type) {
+  const spec = RULE_CATALOG_BY_TYPE[type];
+  // 換型別就重建參數：舊型別的參數名對新型別沒有意義，留著會存出髒資料
+  const next = { type };
+  (spec ? spec.params : []).forEach(p => { next[p.k] = p.def; });
+  editorConditions[i] = next;
+  renderRuleConditions();
+}
+
+function onConditionParamChange(i, key, raw) {
+  const spec = RULE_CATALOG_BY_TYPE[editorConditions[i].type];
+  const p = spec && spec.params.find(x => x.k === key);
+  let v = raw;
+  if (p && p.type === "number") {
+    v = Number(raw);
+    if (!isFinite(v)) return;
+  } else if (p && p.type === "select" && (p.def === 5 || p.def === 20)) {
+    v = Number(raw);
+  }
+  editorConditions[i][key] = v;
+  renderRulePreview();
+}
+
+function renderRuleConditions() {
+  const wrap = document.getElementById("rule-conditions");
+  const grouped = {};
+  RULE_CATALOG.forEach(c => { (grouped[c.tier] = grouped[c.tier] || []).push(c); });
+
+  wrap.innerHTML = editorConditions.map((c, i) => {
+    const spec = RULE_CATALOG_BY_TYPE[c.type] || RULE_CATALOG[0];
+    const opts = Object.keys(RULE_TIERS).map(t =>
+      `<optgroup label="${RULE_TIERS[t].label}">` +
+      (grouped[t] || []).map(x =>
+        `<option value="${x.type}"${x.type === c.type ? " selected" : ""}>${x.name}</option>`).join("") +
+      `</optgroup>`).join("");
+
+    const params = spec.params.map(p => {
+      const v = c[p.k] !== undefined ? c[p.k] : p.def;
+      if (p.type === "select") {
+        return `<label class="rule-param"><span>${p.label}</span>
+          <select class="rule-input" onchange="onConditionParamChange(${i}, '${p.k}', this.value)">
+            ${(p.options || []).map(o =>
+              `<option value="${o[0]}"${String(o[0]) === String(v) ? " selected" : ""}>${o[1]}</option>`).join("")}
+          </select></label>`;
+      }
+      return `<label class="rule-param"><span>${p.label}</span>
+        <input class="rule-input" type="number" value="${v}"
+               ${p.min !== undefined ? `min="${p.min}"` : ""}
+               ${p.max !== undefined ? `max="${p.max}"` : ""}
+               step="${p.step || 1}"
+               oninput="onConditionParamChange(${i}, '${p.k}', this.value)"></label>`;
+    }).join("");
+
+    return `
+      <div class="rule-cond">
+        <div class="rule-cond-top">
+          <select class="rule-input" onchange="onConditionTypeChange(${i}, this.value)">${opts}</select>
+          <button type="button" class="btn btn-sm btn-outline-danger"
+                  onclick="removeRuleCondition(${i})" title="移除這個條件">✕</button>
+        </div>
+        <div class="rule-cond-tier">${RULE_TIERS[spec.tier].label}　${RULE_TIERS[spec.tier].note}</div>
+        ${params ? `<div class="rule-params">${params}</div>` : ""}
+      </div>`;
+  }).join("");
+
+  renderRulePreview();
+}
+
+async function saveRule() {
+  const msgEl = document.getElementById("rule-editor-msg");
+  const name = document.getElementById("rule-name").value.trim();
+  const stockId = document.getElementById("rule-scope").value || null;
+  const severity = document.getElementById("rule-severity").value || null;
+  if (!editorConditions.length) { msgEl.textContent = "至少要有一個條件"; return; }
+
+  const body = { name, stock_id: stockId, severity, conditions: editorConditions, enabled: true };
+  try {
+    if (editingRuleId) {
+      await sbPatch("alert_rules", { id: `eq.${editingRuleId}` }, body, state.accessToken);
+    } else {
+      await sbPost("alert_rules", { ...body, user_id: state.userId }, state.accessToken, true);
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("ruleEditorModal")).hide();
+    setRulesMsg(editingRuleId ? "已更新" : "已新增");
+    refreshRules();
+  } catch (e) {
+    msgEl.textContent = `儲存失敗：${e.message || e}`;
+    msgEl.className = "small mt-2 text-danger";
+  }
+}
+
+// ── 命中預覽 ──
+// 只預覽盤中層條件，而且只用 max／min／平均這類直接運算。
+// RSI、MACD、均線交叉不在這裡重算——那會變成第二份指標實作，
+// 遲早跟後端算出不同結果（評分與通知就曾因此分歧過）。
+function renderRulePreview() {
+  const el = document.getElementById("rule-preview");
+  const previewable = editorConditions.filter(c => (RULE_CATALOG_BY_TYPE[c.type] || {}).preview);
+  const deferred = editorConditions.filter(c => !(RULE_CATALOG_BY_TYPE[c.type] || {}).preview);
+
+  const scope = document.getElementById("rule-scope").value;
+  const targets = (scope ? watchlistRows.filter(w => String(w.stock_id).trim() === scope) : watchlistRows)
+    .map(w => String(w.stock_id).trim());
+
+  let body = "";
+  if (previewable.length && targets.length) {
+    const hits = targets.filter(sid => previewable.every(c => previewCondition(sid, c)));
+    const shown = hits.slice(0, 8).map(sid => `${sid} ${stockNameOf(sid)}`.trim());
+    body += `<div class="rp-line"><b>${hits.length}</b> / ${targets.length} 檔符合可預覽的條件`
+      + (shown.length ? `：${escapeHtml(shown.join("、"))}${hits.length > 8 ? " …" : ""}` : "")
+      + "</div>";
+  } else if (!previewable.length) {
+    body += `<div class="rp-line">此規則沒有可即時預覽的條件</div>`;
+  }
+  if (deferred.length) {
+    const names = deferred.map(c => (RULE_CATALOG_BY_TYPE[c.type] || {}).name || c.type);
+    body += `<div class="rp-line rp-muted">${escapeHtml(names.join("、"))}
+      需伺服器端資料，儲存後於下次評估時生效，這裡不預估。</div>`;
+  }
+  el.innerHTML = `<div class="rp-title">命中預覽</div>${body}`;
+}
+
+function previewCondition(sid, c) {
+  const q = intradayQuoteMap[sid] || {};
+  const stock = sharedReportData?.stock_data?.[sid];
+  const ohlcv = stock?.daily?.ohlcv;          // [[o,h,l,c,v], ...]，最後一筆為最近交易日
+  const price = q.price != null ? q.price : stock?.levels?.current;
+  if (price == null) return false;
+
+  const highs = ohlcv ? ohlcv.map(r => Number(r[1])).filter(isFinite) : [];
+  const lows  = ohlcv ? ohlcv.map(r => Number(r[2])).filter(isFinite) : [];
+  const vols  = ohlcv ? ohlcv.map(r => Number(r[4])).filter(isFinite) : [];
+
+  switch (c.type) {
+    case "break_prior_high": {
+      const w = Number(c.window) || 20;
+      if (highs.length < 2) return false;
+      return price > Math.max(...highs.slice(-w));
+    }
+    case "break_prior_low": {
+      const w = Number(c.window) || 20;
+      if (lows.length < 2) return false;
+      return price < Math.min(...lows.slice(-w));
+    }
+    case "break_52w_high": return highs.length >= 2 && price > Math.max(...highs.slice(-250));
+    case "break_52w_low":  return lows.length  >= 2 && price < Math.min(...lows.slice(-250));
+    case "change_pct_above":
+      return q.changePct != null && q.changePct >= Number(c.value || 0);
+    case "change_pct_below":
+      return q.changePct != null && q.changePct <= -Math.abs(Number(c.value || 0));
+    case "volume_vs_ma": {
+      const w = Number(c.window) || 20;
+      if (vols.length < 2 || q.volume == null) return false;
+      const tail = vols.slice(-w);
+      const avg = tail.reduce((a, b) => a + b, 0) / tail.length / 1000;  // 股 → 張
+      if (!(avg > 0)) return false;
+      const times = q.volume / avg;
+      return String(c.op || "above") === "below"
+        ? times < Number(c.ratio || 0.5)
+        : times >= Number(c.ratio || 2);
+    }
+    default: return false;
+  }
 }
 
 // ── 自選股清單 ──────────────────────────────────────────────────
