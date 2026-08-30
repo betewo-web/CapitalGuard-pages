@@ -1644,13 +1644,12 @@ const SIGNAL_EMOJI = {
   target_low:   "🎯",
 };
 
-// 盤中雷達卡的自製訊號圖示：虛線＝關卡、實線＝價格走勢、圓點＝現價，
-// 底色用等級色。這是頁面內的 inline SVG，與推播圖示的平台限制無關，
-// iOS 一樣正常顯示。
+// 自製訊號圖示：虛線＝關卡、實線＝價格走勢、圓點＝現價，底色用等級色。
+// 這是頁面內的 inline SVG，與推播圖示的平台限制無關，iOS 一樣正常顯示。
 //
-// 只用在雷達卡、不用在 Inbox 列：雷達卡左側本來就有彩色邊條表達等級，
-// 換掉 emoji 不損失資訊；Inbox 列的圓點本身就是燈號，換成圖示會讓
-// 那一整欄看不出等級。
+// Inbox 列與盤中雷達卡都用它，兩邊的等級都由左側彩色邊條表達。
+// 盤中雷達只顯示「當日」通知，非交易時段是空的，所以圖示若只放在那裡
+// 一週只有五個上午看得到——Inbox 才是天天會看的地方。
 const SIGNAL_ICON_ART = {
   near_res:     { level: 15, dash: true,  path: "M9 38 L18 33 L27 27 L36 22", dot: [36, 22] },
   break_res:    { level: 22, dash: true,  path: "M9 37 L18 33 L27 20 L37 11", dot: [37, 11] },
@@ -2002,10 +2001,10 @@ function renderInbox() {
     const sid = String(r.stock_id || "").trim();
     const sidBadge = sid ? `<span class="badge-sid" style="font-size:.66rem">${escapeHtml(sid)}</span>` : "";
     html += `
-      <div class="inbox-item${unread ? " unread" : ""}" role="button" tabindex="0"
+      <div class="inbox-item${unread ? " unread" : ""}" data-sev="${sev}" role="button" tabindex="0"
            onclick="openInboxDetail('${escapeHtml(String(r.id))}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetail('${escapeHtml(String(r.id))}');}">
-        <span class="sev-dot sev-${sev} ib-sev"></span>
+        ${signalIconSvg(r, 30) || `<span class="sev-dot sev-${sev} ib-sev"></span>`}
         <div class="ib-main">
           <div class="ib-title">${escapeHtml(r.title || "")} ${sidBadge}</div>
           <div class="ib-body">${escapeHtml(r.body || "")}</div>

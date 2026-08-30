@@ -1366,6 +1366,9 @@ body.has-bottom-nav .qa-panel {
 	gap: 0.6rem;
 	padding: 0.72rem 0.75rem;
 	border: 1px solid var(--border);
+	/* 等級改由左邊條表達（與盤中雷達卡一致），圓點的位置讓給訊號圖示。
+	   用 data-sev 而非 class：.sev-orange 之類的既有 class 會連帶染色整列文字。 */
+	border-left: 3px solid var(--sig-info);
 	border-radius: 14px;
 	background: var(--surface);
 	margin-bottom: 0.5rem;
@@ -1374,20 +1377,27 @@ body.has-bottom-nav .qa-panel {
 	position: relative;
 }
 
+.inbox-item[data-sev="orange"] { border-left-color: var(--sig-orange); }
+.inbox-item[data-sev="blue"]   { border-left-color: var(--sig-blue); }
+
 .inbox-item:hover {
 	border-color: rgba(60, 230, 209, 0.4);
 	transform: translateY(-1px);
 }
 
+/* 未讀改以底色＋粗體標題表示；左邊條已讓給等級 */
 .inbox-item.unread {
 	background: var(--surface-2);
-	border-left: 3px solid var(--accent-2);
 }
 
 .inbox-item.unread .ib-title { font-weight: 700; }
 
 .inbox-item .ib-sev {
 	margin-top: 5px;
+}
+
+.inbox-item > .sig-ico {
+	margin-top: 1px;
 }
 
 
