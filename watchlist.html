@@ -236,41 +236,33 @@
     <!-- ═══ ⭐ 自選 ═══ -->
     <section id="view-watch" class="app-view">
 
-      <!-- 新增股票 -->
-      <div class="card panel-card mb-3">
-        <div class="card-header py-3 d-flex justify-content-between align-items-center">
-          <span class="fw-semibold panel-title">新增追蹤股票</span>
-        </div>
-        <div class="card-body p-3">
-          <div class="d-flex gap-2 position-relative flex-column flex-md-row">
-            <div class="flex-grow-1 position-relative">
-              <input id="inp-stock" class="form-control form-control-lg" placeholder="輸入股票代號或名稱，如 2330 或 台積電"
-                     autocomplete="off" oninput="onStockInput()" onkeydown="onStockKey(event)">
-              <div id="autocomplete-list" class="position-absolute w-100 rounded" style="display:none;"></div>
-            </div>
-            <button class="btn btn-success btn-lg btn-add" onclick="addStock()">加入</button>
-          </div>
-          <div id="add-msg" class="mt-2 small"></div>
-        </div>
+      <!-- 新增股票：單行搜尋列（原本的整張卡片佔掉近三倍高度） -->
+      <div class="wl-addbar">
+        <span class="wl-addbar-icon" aria-hidden="true">🔍</span>
+        <input id="inp-stock" class="wl-addbar-input" placeholder="加入追蹤：代號或名稱，如 2330／台積電"
+               autocomplete="off" aria-label="輸入股票代號或名稱" oninput="onStockInput()" onkeydown="onStockKey(event)">
+        <button class="wl-addbar-btn" onclick="addStock()">加入</button>
+        <div id="autocomplete-list" class="rounded" style="display:none;"></div>
       </div>
+      <div id="add-msg" class="wl-add-msg"></div>
 
-      <!-- 自選篩選 -->
-      <div class="chip-row" id="watch-filters">
-        <button class="filter-chip active" data-f="all" onclick="setWatchFilter('all')">全部</button>
-        <button class="filter-chip" data-f="signal" onclick="setWatchFilter('signal')">有訊號</button>
-        <button class="filter-chip" data-f="up" onclick="setWatchFilter('up')">上漲</button>
-        <button class="filter-chip" data-f="down" onclick="setWatchFilter('down')">下跌</button>
-      </div>
-
-      <!-- 自選股清單 -->
+      <!-- 自選股清單（篩選 chips 收進標題列，省下一整行） -->
       <div class="card panel-card">
-        <div class="card-header py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
-          <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
-          <span class="d-flex align-items-center gap-2">
-            <button type="button" class="btn btn-sm btn-outline-light" onclick="openRulesModal()"
-                    title="用條件組合自訂通知，全部成立才發送">📐 自訂規則</button>
-            <span id="events-fetch-status" class="events-fetch-status" title="事件資料狀態（需在本機執行 --fetch-events 更新）"></span>
-          </span>
+        <div class="card-header wl-panel-head">
+          <div class="wl-panel-head-top">
+            <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
+            <span class="d-flex align-items-center gap-2">
+              <button type="button" class="btn btn-sm btn-ghost" onclick="openRulesModal()"
+                      title="用條件組合自訂通知，全部成立才發送">📐 自訂規則</button>
+              <span id="events-fetch-status" class="events-fetch-status" title="事件資料狀態（需在本機執行 --fetch-events 更新）"></span>
+            </span>
+          </div>
+          <div class="chip-row chip-row-inline" id="watch-filters">
+            <button class="filter-chip active" data-f="all" onclick="setWatchFilter('all')">全部</button>
+            <button class="filter-chip" data-f="signal" onclick="setWatchFilter('signal')">有訊號</button>
+            <button class="filter-chip" data-f="up" onclick="setWatchFilter('up')">上漲</button>
+            <button class="filter-chip" data-f="down" onclick="setWatchFilter('down')">下跌</button>
+          </div>
         </div>
         <div class="card-body p-0">
           <div id="wl-empty" class="empty-state text-center py-5 text-muted" style="display:none">
@@ -3111,48 +3103,50 @@ function renderWatchlist(rows) {
     const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
     const events = stockEvents[sid] || [];
     const highEvents = events.filter(e => eventScoreOf(e) >= 70);
-    // 事件按鈕永遠顯示：有事件顯示數量，無事件顯示 "0 則"
+    // 事件按鈕永遠顯示：有事件顯示數量，無事件顯示灰底的「無」
     const evtLabel = events.length > 0
-      ? `📋${highEvents.length > 0 ? " ⚠" : ""} ${events.length} 則事件`
-      : `📋 無事件`;
+      ? `<span class="wl-ic">📋${highEvents.length > 0 ? "⚠" : ""}</span><span class="wl-ic-label">${events.length} 則</span>`
+      : `<span class="wl-ic">📋</span><span class="wl-ic-label">無</span>`;
     const evtClass = events.length > 0
       ? `wl-events-btn${highEvents.length > 0 ? " has-high" : ""}`
       : "wl-events-btn wl-events-empty";
 
-    // 報價 + 今日訊號 badge + 持股標記
+    // 報價靠右自成一欄，標籤另起一行——名稱因此拿得到整行寬度，不必截斷
     const q = getQuote(sid);
     const sig = latestSignalOf(sid);
-    const quoteParts = [];
-    if (q) {
-      quoteParts.push(`<span class="wq-price">${q.price.toFixed(2)}</span>`);
-      quoteParts.push(fmtChgHtml(q.changePct));
-    }
+    const quoteLine = q
+      ? `<div class="wl-quote"><span class="wq-price">${q.price.toFixed(2)}</span>${fmtChgHtml(q.changePct)}</div>`
+      : `<div class="wl-quote wl-quote-idle">—</div>`;
+
+    const tags = [];
     if (sig) {
       const sev = inferSeverity(sig);
-      quoteParts.push(`<span class="wl-signal-badge sev-${sev}">${alertGlyph(sig)} ${escapeHtml(alertTypeLabel(sig))}</span>`);
+      tags.push(`<span class="wl-signal-badge sev-${sev}">${alertGlyph(sig)} ${escapeHtml(alertTypeLabel(sig))}</span>`);
     }
     if (Number(row.shares) > 0) {
-      quoteParts.push(`<span class="wl-signal-badge">📊 持股</span>`);
+      tags.push(`<span class="wl-signal-badge wl-tag-holding">📊 持股</span>`);
     }
-    const quoteLine = quoteParts.length ? `<div class="wl-quote-line">${quoteParts.join("")}</div>` : "";
 
     const item = document.createElement("article");
     item.className = "wl-row";
     item.dataset.id = row.id;
     item.dataset.sid = sid;
     item.innerHTML = `
-      <div class="wl-row-left">
-        <button class="wl-remove-mini" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${row.id}')">✕</button>
-        <div class="wl-stock-meta">
-          <div class="wl-name-inline">${escapeHtml(displayName)}</div>
-          <span class="badge-sid">${escapeHtml(sid)}</span>
-          ${quoteLine}
+      <div class="wl-row-head">
+        <div class="wl-ident">
+          <span class="wl-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
+          <span class="wl-sid">${escapeHtml(sid)}</span>
         </div>
+        ${quoteLine}
       </div>
-      <div class="wl-row-actions">
-        <button class="${evtClass}" onclick="openEventsPanel('${escapeHtml(sid)}')">${evtLabel}</button>
-        <button class="wl-action-btn wl-kline-action" onclick="openKLineFromWatchlist('${sid}')">📈 K線分析</button>
-        <button class="wl-action-btn wl-alert-action" onclick="openAlertSettings('${row.id}')">🔔 通知設定</button>
+      <div class="wl-row-foot">
+        <div class="wl-tags">${tags.join("")}</div>
+        <div class="wl-row-actions">
+          <button class="${evtClass}" title="今日事件" onclick="openEventsPanel('${escapeHtml(sid)}')">${evtLabel}</button>
+          <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(sid)}" onclick="openKLineFromWatchlist('${sid}')"><span class="wl-ic">📈</span><span class="wl-ic-label">K線</span></button>
+          <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${row.id}')"><span class="wl-ic">🔔</span><span class="wl-ic-label">通知</span></button>
+          <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${row.id}')"><span class="wl-ic">✕</span></button>
+        </div>
       </div>
     `;
     grid.appendChild(item);
