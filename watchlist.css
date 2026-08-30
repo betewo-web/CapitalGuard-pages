@@ -327,18 +327,22 @@ body.has-bottom-nav .page-shell {
 
 /* 次要動作用的低調按鈕：有邊框沒有底色，不跟主要動作搶注意力 */
 .btn-ghost {
-	border: 1px solid rgba(140, 168, 220, 0.28);
-	background: rgba(255, 255, 255, 0.03);
-	color: var(--text-1);
+	display: inline-flex;
+	align-items: center;
+	gap: 0.32rem;
+	border: 1px solid rgba(140, 168, 220, 0.24);
+	background: rgba(255, 255, 255, 0.025);
+	color: #c3d0e6;
 	font-size: 0.75rem;
-	padding: 0.26rem 0.6rem;
-	font-weight: 600;
+	line-height: 1;
+	padding: 0.34rem 0.62rem;
+	font-weight: 500;
 }
 
 .btn-ghost:hover {
 	border-color: rgba(86, 168, 255, 0.5);
 	background: rgba(86, 168, 255, 0.12);
-	color: var(--text-0);
+	color: #eaf2ff;
 }
 
 .badge-sid {
@@ -381,10 +385,12 @@ body.has-bottom-nav .page-shell {
 
 .wl-addbar-icon {
 	flex-shrink: 0;
-	font-size: 0.82rem;
-	opacity: 0.55;
+	display: inline-flex;
+	color: #7e93b8;
 	line-height: 1;
 }
+
+.wl-addbar:focus-within .wl-addbar-icon { color: var(--accent-2); }
 
 .wl-addbar-input {
 	flex: 1 1 auto;
@@ -406,21 +412,23 @@ body.has-bottom-nav .page-shell {
 	font-size: 0.82rem;
 }
 
+/* 單色平面，不用漸層：小尺寸的漸層在手機上只會看起來髒 */
 .wl-addbar-btn {
 	flex-shrink: 0;
 	height: 30px;
-	padding: 0 0.85rem;
+	padding: 0 0.9rem;
 	border: none;
-	border-radius: 9px;
-	font-size: 0.79rem;
+	border-radius: 8px;
+	font-size: 0.8rem;
 	font-weight: 700;
-	letter-spacing: 0.02em;
-	color: #032322;
-	background: linear-gradient(145deg, #34c6a8, #3ce6d1);
-	transition: filter 0.18s ease;
+	letter-spacing: 0.04em;
+	color: #04231f;
+	background: #3ce6d1;
+	transition: background 0.18s ease;
 }
 
-.wl-addbar-btn:hover { filter: brightness(1.06); }
+.wl-addbar-btn:hover { background: #62f0de; }
+.wl-addbar-btn:active { background: #2fcbb8; }
 
 .wl-add-msg {
 	font-size: 0.76rem;
@@ -476,14 +484,15 @@ body.has-bottom-nav .page-shell {
 .wl-row {
 	/* grid item 預設 min-width:auto 會被最長的內容撐開，整列因此橫向溢出 */
 	min-width: 0;
-	border: 1px solid rgba(121, 157, 255, 0.18);
-	border-radius: 13px;
-	background: rgba(12, 20, 39, 0.66);
-	padding: 0.55rem 0.7rem 0.5rem;
+	border: 1px solid rgba(121, 157, 255, 0.16);
+	border-radius: 12px;
+	/* 底色壓深：名稱與價格是白字，底越深對比越高 */
+	background: rgba(7, 12, 26, 0.78);
+	padding: 0.42rem 0.6rem 0.4rem;
 	display: flex;
 	flex-direction: column;
-	gap: 0.36rem;
-	transition: border-color 0.24s ease, background 0.24s ease, box-shadow 0.24s ease;
+	gap: 0.26rem;
+	transition: border-color 0.24s ease, background 0.24s ease;
 }
 
 .wl-row-head {
@@ -506,11 +515,11 @@ body.has-bottom-nav .page-shell {
    截成「台灣積體電路製造股…」。超過兩行才截斷，title 仍保留全名。 */
 .wl-name {
 	min-width: 0;
-	color: var(--text-0);
-	font-size: 0.95rem;
-	font-weight: 600;
-	letter-spacing: 0.01em;
-	line-height: 1.32;
+	color: #ffffff;
+	font-size: 0.97rem;
+	font-weight: 700;
+	letter-spacing: 0.015em;
+	line-height: 1.26;
 	white-space: normal;
 	overflow-wrap: anywhere;
 	display: -webkit-box;
@@ -523,30 +532,40 @@ body.has-bottom-nav .page-shell {
 .wl-sid {
 	flex-shrink: 0;
 	font-family: "Space Grotesk", ui-monospace, monospace;
-	font-size: 0.74rem;
-	font-weight: 600;
+	font-size: 0.75rem;
+	font-weight: 500;
 	letter-spacing: 0.04em;
-	color: #7fa6dd;
+	color: #9dbbe4;
 }
 
 .wl-quote {
 	flex-shrink: 0;
 	display: flex;
 	align-items: baseline;
-	gap: 0.4rem;
-	font-size: 0.78rem;
+	gap: 0.35rem;
+	font-size: 0.8rem;
+	font-weight: 700;
 	font-variant-numeric: tabular-nums;
+	font-feature-settings: "tnum" 1;
 }
 
+/* 價格是這一列第二重要的資訊，給到跟名稱同級的白 */
 .wl-quote .wq-price {
-	font-size: 0.95rem;
+	font-size: 0.98rem;
 	font-weight: 700;
-	color: var(--text-0);
+	color: #ffffff;
+	letter-spacing: 0.01em;
 }
+
+/* 漲跌幅在深底上要看得清楚：全站的 --chg-* 偏柔，這裡調亮一階 */
+.wl-quote .chg-up { color: #ff8095; }
+.wl-quote .chg-down { color: #4bdd85; }
+.wl-quote .chg-flat { color: var(--text-muted); }
 
 .wl-quote-idle {
 	color: var(--text-muted);
-	opacity: 0.5;
+	opacity: 0.45;
+	font-weight: 500;
 }
 
 .wl-row-foot {
@@ -574,18 +593,23 @@ body.has-bottom-nav .page-shell {
 	gap: 0.28rem;
 }
 
-/* 動作鈕統一成 26px 高的線框鈕：原本三顆 34px 漸層鈕加陰影，
-   份量比它們旁邊的股票名稱還重。 */
-.wl-icon-btn {
+/* 動作鈕：24px 的正方形線框鈕，圖示是 currentColor 的 SVG，
+   hover／停用態變色時圖示會跟著變（emoji 做不到這件事）。
+   手機只留圖示，文字標籤要到 ≥768px 才出現。 */
+.wl-icon-btn,
+.wl-events-btn {
+	position: relative;
 	display: inline-flex;
 	align-items: center;
-	gap: 0.22rem;
-	height: 26px;
-	padding: 0 0.5rem;
-	border-radius: 8px;
-	border: 1px solid rgba(140, 168, 220, 0.24);
-	background: rgba(255, 255, 255, 0.03);
-	color: var(--text-1);
+	justify-content: center;
+	gap: 0.2rem;
+	height: 24px;
+	min-width: 24px;
+	padding: 0 0.28rem;
+	border-radius: 7px;
+	border: 1px solid rgba(140, 168, 220, 0.22);
+	background: rgba(255, 255, 255, 0.025);
+	color: #b6c6e2;
 	font-size: 0.72rem;
 	font-weight: 600;
 	line-height: 1;
@@ -594,26 +618,49 @@ body.has-bottom-nav .page-shell {
 	transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
 }
 
-.wl-icon-btn .wl-ic { font-size: 0.8rem; line-height: 1; }
+.wl-icon-btn .ic,
+.wl-events-btn .ic {
+	flex-shrink: 0;
+	display: block;
+}
+
+/* 視覺上是 24px，但手指的可點範圍撐到 40px 高。
+   只在觸控裝置上加，滑鼠不需要、加了反而會蓋到隔壁的 hover。 */
+@media (pointer: coarse) {
+	.wl-icon-btn::after,
+	.wl-events-btn::after {
+		content: "";
+		position: absolute;
+		inset: -8px -2px;
+	}
+}
+
+/* 標籤只在桌機出現 */
+.wl-ic-label {
+	display: none;
+	padding-right: 0.14rem;
+}
+
+.wl-ic-count {
+	font-variant-numeric: tabular-nums;
+	padding-right: 0.14rem;
+}
 
 .wl-icon-btn:hover {
 	border-color: rgba(86, 168, 255, 0.55);
 	background: rgba(86, 168, 255, 0.14);
-	color: var(--text-0);
+	color: #eaf2ff;
 }
 
 .wl-icon-danger {
-	padding: 0 0.45rem;
-	margin-left: 0.16rem;
-	color: var(--text-muted);
-	border-color: rgba(140, 168, 220, 0.18);
+	margin-left: 0.14rem;
+	color: #7e8aa4;
+	border-color: rgba(140, 168, 220, 0.16);
 }
 
-.wl-icon-danger .wl-ic { font-size: 0.72rem; }
-
 .wl-icon-danger:hover {
-	border-color: rgba(255, 95, 133, 0.6);
-	background: rgba(255, 95, 133, 0.14);
+	border-color: rgba(255, 95, 133, 0.55);
+	background: rgba(255, 95, 133, 0.13);
 	color: #ff8ba5;
 }
 
@@ -684,43 +731,37 @@ body.has-bottom-nav .page-shell {
 	font-weight: 500;
 }
 
-/* 尺寸與 .wl-icon-btn 對齊，只用顏色區分狀態 */
+/* 尺寸吃 .wl-icon-btn 那組共用規則，這裡只描述狀態顏色 */
 .wl-events-btn {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.22rem;
-	height: 26px;
-	padding: 0 0.5rem;
-	border-radius: 8px;
-	border: 1px solid rgba(60, 140, 230, 0.35);
-	background: rgba(30, 50, 90, 0.4);
-	color: #90b8f8;
-	font-size: 0.72rem;
-	font-weight: 600;
-	line-height: 1;
-	cursor: pointer;
-	white-space: nowrap;
-	transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+	border-color: rgba(70, 140, 225, 0.42);
+	background: rgba(32, 56, 100, 0.45);
+	color: #a5c8ff;
 }
-.wl-events-btn .wl-ic { font-size: 0.8rem; line-height: 1; }
 .wl-events-btn:hover {
-	border-color: rgba(86, 168, 255, 0.6);
-	background: rgba(50, 80, 140, 0.7);
+	border-color: rgba(86, 168, 255, 0.7);
+	background: rgba(48, 82, 145, 0.7);
+	color: #e6f0ff;
 }
 .wl-events-btn.has-high {
-	border-color: rgba(255, 180, 0, 0.5);
-	background: rgba(80, 50, 10, 0.45);
-	color: #ffd060;
+	border-color: rgba(255, 175, 45, 0.5);
+	background: rgba(74, 48, 10, 0.6);
+	color: #ffca5c;
 }
+.wl-events-btn.has-high:hover {
+	border-color: rgba(255, 175, 45, 0.75);
+	background: rgba(96, 62, 12, 0.75);
+	color: #ffdb8e;
+}
+/* 沒有事件時是純粹的資訊狀態，淡到不搶眼但仍看得出可以按 */
 .wl-events-btn.wl-events-empty {
-	border-color: rgba(140, 168, 220, 0.16);
-	background: rgba(255, 255, 255, 0.02);
-	color: rgba(140, 170, 220, 0.42);
+	border-color: rgba(140, 168, 220, 0.14);
+	background: rgba(255, 255, 255, 0.015);
+	color: #5f6d86;
 }
 .wl-events-btn.wl-events-empty:hover {
 	border-color: rgba(86, 168, 255, 0.4);
-	background: rgba(30, 50, 90, 0.45);
-	color: rgba(140, 190, 255, 0.65);
+	background: rgba(32, 56, 100, 0.45);
+	color: #a5c8ff;
 }
 
 /* 事件列表空白引導畫面 */
@@ -1407,6 +1448,17 @@ body.has-bottom-nav .qa-panel {
 		font-size: 1rem;
 		-webkit-line-clamp: 1;
 	}
+
+	/* 桌機才放得下文字，圖示旁補上標籤 */
+	.wl-ic-label {
+		display: inline;
+	}
+
+	.wl-icon-btn,
+	.wl-events-btn {
+		height: 26px;
+		padding: 0 0.4rem;
+	}
 }
 
 
@@ -2017,21 +2069,27 @@ body.has-bottom-nav .qa-panel {
 .wl-signal-badge {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.18rem;
-	font-size: 0.67rem;
+	gap: 0.3rem;
+	font-size: 0.69rem;
+	font-weight: 500;
 	line-height: 1;
-	padding: 0.24rem 0.48rem;
+	padding: 0.28rem 0.5rem;
 	border-radius: 999px;
-	border: 1px solid var(--border);
-	background: rgba(255, 255, 255, 0.04);
-	color: var(--text-1);
+	border: 1px solid rgba(146, 146, 163, 0.24);
+	background: rgba(255, 255, 255, 0.045);
+	color: #d3dcec;
 	white-space: nowrap;
 }
 
+.wl-signal-badge .sev-dot {
+	width: 6px;
+	height: 6px;
+}
+
 .wl-tag-holding {
-	border-color: rgba(60, 230, 209, 0.32);
-	background: rgba(60, 230, 209, 0.09);
-	color: #86e8db;
+	border-color: rgba(60, 230, 209, 0.3);
+	background: rgba(60, 230, 209, 0.1);
+	color: #8fece0;
 }
 
 /* ── 通知詳情「為什麼通知你」 ── */

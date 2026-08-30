@@ -238,7 +238,7 @@
 
       <!-- 新增股票：單行搜尋列（原本的整張卡片佔掉近三倍高度） -->
       <div class="wl-addbar">
-        <span class="wl-addbar-icon" aria-hidden="true">🔍</span>
+        <span class="wl-addbar-icon" aria-hidden="true"></span>
         <input id="inp-stock" class="wl-addbar-input" placeholder="加入追蹤：代號或名稱，如 2330／台積電"
                autocomplete="off" aria-label="輸入股票代號或名稱" oninput="onStockInput()" onkeydown="onStockKey(event)">
         <button class="wl-addbar-btn" onclick="addStock()">加入</button>
@@ -252,8 +252,8 @@
           <div class="wl-panel-head-top">
             <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
             <span class="d-flex align-items-center gap-2">
-              <button type="button" class="btn btn-sm btn-ghost" onclick="openRulesModal()"
-                      title="用條件組合自訂通知，全部成立才發送">📐 自訂規則</button>
+              <button type="button" class="btn btn-sm btn-ghost" id="wl-rules-btn" onclick="openRulesModal()"
+                      title="用條件組合自訂通知，全部成立才發送">自訂規則</button>
               <span id="events-fetch-status" class="events-fetch-status" title="事件資料狀態（需在本機執行 --fetch-events 更新）"></span>
             </span>
           </div>
@@ -746,6 +746,28 @@ let homeWatchlistExpanded = localStorage.getItem(HOME_WATCHLIST_EXPAND_KEY) === 
 let alertModalRowId = null;
 let removeModalRowId = null;
 let stockEvents = {};   // sid → scored stock_events rows
+
+// ── 線條圖示 ────────────────────────────────────────────────────
+// 自選列的動作鈕原本用 emoji（📈🔔📋✕）。emoji 是系統字型的彩色字符，
+// 各平台長相不同、縮到 14px 就糊掉，也吃不到按鈕的文字顏色，
+// 所以 hover／停用態變色時圖示不會跟著變。改成 currentColor 的 SVG。
+const _svg = (body, w = 15) =>
+  `<svg class="ic" viewBox="0 0 16 16" width="${w}" height="${w}" fill="none" stroke="currentColor" ` +
+  `stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICON_CHART  = _svg('<path d="M2.2 13.6h11.6"/><path d="M4.6 11.2V7.4"/><path d="M8 11.2V3.2"/><path d="M11.4 11.2V5.8"/>');
+const ICON_BELL   = _svg('<path d="M4.1 6.6a3.9 3.9 0 0 1 7.8 0c0 2.9 1 3.9 1 3.9H3.1s1-1 1-3.9Z"/><path d="M6.5 12.6a1.7 1.7 0 0 0 3 0"/>');
+const ICON_EVENTS = _svg('<rect x="3.3" y="3.2" width="9.4" height="10.4" rx="1.7"/><path d="M6.2 2.1h3.6v2.1H6.2z"/><path d="M6 7.6h4M6 10.2h2.6"/>');
+const ICON_CLOSE  = _svg('<path d="M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4"/>');
+const ICON_SEARCH = _svg('<circle cx="6.9" cy="6.9" r="4.1"/><path d="M10 10 13.6 13.6"/>', 14);
+const ICON_RULES  = _svg('<path d="M2.6 5.2h10.8M2.6 10.8h10.8"/><circle cx="6" cy="5.2" r="1.7"/><circle cx="10.4" cy="10.8" r="1.7"/>', 14);
+
+// 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
+{
+  const searchIcon = document.querySelector(".wl-addbar-icon");
+  if (searchIcon) searchIcon.innerHTML = ICON_SEARCH;
+  const rulesBtn = document.getElementById("wl-rules-btn");
+  if (rulesBtn) rulesBtn.innerHTML = `${ICON_RULES}<span>自訂規則</span>`;
+}
 
 // ── PWA v2: App Shell 狀態 ──
 const APP_TABS = ["home", "holdings", "live", "inbox", "watch"];
@@ -3103,10 +3125,10 @@ function renderWatchlist(rows) {
     const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
     const events = stockEvents[sid] || [];
     const highEvents = events.filter(e => eventScoreOf(e) >= 70);
-    // 事件按鈕永遠顯示：有事件顯示數量，無事件顯示灰底的「無」
+    // 事件按鈕永遠顯示：有事件就接一個數字，沒有就只剩一個淡掉的圖示
     const evtLabel = events.length > 0
-      ? `<span class="wl-ic">📋${highEvents.length > 0 ? "⚠" : ""}</span><span class="wl-ic-label">${events.length} 則</span>`
-      : `<span class="wl-ic">📋</span><span class="wl-ic-label">無</span>`;
+      ? `${ICON_EVENTS}<span class="wl-ic-count">${events.length}</span>`
+      : ICON_EVENTS;
     const evtClass = events.length > 0
       ? `wl-events-btn${highEvents.length > 0 ? " has-high" : ""}`
       : "wl-events-btn wl-events-empty";
@@ -3118,13 +3140,14 @@ function renderWatchlist(rows) {
       ? `<div class="wl-quote"><span class="wq-price">${q.price.toFixed(2)}</span>${fmtChgHtml(q.changePct)}</div>`
       : `<div class="wl-quote wl-quote-idle">—</div>`;
 
+    // 標籤用等級圓點而不是 emoji：同一個等級在全站都是同一顆顏色
     const tags = [];
     if (sig) {
       const sev = inferSeverity(sig);
-      tags.push(`<span class="wl-signal-badge sev-${sev}">${alertGlyph(sig)} ${escapeHtml(alertTypeLabel(sig))}</span>`);
+      tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${sev}"></i>${escapeHtml(alertTypeLabel(sig))}</span>`);
     }
     if (Number(row.shares) > 0) {
-      tags.push(`<span class="wl-signal-badge wl-tag-holding">📊 持股</span>`);
+      tags.push(`<span class="wl-signal-badge wl-tag-holding">持股</span>`);
     }
 
     const item = document.createElement("article");
@@ -3143,9 +3166,9 @@ function renderWatchlist(rows) {
         <div class="wl-tags">${tags.join("")}</div>
         <div class="wl-row-actions">
           <button class="${evtClass}" title="今日事件" onclick="openEventsPanel('${escapeHtml(sid)}')">${evtLabel}</button>
-          <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(sid)}" onclick="openKLineFromWatchlist('${sid}')"><span class="wl-ic">📈</span><span class="wl-ic-label">K線</span></button>
-          <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${row.id}')"><span class="wl-ic">🔔</span><span class="wl-ic-label">通知</span></button>
-          <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${row.id}')"><span class="wl-ic">✕</span></button>
+          <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(sid)}" onclick="openKLineFromWatchlist('${sid}')">${ICON_CHART}<span class="wl-ic-label">K線</span></button>
+          <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${row.id}')">${ICON_BELL}<span class="wl-ic-label">通知</span></button>
+          <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${row.id}')">${ICON_CLOSE}</button>
         </div>
       </div>
     `;
