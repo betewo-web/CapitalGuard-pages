@@ -9,7 +9,7 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v11';
+const CACHE_VERSION = 'tw-stock-v12';
 
 // Static assets cached for offline CSS/icon support.
 // watchlist.html is NOT listed here — it is handled by network-first navigation.

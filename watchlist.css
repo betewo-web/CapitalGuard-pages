@@ -19,6 +19,13 @@
 	--sig-orange: #ff9f43;
 	--sig-blue: #56a8ff;
 	--sig-info: #9292a3;
+	/* 台股漲跌色（紅漲綠跌）。漲跌幅欄位與漲跌停圖示的板線共用同一個定義，
+	   兩處講的是同一件事，不該各自寫死。 */
+	--chg-up: #ff6b81;
+	--chg-down: #2ed573;
+	/* 漲跌停圖示底色：紅綠線在橘底上對比度只有 1.3:1／1.1:1 等於看不見，
+	   改深色底後拉到 5.7:1／8.1:1。等級仍由卡片左側邊條表達。 */
+	--sig-limit-bg: #1e2430;
 	--shadow-soft: 0 8px 30px rgba(4, 6, 16, 0.45);
 	--shadow-hover: 0 16px 44px rgba(10, 12, 38, 0.42);
 	--radius: 18px;
@@ -1383,10 +1390,6 @@ body.has-bottom-nav .qa-panel {
 	margin-top: 5px;
 }
 
-/* 自製訊號圖示（signalIconSvg）：Inbox 列與盤中雷達卡共用 */
-.sig-ico { flex-shrink: 0; display: inline-block; }
-.inbox-item > .sig-ico { margin-top: 2px; }
-.sc-type .sig-ico { vertical-align: -4px; margin-right: 3px; }
 
 .ib-main { flex: 1 1 auto; min-width: 0; }
 
@@ -1517,8 +1520,8 @@ body.has-bottom-nav .qa-panel {
 }
 
 /* ── 漲跌顏色（台股慣例：紅漲綠跌） ── */
-.chg-up   { color: #ff6b81; }
-.chg-down { color: #2ed573; }
+.chg-up   { color: var(--chg-up); }
+.chg-down { color: var(--chg-down); }
 .chg-flat { color: var(--text-muted); }
 
 /* ── 盤中訊號卡 ── */
@@ -1549,6 +1552,13 @@ body.has-bottom-nav .qa-panel {
 .signal-card .sc-type {
 	font-size: 0.8rem;
 	font-weight: 700;
+}
+
+/* 自製訊號圖示（signalIconSvg）：只用於盤中雷達卡，Inbox 列維持圓點燈號 */
+.sc-type .sig-ico {
+	flex-shrink: 0;
+	vertical-align: -4px;
+	margin-right: 3px;
 }
 
 .signal-card .sc-time {

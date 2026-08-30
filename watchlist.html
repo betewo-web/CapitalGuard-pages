@@ -1643,29 +1643,39 @@ const SIGNAL_EMOJI = {
   target_high:  "🎯",
   target_low:   "🎯",
 };
-// PWA 內通知列表的自製訊號圖示：虛線＝關卡、實線＝價格走勢、圓點＝現價，
-// 底色用等級色（橘＝強訊號、藍＝注意）。九個圖示共用同一套幾何語言。
-// 推播通知受平台限制（iOS 忽略自訂 icon）仍以標題 emoji 為主。
+
+// 盤中雷達卡的自製訊號圖示：虛線＝關卡、實線＝價格走勢、圓點＝現價，
+// 底色用等級色。這是頁面內的 inline SVG，與推播圖示的平台限制無關，
+// iOS 一樣正常顯示。
+//
+// 只用在雷達卡、不用在 Inbox 列：雷達卡左側本來就有彩色邊條表達等級，
+// 換掉 emoji 不損失資訊；Inbox 列的圓點本身就是燈號，換成圖示會讓
+// 那一整欄看不出等級。
 const SIGNAL_ICON_ART = {
   near_res:     { level: 15, dash: true,  path: "M9 38 L18 33 L27 27 L36 22", dot: [36, 22] },
   break_res:    { level: 22, dash: true,  path: "M9 37 L18 33 L27 20 L37 11", dot: [37, 11] },
   near_sup:     { level: 34, dash: true,  path: "M9 11 L18 16 L27 22 L36 27", dot: [36, 27] },
   break_sup:    { level: 27, dash: true,  path: "M9 12 L18 16 L27 29 L37 38", dot: [37, 38] },
   reclaim_sup:  { level: 26, dash: true,  path: "M9 18 L16 24 L23 35 L31 28 L38 17", dot: [38, 17] },
-  limit_up:     { level: 13, dash: false, path: "M10 39 L20 25 L27 18 L38 18", dot: [38, 18] },
-  limit_down:   { level: 35, dash: false, path: "M10 9 L20 23 L27 30 L38 30", dot: [38, 30] },
+  // 漲跌停：深色底 ＋ 紅漲綠跌的板線。價格走勢維持白線，
+  // 所以「白線是價格、紅綠線是漲跌停板」語意清楚。
+  limit_up:     { level: 13, dash: false, path: "M10 39 L20 25 L27 18 L38 18", dot: [38, 18],
+                  chip: "var(--sig-limit-bg)", line: "var(--chg-up)" },
+  limit_down:   { level: 35, dash: false, path: "M10 9 L20 23 L27 30 L38 30", dot: [38, 30],
+                  chip: "var(--sig-limit-bg)", line: "var(--chg-down)" },
   volume_spike: { bars: true },
   target_high:  { level: 17, dash: true,  path: "M9 38 L17 32 L25 25 L32 17", target: [32, 17] },
   target_low:   { level: 31, dash: true,  path: "M9 10 L17 16 L25 23 L32 31", target: [32, 31] },
 };
 
-function signalIconSvg(row, size = 30) {
+function signalIconSvg(row, size = 18) {
   const art = SIGNAL_ICON_ART[signalKindOf(row)];
-  if (!art) return "";   // 非盤中訊號（每日報告、盤後提醒）由呼叫端 fallback
+  if (!art) return "";   // 非盤中訊號（每日報告、盤後提醒）由呼叫端 fallback 回 emoji
   const sev = inferSeverity(row);
-  const bg = sev === "orange" ? "var(--sig-orange)"
+  const bg = art.chip || (sev === "orange" ? "var(--sig-orange)"
            : sev === "blue"   ? "var(--sig-blue)"
-           : "var(--sig-info)";
+           : "var(--sig-info)");
+  const lineColor = art.line || "#fff";
   let inner;
   if (art.bars) {
     inner = '<g fill="#fff" opacity=".72">'
@@ -1674,8 +1684,8 @@ function signalIconSvg(row, size = 30) {
       + '<rect x="25" y="31" width="5" height="8" rx="1.6"/></g>'
       + '<rect x="33" y="12" width="6" height="27" rx="2" fill="#fff"/>';
   } else {
-    inner = `<line x1="9" y1="${art.level}" x2="39" y2="${art.level}" stroke="#fff"`
-      + ` stroke-width="${art.dash ? 2 : 3}"${art.dash ? ' stroke-dasharray="4 3.5" opacity=".75"' : ""}`
+    inner = `<line x1="9" y1="${art.level}" x2="39" y2="${art.level}" stroke="${lineColor}"`
+      + ` stroke-width="${art.dash ? 2 : 3.6}"${art.dash ? ' stroke-dasharray="4 3.5" opacity=".75"' : ""}`
       + ' stroke-linecap="round"/>'
       + `<path d="${art.path}" fill="none" stroke="#fff" stroke-width="3"`
       + ' stroke-linecap="round" stroke-linejoin="round"/>'
@@ -1995,7 +2005,7 @@ function renderInbox() {
       <div class="inbox-item${unread ? " unread" : ""}" role="button" tabindex="0"
            onclick="openInboxDetail('${escapeHtml(String(r.id))}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetail('${escapeHtml(String(r.id))}');}">
-        ${signalIconSvg(r, 30) || `<span class="sev-dot sev-${sev} ib-sev"></span>`}
+        <span class="sev-dot sev-${sev} ib-sev"></span>
         <div class="ib-main">
           <div class="ib-title">${escapeHtml(r.title || "")} ${sidBadge}</div>
           <div class="ib-body">${escapeHtml(r.body || "")}</div>
