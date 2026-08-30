@@ -1618,14 +1618,31 @@ function getQuoteFromSharedData(sid) {
 }
 
 // ── PWA v2: 訊號等級（統一對照）──────────────────────────────────
+// 訊號等級兩級，分野是「要不要處理部位」。紅綠留給漲跌幅（台股紅漲綠跌），
+// 訊號改用橘／藍，避免同一列出現相反語意的顏色。
 const SEV_META = {
-  red:    { emoji: "🔴", label: "強訊號" },
-  orange: { emoji: "🟠", label: "注意" },
-  green:  { emoji: "🟢", label: "突破" },
-  yellow: { emoji: "🟡", label: "接近" },
-  info:   { emoji: "🔵", label: "資訊" },
+  orange: { emoji: "🟠", label: "強訊號" },
+  blue:   { emoji: "🔵", label: "注意" },
+  info:   { emoji: "⚪", label: "資訊" },
 };
-const SEV_ORDER = { red: 4, orange: 3, yellow: 2, green: 1, none: 0, info: 0 };
+const SEV_ORDER = { orange: 2, blue: 1, info: 0, none: 0 };
+// 舊資料的四級 severity 對映到新的兩級
+const LEGACY_SEV = { red: "orange", yellow: "blue", green: "blue" };
+const ORANGE_KINDS = ["limit_down", "limit_up", "break_sup", "target_low", "target_high"];
+const BLUE_KINDS   = ["break_res", "reclaim_sup", "near_sup", "near_res", "volume_spike"];
+// 訊號自己的符號（與後端推播文字一致）；方向由形狀表達，燈號只表緊急度
+const SIGNAL_EMOJI = {
+  break_res:    "⬆️",
+  near_res:     "↗️",
+  break_sup:    "⬇️",
+  near_sup:     "↘️",
+  reclaim_sup:  "🔄",
+  limit_up:     "🔝",
+  limit_down:   "⛔",
+  volume_spike: "🌊",
+  target_high:  "🎯",
+  target_low:   "🎯",
+};
 const SIGNAL_LABEL_MAP = {
   break_sup:   "跌破支撐",
   near_sup:    "逼近支撐",
@@ -1639,22 +1656,42 @@ const SIGNAL_LABEL_MAP = {
   target_low:  "觸及下跌目標",
 };
 
+// event_key 形如 "2330:volume_spike:2026-08-30"，第二段就是訊號種類。
+// 比標題文字正則可靠——訊息文案改寫時不會失效。
+function signalFromEventKey(row) {
+  const parts = String(row.event_key || "").split(":");
+  const kind = parts.length > 1 ? parts[1] : "";
+  return SIGNAL_LABEL_MAP[kind] ? kind : "";
+}
+
+// 一律以訊號種類推導等級——比讀 row.severity 可靠，舊資料也能正確歸級。
 function inferSeverity(row) {
+  const kind = signalKindOf(row);
+  if (ORANGE_KINDS.includes(kind)) return "orange";
+  if (BLUE_KINDS.includes(kind))   return "blue";
   const s = String(row.severity || "").toLowerCase();
-  if (SEV_META[s] && s !== "info") return s;
+  if (LEGACY_SEV[s]) return LEGACY_SEV[s];
+  if (SEV_META[s])   return s;
   const t = String(row.title || "");
-  if (/跌破支撐|跌停|下跌價位/.test(t)) return "red";
-  if (/逼近支撐|爆量|融資/.test(t))     return "orange";
-  if (/突破壓力|漲停|收復/.test(t))     return "green";
-  if (/逼近壓力|上漲價位/.test(t))      return "yellow";
-  return SEV_META[s] ? s : "info";
+  if (/跌破支撐|漲停|跌停|價位/.test(t))            return "orange";
+  if (/逼近|爆量|帶量|突破壓力|收復|融資/.test(t))  return "blue";
+  return "info";
+}
+
+function signalKindOf(row) {
+  return String(row.signal || "") || signalFromEventKey(row);
+}
+
+// 徽章顯示訊號自己的符號；燈號只負責顏色
+function alertGlyph(row) {
+  return SIGNAL_EMOJI[signalKindOf(row)] || SEV_META[inferSeverity(row)].emoji;
 }
 
 function alertTypeLabel(row) {
-  const sig = String(row.signal || "");
+  const sig = signalKindOf(row);
   if (sig && SIGNAL_LABEL_MAP[sig]) return SIGNAL_LABEL_MAP[sig];
   const t = String(row.title || "");
-  const m = t.match(/(跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
+  const m = t.match(/(跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|帶量上攻|帶量下殺|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
   if (m) return m[1].replace("達到自訂", "");
   if (String(row.source || "").startsWith("daily_report")) return "每日報告";
   return "通知";
@@ -1862,7 +1899,8 @@ function filteredInboxRows() {
     return inboxSupportsRead ? inboxRows.filter(r => !r.read_at) : [];
   }
   if (inboxFilter === "important") {
-    return inboxRows.filter(r => ["red", "orange"].includes(inferSeverity(r)));
+    // 兩級之後「重要」= 強訊號（需要處理部位的事件）
+    return inboxRows.filter(r => inferSeverity(r) === "orange");
   }
   if (inboxFilter === "stocks") {
     const holdSids = new Set(watchlistRows.filter(r => Number(r.shares) > 0).map(r => String(r.stock_id).trim()));
@@ -1954,7 +1992,7 @@ function openInboxDetail(rowId) {
   document.getElementById("alert-history-view-stock-btn").style.display = sid ? "inline-flex" : "none";
   document.getElementById("alert-history-settings-btn").style.display = wl ? "inline-flex" : "none";
 
-  const isDailyReport = source === "daily_report_line" || source === "daily_report_web_push";
+  const isDailyReport = String(source || "").startsWith("daily_report");
   document.getElementById("alert-history-open-report-btn").style.display = isDailyReport ? "inline-flex" : "none";
 
   bootstrap.Modal.getOrCreateInstance(document.getElementById("alertHistoryDetailModal")).show();
@@ -2068,9 +2106,9 @@ function renderHome() {
   }
   if (statsEl) {
     statsEl.innerHTML = hasEvents ? `
-    <div class="home-stat"><div class="hs-num sev-red">${high}</div><div class="hs-label">🔴 重要</div></div>
-    <div class="home-stat"><div class="hs-num sev-orange">${normal}</div><div class="hs-label">🟠 注意</div></div>
-    <div class="home-stat"><div class="hs-num sev-info">${other}</div><div class="hs-label">📰 一般</div></div>
+    <div class="home-stat"><div class="hs-num sev-orange">${high}</div><div class="hs-label">🟠 重要</div></div>
+    <div class="home-stat"><div class="hs-num sev-blue">${normal}</div><div class="hs-label">🔵 注意</div></div>
+    <div class="home-stat"><div class="hs-num sev-info">${other}</div><div class="hs-label">⚪ 一般</div></div>
   ` : `<div class="view-empty py-2" style="padding:0.5rem">今日尚無彙整事件<br><span style="font-size:.72rem;opacity:.75">每日盤後執行 python main.py --fetch-events 更新</span></div>`;
     statsEl.onclick = hasEvents ? openTodayEventsPanel : null;
   }
@@ -2190,7 +2228,7 @@ function renderHoldings() {
     }
 
     const sigHtml = sig
-      ? `<span class="wl-signal-badge sev-${inferSeverity(sig)}">${SEV_META[inferSeverity(sig)].emoji} ${escapeHtml(alertTypeLabel(sig))}</span>`
+      ? `<span class="wl-signal-badge sev-${inferSeverity(sig)}">${alertGlyph(sig)} ${escapeHtml(alertTypeLabel(sig))}</span>`
       : "";
     const plHtml = pl !== null
       ? `<span class="${pl >= 0 ? "chg-up" : "chg-down"}">${pl >= 0 ? "+" : ""}${Math.round(pl).toLocaleString()}</span>`
@@ -2279,12 +2317,12 @@ function renderLive() {
     ? `🟢 盤中（09:00–13:35）· 今日 ${rows.length} 則通知`
     : `⚪ 已收盤 — 今日 ${rows.length} 則通知`;
 
-  const counts = { red: 0, orange: 0, green: 0, yellow: 0 };
+  const counts = { orange: 0, blue: 0, info: 0 };
   rows.forEach(r => { const sev = inferSeverity(r); if (counts[sev] !== undefined) counts[sev]++; });
   document.getElementById("live-stats").innerHTML = `
-    <div class="home-stat"><div class="hs-num sev-red">${counts.red}</div><div class="hs-label">🔴 強訊號</div></div>
-    <div class="home-stat"><div class="hs-num sev-orange">${counts.orange + counts.yellow}</div><div class="hs-label">🟠 注意</div></div>
-    <div class="home-stat"><div class="hs-num sev-green">${counts.green}</div><div class="hs-label">🟢 突破</div></div>
+    <div class="home-stat"><div class="hs-num sev-orange">${counts.orange}</div><div class="hs-label">🟠 強訊號</div></div>
+    <div class="home-stat"><div class="hs-num sev-blue">${counts.blue}</div><div class="hs-label">🔵 注意</div></div>
+    <div class="home-stat"><div class="hs-num sev-info">${counts.info}</div><div class="hs-label">⚪ 資訊</div></div>
   `;
   if (!rows.length) {
     listEl.innerHTML = `<div class="view-empty">今日尚無通知<br><span style="font-size:.78rem;opacity:.8">監控、盤後與每日報告通知會顯示在這裡</span></div>`;
@@ -2304,7 +2342,7 @@ function renderLive() {
     return `
       <div class="signal-card sev-${sev}" onclick="openInboxDetail('${escapeHtml(String(r.id))}')">
         <div class="sc-head">
-          <span class="sc-type sev-${sev}">${SEV_META[sev].emoji} ${escapeHtml(alertTypeLabel(r))}</span>
+          <span class="sc-type sev-${sev}">${alertGlyph(r)} ${escapeHtml(alertTypeLabel(r))}</span>
           <span class="sc-time">${fmtTime(r.sent_at)}</span>
         </div>
         ${sid ? `<div class="sc-stock">${escapeHtml(stockLabelOf(sid))}</div>` : ""}
@@ -2389,7 +2427,7 @@ function renderWatchlist(rows) {
     }
     if (sig) {
       const sev = inferSeverity(sig);
-      quoteParts.push(`<span class="wl-signal-badge sev-${sev}">${SEV_META[sev].emoji} ${escapeHtml(alertTypeLabel(sig))}</span>`);
+      quoteParts.push(`<span class="wl-signal-badge sev-${sev}">${alertGlyph(sig)} ${escapeHtml(alertTypeLabel(sig))}</span>`);
     }
     if (Number(row.shares) > 0) {
       quoteParts.push(`<span class="wl-signal-badge">📊 持股</span>`);

@@ -11,11 +11,14 @@
 	--accent: #3ce6d1;
 	--accent-2: #56a8ff;
 	--danger: #ff5f85;
-	--sig-red: #ff4d6a;
+	--sig-red: #ff4d6a;      /* 未讀數徽章 */
+	--sig-yellow: #ffd93d;   /* migration 提示 */
+	/* 優先度三階，全站一致（盤中訊號等級與今日事件重要度共用）：
+	   橘＝最高（強訊號／重要）、藍＝次級（注意）、灰＝最低（資訊／一般）。
+	   刻意不含紅綠——那組顏色專屬漲跌幅（台股紅漲綠跌）。 */
 	--sig-orange: #ff9f43;
-	--sig-green: #2ed573;
-	--sig-yellow: #ffd93d;
-	--sig-info: #56a8ff;
+	--sig-blue: #56a8ff;
+	--sig-info: #9292a3;
 	--shadow-soft: 0 8px 30px rgba(4, 6, 16, 0.45);
 	--shadow-hover: 0 16px 44px rgba(10, 12, 38, 0.42);
 	--radius: 18px;
@@ -1299,16 +1302,12 @@ body.has-bottom-nav .qa-panel {
 	flex-shrink: 0;
 }
 
-.sev-red    { color: var(--sig-red); }
 .sev-orange { color: var(--sig-orange); }
-.sev-green  { color: var(--sig-green); }
-.sev-yellow { color: var(--sig-yellow); }
+.sev-blue   { color: var(--sig-blue); }
 .sev-info   { color: var(--sig-info); }
 
-.sev-dot.sev-red    { background: var(--sig-red); }
 .sev-dot.sev-orange { background: var(--sig-orange); }
-.sev-dot.sev-green  { background: var(--sig-green); }
-.sev-dot.sev-yellow { background: var(--sig-yellow); }
+.sev-dot.sev-blue   { background: var(--sig-blue); }
 .sev-dot.sev-info   { background: var(--sig-info); }
 
 /* ── 篩選 chips ── */
@@ -1531,10 +1530,8 @@ body.has-bottom-nav .qa-panel {
 
 .signal-card:hover { transform: translateY(-1px); }
 
-.signal-card.sev-red    { border-left-color: var(--sig-red); }
 .signal-card.sev-orange { border-left-color: var(--sig-orange); }
-.signal-card.sev-green  { border-left-color: var(--sig-green); }
-.signal-card.sev-yellow { border-left-color: var(--sig-yellow); }
+.signal-card.sev-blue   { border-left-color: var(--sig-blue); }
 .signal-card.sev-info   { border-left-color: var(--sig-info); }
 
 .signal-card .sc-head {
