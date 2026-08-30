@@ -1714,6 +1714,7 @@ function inferSeverity(row) {
   const kind = signalKindOf(row);
   if (ORANGE_KINDS.includes(kind)) return "orange";
   if (BLUE_KINDS.includes(kind))   return "blue";
+  // 自訂規則的等級由後端依條件推導，直接採用
   const s = String(row.severity || "").toLowerCase();
   if (LEGACY_SEV[s]) return LEGACY_SEV[s];
   if (SEV_META[s])   return s;
@@ -1735,6 +1736,7 @@ function alertGlyph(row) {
 function alertTypeLabel(row) {
   const sig = signalKindOf(row);
   if (sig && SIGNAL_LABEL_MAP[sig]) return SIGNAL_LABEL_MAP[sig];
+  if (String(row.source || "") === "rule") return "自訂規則";
   const t = String(row.title || "");
   const m = t.match(/(跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|帶量上攻|帶量下殺|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
   if (m) return m[1].replace("達到自訂", "");
