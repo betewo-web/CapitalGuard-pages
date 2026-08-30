@@ -536,6 +536,7 @@
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-view-stock-btn" style="display:none" onclick="openStockFromDetail()">📈 查看股票</button>
         <button type="button" class="btn btn-sm btn-outline-light" id="alert-history-settings-btn" style="display:none" onclick="openSettingsFromDetail()">調整通知設定</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-report-btn" style="display:none" onclick="openDailyReportFromHistory()">開啟分析報告</button>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="alert-history-stop-rule-btn" style="display:none" onclick="stopRuleFromDetail()">停用此規則</button>
         <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">關閉</button>
       </div>
     </div>
@@ -2204,6 +2205,13 @@ function openInboxDetail(rowId) {
   const isDailyReport = String(source || "").startsWith("daily_report");
   document.getElementById("alert-history-open-report-btn").style.display = isDailyReport ? "inline-flex" : "none";
 
+  // 自訂規則的通知才給停用按鈕。狀態型條件（ROE、毛利率…）會天天成立，
+  // 使用者要能從通知本身直接關掉，而不是自己回去翻規則清單。
+  const stopBtn = document.getElementById("alert-history-stop-rule-btn");
+  stopBtn.style.display = ruleIdFromEventKey(row) ? "inline-flex" : "none";
+  stopBtn.textContent = "停用此規則";   // 每次開啟都重置，否則會留著上一次的「已停用」
+  stopBtn.disabled = false;
+
   bootstrap.Modal.getOrCreateInstance(document.getElementById("alertHistoryDetailModal")).show();
 }
 
@@ -2559,6 +2567,38 @@ function renderLive() {
         <div class="sc-foot">${sid ? "查看走勢" : "查看通知"} →</div>
       </div>`;
   }).join("");
+}
+
+// 自訂規則通知的 event_key 形如 "2330:rule:{uuid}:2026-08-30"
+function ruleIdFromEventKey(row) {
+  const parts = String((row && row.event_key) || "").split(":");
+  return parts.length >= 4 && parts[1] === "rule" ? parts[2] : "";
+}
+
+async function stopRuleFromDetail() {
+  const ruleId = ruleIdFromEventKey(detailRow);
+  if (!ruleId) return;
+  let rule = null;
+  try {
+    const rows = await sbGet("alert_rules", { id: `eq.${ruleId}` }, state.accessToken);
+    rule = rows && rows[0];
+  } catch (e) { /* 讀不到就用泛用文案確認 */ }
+
+  const label = rule ? `「${rule.name || "(未命名)"}」` : "這條規則";
+  if (!confirm(`停用${label}？\n\n之後不會再收到它的通知，規則仍會保留，隨時可以在「📐 自訂規則」重新啟用。`)) return;
+
+  try {
+    await sbPatch("alert_rules", { id: `eq.${ruleId}` }, { enabled: false }, state.accessToken);
+    const btn = document.getElementById("alert-history-stop-rule-btn");
+    btn.textContent = "已停用";
+    btn.disabled = true;
+    if (Array.isArray(alertRules)) {
+      const cached = alertRules.find(r => String(r.id) === String(ruleId));
+      if (cached) cached.enabled = false;
+    }
+  } catch (e) {
+    alert(`停用失敗：${e.message || e}`);
+  }
 }
 
 // ── 自訂規則：清單與編輯 ────────────────────────────────────────
