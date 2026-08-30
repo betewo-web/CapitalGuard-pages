@@ -18,7 +18,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="台股監控">
-  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <!-- iOS 不支援 SVG 的 apple-touch-icon，給 SVG 主畫面會拿不到圖，
+       而 iOS 的推播通知正是用這張圖當通知圖示。 -->
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
 </head>
 <body>
 <!-- PWA v2 shell -->
@@ -49,6 +53,15 @@
       <span class="brand-title">台股監控</span>
     </span>
     <div class="nav-user-actions">
+      <!-- 手動重新整理：iOS 的 standalone PWA 沒有下拉重新整理、也沒有網址列，
+           沒有這顆按鈕的話 iPhone 使用者完全無法手動更新資料。 -->
+      <button id="nav-refresh-btn" class="btn btn-sm btn-outline-light nav-refresh" style="display:none"
+              onclick="manualRefresh()" title="重新整理" aria-label="重新整理">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:-2px">
+          <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+          <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+        </svg>
+      </button>
       <button id="pwa-install-btn" class="btn btn-sm btn-outline-info" style="display:none" onclick="installPwa()" title="安裝 App 到主畫面">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" class="me-1" style="vertical-align:-2px">
           <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
@@ -634,6 +647,12 @@ const LIFF_ID       = "2010668840-DXPfjNlx";
 const REPORT_DATA_URL = "report_data_latest.json";
 // Web Push 公鑰：執行 generate_vapid.py 產生後填入（決對不要提交真實金鑰）
 const VAPID_PUBLIC_KEY = 'BEVYyLc3V5Jagd_VR_iEwISXxL5Sa1gDscEzzH2j1ZHewi5VoDLHVu1L0hZ9yYWvu51t-h_e45UK6rkhFBH80oQ';
+
+// 通知圖示必須是 PNG。Chromium 的通知圖片解碼器不吃 SVG（桌機與 Android 都一樣），
+// 給 SVG 等於沒給圖示；badge 是 Android 狀態列的單色小圖，也只認 PNG。
+// iOS 兩個都忽略，直接用主畫面的 App 圖示——所以 apple-touch-icon 也得是 PNG。
+const NOTIFICATION_ICON  = './icons/icon-192.png';
+const NOTIFICATION_BADGE = './icons/badge-96.png';
 
 function withCacheBust(url) {
   const sep = url.includes("?") ? "&" : "?";
@@ -1471,6 +1490,7 @@ async function showMain() {
   document.getElementById("main-section").style.display  = "";
   document.getElementById("nav-user").textContent = `👤 ${state.displayName}`;
   document.getElementById("nav-logout").style.display = "inline-flex";
+  document.getElementById("nav-refresh-btn").style.display = "inline-flex";
   document.body.classList.add("has-bottom-nav");
   document.getElementById("bottom-nav").style.display = "flex";
 
@@ -1479,8 +1499,11 @@ async function showMain() {
 
   await loadWatchlist();
   initPushUI();
+  ensurePushSubscriptionRegistered();
   refreshInbox(true);
   loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
+  _lastRefreshAt = Date.now();
+  _scheduleAutoRefresh();
 }
 
 function logout() {
@@ -1488,18 +1511,88 @@ function logout() {
   location.reload();
 }
 
-// ── PWA v2: Tab 路由 ─────────────────────────────────────────────
-let _liveRefreshTimer = null;
-function _startLiveRefresh() {
-  if (_liveRefreshTimer) return;
-  _liveRefreshTimer = setInterval(async () => {
-    if (currentTab !== "live") { _stopLiveRefresh(); return; }
-    await Promise.all([loadIntradayQuotes(true), refreshInbox(true)]);
-    renderLive();
-  }, 30000);
+// ── 自動／手動重新整理 ───────────────────────────────────────────
+// iOS 的 standalone PWA 既沒有下拉重新整理、也沒有網址列，Android 兩者都有。
+// 與其讓新鮮度取決於平台手勢，這裡統一排程，三個平台看到的資料一樣新。
+//
+//   • 只在分頁位於前景時輪詢（document.hidden 就停），省電也省 Supabase 用量
+//   • 盤中才需要即時報價：盤中雷達 30 秒、其他分頁 90 秒；
+//     收盤後只每 5 分鐘拉一次 Inbox（盤後提醒與每日報告會在這時候進來）
+//   • 從背景切回前景時無條件更新一次——手機把 PWA 凍結在背景是常態，
+//     回來的那一刻資料往往已經過期好幾個小時
+const REFRESH_MS_LIVE_TAB = 30000;
+const REFRESH_MS_MARKET   = 90000;
+const REFRESH_MS_CLOSED   = 300000;
+
+let _refreshTimer  = null;
+let _lastRefreshAt = 0;
+
+function _refreshIntervalMs() {
+  if (!_isMarketOpenNow()) return REFRESH_MS_CLOSED;
+  return currentTab === "live" ? REFRESH_MS_LIVE_TAB : REFRESH_MS_MARKET;
 }
-function _stopLiveRefresh() {
-  if (_liveRefreshTimer) { clearInterval(_liveRefreshTimer); _liveRefreshTimer = null; }
+
+// 自動更新只抓輕量資料：Inbox 一定要，報價只有盤中才有意義。
+// 6MB 的 report_data 不在這裡重抓——那份一天只換一次，留給手動按鈕。
+async function _autoRefreshOnce() {
+  if (!state.userId || document.hidden) return;
+  const tasks = [refreshInbox(true)];
+  if (_isMarketOpenNow()) tasks.push(loadIntradayQuotes(true));
+  await Promise.allSettled(tasks);
+  _lastRefreshAt = Date.now();
+  renderCurrentTab();
+}
+
+// 用自我重排的 setTimeout 而非 setInterval：間隔會隨「盤中/收盤」與
+// 目前分頁改變，每輪重算才不會停在開盤前算出的那個節奏。
+function _scheduleAutoRefresh() {
+  _stopAutoRefresh();
+  if (!state.userId) return;
+  _refreshTimer = setTimeout(async () => {
+    _refreshTimer = null;
+    if (!document.hidden) {
+      try { await _autoRefreshOnce(); } catch { /* 單次失敗不該停掉排程 */ }
+    }
+    _scheduleAutoRefresh();
+  }, _refreshIntervalMs());
+}
+
+function _stopAutoRefresh() {
+  if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; }
+}
+
+// 回到前景一律更新一次，不看資料有多新。手機把 PWA 凍在背景是常態，
+// 「剛才才更新過」在這裡不成立——凍結期間排程是停的，_lastRefreshAt
+// 只代表凍結前的最後一次，離現在可能已經好幾個小時。
+function _onAppResume() {
+  if (!state.userId || document.hidden) return;
+  _autoRefreshOnce().catch(() => {});
+  _scheduleAutoRefresh();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) _stopAutoRefresh();
+  else _onAppResume();
+});
+// iOS 從背景還原時走 bfcache，不一定會觸發 visibilitychange
+window.addEventListener("pageshow", e => { if (e.persisted) _onAppResume(); });
+
+// 手動重新整理：軟更新，不用 location.reload()——report_data_latest.json
+// 有 6MB，整頁重載在手機網路上要等很久，而且會把捲動位置一起丟掉。
+async function manualRefresh() {
+  if (!state.userId) return;
+  const btn = document.getElementById("nav-refresh-btn");
+  if (btn) { btn.classList.add("is-busy"); btn.disabled = true; }
+  try {
+    // loadIntradayQuotes 讀的是 watchlistRows，必須等自選股先回來
+    await Promise.allSettled([loadWatchlist(), refreshInbox(true), loadSharedReportData(true)]);
+    await Promise.allSettled([loadIntradayQuotes(true)]);
+    _lastRefreshAt = Date.now();
+    renderCurrentTab();
+  } finally {
+    if (btn) { btn.classList.remove("is-busy"); btn.disabled = false; }
+    _scheduleAutoRefresh();
+  }
 }
 
 function switchTab(tab, silent = false) {
@@ -1517,10 +1610,9 @@ function switchTab(tab, silent = false) {
   if (tab === "inbox") refreshInbox(false);
   if (tab === "live") {
     Promise.all([loadIntradayQuotes(true), refreshInbox(false)]).then(() => renderLive());
-    _startLiveRefresh();
-  } else {
-    _stopLiveRefresh();
   }
+  // 輪詢間隔跟分頁有關（盤中雷達要快一點），換分頁就重排
+  if (changed) _scheduleAutoRefresh();
   renderCurrentTab();
   if (changed) window.scrollTo({ top: 0 });
 }
@@ -1907,62 +1999,87 @@ function alertTypeLabel(row) {
   return "通知";
 }
   function todayImportantInfoKey(rows) {
-    const today = new Date().toISOString().slice(0, 10);
+    // 用台北日期，不要用 UTC：早上 8 點前 toISOString() 還停在昨天，
+    // 會讓「今天」的判斷比使用者早一天翻頁
+    const today = taipeiDateKey(new Date());
     const sig = (rows || [])
       .map(({ sid, ev }) => `${sid}:${ev.event_type || ""}:${ev.title || ""}`)
       .join("|");
     return `home_important_info_notified_${today}_${btoa(unescape(encodeURIComponent(sig))).slice(0, 24)}`;
   }
   
-  function sendTodayImportantInfoNotification(newsRows) {
+  // 一律走 service worker 的 showNotification()，不要用 new Notification()：
+  // Android Chrome 對那個建構子直接丟 TypeError（Illegal constructor），
+  // iOS Safari 也不支援，等於這則通知以前只有桌機看得到、手機靜默失敗。
+  // 點擊行為交給 sw.js 的 notificationclick，三個平台才會一致。
+  async function sendTodayImportantInfoNotification(newsRows) {
     if (!Array.isArray(newsRows) || newsRows.length === 0) return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  
+    if (!("serviceWorker" in navigator)) return;
+
     const key = todayImportantInfoKey(newsRows);
     if (localStorage.getItem(key) === "1") return;
-  
+
     const topRows = newsRows.slice(0, 3).map(({ sid, ev }) => {
       const name = universe[sid]?.n || "";
       return `${sid}${name ? ` ${name}` : ""}：${ev.title || "重要資訊"}`;
     });
-  
+
     try {
-      const n = new Notification(`今日重要資訊：${newsRows.length} 則`, {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(`今日重要資訊：${newsRows.length} 則`, {
         body: topRows.join("\n"),
-        tag: `home-important-info-${new Date().toISOString().slice(0, 10)}`,
-        renotify: false,
+        icon: NOTIFICATION_ICON,
+        badge: NOTIFICATION_BADGE,
+        tag: `home-important-info-${taipeiDateKey(new Date())}`,
         data: { url: new URL("watchlist.html#home", window.location.href).toString() },
       });
-      n.onclick = () => {
-        window.focus();
-        window.location.href = n.data?.url || new URL("watchlist.html#home", window.location.href).toString();
-        n.close();
-      };
       localStorage.setItem(key, "1");
     } catch (e) {
       console.warn("[Notification] 無法發送今日重要資訊通知:", e);
     }
   }
 
+// 時間一律以台北時區顯示。使用者關心的是台股的時間，不是裝置所在地的時間：
+// 人在國外或裝置時區設錯時，本機時間會把 09:15 的盤中通知顯示成前一天晚上，
+// 而同一張畫面的「今天／昨天」分組又是用台北日期算的，兩邊會互相矛盾。
+const _TPE_HM_FMT = new Intl.DateTimeFormat("zh-TW", {
+  timeZone: "Asia/Taipei",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",   // 不寫的話某些引擎午夜會顯示成 "24:00"
+});
+
 function fmtTime(ts, withDate = false) {
   const d = new Date(ts);
   if (isNaN(d)) return "";
-  const hm = d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false });
-  return withDate ? `${d.getMonth() + 1}/${d.getDate()} ${hm}` : hm;
+  const hm = _TPE_HM_FMT.format(d);
+  if (!withDate) return hm;
+  const [, month, day] = taipeiDateKey(d).split("-");
+  return `${Number(month)}/${Number(day)} ${hm}`;
 }
 
 function isToday(ts) {
-  const d = new Date(ts), n = new Date();
-  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+  const key = taipeiDateKey(ts);
+  return !!key && key === taipeiDateKey(new Date());
+}
+
+// "YYYY-MM-DD" → UTC 毫秒。純粹拿來算天數差，不涉及時區換算：
+// 兩邊都是台北日期字串，用同一個基準轉換相減才不會被日光節約或時區干擾。
+function _dateKeyToUtcMs(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
 }
 
 function dayLabelOf(ts) {
-  const d = new Date(ts); d.setHours(0, 0, 0, 0);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const diff = Math.round((today - d) / 86400000);
+  const key = taipeiDateKey(ts);
+  if (!key) return "";
+  const diff = Math.round(
+    (_dateKeyToUtcMs(taipeiDateKey(new Date())) - _dateKeyToUtcMs(key)) / 86400000);
   if (diff <= 0) return "今天";
   if (diff === 1) return "昨天";
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  const [, month, day] = key.split("-");
+  return `${Number(month)}/${Number(day)}`;
 }
 
 function stockLabelOf(sid) {
@@ -1977,16 +2094,20 @@ function getPreferredStockName(sid, rawName) {
   return String(rawName || "").trim();
 }
 
+// 建立 Intl.DateTimeFormat 不便宜，而這支函式現在每列通知都會呼叫好幾次
+//（fmtTime、isToday、dayLabelOf、盤中雷達的當日篩選），格式器要重複使用。
+const _TPE_DATE_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Taipei",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 function taipeiDateKey(value) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Taipei",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+  const parts = _TPE_DATE_FMT.formatToParts(date);
   const part = type => parts.find(item => item.type === type)?.value || "";
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
@@ -2478,11 +2599,28 @@ function renderHoldings() {
 }
 
 // ── PWA v2: ⚡ 盤中雷達 ──────────────────────────────────────────
+// 用台北時區判斷，不要用裝置本機時間：同一張畫面的「今日 N 則」是用
+// taipeiDateKey() 換算的，兩邊時區不一致時狀態列會自相矛盾（人在國外、
+// 或裝置時區設錯就會遇到）。自動更新的節奏也靠這個函式，錯了會整天用
+// 收盤的間隔輪詢。
 function _isMarketOpenNow() {
-  const n = new Date();
-  const day = n.getDay();
-  if (day === 0 || day === 6) return false;
-  const mins = n.getHours() * 60 + n.getMinutes();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Taipei",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",   // 不寫的話某些引擎午夜會回傳 "24"
+  }).formatToParts(new Date());
+  const part = type => parts.find(item => item.type === type)?.value || "";
+
+  const weekday = part("weekday");
+  if (weekday === "Sat" || weekday === "Sun") return false;
+
+  const hour = Number(part("hour")) % 24;
+  const minute = Number(part("minute"));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
+
+  const mins = hour * 60 + minute;
   return mins >= 9 * 60 && mins <= 13 * 60 + 35;
 }
 
@@ -4485,6 +4623,19 @@ function _urlBase64ToUint8Array(b64) {
   return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }
 
+// 已安裝成 standalone PWA？initPushUI() 與安裝提示都要用，宣告在兩者之前。
+const _pwaIsStandalone = window.matchMedia('(display-mode: standalone)').matches
+  || window.navigator.standalone === true;
+
+// iOS 只有「已加入主畫面」的 standalone PWA 能訂閱 Web Push；
+// 在 Safari 分頁裡 pushManager.subscribe() 一定丟 NotAllowedError。
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// 目前是否已訂閱。togglePushSubscription() 需要「不 await 就知道要訂閱還是取消」，
+// 否則權限請求前面會多出 await，Safari 會判定已經脫離使用者手勢。
+let _pushSubscribed = false;
+
 async function initPushUI() {
   const bar  = document.getElementById('push-notify-bar');
   const btn  = document.getElementById('push-notify-btn');
@@ -4493,8 +4644,7 @@ async function initPushUI() {
   const homeHead  = document.querySelector('#view-home .view-head');
   const inboxHead = document.querySelector('#view-inbox .view-head');
 
-  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !bar) return;
-
+  if (!bar) return;
   bar.style.display = '';
 
   // 尚未啟用/被封鎖時顯示在首頁（提醒去啟用）；已啟用後移到「通知」分頁（首頁不再顯示）
@@ -4504,17 +4654,34 @@ async function initPushUI() {
     }
   }
 
-  if (Notification.permission === 'denied') {
+  function showHint(emoji, message) {
     placeBar(homeHead);
-    icon.textContent = '🔇';
-    txt.textContent  = '通知已被封鎖，請在瀏覽器設定中允許此網站發送通知';
+    icon.textContent = emoji;
+    txt.textContent  = message;
     btn.style.display = 'none';
+  }
+
+  // iPhone 在 Safari 分頁裡不可能訂閱成功。以前這裡直接 return、整條 bar 消失，
+  // 使用者只看到「Android 有、iPhone 沒有」，卻不知道要先加入主畫面。
+  if (_isIOS && !_pwaIsStandalone) {
+    showHint('📲', 'iPhone 需先用「分享 → 加入主畫面」安裝，才能開啟推播通知');
+    return;
+  }
+
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    showHint('🔇', '此瀏覽器不支援推播通知');
+    return;
+  }
+
+  if (Notification.permission === 'denied') {
+    showHint('🔇', '通知已被封鎖，請在瀏覽器設定中允許此網站發送通知');
     return;
   }
 
   try {
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
+    _pushSubscribed = !!sub;
     btn.style.display = '';
     if (sub) {
       placeBar(inboxHead);
@@ -4534,55 +4701,171 @@ async function initPushUI() {
   }
 }
 
+// 存 / 刪 Supabase 的訂閱紀錄。pushsubscriptionchange 也共用 _savePushSubscription。
+async function _savePushSubscription(sub) {
+  return _savePushSubscriptionJson(sub.toJSON());
+}
+
+async function _savePushSubscriptionJson(j) {
+  await sbPost('push_subscriptions', {
+    user_id:    state.userId,
+    endpoint:   j.endpoint,
+    p256dh:     j.keys.p256dh,
+    auth:       j.keys.auth,
+    user_agent: navigator.userAgent.slice(0, 200),
+  }, state.accessToken, true /* minimal */);
+}
+
+async function _deletePushSubscription(endpoint) {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/push_subscriptions`);
+  url.searchParams.set('user_id', `eq.${state.userId}`);
+  url.searchParams.set('endpoint', `eq.${endpoint}`);
+  await fetch(url, { method: 'DELETE', headers: sbHeaders(state.accessToken) });
+}
+
+// Safari 要求 Notification.requestPermission() 在使用者手勢的「同一個 tick」發出。
+// 只要前面插了任何 await（例如 serviceWorker.ready），手勢憑證就過期，
+// iPhone 會直接判定拒絕——Chrome 判定寬鬆，所以這個 bug 只在 iOS 現形。
+// 因此：權限一定第一個要，非同步工作全部排在它後面。
+// 舊版 Safari 的 requestPermission 只吃 callback、不回傳 Promise，兩種都接。
+function _requestNotificationPermission() {
+  return new Promise(resolve => {
+    let settled = false;
+    const done = p => { if (!settled) { settled = true; resolve(p); } };
+    try {
+      const r = Notification.requestPermission(done);
+      if (r && typeof r.then === 'function') r.then(done, () => done('default'));
+    } catch {
+      done('default');
+    }
+  });
+}
+
+// ── 訂閱輪換同步 ─────────────────────────────────────────────────
+// Safari / iOS 會定期換掉 push 訂閱。sw.js 的 pushsubscriptionchange 會立刻
+// 重新訂閱，但它沒有 access token 寫不了 Supabase，只能把結果留在 Cache；
+// 補寫的工作在這裡做——這是唯一同時有新訂閱和使用者 token 的地方。
+const PUSH_SYNC_CACHE = 'push-sync';
+const PUSH_SYNC_URL   = './__push_sync__';
+const PUSH_KEY_URL    = './__push_key__';
+
+// SW 重新訂閱時需要 VAPID 公鑰，但它讀不到頁面的常數，先寄放在 Cache
+async function _rememberVapidKeyForSw() {
+  if (!('caches' in window)) return;
+  try {
+    const cache = await caches.open(PUSH_SYNC_CACHE);
+    await cache.put(PUSH_KEY_URL, new Response(VAPID_PUBLIC_KEY));
+  } catch { /* 寄放失敗不影響本次訂閱 */ }
+}
+
+async function _syncRotatedPushSubscription() {
+  if (!state.userId || !('caches' in window)) return false;
+  try {
+    const cache = await caches.open(PUSH_SYNC_CACHE);
+    const res = await cache.match(PUSH_SYNC_URL);
+    if (!res) return false;
+    const info = await res.json();
+    const j = info && info.subscription;
+    if (j && j.endpoint && j.keys) {
+      await _savePushSubscriptionJson(j);
+      // 舊 endpoint 已經失效，留著只會讓後端每次推播都吃一次 410
+      if (info.oldEndpoint && info.oldEndpoint !== j.endpoint) {
+        try { await _deletePushSubscription(info.oldEndpoint); } catch { /* noop */ }
+      }
+    }
+    await cache.delete(PUSH_SYNC_URL);
+    return true;
+  } catch (e) {
+    console.warn('[Push] 訂閱輪換同步失敗', e);
+    return false;
+  }
+}
+
+// 最後一道防線：輪換若發生在 App 沒開的時候，SW 可能早就被系統回收、
+// pushsubscriptionchange 根本沒跑到。每次開啟時直接比對
+// 「瀏覽器目前的訂閱」與「Supabase 裡的紀錄」，缺了就補。
+async function ensurePushSubscriptionRegistered() {
+  if (!state.userId || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    await _syncRotatedPushSubscription();
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    await _rememberVapidKeyForSw();
+    const rows = await sbGet('push_subscriptions', {
+      select: 'id', endpoint: `eq.${sub.endpoint}`, limit: '1',
+    }, state.accessToken);
+    if (!rows || !rows.length) await _savePushSubscriptionJson(sub.toJSON());
+  } catch (e) {
+    console.warn('[Push] 訂閱狀態比對失敗', e);
+  }
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', e => {
+    // 頁面開著時輪換：SW 通知我們立刻補寫，不用等下次啟動
+    if (e.data && e.data.type === 'push-subscription-changed') {
+      _syncRotatedPushSubscription().catch(() => {});
+    }
+  });
+}
+
 async function togglePushSubscription() {
   const btn  = document.getElementById('push-notify-btn');
   const txt  = document.getElementById('push-status-text');
+
+  // ── 停用：不需要權限，可以放心 await ──
+  if (_pushSubscribed) {
+    btn.disabled = true;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        await existing.unsubscribe();
+        // 即使刪除失敗也不擋：後端收到 410 會自動清掉過期訂閱
+        try { await _deletePushSubscription(existing.endpoint); } catch { /* noop */ }
+      }
+      _pushSubscribed = false;
+      await initPushUI();
+    } catch (e) {
+      txt.textContent = `錯誤：${e.message}`;
+      console.error('[Push]', e);
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+
+  // ── 啟用：先要權限，再做其他事 ──
+  if (!VAPID_PUBLIC_KEY) {
+    alert('尚未設定 VAPID 公鑰。\n請先執行  python generate_vapid.py  並依照說明填入 .env 和 watchlist.html');
+    return;
+  }
+  const permissionPromise = _requestNotificationPermission();   // ← 手勢內同步發出
   btn.disabled = true;
 
   try {
-    const reg = await navigator.serviceWorker.ready;
-    const existing = await reg.pushManager.getSubscription();
-
-    if (existing) {
-      // 停用：取消訂閱 + 從 Supabase 刪除
-      await existing.unsubscribe();
-      try {
-        const url = new URL(`${SUPABASE_URL}/rest/v1/push_subscriptions`);
-        url.searchParams.set('user_id', `eq.${state.userId}`);
-        url.searchParams.set('endpoint', `eq.${existing.endpoint}`);
-        await fetch(url, { method: 'DELETE', headers: sbHeaders(state.accessToken) });
-      } catch { /* 即使刪除失敗，410 機制會自動清除過期訂閱 */ }
-      await initPushUI();
-
-    } else {
-      // 啟用：請求權限 → 訂閱 → 儲存到 Supabase
-      if (!VAPID_PUBLIC_KEY) {
-        alert('尚未設定 VAPID 公鑰。\n請先執行  python generate_vapid.py  並依照說明填入 .env 和 watchlist.html');
-        btn.disabled = false;
-        return;
-      }
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        txt.textContent = '已拒絕授權通知權限';
-        btn.disabled = false;
-        return;
-      }
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
-      const j = sub.toJSON();
-      await sbPost('push_subscriptions', {
-        user_id:    state.userId,
-        endpoint:   j.endpoint,
-        p256dh:     j.keys.p256dh,
-        auth:       j.keys.auth,
-        user_agent: navigator.userAgent.slice(0, 200),
-      }, state.accessToken, true /* minimal */);
-      await initPushUI();
+    const permission = await permissionPromise;
+    if (permission !== 'granted') {
+      txt.textContent = permission === 'denied'
+        ? '已拒絕授權通知權限'
+        : '尚未授權通知權限，請再試一次';
+      return;
     }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+    await _savePushSubscription(sub);
+    await _rememberVapidKeyForSw();
+    _pushSubscribed = true;
+    await initPushUI();
   } catch (e) {
-    txt.textContent = `錯誤：${e.message}`;
+    // iOS 在 Safari 分頁（未加入主畫面）訂閱一定失敗，訊息要講清楚怎麼辦
+    txt.textContent = (_isIOS && !_pwaIsStandalone)
+      ? '請先用「分享 → 加入主畫面」安裝後，再開啟通知'
+      : `錯誤：${e.message}`;
     console.error('[Push]', e);
   } finally {
     btn.disabled = false;
@@ -4605,8 +4888,6 @@ if ('serviceWorker' in navigator) {
 let _deferredInstallPrompt = null;
 let _installIntentPending  = false;   // user clicked Install before prompt was ready
 let _installIntentTimer    = null;
-const _pwaIsStandalone = window.matchMedia('(display-mode: standalone)').matches
-  || window.navigator.standalone === true;
 
 // Show button whenever not already in standalone mode
 if (!_pwaIsStandalone) {

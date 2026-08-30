@@ -9,7 +9,12 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v16';
+const CACHE_VERSION = 'tw-stock-v17';
+
+// 訂閱輪換用的 Cache：不隨版本清掉，否則升級 SW 就把待同步的訂閱弄丟了。
+const PUSH_SYNC_CACHE = 'push-sync';
+const PUSH_SYNC_URL   = './__push_sync__';   // 假 URL，只當 Cache 的 key 用
+const PUSH_KEY_URL    = './__push_key__';    // 頁面訂閱時寫入的 VAPID 公鑰
 
 // Static assets cached for offline CSS/icon support.
 // watchlist.html is NOT listed here — it is handled by network-first navigation.
@@ -19,6 +24,8 @@ const PRECACHE_STATIC = [
   './manifest.json',
   './icons/icon.svg',
   './icons/icon-maskable.svg',
+  './icons/icon-192.png',
+  './icons/badge-96.png',
 ];
 
 // ── Install ─────────────────────────────────────
@@ -35,7 +42,8 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_VERSION).map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k !== CACHE_VERSION && k !== PUSH_SYNC_CACHE)
+                      .map(k => caches.delete(k)))
     )
   );
   self.clients.claim();
@@ -101,9 +109,11 @@ self.addEventListener('push', event => {
 
   const title = data.title || '台股監控';
   const options = {
+    // 圖示必須是 PNG：Chromium 的通知圖片解碼器不支援 SVG（桌機與 Android 皆然），
+    // 給 SVG 等於整塊圖示空白。iOS 兩個都忽略，直接用主畫面的 App 圖示。
     body:     data.body  || '',
-    icon:     data.icon  || './icons/icon.svg',   // 後端可依訊號帶不同圖示
-    badge:    data.badge || './icons/icon.svg',
+    icon:     data.icon  || './icons/icon-192.png',   // 後端可依訊號帶不同圖示
+    badge:    data.badge || './icons/badge-96.png',   // Android 狀態列單色小圖
     data:     { url: data.url || './watchlist.html' },
     tag:      data.tag   || 'stock-alert',        // 每則 alert 帶專屬 tag → 通知各自保留，系統自動堆疊
     renotify: true,
@@ -112,6 +122,56 @@ self.addEventListener('push', event => {
   event.waitUntil(
     self.registration.showNotification(title, options)
   );
+});
+
+// ── Web Push: 訂閱輪換 ────────────────────────────────────────
+// Safari / iOS 會定期換掉 push 訂閱，Chrome 在還原資料或權限異動時也會。
+// 沒有這個 handler 的話，舊 endpoint 失效、新的沒人回報後端，
+// 通知就此靜音，而且沒有任何錯誤訊息——iPhone 上最常見。
+//
+// SW 讀不到 localStorage，拿不到使用者的 access token，因此無法自己寫回
+// Supabase。這裡負責「立刻重新訂閱」並把結果留在 Cache，
+// 由頁面下次開啟時（那時才有 token）補寫進資料庫。
+function _b64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+self.addEventListener('pushsubscriptionchange', event => {
+  event.waitUntil((async () => {
+    const oldEndpoint = event.oldSubscription?.endpoint || null;
+    let sub = event.newSubscription || null;
+
+    if (!sub) {
+      // 部分瀏覽器只給 oldSubscription，得自己重新訂閱
+      let key = event.oldSubscription?.options?.applicationServerKey || null;
+      if (!key) {
+        try {
+          const cache = await caches.open(PUSH_SYNC_CACHE);
+          const res = await cache.match(PUSH_KEY_URL);
+          if (res) key = _b64ToUint8Array(await res.text());
+        } catch { /* 沒有金鑰就放棄，頁面開啟時的保險機制會補訂閱 */ }
+      }
+      if (!key) return;
+      try {
+        sub = await self.registration.pushManager.subscribe({
+          userVisibleOnly: true, applicationServerKey: key,
+        });
+      } catch { return; }
+    }
+
+    try {
+      const cache = await caches.open(PUSH_SYNC_CACHE);
+      await cache.put(PUSH_SYNC_URL, new Response(JSON.stringify({
+        oldEndpoint, subscription: sub.toJSON(),
+      }), { headers: { 'Content-Type': 'application/json' } }));
+    } catch { /* 寫不進去也還有頁面端的比對機制 */ }
+
+    // 頁面正開著就叫它立刻同步，不必等下次啟動
+    const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of list) c.postMessage({ type: 'push-subscription-changed' });
+  })());
 });
 
 // ── Web Push: notification click → open/focus PWA ─
