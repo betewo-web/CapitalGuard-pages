@@ -1383,6 +1383,11 @@ body.has-bottom-nav .qa-panel {
 	margin-top: 5px;
 }
 
+/* 自製訊號圖示（signalIconSvg）：Inbox 列與盤中雷達卡共用 */
+.sig-ico { flex-shrink: 0; display: inline-block; }
+.inbox-item > .sig-ico { margin-top: 2px; }
+.sc-type .sig-ico { vertical-align: -4px; margin-right: 3px; }
+
 .ib-main { flex: 1 1 auto; min-width: 0; }
 
 .ib-title {

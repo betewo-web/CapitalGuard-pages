@@ -9,7 +9,7 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v10';
+const CACHE_VERSION = 'tw-stock-v11';
 
 // Static assets cached for offline CSS/icon support.
 // watchlist.html is NOT listed here — it is handled by network-first navigation.
@@ -102,10 +102,10 @@ self.addEventListener('push', event => {
   const title = data.title || '台股監控';
   const options = {
     body:     data.body  || '',
-    icon:     './icons/icon.svg',
-    badge:    './icons/icon.svg',
+    icon:     data.icon  || './icons/icon.svg',   // 後端可依訊號帶不同圖示
+    badge:    data.badge || './icons/icon.svg',
     data:     { url: data.url || './watchlist.html' },
-    tag:      data.tag   || 'stock-alert',
+    tag:      data.tag   || 'stock-alert',        // 每則 alert 帶專屬 tag → 通知各自保留，系統自動堆疊
     renotify: true,
     vibrate:  [200, 100, 200],
   };
