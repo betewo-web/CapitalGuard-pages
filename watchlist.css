@@ -39,6 +39,8 @@
 html,
 body {
 	min-height: 100%;
+	/* 只寫在 body 上時，html 沒設會讓瀏覽器改用預設值，下拉重新整理照樣被觸發 */
+	overscroll-behavior-y: contain;
 }
 
 body {
@@ -965,6 +967,93 @@ body.has-bottom-nav .page-shell {
 	border: 1px solid var(--border);
 	background: rgba(9, 16, 31, 0.96);
 	color: var(--text-0);
+}
+
+/* ── 彈出面板（自訂規則清單／規則編輯器）─────────────────────────
+   原本這兩張卡片跟底下的頁面同一個深藍、backdrop 又只暗一點點，
+   疊起來像同一個畫面糊在一起。這裡把「面板」和「背景」徹底分開：
+   背景壓黑並模糊，面板改成不透明底＋亮一階的邊＋大陰影。 */
+.sheet-modal .modal-content {
+	background: #0d1424;
+	border: 1px solid rgba(121, 157, 255, 0.34);
+	border-radius: 16px;
+	box-shadow: 0 24px 70px rgba(0, 0, 0, 0.72);
+}
+
+/* 第二層（編輯器）再亮半階，即使真的疊到也分得出前後 */
+.sheet-modal .modal-content.is-nested {
+	background: #111a2e;
+	border-color: rgba(121, 157, 255, 0.46);
+}
+
+.sheet-modal .modal-header {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.55rem 0.85rem;
+}
+
+.sheet-modal .modal-header h5 {
+	font-size: 0.98rem;
+	font-weight: 700;
+	color: #ffffff;
+}
+
+.sheet-modal .modal-header .btn-close {
+	margin-left: auto;
+}
+
+.sheet-modal .modal-footer {
+	border-top: 1px solid rgba(121, 157, 255, 0.2);
+	background: rgba(6, 11, 22, 0.6);
+}
+
+/* 返回上一層：手機上沒有這顆，使用者只能猜「取消」會退到哪裡 */
+.sheet-back {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2rem;
+	height: 26px;
+	padding: 0 0.5rem 0 0.35rem;
+	border-radius: 7px;
+	border: 1px solid rgba(140, 168, 220, 0.24);
+	background: rgba(255, 255, 255, 0.03);
+	color: #b6c6e2;
+	font-size: 0.75rem;
+	line-height: 1;
+	cursor: pointer;
+	transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.sheet-back:hover {
+	border-color: rgba(86, 168, 255, 0.55);
+	background: rgba(86, 168, 255, 0.14);
+	color: #eaf2ff;
+}
+
+@media (max-width: 400px) {
+	.sheet-back span { display: none; }
+	.sheet-back { padding: 0 0.3rem; }
+}
+
+/* 背景要退得夠遠，面板才像浮在上面而不是跟它黏在一起 */
+.modal-backdrop.show {
+	opacity: 1;
+	background: rgba(3, 5, 12, 0.78);
+	-webkit-backdrop-filter: blur(3px);
+	backdrop-filter: blur(3px);
+}
+
+/* 面板內容捲到底再拉，捲動會傳回頁面 → PWA 觸發下拉重新整理 → 整個
+   App 重載、跳回預設分頁，使用者填到一半的規則就沒了。contain 把捲動
+   關在面板裡。 */
+.modal,
+.modal-dialog-scrollable .modal-body {
+	overscroll-behavior: contain;
+}
+
+.modal-dialog-scrollable .modal-body {
+	-webkit-overflow-scrolling: touch;
 }
 
 /* ── Feature 4: 浮動 AI 問答 ─────────────────────────────────── */

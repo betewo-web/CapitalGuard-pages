@@ -298,12 +298,12 @@
 </nav>
 
 <!-- ── 自訂規則：清單 ────────────────────────────────────────────── -->
-<div class="modal fade" id="rulesModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
+<div class="modal fade sheet-modal" id="rulesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
-        <h5 class="mb-0">📐 自訂通知規則</h5>
-        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+        <h5 class="mb-0">自訂通知規則</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3">
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -318,12 +318,18 @@
 </div>
 
 <!-- ── 自訂規則：編輯器 ──────────────────────────────────────────── -->
-<div class="modal fade" id="ruleEditorModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
-    <div class="modal-content kline-modal-content">
+<div class="modal fade sheet-modal" id="ruleEditorModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+    <div class="modal-content kline-modal-content is-nested">
       <div class="modal-header py-2">
+        <button type="button" class="sheet-back" data-bs-dismiss="modal" aria-label="返回規則清單">
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9.8 3.2 5 8l4.8 4.8"/>
+          </svg><span>規則清單</span>
+        </button>
         <h5 class="mb-0" id="rule-editor-title">新增規則</h5>
-        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3">
         <div class="rule-field">
@@ -358,18 +364,18 @@
       </div>
       <div class="modal-footer py-2">
         <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">取消</button>
-        <button type="button" class="btn btn-sm btn-primary" onclick="saveRule()">儲存</button>
+        <button type="button" class="btn btn-sm btn-primary" onclick="saveRule()">儲存規則</button>
       </div>
     </div>
   </div>
 </div>
 
-<div class="modal fade" id="alertSettingsModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+<div class="modal fade sheet-modal" id="alertSettingsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
         <h5 class="mb-0" id="alert-settings-title">通知設定</h5>
-        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3">
         <div class="d-flex justify-content-end gap-2 mb-2">
@@ -507,7 +513,7 @@
   </div>
 </div>
 
-<div class="modal fade" id="stockEventsModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade sheet-modal" id="stockEventsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
@@ -746,6 +752,8 @@ let homeWatchlistExpanded = localStorage.getItem(HOME_WATCHLIST_EXPAND_KEY) === 
 let alertModalRowId = null;
 let removeModalRowId = null;
 let stockEvents = {};   // sid → scored stock_events rows
+let brokerHoldings = [];     // broker_holdings rows（券商同步庫存；表未建或未同步時為空）
+let brokerHoldingsAt = null; // 最近一次同步時間（synced_at 最大值）
 
 // ── 線條圖示 ────────────────────────────────────────────────────
 // 自選列的動作鈕原本用 emoji（📈🔔📋✕）。emoji 是系統字型的彩色字符，
@@ -2532,12 +2540,55 @@ function renderHome() {
 }
 
 // ── PWA v2: 📊 持股 ──────────────────────────────────────────────
+// 資料來源兩種：券商同步的 broker_holdings（python main.py --sync-holdings）
+// 有資料就優先；一筆都沒有時退回 watchlist.shares 手動輸入。
+// 平均成本兩種來源都沿用 watchlist.avg_cost——元富 API 查不到成本，
+// 使用者在 🔔 通知設定 → 📊 持股 輸入的值是唯一來源。
+function fmtSyncTime(iso) {
+  const d = new Date(iso || "");
+  if (isNaN(d)) return "";
+  return `${d.getMonth() + 1}/${d.getDate()} ` +
+         `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} `;
+}
+
+function holdingEntries() {
+  if (brokerHoldings.length > 0) {
+    const wlBySid = new Map(watchlistRows.map(r => [String(r.stock_id || "").trim(), r]));
+    return brokerHoldings.map(h => {
+      const sid = String(h.stock_id || "").trim();
+      const wl = wlBySid.get(sid);
+      const qty = Number(h.qty) || 0, credit = Number(h.qty_credit) || 0;
+      const debit = Number(h.qty_debit) || 0, zero = Number(h.qty_zero) || 0;
+      return {
+        sid,
+        name: getPreferredStockName(sid, h.stock_name || (wl ? wl.stock_name : "")) || sid,
+        shares: qty + credit + zero,   // 多方部位；融券另列不計入市值
+        cost: wl && wl.avg_cost != null ? Number(wl.avg_cost) : null,
+        extra: [credit > 0 ? `融資 ${credit.toLocaleString()}` : "",
+                zero  > 0 ? `零股 ${zero.toLocaleString()}`  : "",
+                debit > 0 ? `融券 ${debit.toLocaleString()}` : ""].filter(Boolean),
+      };
+    }).filter(h => h.shares > 0 || h.extra.length);
+  }
+  return watchlistRows.filter(r => Number(r.shares) > 0).map(r => {
+    const sid = String(r.stock_id || "").trim();
+    return {
+      sid,
+      name: getPreferredStockName(sid, r.stock_name) || sid,
+      shares: Number(r.shares),
+      cost: r.avg_cost != null ? Number(r.avg_cost) : null,
+      extra: [],
+    };
+  });
+}
+
 function renderHoldings() {
   const listEl = document.getElementById("holdings-list");
   if (!listEl) return;
-  const holds = watchlistRows.filter(r => Number(r.shares) > 0);
   const summaryCard = document.getElementById("holdings-summary-card");
   const noteEl = document.getElementById("holdings-price-note");
+  const useBroker = brokerHoldings.length > 0;
+  const holds = holdingEntries();
 
   if (!holds.length) {
     summaryCard.style.display = "none";
@@ -2545,36 +2596,36 @@ function renderHoldings() {
     listEl.innerHTML = `
       <div class="view-empty">
         尚未設定持股<br>
-        <span style="font-size:.78rem">到 ⭐ 自選 → 🔔 通知設定 → 📊 持股，輸入持有股數與平均成本</span><br>
+        <span style="font-size:.78rem">到 ⭐ 自選 → 🔔 通知設定 → 📊 持股，輸入持有股數與平均成本；<br>
+        或設定券商同步（見 BROKER_SYNC.md）自動帶入元富證券庫存</span><br>
         <button class="btn btn-sm btn-outline-info mt-3" onclick="switchTab('watch')">前往自選股 →</button>
       </div>`;
     return;
   }
 
-  noteEl.textContent = "以最近收盤價計算";
+  noteEl.textContent = useBroker
+    ? `元富證券 ${fmtSyncTime(brokerHoldingsAt)}同步 · 以最近收盤價計算`
+    : "以最近收盤價計算";
   let total = 0, dayPl = 0, unreal = 0;
-  let hasQuote = false, hasCost = false;
+  let hasQuote = false, hasCost = false, missingCost = false;
 
-  const rowsHtml = holds.map(row => {
-    const sid = String(row.stock_id || "").trim();
-    const name = getPreferredStockName(sid, row.stock_name) || sid;
-    const shares = Number(row.shares);
-    const cost = row.avg_cost != null ? Number(row.avg_cost) : null;
-    const q = getQuote(sid);
-    const sig = latestSignalOf(sid);
+  const rowsHtml = holds.map(h => {
+    const q = getQuote(h.sid);
+    const sig = latestSignalOf(h.sid);
+    if (!(h.cost > 0)) missingCost = true;
 
     let value = null, pl = null;
     if (q) {
       hasQuote = true;
-      value = q.price * shares;
+      value = q.price * h.shares;
       total += value;
       if (q.changePct !== null) {
         const prev = q.price / (1 + q.changePct / 100);
-        dayPl += (q.price - prev) * shares;
+        dayPl += (q.price - prev) * h.shares;
       }
-      if (cost != null && cost > 0) {
+      if (h.cost != null && h.cost > 0) {
         hasCost = true;
-        pl = (q.price - cost) * shares;
+        pl = (q.price - h.cost) * h.shares;
         unreal += pl;
       }
     }
@@ -2585,12 +2636,14 @@ function renderHoldings() {
     const plHtml = pl !== null
       ? `<span class="${pl >= 0 ? "chg-up" : "chg-down"}">${pl >= 0 ? "+" : ""}${Math.round(pl).toLocaleString()}</span>`
       : "";
+    const metaParts = [`${h.shares.toLocaleString()} 股`, ...h.extra];
+    if (h.cost != null) metaParts.push(`成本 ${h.cost}`);
 
     return `
-      <div class="holding-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
+      <div class="holding-row" onclick="openKLineFromWatchlist('${escapeHtml(h.sid)}')">
         <div class="hr-left">
-          <div class="hr-sid">${escapeHtml(sid)} · ${shares.toLocaleString()} 股${cost != null ? ` · 成本 ${cost}` : ""}</div>
-          <div class="hr-title">${escapeHtml(name)} ${sigHtml}</div>
+          <div class="hr-sid">${escapeHtml(h.sid)} · ${metaParts.join(" · ")}</div>
+          <div class="hr-title">${escapeHtml(h.name)} ${sigHtml}</div>
         </div>
         <div class="hr-right">
           <div class="hr-price">${q ? q.price.toFixed(2) : "—"} ${q ? fmtChgHtml(q.changePct) : ""}</div>
@@ -2598,7 +2651,12 @@ function renderHoldings() {
         </div>
       </div>`;
   }).join("");
-  listEl.innerHTML = rowsHtml;
+  const costHint = useBroker && missingCost
+    ? `<div class="small text-muted p-2" style="font-size:.72rem">
+        部分持股未設定成本，未實現損益僅計入已設定的部分。成本請到
+        ⭐ 自選 → 🔔 通知設定 → 📊 持股 輸入（未加入自選的請先加入）。</div>`
+    : "";
+  listEl.innerHTML = rowsHtml + costHint;
 
   summaryCard.style.display = "";
   document.getElementById("hd-total").textContent = hasQuote ? `$${Math.round(total).toLocaleString()}` : "—";
@@ -2758,10 +2816,32 @@ let alertRules = [];
 let editingRuleId = null;
 let editorConditions = [];
 
+// 規則清單與規則編輯器一次只顯示一層。
+// 兩層疊著時，兩張卡片是同一個深藍底、backdrop 只再暗一點點，看起來像同一個
+// 畫面糊在一起；而且下層仍然掛在 DOM 上，手指滑到它身上就把捲動接了過去。
+function swapModal(fromId, toId) {
+  const fromEl = document.getElementById(fromId);
+  const toEl   = document.getElementById(toId);
+  if (!toEl) return;
+  const show = () => bootstrap.Modal.getOrCreateInstance(toEl).show();
+  if (!fromEl || !fromEl.classList.contains("show")) { show(); return; }
+  fromEl.addEventListener("hidden.bs.modal", show, { once: true });
+  bootstrap.Modal.getOrCreateInstance(fromEl).hide();
+}
+
 async function openRulesModal() {
   bootstrap.Modal.getOrCreateInstance(document.getElementById("rulesModal")).show();
   await refreshRules();
 }
+
+// 從清單進編輯器的話，關掉編輯器要回到清單，而不是一路退回自選畫面
+let returnToRulesList = false;
+
+document.getElementById("ruleEditorModal").addEventListener("hidden.bs.modal", () => {
+  if (!returnToRulesList) return;
+  returnToRulesList = false;
+  openRulesModal();
+});
 
 async function refreshRules() {
   const listEl = document.getElementById("rules-list");
@@ -2889,7 +2969,8 @@ function openRuleEditor(id) {
     : [{ type: "change_pct_above", value: 5 }];
   renderRuleConditions();
 
-  bootstrap.Modal.getOrCreateInstance(document.getElementById("ruleEditorModal")).show();
+  returnToRulesList = true;
+  swapModal("rulesModal", "ruleEditorModal");
 }
 
 function addRuleCondition() {
@@ -2985,9 +3066,11 @@ async function saveRule() {
     } else {
       await sbPost("alert_rules", { ...body, user_id: state.userId }, state.accessToken, true);
     }
+    const saved = editingRuleId ? "已更新" : "已新增";
+    // hidden 事件會把清單重新打開，訊息等它回來再設，否則會被 openRulesModal 蓋掉
+    document.getElementById("ruleEditorModal").addEventListener(
+      "hidden.bs.modal", () => setTimeout(() => setRulesMsg(saved), 0), { once: true });
     bootstrap.Modal.getOrCreateInstance(document.getElementById("ruleEditorModal")).hide();
-    setRulesMsg(editingRuleId ? "已更新" : "已新增");
-    refreshRules();
   } catch (e) {
     msgEl.textContent = `儲存失敗：${e.message || e}`;
     msgEl.className = "small mt-2 text-danger";
@@ -3068,9 +3151,27 @@ function previewCondition(sid, c) {
   }
 }
 
+// ── 券商庫存（broker_holdings，由後端 --sync-holdings 寫入）──────
+// 表還沒建（migration 未執行）或還沒同步過都是預期情況：安靜退回
+// watchlist.shares 手動輸入模式，不打擾使用者。
+async function loadBrokerHoldings() {
+  if (!state.accessToken) return;
+  try {
+    const rows = await sbGet("broker_holdings", { "order": "stock_id.asc" }, state.accessToken);
+    brokerHoldings = rows || [];
+    brokerHoldingsAt = brokerHoldings.reduce(
+      (m, r) => (r.synced_at && (!m || r.synced_at > m) ? r.synced_at : m), null);
+  } catch (e) { /* 404（表不存在）或暫時失敗：保留上次資料 */ }
+}
+
 // ── 自選股清單 ──────────────────────────────────────────────────
 async function loadWatchlist() {
-  const rows = await sbGet("watchlist", {}, state.accessToken);
+  // 券商庫存跟著自選股一起抓：所有會刷新自選的路徑（登入、手動更新）
+  // 就自動涵蓋持股分頁，不必在每個呼叫點各記一行
+  const [rows] = await Promise.all([
+    sbGet("watchlist", {}, state.accessToken),
+    loadBrokerHoldings(),
+  ]);
   watchlistRows = (rows || []).map(row => {
     const sid = String(row.stock_id || "").trim();
     return {
