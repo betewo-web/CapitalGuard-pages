@@ -3,13 +3,14 @@
    Strategy:
      • HTML navigation  → Network-first (always fetch latest,
                             fall back to cache when offline)
-     • CSS / icons      → Cache-first (stable assets)
+     • watchlist.css    → Network-first (must not lag behind the HTML)
+     • icons / manifest → Cache-first (stable assets)
      • JSON data files  → Pass-through (never cached by SW)
      • Cross-origin     → Pass-through (APIs, CDN, fonts)
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v21';
+const CACHE_VERSION = 'tw-stock-v22';
 
 // 訂閱輪換用的 Cache：不隨版本清掉，否則升級 SW 就把待同步的訂閱弄丟了。
 const PUSH_SYNC_CACHE = 'push-sync';
@@ -84,8 +85,30 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ④ Cache-first: CSS, icons, manifest
   const assetName = url.pathname.split('/').pop();
+
+  // ④ Network-first: watchlist.css
+  //    HTML 走 network-first、CSS 走 cache-first 的話，部署完的那一刻使用者拿到的
+  //    是「新的 HTML ＋ 舊的 CSS」：這一版新加的樣式類別在舊 CSS 裡還不存在，
+  //    掛著 .btn 的按鈕就退回 Bootstrap 預設的深色字＋透明底，在深色面板上等於隱形。
+  //    真的發生過（自訂規則面板的「新增規則」）。CSS 跟著 HTML 一起走 network-first，
+  //    兩邊才不會版本錯開；離線時仍然回退到快取。
+  if (assetName === 'watchlist.css') {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          if (response.ok) {
+            caches.open(CACHE_VERSION).then(c => c.put(event.request, response.clone()));
+          }
+          return response;
+        })
+        .catch(async () =>
+          (await caches.match(event.request)) || new Response('', { status: 503 }))
+    );
+    return;
+  }
+
+  // ⑤ Cache-first: icons, manifest
   const isCachedAsset = PRECACHE_STATIC.some(a => a.split('/').pop() === assetName);
   if (!isCachedAsset) return; // pass-through anything else
 
