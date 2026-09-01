@@ -297,42 +297,44 @@
   </button>
 </nav>
 
-<!-- ── 自訂規則：清單 ────────────────────────────────────────────── -->
+<!-- ── 自訂規則：清單與編輯器共用同一個面板 ────────────────────────
+     兩個 modal 互相切換時，Bootstrap 得先把上層淡出、backdrop 收掉，
+     再淡入下層——中間那一格沒有任何 modal，畫面會閃一下自選清單。
+     改成同一個面板換內容，就沒有那個空檔了。 -->
 <div class="modal fade sheet-modal" id="rulesModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
-        <h5 class="mb-0">自訂通知規則</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
-      </div>
-      <div class="modal-body p-3">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <span class="small text-muted" id="rules-count"></span>
-          <button type="button" class="btn btn-sm btn-primary" onclick="openRuleEditor(null)">＋ 新增規則</button>
-        </div>
-        <div id="rules-list"></div>
-        <div id="rules-msg" class="small mt-2 text-muted"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ── 自訂規則：編輯器 ──────────────────────────────────────────── -->
-<div class="modal fade sheet-modal" id="ruleEditorModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
-    <div class="modal-content kline-modal-content is-nested">
-      <div class="modal-header py-2">
-        <button type="button" class="sheet-back" data-bs-dismiss="modal" aria-label="返回規則清單">
+        <button type="button" class="sheet-back" id="rules-back" style="display:none"
+                onclick="showRulesPane('list')" aria-label="返回規則清單">
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
                stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M9.8 3.2 5 8l4.8 4.8"/>
           </svg><span>規則清單</span>
         </button>
-        <h5 class="mb-0" id="rule-editor-title">新增規則</h5>
+        <h5 class="mb-0" id="rules-modal-title">自訂通知規則</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
+
       <div class="modal-body p-3">
-        <div class="rule-field">
+        <!-- pane 1：清單 -->
+        <div id="rules-pane-list">
+          <div class="rules-toolbar">
+            <span id="rules-count" class="rules-count"></span>
+            <button type="button" class="btn btn-sm btn-accent-sm" onclick="openRuleEditor(null)">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                <path d="M8 3.4v9.2M3.4 8h9.2"/>
+              </svg><span>新增規則</span>
+            </button>
+          </div>
+          <div id="rules-list"></div>
+          <div id="rules-msg" class="rules-msg"></div>
+        </div>
+
+        <!-- pane 2：編輯器 -->
+        <div id="rules-pane-editor" style="display:none">
+          <div class="rule-field">
           <label for="rule-name">規則名稱</label>
           <input id="rule-name" type="text" class="rule-input" maxlength="40"
                  placeholder="例如：量增突破" oninput="renderRulePreview()">
@@ -361,9 +363,11 @@
 
         <div class="rule-preview" id="rule-preview"></div>
         <div id="rule-editor-msg" class="small mt-2 text-muted"></div>
+        </div>
       </div>
-      <div class="modal-footer py-2">
-        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">取消</button>
+
+      <div class="modal-footer py-2" id="rules-footer" style="display:none">
+        <button type="button" class="btn btn-sm btn-outline-light" onclick="showRulesPane('list')">取消</button>
         <button type="button" class="btn btn-sm btn-primary" onclick="saveRule()">儲存規則</button>
       </div>
     </div>
@@ -768,6 +772,8 @@ const ICON_EVENTS = _svg('<rect x="3.3" y="3.2" width="9.4" height="10.4" rx="1.
 const ICON_CLOSE  = _svg('<path d="M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4"/>');
 const ICON_SEARCH = _svg('<circle cx="6.9" cy="6.9" r="4.1"/><path d="M10 10 13.6 13.6"/>', 14);
 const ICON_RULES  = _svg('<path d="M2.6 5.2h10.8M2.6 10.8h10.8"/><circle cx="6" cy="5.2" r="1.7"/><circle cx="10.4" cy="10.8" r="1.7"/>', 14);
+const ICON_EDIT   = _svg('<path d="M11.1 2.6 13.4 4.9 5.6 12.7 2.6 13.4l0.7-3z"/>', 14);
+const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5"/><path d="M4.1 4.4l0.6 8.5h6.6l0.6-8.5"/><path d="M6.7 6.8v3.8M9.3 6.8v3.8"/>', 14);
 
 // 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
 {
@@ -2816,32 +2822,27 @@ let alertRules = [];
 let editingRuleId = null;
 let editorConditions = [];
 
-// 規則清單與規則編輯器一次只顯示一層。
-// 兩層疊著時，兩張卡片是同一個深藍底、backdrop 只再暗一點點，看起來像同一個
-// 畫面糊在一起；而且下層仍然掛在 DOM 上，手指滑到它身上就把捲動接了過去。
-function swapModal(fromId, toId) {
-  const fromEl = document.getElementById(fromId);
-  const toEl   = document.getElementById(toId);
-  if (!toEl) return;
-  const show = () => bootstrap.Modal.getOrCreateInstance(toEl).show();
-  if (!fromEl || !fromEl.classList.contains("show")) { show(); return; }
-  fromEl.addEventListener("hidden.bs.modal", show, { once: true });
-  bootstrap.Modal.getOrCreateInstance(fromEl).hide();
+// 清單與編輯器是同一個面板的兩個 pane，切換只是換內容——
+// 不動 modal 本身，就不會有「淡出→沒有 modal→淡入」中間那一格閃到底層。
+function showRulesPane(pane) {
+  const editing = pane === "editor";
+  document.getElementById("rules-pane-list").style.display   = editing ? "none" : "";
+  document.getElementById("rules-pane-editor").style.display = editing ? "" : "none";
+  document.getElementById("rules-back").style.display   = editing ? "" : "none";
+  document.getElementById("rules-footer").style.display = editing ? "" : "none";
+  // 換 pane 等於換一頁，捲軸要回到最上面，否則新頁一進來就停在半路
+  const body = document.querySelector("#rulesModal .modal-body");
+  if (body) body.scrollTop = 0;
+  if (!editing) {
+    document.getElementById("rules-modal-title").textContent = "自訂通知規則";
+    refreshRules();
+  }
 }
 
-async function openRulesModal() {
+function openRulesModal() {
+  showRulesPane("list");   // 這裡面已經會拉一次清單，不用再 await 一次
   bootstrap.Modal.getOrCreateInstance(document.getElementById("rulesModal")).show();
-  await refreshRules();
 }
-
-// 從清單進編輯器的話，關掉編輯器要回到清單，而不是一路退回自選畫面
-let returnToRulesList = false;
-
-document.getElementById("ruleEditorModal").addEventListener("hidden.bs.modal", () => {
-  if (!returnToRulesList) return;
-  returnToRulesList = false;
-  openRulesModal();
-});
 
 async function refreshRules() {
   const listEl = document.getElementById("rules-list");
@@ -2854,39 +2855,56 @@ async function refreshRules() {
     return;
   }
   document.getElementById("rules-count").textContent =
-    alertRules.length ? `共 ${alertRules.length} 條` : "";
+    alertRules.length ? `共 ${alertRules.length} 條規則` : "";
 
   if (!alertRules.length) {
-    listEl.innerHTML = `<div class="view-empty">尚無自訂規則<br>
-      <span style="font-size:.75rem;opacity:.8">用「＋ 新增規則」組合條件，全部成立時才會通知你</span></div>`;
+    listEl.innerHTML = `<div class="rules-empty">
+      <div class="rules-empty-icon">${ICON_RULES}</div>
+      <div class="rules-empty-title">尚無自訂規則</div>
+      <div class="rules-empty-hint">用上面的「新增規則」把條件組起來，<br>全部成立時才會通知你</div>
+    </div>`;
     return;
   }
 
   listEl.innerHTML = alertRules.map(r => {
     const conds = Array.isArray(r.conditions) ? r.conditions : [];
     const tier = ruleTierOf(conds);
-    const scope = r.stock_id ? `${escapeHtml(r.stock_id)} ${escapeHtml(stockNameOf(r.stock_id))}` : "全部自選股";
-    const sev = r.severity === "orange" ? "🟠" : r.severity === "blue" ? "🔵" : "";
+    const scope = r.stock_id
+      ? `${escapeHtml(r.stock_id)} ${escapeHtml(stockNameOf(r.stock_id))}`.trim()
+      : "全部自選股";
+    // 等級用圓點而不是 emoji；沒設等級時留一顆空心的，名稱才不會左右跳
+    const sevCls = r.severity === "orange" ? "sev-orange"
+                 : r.severity === "blue"   ? "sev-blue" : "sev-auto";
+    const sevTitle = r.severity === "orange" ? "強訊號"
+                   : r.severity === "blue"   ? "注意" : "依條件自動判定";
+    // 一條條列出來，比一長串「　＋　」串在一起好讀，也看得出「全部成立」
+    const condChips = conds.length
+      ? conds.map(c => `<li class="rule-cond-chip">${escapeHtml(describeCondition(c))}</li>`).join("")
+      : `<li class="rule-cond-chip is-empty">尚未設定條件</li>`;
+    const id = escapeHtml(String(r.id));
     return `
       <div class="rule-card${r.enabled ? "" : " is-off"}">
         <div class="rule-card-head">
-          <span class="rule-card-name">${sev} ${escapeHtml(r.name || "(未命名)")}</span>
+          <i class="sev-dot ${sevCls}" title="${sevTitle}"></i>
+          <span class="rule-card-name">${escapeHtml(r.name || "(未命名)")}</span>
+          ${r.enabled ? "" : '<span class="rule-off-tag">已停用</span>'}
           <span class="toggle-wrap form-check form-switch mb-0">
             <input class="form-check-input" type="checkbox" ${r.enabled ? "checked" : ""}
-                   onchange="toggleRule('${escapeHtml(String(r.id))}', this.checked)">
+                   aria-label="啟用或停用這條規則"
+                   onchange="toggleRule('${id}', this.checked)">
           </span>
         </div>
         <div class="rule-card-meta">
           <span class="rule-tier tier-${tier}">${RULE_TIERS[tier].label}</span>
-          <span>${scope}</span>
+          <span class="rule-scope">${scope}</span>
+          <span class="rule-card-actions">
+            <button type="button" class="wl-icon-btn" onclick="openRuleEditor('${id}')"
+                    title="編輯規則">${ICON_EDIT}<span>編輯</span></button>
+            <button type="button" class="wl-icon-btn wl-icon-danger" onclick="deleteRule('${id}')"
+                    title="刪除規則">${ICON_TRASH}<span>刪除</span></button>
+          </span>
         </div>
-        <div class="rule-card-conds">${conds.map(describeCondition).map(escapeHtml).join("　＋　")}</div>
-        <div class="rule-card-actions">
-          <button type="button" class="btn btn-sm btn-outline-light"
-                  onclick="openRuleEditor('${escapeHtml(String(r.id))}')">編輯</button>
-          <button type="button" class="btn btn-sm btn-outline-danger"
-                  onclick="deleteRule('${escapeHtml(String(r.id))}')">刪除</button>
-        </div>
+        <ul class="rule-conds">${condChips}</ul>
       </div>`;
   }).join("");
 }
@@ -2952,7 +2970,7 @@ function setRulesMsg(text, isErr) {
 function openRuleEditor(id) {
   editingRuleId = id;
   const r = id ? alertRules.find(x => String(x.id) === String(id)) : null;
-  document.getElementById("rule-editor-title").textContent = r ? "編輯規則" : "新增規則";
+  document.getElementById("rules-modal-title").textContent = r ? "編輯規則" : "新增規則";
   document.getElementById("rule-name").value = (r && r.name) || "";
   document.getElementById("rule-severity").value = (r && r.severity) || "";
   document.getElementById("rule-editor-msg").textContent = "";
@@ -2969,8 +2987,7 @@ function openRuleEditor(id) {
     : [{ type: "change_pct_above", value: 5 }];
   renderRuleConditions();
 
-  returnToRulesList = true;
-  swapModal("rulesModal", "ruleEditorModal");
+  showRulesPane("editor");
 }
 
 function addRuleCondition() {
@@ -3067,10 +3084,8 @@ async function saveRule() {
       await sbPost("alert_rules", { ...body, user_id: state.userId }, state.accessToken, true);
     }
     const saved = editingRuleId ? "已更新" : "已新增";
-    // hidden 事件會把清單重新打開，訊息等它回來再設，否則會被 openRulesModal 蓋掉
-    document.getElementById("ruleEditorModal").addEventListener(
-      "hidden.bs.modal", () => setTimeout(() => setRulesMsg(saved), 0), { once: true });
-    bootstrap.Modal.getOrCreateInstance(document.getElementById("ruleEditorModal")).hide();
+    showRulesPane("list");   // 這裡面會重新拉一次清單
+    setRulesMsg(saved);
   } catch (e) {
     msgEl.textContent = `儲存失敗：${e.message || e}`;
     msgEl.className = "small mt-2 text-danger";
