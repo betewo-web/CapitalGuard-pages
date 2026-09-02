@@ -884,6 +884,20 @@ body.has-bottom-nav .page-shell {
 	font-weight: 600;
 	color: rgba(160, 190, 240, 0.7);
 }
+.event-new-badge {
+	font-size: 0.66rem;
+	font-weight: 800;
+	padding: 0.08rem 0.3rem;
+	border-radius: 4px;
+	color: #ffd060;
+	background: rgba(255, 208, 96, 0.14);
+	border: 1px solid rgba(255, 208, 96, 0.45);
+}
+.event-date-chip {
+	font-size: 0.66rem;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
 .event-meta-row {
 	display: flex;
 	align-items: center;

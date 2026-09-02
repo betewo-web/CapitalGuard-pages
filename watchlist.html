@@ -11,7 +11,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=23" rel="stylesheet">
+  <link href="watchlist.css?v=24" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -794,19 +794,47 @@ let inboxFilter = "all";        // all / unread / important / stocks
 let watchFilter = "all";        // all / signal / up / down
 
 // ── 事件彙整功能（Feature 2）────────────────────────────────────
+// 查詢抓「近 90 天 + 未來」的事件窗口；「今日事件」只呈現
+// created_at 在今天（今天才首次入庫）或 event_date 就是今天的列。
+// 後端每天 upsert 會刷新 observed_at 但不動 created_at，因此
+// created_at 是「這件事第一次被看到」的可靠依據——沒有它，
+// 三週前的月營收每天重抓都會被當成新消息。
+function _localDateIso(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function _todayStartMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function isNewToday(ev) {
+  if (!ev || !ev.created_at) return false;
+  const created = new Date(ev.created_at).getTime();
+  return Number.isFinite(created) && created >= _todayStartMs();
+}
+
+function isTodayEvent(ev) {
+  if (!ev) return false;
+  if (!("created_at" in ev)) return true;  // 舊 schema 降級查詢只回今日以後的列
+  return isNewToday(ev) || ev.event_date === _localDateIso();
+}
+
 async function loadStockEvents(sids) {
   if (!sids || sids.length === 0) return;
   try {
-    const today = new Date().toISOString().split("T")[0];
+    const today = _localDateIso();
+    const historyStart = _localDateIso(new Date(Date.now() - 90 * 864e5));
     const buildUrl = rich => {
       const url = new URL(`${SUPABASE_URL}/rest/v1/stock_events`);
       const legacy = "stock_id,event_date,event_type,title,content,source_url,importance,ai_analysis";
-      const scored = `${legacy},event_code,direction,event_score,score_breakdown,metrics,source`;
+      const scored = `${legacy},event_code,direction,event_score,score_breakdown,metrics,source,created_at,observed_at`;
       url.searchParams.set("select", rich ? scored : legacy);
-      url.searchParams.set("event_date", `gte.${today}`);
+      url.searchParams.set("event_date", `gte.${rich ? historyStart : today}`);
       url.searchParams.set("stock_id", `in.(${sids.join(",")})`);
-      url.searchParams.set("order", rich ? "event_score.desc.nullslast,event_date.desc" : "importance.asc,event_date.desc");
-      url.searchParams.set("limit", "300");
+      url.searchParams.set("order", rich ? "event_date.desc,event_score.desc.nullslast" : "importance.asc,event_date.desc");
+      url.searchParams.set("limit", rich ? "500" : "300");
       return url;
     };
     let r = await fetch(buildUrl(true), { headers: sbHeaders(null) });
@@ -824,17 +852,20 @@ async function loadStockEvents(sids) {
       if (!stockEvents[row.stock_id]) stockEvents[row.stock_id] = [];
       stockEvents[row.stock_id].push(row);
     }
-    Object.values(stockEvents).forEach(events => events.sort(_compareEvents));
   } catch (e) {
     console.warn("[Events] 無法載入股票事件:", e.message);
   }
+}
+
+function todayEventsOf(sid) {
+  return (stockEvents[sid] || []).filter(isTodayEvent);
 }
 
 function _collectTodayEvents() {
   const rows = [];
   for (const [sid, evs] of Object.entries(stockEvents)) {
     for (const ev of evs || []) {
-      rows.push({ sid, ev });
+      if (isTodayEvent(ev)) rows.push({ sid, ev });
     }
   }
   rows.sort((a, b) => _compareEvents(a.ev, b.ev) || String(a.sid).localeCompare(String(b.sid)));
@@ -916,11 +947,15 @@ function renderEventCard(sid, ev, options = {}) {
     : (ev.ai_analysis
       ? `<div class="event-ai-text">${escapeHtml(ev.ai_analysis)}</div>`
       : `<button class="btn btn-xs btn-outline-info" onclick="requestAiAnalysis('${escapeHtml(sid)}','${escapeHtml(ev.title)}',this)">AI 解讀</button>`);
+  const newBadge = isNewToday(ev) ? `<span class="event-new-badge">新</span>` : "";
+  const dateChip = ev.event_date ? `<span class="event-date-chip">${escapeHtml(ev.event_date)}</span>` : "";
   return `
     <article class="event-item ${eventImportanceClass(ev)}">
       <div class="event-meta-row">
+        ${newBadge}
         <span class="event-type-badge">${escapeHtml(typeLabel)}</span>
         <span class="event-direction ${direction.className}">${direction.label}</span>
+        ${dateChip}
         <span class="event-score-badge">${score}</span>
       </div>
       <div class="event-title">${titlePrefix}${escapeHtml(ev.title || "")}</div>
@@ -933,14 +968,14 @@ function renderEventCard(sid, ev, options = {}) {
 function openEventsPanel(sid) {
   const events = stockEvents[sid] || [];
   const sidName = universe[sid]?.n || sid;
-  document.getElementById("events-modal-title").textContent = `📋 ${sid} ${sidName} 事件彙整`;
+  document.getElementById("events-modal-title").textContent = `📋 ${sid} ${sidName} 事件彙整（近 90 天）`;
 
   const body = document.getElementById("events-modal-body");
   if (events.length === 0) {
     body.innerHTML = `
       <div class="events-empty-guide">
         <div class="events-empty-icon">📊</div>
-        <div class="events-empty-title">今日尚無彙整事件</div>
+        <div class="events-empty-title">尚無彙整事件</div>
         <div class="events-empty-desc">
           事件彙整需在本機執行以下指令，每日盤後安排一次：
         </div>
@@ -2444,8 +2479,9 @@ function renderHome() {
   const week = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
   dateEl.textContent = `${now.getMonth() + 1}/${now.getDate()}（${week}）`;
 
-  // 今日事件摘要
-  const evAll = Object.values(stockEvents).flat();
+  // 今日事件摘要——只數「今天首次入庫」或「事件日就是今天」的列，
+  // 早已知道、每天重新確認的舊事件不灌水
+  const evAll = Object.values(stockEvents).flat().filter(isTodayEvent);
   const high = evAll.filter(e => eventScoreOf(e) >= 70).length;
   const normal = evAll.filter(e => eventScoreOf(e) >= 40 && eventScoreOf(e) < 70).length;
   const other = evAll.length - high - normal;
@@ -2514,11 +2550,12 @@ function renderHome() {
     document.getElementById("home-watchlist").innerHTML = wlHtml;
   }
 
-  // 今日重要資訊（high importance 事件）
+  // 今日重要資訊（high importance 事件）——僅限今天首次入庫或事件日為
+  // 今天的列；先前就已知、每天重新確認的舊事件不再重新上榜（也不重推播）
   const newsRows = [];
   for (const [sid, evs] of Object.entries(stockEvents)) {
     for (const ev of evs) {
-      if (eventScoreOf(ev) >= 70) newsRows.push({ sid, ev });
+      if (isTodayEvent(ev) && eventScoreOf(ev) >= 70) newsRows.push({ sid, ev });
     }
   }
   newsRows.sort((a, b) => _compareEvents(a.ev, b.ev));
@@ -3227,7 +3264,7 @@ function renderWatchlist(rows) {
     const sid = String(row.stock_id || "").trim();
     const fallbackName = universe[sid]?.n || "";
     const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
-    const events = stockEvents[sid] || [];
+    const events = todayEventsOf(sid);
     const highEvents = events.filter(e => eventScoreOf(e) >= 70);
     // 事件按鈕永遠顯示：有事件就接一個數字，沒有就只剩一個淡掉的圖示
     const evtLabel = events.length > 0
