@@ -251,11 +251,8 @@
         <div class="card-header wl-panel-head">
           <div class="wl-panel-head-top">
             <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
-            <span class="d-flex align-items-center gap-2">
-              <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-rules-btn" onclick="openRulesModal()"
-                      title="用條件組合自訂通知，全部成立才發送">自訂規則</button>
-              <span id="events-fetch-status" class="events-fetch-status" title="事件資料狀態（需在本機執行 --fetch-events 更新）"></span>
-            </span>
+            <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-rules-btn" onclick="openRulesModal()"
+                    title="用條件組合自訂通知，全部成立才發送">自訂規則</button>
           </div>
           <div class="chip-row chip-row-inline" id="watch-filters">
             <button class="filter-chip active" data-f="all" onclick="setWatchFilter('all')">全部</button>
@@ -796,8 +793,6 @@ let watchFilter = "all";        // all / signal / up / down
 // ── 事件彙整功能（Feature 2）────────────────────────────────────
 async function loadStockEvents(sids) {
   if (!sids || sids.length === 0) return;
-  const statusEl = document.getElementById("events-fetch-status");
-  if (statusEl) statusEl.textContent = "事件載入中…";
   try {
     const today = new Date().toISOString().split("T")[0];
     const buildUrl = rich => {
@@ -817,7 +812,7 @@ async function loadStockEvents(sids) {
       r = await fetch(buildUrl(false), { headers: sbHeaders(null) });
     }
     if (!r.ok) {
-      if (statusEl) statusEl.textContent = "事件載入失敗";
+      console.warn("[Events] 載入失敗：", r.status);
       return;
     }
     const rows = await r.json();
@@ -827,18 +822,8 @@ async function loadStockEvents(sids) {
       stockEvents[row.stock_id].push(row);
     }
     Object.values(stockEvents).forEach(events => events.sort(_compareEvents));
-    const totalEvents = Object.values(stockEvents).reduce((s, a) => s + a.length, 0);
-    if (statusEl) {
-      statusEl.textContent = totalEvents > 0
-        ? `📋 今日 ${totalEvents} 則事件`
-        : `📋 今日無彙整事件`;
-      statusEl.title = totalEvents > 0
-        ? `已從 Supabase 載入 ${totalEvents} 則事件（每日盤後執行 --fetch-events 更新）`
-        : `今日尚無事件資料。請在本機執行: python main.py --fetch-events`;
-    }
   } catch (e) {
     console.warn("[Events] 無法載入股票事件:", e.message);
-    if (statusEl) statusEl.textContent = "";
   }
 }
 
