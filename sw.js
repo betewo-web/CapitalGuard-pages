@@ -102,8 +102,10 @@ self.addEventListener('fetch', event => {
           }
           return response;
         })
+        // 離線回退要 ignoreSearch：快取裡存的是不帶 ?v= 的那份
         .catch(async () =>
-          (await caches.match(event.request)) || new Response('', { status: 503 }))
+          (await caches.match(event.request, { ignoreSearch: true }))
+            || new Response('', { status: 503 }))
     );
     return;
   }
