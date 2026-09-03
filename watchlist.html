@@ -11,7 +11,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=24" rel="stylesheet">
+  <link href="watchlist.css?v=26" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -1554,6 +1554,7 @@ async function showMain() {
   refreshInbox(true);
   loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
   _lastRefreshAt = Date.now();
+  _lastInboxRefreshAt = Date.now();
   _scheduleAutoRefresh();
 }
 
@@ -1567,28 +1568,40 @@ function logout() {
 // 與其讓新鮮度取決於平台手勢，這裡統一排程，三個平台看到的資料一樣新。
 //
 //   • 只在分頁位於前景時輪詢（document.hidden 就停），省電也省 Supabase 用量
-//   • 盤中才需要即時報價：盤中雷達 30 秒、其他分頁 90 秒；
-//     收盤後只每 5 分鐘拉一次 Inbox（盤後提醒與每日報告會在這時候進來）
+//   • 盤中報價所有分頁一律每 15 秒拉一次（後端約 12 秒寫一輪，
+//     端到端落後才能壓在 40 秒內）；Inbox 較重，維持雷達 30 秒、
+//     其他分頁 90 秒的節奏，不跟著報價一起抓
+//   • 收盤後只每 5 分鐘拉一次 Inbox（盤後提醒與每日報告會在這時候進來）
 //   • 從背景切回前景時無條件更新一次——手機把 PWA 凍結在背景是常態，
 //     回來的那一刻資料往往已經過期好幾個小時
-const REFRESH_MS_LIVE_TAB = 30000;
-const REFRESH_MS_MARKET   = 90000;
-const REFRESH_MS_CLOSED   = 300000;
+const QUOTE_MS_MARKET   = 15000;
+const INBOX_MS_LIVE_TAB = 30000;
+const INBOX_MS_MARKET   = 90000;
+const REFRESH_MS_CLOSED = 300000;
 
 let _refreshTimer  = null;
 let _lastRefreshAt = 0;
+let _lastInboxRefreshAt = 0;
 
 function _refreshIntervalMs() {
-  if (!_isMarketOpenNow()) return REFRESH_MS_CLOSED;
-  return currentTab === "live" ? REFRESH_MS_LIVE_TAB : REFRESH_MS_MARKET;
+  return _isMarketOpenNow() ? QUOTE_MS_MARKET : REFRESH_MS_CLOSED;
 }
 
-// 自動更新只抓輕量資料：Inbox 一定要，報價只有盤中才有意義。
+function _inboxIntervalMs() {
+  return currentTab === "live" ? INBOX_MS_LIVE_TAB : INBOX_MS_MARKET;
+}
+
+// 自動更新只抓輕量資料：盤中每一輪都拉報價，Inbox 到期才拉。
 // 6MB 的 report_data 不在這裡重抓——那份一天只換一次，留給手動按鈕。
 async function _autoRefreshOnce() {
   if (!state.userId || document.hidden) return;
-  const tasks = [refreshInbox(true)];
-  if (_isMarketOpenNow()) tasks.push(loadIntradayQuotes(true));
+  const marketOpen = _isMarketOpenNow();
+  const tasks = [];
+  if (!marketOpen || Date.now() - _lastInboxRefreshAt >= _inboxIntervalMs()) {
+    _lastInboxRefreshAt = Date.now();
+    tasks.push(refreshInbox(true));
+  }
+  if (marketOpen) tasks.push(loadIntradayQuotes(true));
   await Promise.allSettled(tasks);
   _lastRefreshAt = Date.now();
   renderCurrentTab();
@@ -1639,6 +1652,7 @@ async function manualRefresh() {
     await Promise.allSettled([loadWatchlist(), refreshInbox(true), loadSharedReportData(true)]);
     await Promise.allSettled([loadIntradayQuotes(true)]);
     _lastRefreshAt = Date.now();
+    _lastInboxRefreshAt = Date.now();
     renderCurrentTab();
   } finally {
     if (btn) { btn.classList.remove("is-busy"); btn.disabled = false; }
