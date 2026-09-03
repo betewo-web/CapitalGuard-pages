@@ -393,7 +393,7 @@ function escapeHtml(value) {
 
 function openInvestmentDetail(sid) {
   const score = _investmentScores[sid];
-  if (!score) return;
+  if (!score) { openDetail(sid); return; }  // 無評分資料（如新股）時直接開 K 線詳情
   document.getElementById("sm-code").textContent = sid;
   document.getElementById("sm-name").textContent = score.stock_name || "";
   document.getElementById("sm-industry").textContent = score.industry_category || "";
@@ -473,8 +473,8 @@ function buildTable(rows) {
       .map(s => `<span class="sig-tag">${s}</span>`).join("");
     return `<tr>
       <td><span class="rank-num">${r.rank ?? ""}</span></td>
-      <td><span class="stock-link" onclick="openDetail('${r.stock_id}')">${r.stock_name || ""}</span></td>
-      <td><strong><span class="stock-link" onclick="openDetail('${r.stock_id}')">${r.stock_id || ""}</span></strong></td>
+      <td><span class="stock-link" onclick="openInvestmentDetail('${r.stock_id}')">${r.stock_name || ""}</span></td>
+      <td><strong><span class="stock-link" onclick="openInvestmentDetail('${r.stock_id}')">${r.stock_id || ""}</span></strong></td>
       <td class="d-none d-md-table-cell"><small class="text-muted">${r.industry_category || ""}</small></td>
       <td>${scoreBadge}</td>
       <td class="d-none d-sm-table-cell">${fmtNum(r.pe)}</td>
