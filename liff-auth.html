@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>台股監控 — LINE 帳號綁定</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; background: #0f1117; color: #e0e0e0;
+      font-family: 'Segoe UI', sans-serif; padding: 1rem;
+    }
+    .box {
+      text-align: center; padding: 2.5rem 2rem;
+      max-width: 320px; width: 100%;
+      background: #1a1d27; border: 1px solid #2a2d3d; border-radius: 12px;
+    }
+    .icon { font-size: 3.5rem; margin-bottom: 1rem; }
+    .title { font-size: 1.1rem; font-weight: 600; margin-bottom: .5rem; }
+    .msg { color: #aaa; font-size: .85rem; line-height: 1.5; }
+    .err { color: #f87171; }
+    .spinner {
+      width: 40px; height: 40px; border: 4px solid #2a2d3d;
+      border-top-color: #4c6ef5; border-radius: 50%;
+      animation: spin .8s linear infinite; margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="box">
+  <div id="spinner" class="spinner"></div>
+  <div class="icon" id="icon" style="display:none"></div>
+  <div class="title" id="title">正在驗證 LINE 身份…</div>
+  <div class="msg"   id="msg"></div>
+  <div id="friend-actions" style="display:none;margin-top:1.2rem;">
+    <button onclick="openAddFriendPage()" style="padding:.6rem 1rem;background:#06c755;color:#fff;border:none;border-radius:8px;font-size:.9rem;cursor:pointer;">➕ 前往加好友</button>
+    <button onclick="recheckFriendship()" style="margin-left:.5rem;padding:.6rem 1rem;background:#2a2d3d;color:#fff;border:1px solid #3a3f55;border-radius:8px;font-size:.9rem;cursor:pointer;">我已加入，重新驗證</button>
+  </div>
+</div>
+
+<script>
+// ── 設定（由 setup_supabase.py 自動填入，或手動替換） ──────────────────────
+const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
+const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
+const LIFF_ID       = "2010668840-DXPfjNlx";
+const OA_BASIC_ID   = "@408csebn";
+
+function hideFriendActions() {
+  const panel = document.getElementById("friend-actions");
+  if (panel) panel.style.display = "none";
+}
+
+function setStatus(icon, title, msg, isErr) {
+  hideFriendActions();
+  document.getElementById("spinner").style.display = "none";
+  const iconEl = document.getElementById("icon");
+  iconEl.textContent  = icon;
+  iconEl.style.display = "";
+  document.getElementById("title").textContent = title;
+  const m = document.getElementById("msg");
+  m.textContent = msg;
+  m.classList.toggle("err", !!isErr);
+}
+
+async function main() {
+  // 取得 URL 中的 session token（QR 綁定模式才有）
+  const params       = new URLSearchParams(location.search);
+  const liffState    = params.get("liff.state");
+  const sessionToken = params.get("token") ||
+                       (liffState ? new URLSearchParams(liffState).get("token") : null);
+  const isBindMode   = !!sessionToken;  // 有 token = QR 綁定；無 token = 直接登入跳轉
+
+  // 初始化 LIFF
+  try {
+    await liff.init({ liffId: LIFF_ID });
+  } catch (e) {
+    setStatus("❌", "LIFF 初始化失敗", `LIFF ID 可能未設定或不正確：${e.message}`, true);
+    return;
+  }
+
+  // 若未登入，導向 LINE 授權；botPrompt:"aggressive" 會在授權後自動彈出「加入官方帳號好友」確認畫面
+  if (!liff.isLoggedIn()) {
+    liff.login({ redirectUri: location.href, botPrompt: "aggressive" });
+    return;
+  }
+
+  // 取得 LINE 個人資料
+  let profile;
+  try {
+    profile = await liff.getProfile();
+  } catch (e) {
+    setStatus("❌", "無法取得 LINE 資料", e.message, true);
+    return;
+  }
+
+  // 確認是否已加入官方帳號好友
+  // 若未加入：自動重新導向並彈出加好友畫面（需 LINE Developers Console 已將 LOGIN channel 連結至 Messaging API channel）
+  try {
+    const friendship = await liff.getFriendship();
+    if (!friendship?.friendFlag) {
+      // 使用者尚未加好友（可能在彈出畫面按了「略過」）
+      // 顯示說明 + 重試按鈕，讓使用者可以再觸發一次加好友畫面
+      setStatus(
+        "➕",
+        "需要先加入好友",
+        "請先點「前往加好友」，完成後再點「我已加入，重新驗證」。",
+        false
+      );
+      document.getElementById("friend-actions").style.display = "";
+      return;
+    }
+  } catch {
+    // getFriendship 在部分瀏覽器環境不支援（如 External Browser 模式），忽略並繼續
+  }
+
+  // 向後端證明身分：送 LIFF 的 ID Token，由 line-login（後端金鑰）向 LINE 驗證後才發 token。
+  // 這一頁本身拿不到長期 token，只拿一次性登入碼；QR 綁定的 PC 端由後端寫入結果。
+  // 以前這裡直接 PATCH pending_line_auth 再呼叫 get_or_create_user——那兩個入口對 anon 全開，
+  // 等於任何人只要知道 LINE userId 就能拿到別人的帳號（SECURITY.md）。
+  // 舊使用者是在沒有 openid scope 的時候授權的，快取的登入沒有 ID Token：
+  // 自動登出重登一次（sessionStorage 防無限迴圈），還是拿不到才是 LIFF 設定沒開 openid。
+  const idToken = liff.getIDToken();
+  if (!idToken) {
+    if (!sessionStorage.getItem("liff_relogin_tried")) {
+      sessionStorage.setItem("liff_relogin_tried", "1");
+      liff.logout();
+      liff.login({ redirectUri: location.href, botPrompt: "aggressive" });
+      return;
+    }
+    setStatus("❌", "無法取得 LINE 身分憑證",
+      "LIFF 應用需開啟 openid 權限（LINE Developers → LINE Login channel → LIFF → Scopes）。", true);
+    return;
+  }
+  sessionStorage.removeItem("liff_relogin_tried");
+
+  let result;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/line-login`, {
+      method: "POST",
+      headers: {
+        "apikey":        SUPABASE_ANON,
+        "Authorization": `Bearer ${SUPABASE_ANON}`,
+        "Content-Type":  "application/json",
+      },
+      body: JSON.stringify({
+        action:        "verify",
+        id_token:      idToken,
+        session_token: isBindMode ? sessionToken : null,
+        display_name:  profile.displayName,
+      }),
+    });
+    result = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      // ID Token 是登入當下簽發的，LIFF 快取久了會過期：登出重登一次就有新的
+      if (r.status === 401 && /逾時/.test(String(result.error || ""))) {
+        liff.logout();
+        liff.login({ redirectUri: location.href, botPrompt: "aggressive" });
+        return;
+      }
+      throw new Error(result.error || `HTTP ${r.status}`);
+    }
+  } catch (e) {
+    setStatus("❌", isBindMode ? "綁定失敗" : "登入失敗", `請重試或聯絡管理員（${e.message}）`, true);
+    return;
+  }
+
+  if (isBindMode && !result.bound) {
+    setStatus("⏰", "QR Code 已過期", "請回到電腦點「重新產生 QR Code」再掃一次。", true);
+    return;
+  }
+
+  setStatus("✅", isBindMode ? "綁定成功！" : "登入成功！", `${profile.displayName}，即將開啟監控頁面…`);
+
+  // 2 秒後開啟 watchlist.html：帶一次性登入碼（2 分鐘內有效、用過即失效）。
+  // 網址裡不再出現長期 access_token。
+  setTimeout(() => {
+    try {
+      if (liff.isInClient() && result.login_code) {
+        const dest = `https://betewo-web.github.io/CapitalGuard-pages/watchlist.html?code=${encodeURIComponent(result.login_code)}`;
+        liff.openWindow({ url: dest, external: true });
+      }
+    } catch {}
+  }, 2000);
+}
+
+function openAddFriendPage() {
+  const addFriendUrl = `https://line.me/R/ti/p/${OA_BASIC_ID}`;
+  try {
+    if (typeof liff !== "undefined" && liff.isInClient()) {
+      liff.openWindow({ url: addFriendUrl, external: true });
+    } else {
+      window.open(addFriendUrl, "_blank");
+    }
+  } catch {
+    window.open(addFriendUrl, "_blank");
+  }
+}
+
+function recheckFriendship() {
+  hideFriendActions();
+  document.getElementById("spinner").style.display = "";
+  document.getElementById("icon").style.display = "none";
+  document.getElementById("title").textContent = "正在重新驗證 LINE 好友狀態…";
+  const msgEl = document.getElementById("msg");
+  msgEl.textContent = "";
+  msgEl.classList.remove("err");
+  location.reload();
+}
+
+main();
+</script>
+</body>
+</html>
