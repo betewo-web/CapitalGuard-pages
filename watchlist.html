@@ -11,7 +11,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=29" rel="stylesheet">
+  <link href="watchlist.css?v=30" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -1237,6 +1237,7 @@ document.addEventListener("keydown", e => {
 
 async function loadPlanState() {
   if (!state.accessToken) return;
+  const prevCode = planState.ready && planState.plan ? planState.plan.code : null;
   try {
     const [mine, plans] = await Promise.all([
       sbRpc("my_plan", {}, state.accessToken),
@@ -1252,6 +1253,11 @@ async function loadPlanState() {
   }
   renderPlanBadge();
   renderQaLock();
+  // 方案變了（管理員指派、到期降級）：重抓自選股，超出方案的標記與計數才會跟著換。
+  // loadWatchlist 會再叫一次 loadPlanState，但那時代碼已相同，不會循環。
+  if (prevCode && planState.ready && planState.plan.code !== prevCode) {
+    loadWatchlist().catch(() => {});
+  }
 }
 
 // 超出方案的列：讀 view 拿「仍生效」的 id，其餘標記為超出。
@@ -1501,7 +1507,7 @@ function renderPlanModal(focus) {
     <div class="plan-sec-title">付款紀錄</div>
     ${payments}
     <div id="plan-msg" class="plan-msg"></div>
-    <div class="plan-foot-note">月費不退款；取消續訂後功能保留至當期結束。超出方案的自選股與規則會保留資料、暫停通知，升級後即恢復。</div>`;
+    <div class="plan-foot-note">月費不退款；取消續訂後功能保留至當期結束。超出方案的自選股與規則會保留資料、暫停通知，升級後即恢復。<span class="plan-ver">App v${appVersion()}</span></div>`;
 }
 
 function setPlanMsg(text, isErr) {
@@ -1946,6 +1952,7 @@ async function showMain() {
   _lastRefreshAt = Date.now();
   _lastInboxRefreshAt = Date.now();
   _scheduleAutoRefresh();
+  initAppUpdater();
 }
 
 function logout() {
@@ -1990,6 +1997,9 @@ async function _autoRefreshOnce() {
   if (!marketOpen || Date.now() - _lastInboxRefreshAt >= _inboxIntervalMs()) {
     _lastInboxRefreshAt = Date.now();
     tasks.push(refreshInbox(true));
+    // 方案狀態跟著通知一起重問（一次 RPC，很輕）：管理員指派、到期降級、
+    // 別的裝置升級，幾分鐘內徽章與上限就會跟著變，不必手動重整
+    tasks.push(loadPlanState());
   }
   if (marketOpen) tasks.push(loadIntradayQuotes(true));
   await Promise.allSettled(tasks);
@@ -2018,9 +2028,60 @@ function _stopAutoRefresh() {
 // 回到前景一律更新一次，不看資料有多新。手機把 PWA 凍在背景是常態，
 // 「剛才才更新過」在這裡不成立——凍結期間排程是停的，_lastRefreshAt
 // 只代表凍結前的最後一次，離現在可能已經好幾個小時。
+// ── 自我更新：新版部署後不必手動關掉重開 ─────────────────────────
+// 安裝版 PWA（Android／iOS）常常整天不重新載入頁面：從背景回來直接還原快照，
+// 「重新整理」鈕也只是軟更新資料，JavaScript 還是舊的。所以：
+//   1. 定期 registration.update() 抓 sw.js；CACHE_VERSION 變了瀏覽器就裝新 SW
+//      （sw.js 有 skipWaiting + clients.claim，新 SW 會立刻接管）
+//   2. 接管時觸發 controllerchange → 在使用者沒在輸入、沒開面板、沒在掃碼時 reload
+//   3. 從背景切回前景也檢查一次，最常見的「隔天打開還是舊版」就靠這個
+const APP_UPDATE_CHECK_MS = 10 * 60 * 1000;
+let _reloadPending = false;
+let _hadController = false;
+
+async function initAppUpdater() {
+  if (!("serviceWorker" in navigator)) return;
+  let reg;
+  try { reg = await navigator.serviceWorker.ready; } catch { return; }
+  _hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    // 第一次安裝 SW 也會觸發（從沒有 controller 變成有），那不是更新，不重載
+    if (!_hadController) { _hadController = true; return; }
+    _reloadPending = true;
+    _maybeReload();
+  });
+  const check = () => reg.update().catch(() => {});
+  check();
+  setInterval(check, APP_UPDATE_CHECK_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) { check(); _maybeReload(); }
+  });
+}
+
+function _maybeReload() {
+  if (!_reloadPending) return;
+  const el = document.activeElement;
+  const typing = !!el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
+  const busy = typing || !!document.querySelector(".modal.show") || !!pollTimer;
+  if (!document.hidden && busy) {
+    setTimeout(_maybeReload, 30 * 1000);   // 等使用者忙完再重載
+    return;
+  }
+  _reloadPending = false;
+  location.reload();
+}
+
+// 目前跑的是哪一版：讀 CSS 連結的 ?v=，它與 sw.js 的 CACHE_VERSION 同號（測試釘住）
+function appVersion() {
+  const link = document.querySelector('link[href^="watchlist.css?v="]');
+  const m = link && (link.getAttribute("href") || "").match(/v=(\d+)/);
+  return m ? m[1] : "?";
+}
+
 function _onAppResume() {
   if (!state.userId || document.hidden) return;
   _autoRefreshOnce().catch(() => {});
+  loadPlanState().catch(() => {});   // 回前景無條件重問方案，不等通知的節奏
   _scheduleAutoRefresh();
 }
 

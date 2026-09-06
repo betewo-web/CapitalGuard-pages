@@ -2605,6 +2605,8 @@ button.user-chip:hover { border-color: rgba(60, 230, 209, 0.45); color: var(--te
 .plan-msg:empty { display: none; }
 .plan-msg.is-err { color: var(--danger); }
 .plan-foot-note { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.8rem; line-height: 1.5; }
+/* 版本號：回報問題時一眼看出跑的是哪一版 */
+.plan-ver { float: right; margin-left: 0.6rem; font-family: "Space Grotesk", sans-serif; opacity: 0.7; }
 
 /* 超出方案的自選股／規則：資料保留、通知暫停。
    只把內容降一階，通知設定與移除鈕維持全亮——使用者要能刪掉別的來讓它回到方案內 */
