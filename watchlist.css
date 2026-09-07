@@ -2608,6 +2608,43 @@ button.user-chip:hover { border-color: rgba(60, 230, 209, 0.45); color: var(--te
 /* 版本號：回報問題時一眼看出跑的是哪一版 */
 .plan-ver { float: right; margin-left: 0.6rem; font-family: "Space Grotesk", sans-serif; opacity: 0.7; }
 
+/* ── 強制更新畫面（S31）：蓋住整個 App，直到拿到新版 ── */
+.update-gate {
+	position: fixed;
+	inset: 0;
+	z-index: 20000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+	background: rgba(11, 11, 19, 0.96);
+	backdrop-filter: blur(6px);
+}
+.ug-box {
+	max-width: 320px;
+	width: 100%;
+	text-align: center;
+	padding: 1.8rem 1.4rem;
+	border-radius: 16px;
+	border: 1px solid rgba(60, 230, 209, 0.3);
+	background: rgba(7, 12, 26, 0.9);
+	color: var(--text-1);
+}
+.ug-spin {
+	width: 38px;
+	height: 38px;
+	margin: 0 auto 0.9rem;
+	border: 4px solid rgba(146, 146, 163, 0.25);
+	border-top-color: var(--accent);
+	border-radius: 50%;
+	animation: nav-refresh-spin 0.9s linear infinite;
+}
+.ug-title { font-weight: 700; color: var(--text-0); font-size: 1.05rem; margin-bottom: 0.4rem; }
+.ug-msg { font-size: 0.82rem; line-height: 1.6; }
+@media (prefers-reduced-motion: reduce) {
+	.ug-spin { animation: none; }
+}
+
 /* 超出方案的自選股／規則：資料保留、通知暫停。
    只把內容降一階，通知設定與移除鈕維持全亮——使用者要能刪掉別的來讓它回到方案內 */
 .wl-row.is-inactive .wl-ident,

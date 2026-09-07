@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
+       每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
+  <meta name="app-version" content="31">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=30" rel="stylesheet">
+  <link href="watchlist.css?v=31" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -29,6 +32,16 @@
 </head>
 <body>
 <!-- PWA v2 shell -->
+
+<!-- ── 強制更新畫面：伺服器說這一版太舊時蓋住整個 App（SECURITY.md S31） ── -->
+<div id="update-gate" class="update-gate" style="display:none" role="alert">
+  <div class="ug-box">
+    <div class="ug-spin"></div>
+    <div class="ug-title">正在更新 App</div>
+    <div class="ug-msg"></div>
+    <button type="button" class="btn btn-sm btn-outline-light mt-3" onclick="location.reload()">立即重新載入</button>
+  </div>
+</div>
 
 <!-- ── iOS 加入主畫面提示橫幅 ── -->
 <div id="ios-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;
@@ -688,6 +701,7 @@ function sbHeaders(accessToken) {
     "Authorization": `Bearer ${SUPABASE_ANON}`,
     "Content-Type":  "application/json",
     "Prefer":        "return=representation",
+    "X-App-Version": appVersion(),   // 太舊的版本 current_user_id() 會回 NULL（S31）
   };
   if (accessToken) h["x-access-token"] = accessToken;
   return h;
@@ -735,6 +749,7 @@ async function sbRpc(fn, params, accessToken) {
     "apikey":        SUPABASE_ANON,
     "Authorization": `Bearer ${SUPABASE_ANON}`,
     "Content-Type":  "application/json",
+    "X-App-Version": appVersion(),
   };
   // 需要辨識呼叫者的函式（my_plan）靠這個 header 推導 current_user_id()
   if (accessToken) headers["x-access-token"] = accessToken;
@@ -1110,15 +1125,11 @@ async function requestAiAnalysis(sid, eventTitle, btnEl) {
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/interpret-event`, {
       method: "POST",
-      headers: {
-        "apikey":          SUPABASE_ANON,
-        "Authorization":   `Bearer ${SUPABASE_ANON}`,
-        "Content-Type":    "application/json",
-        "x-access-token":  state.accessToken,
-      },
+      headers: billingHeaders(),
       body: JSON.stringify({ stock_id: sid, event_title: eventTitle }),
     });
     const data = await resp.json().catch(() => ({}));
+    if (handleUpdateRequired(data)) return;
     if (data.code === "plan_required" || data.code === "ai_limit") {
       btnEl.textContent = "AI 解讀";
       btnEl.disabled = false;
@@ -1195,15 +1206,11 @@ async function sendQaQuestion() {
     if (qaCurrentSid) body.stock_id = qaCurrentSid;
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/stock-qa`, {
       method: "POST",
-      headers: {
-        "apikey":         SUPABASE_ANON,
-        "Authorization":  `Bearer ${SUPABASE_ANON}`,
-        "Content-Type":   "application/json",
-        "x-access-token": state.accessToken,
-      },
+      headers: billingHeaders(),
       body: JSON.stringify(body),
     });
     const data = await resp.json().catch(() => ({}));
+    if (handleUpdateRequired(data)) return;
     if (data.code === "plan_required" || data.code === "ai_limit") {
       aiDiv.className = "qa-msg qa-ai qa-error";
       aiDiv.textContent = data.error || "AI 問答為專業版功能";
@@ -1523,6 +1530,7 @@ function billingHeaders() {
     "Authorization":  `Bearer ${SUPABASE_ANON}`,
     "Content-Type":   "application/json",
     "x-access-token": state.accessToken,
+    "X-App-Version":  appVersion(),
   };
 }
 
@@ -1753,10 +1761,12 @@ async function lineLogin(body) {
       "apikey":        SUPABASE_ANON,
       "Authorization": `Bearer ${SUPABASE_ANON}`,
       "Content-Type":  "application/json",
+      "X-App-Version": appVersion(),
     },
     body: JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({}));
+  if (handleUpdateRequired(data)) throw new Error(data.error || "App 需要更新");
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
 }
@@ -1826,6 +1836,9 @@ async function pollForLogin(sessionToken) {
 
 // ── 初始化 ──────────────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", async () => {
+  // 開頁第一件事：這一版還能不能用（S31）。太舊就停在更新畫面，不進登入或主畫面
+  if (!(await enforceAppVersion())) return;
+
   const qs = new URLSearchParams(location.search);
   const forceShowQr = qs.get("show_qr") === "1";
 
@@ -2050,7 +2063,8 @@ async function initAppUpdater() {
     _reloadPending = true;
     _maybeReload();
   });
-  const check = () => reg.update().catch(() => {});
+  // 兩件事一起：抓新 sw.js（有新版就裝），並問伺服器這一版是否已經太舊
+  const check = () => { reg.update().catch(() => {}); enforceAppVersion().catch(() => {}); };
   check();
   setInterval(check, APP_UPDATE_CHECK_MS);
   document.addEventListener("visibilitychange", () => {
@@ -2071,11 +2085,60 @@ function _maybeReload() {
   location.reload();
 }
 
-// 目前跑的是哪一版：讀 CSS 連結的 ?v=，它與 sw.js 的 CACHE_VERSION 同號（測試釘住）
+// 目前跑的是哪一版：<meta name="app-version">，與 sw.js 的 CACHE_VERSION 同號（測試釘住）
 function appVersion() {
-  const link = document.querySelector('link[href^="watchlist.css?v="]');
-  const m = link && (link.getAttribute("href") || "").match(/v=(\d+)/);
-  return m ? m[1] : "?";
+  const meta = document.querySelector('meta[name="app-version"]');
+  const v = meta && (meta.getAttribute("content") || "").trim();
+  return /^\d+$/.test(v || "") ? v : "0";
+}
+
+// ── 版本閘（SECURITY.md S31）：伺服器規定最低版本，舊版會被 RLS 當成未登入 ──
+// 開頁先問一次；之後跟著 initAppUpdater 每 10 分鐘與回前景各問一次。
+// 任何 Supabase 回應帶 code=update_required 也走同一條路。
+const _FORCE_UPDATE_KEY = "force_update_tries";
+
+async function enforceAppVersion() {
+  let st = null;
+  try { st = await sbRpc("app_status", {}); } catch { /* 離線或表未建：不擋 */ }
+  if (!st || st.ok !== false) {
+    sessionStorage.removeItem(_FORCE_UPDATE_KEY);
+    return true;
+  }
+  await forceUpdate(st.min_app_version);
+  return false;
+}
+
+function handleUpdateRequired(data) {
+  if (!data || data.code !== "update_required") return false;
+  forceUpdate(data.min_app_version);
+  return true;
+}
+
+let _forcingUpdate = false;
+async function forceUpdate(minVersion) {
+  if (_forcingUpdate) return;
+  _forcingUpdate = true;
+  const gate = document.getElementById("update-gate");
+  if (gate) {
+    gate.querySelector(".ug-msg").textContent =
+      `這一版（v${appVersion()}）已停用，需要 v${minVersion || "?"} 以上。正在取得新版…`;
+    gate.style.display = "flex";
+  }
+  // 先讓 service worker 抓新的 sw.js，再整頁重載（HTML 是 network-first，會拿到新版）。
+  // 重載兩次還是舊版 = Pages 還在建置，留在這個畫面每 15 秒再試一次，不無限重載。
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) await reg.update();
+  } catch { /* 沒有 SW 也照樣重載 */ }
+  const tries = Number(sessionStorage.getItem(_FORCE_UPDATE_KEY) || 0);
+  if (tries < 2) {
+    sessionStorage.setItem(_FORCE_UPDATE_KEY, String(tries + 1));
+    location.reload();
+    return;
+  }
+  if (gate) gate.querySelector(".ug-msg").textContent =
+    `新版本部署中（需要 v${minVersion || "?"}），15 秒後自動重試…`;
+  setTimeout(() => { sessionStorage.setItem(_FORCE_UPDATE_KEY, "0"); location.reload(); }, 15000);
 }
 
 function _onAppResume() {
@@ -4040,6 +4103,7 @@ async function reportSignedUrl(name = "latest") {
       method: "POST", headers: billingHeaders(), body: JSON.stringify({ name }),
     });
     const data = await r.json().catch(() => ({}));
+    if (handleUpdateRequired(data)) return null;
     return r.ok && data.url ? data.url : null;
   } catch (e) {
     return null;

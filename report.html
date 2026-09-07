@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="app-version" content="31">
 <title>台股每日分析報告</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -222,13 +223,36 @@ function logout() {
   location.href = "watchlist.html";
 }
 
+function appVersion() {
+  const meta = document.querySelector('meta[name="app-version"]');
+  const v = meta && (meta.getAttribute("content") || "").trim();
+  return /^\d+$/.test(v || "") ? v : "0";
+}
+
 function _fnHeaders() {
   return {
     "apikey":         SUPABASE_ANON,
     "Authorization":  `Bearer ${SUPABASE_ANON}`,
     "Content-Type":   "application/json",
     "x-access-token": _authToken || "",
+    "X-App-Version":  appVersion(),   // 太舊的版本伺服器回 426（SECURITY.md S31）
   };
+}
+
+// 伺服器說這一版太舊：重載拿新版（HTML 是 network-first）；重載兩次仍舊版就是 Pages 還在建置
+function handleUpdateRequired(data) {
+  if (!data || data.code !== "update_required") return false;
+  const key = "force_update_tries";
+  const tries = Number(sessionStorage.getItem(key) || 0);
+  if (tries < 2) {
+    sessionStorage.setItem(key, String(tries + 1));
+    location.reload();
+  } else {
+    document.getElementById("report-body").innerHTML =
+      `<div class="alert alert-warning">App 需要更新到 v${data.min_app_version || "?"}，新版本部署中，請稍後重新開啟。</div>`;
+    sessionStorage.setItem(key, "0");
+  }
+  return true;
 }
 
 // 向 report-data 要資料。回 null = function 尚未部署（過渡期走舊的相對路徑）；
@@ -241,6 +265,7 @@ async function reportApi(body) {
     });
   } catch { return null; }
   const data = await r.json().catch(() => ({}));
+  if (handleUpdateRequired(data)) return null;
   if (r.status === 401) { logout(); return null; }
   if (r.ok) return data;
   return data.code ? data : null;
@@ -255,6 +280,7 @@ async function bootAuth() {
         body: JSON.stringify({ action: "poll", session_token: _urlCode }),
       });
       const data = await r.json().catch(() => ({}));
+      if (handleUpdateRequired(data)) return;
       if (r.ok && data.access_token) {
         _authToken = data.access_token;
         localStorage.setItem("rpt_token", _authToken);

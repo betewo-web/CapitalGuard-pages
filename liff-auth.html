@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="app-version" content="31">
   <title>台股監控 — LINE 帳號綁定</title>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
@@ -144,6 +145,7 @@ async function main() {
         "apikey":        SUPABASE_ANON,
         "Authorization": `Bearer ${SUPABASE_ANON}`,
         "Content-Type":  "application/json",
+        "X-App-Version": (document.querySelector('meta[name="app-version"]') || {}).content || "0",
       },
       body: JSON.stringify({
         action:        "verify",
@@ -153,6 +155,16 @@ async function main() {
       }),
     });
     result = await r.json().catch(() => ({}));
+    if (result.code === "update_required") {
+      // 這一頁太舊：重載一次拿新版；還是舊版就是 Pages 還在建置，請使用者稍後再掃
+      if (!sessionStorage.getItem("liff_update_reloaded")) {
+        sessionStorage.setItem("liff_update_reloaded", "1");
+        location.reload();
+        return;
+      }
+      setStatus("🔄", "App 更新中", "新版本部署中，請一兩分鐘後再掃一次 QR Code。", true);
+      return;
+    }
     if (!r.ok) {
       // ID Token 是登入當下簽發的，LIFF 快取久了會過期：登出重登一次就有新的
       if (r.status === 401 && /逾時/.test(String(result.error || ""))) {
