@@ -2417,6 +2417,35 @@ body.has-bottom-nav .qa-panel {
 	color: #8fece0;
 }
 
+/* 距自訂下跌價位 3% 內：橘框提醒（等級色，不是漲跌色） */
+.wl-tag-warn {
+	border-color: rgba(255, 159, 67, 0.55);
+	color: #ffb86b;
+}
+
+/* ── 評分頁：等級膠囊（等級專屬色，不借用漲跌的紅綠） ── */
+.grade-pill {
+	flex: 0 0 auto;
+	min-width: 2.1rem;
+	text-align: center;
+	font-family: "Space Grotesk", sans-serif;
+	font-weight: 700;
+	font-size: 0.85rem;
+	padding: 0.25rem 0.45rem;
+	border-radius: 8px;
+	border: 1px solid rgba(146, 146, 163, 0.24);
+	background: rgba(255, 255, 255, 0.045);
+	color: #d3dcec;
+}
+
+.grade-pill.grade-hi   { border-color: rgba(60, 230, 209, 0.45); color: #8fece0; }
+.grade-pill.grade-mid  { border-color: rgba(86, 168, 255, 0.45); color: #9cc7ff; }
+.grade-pill.grade-lo   { border-color: rgba(146, 146, 163, 0.35); color: #b9bfcc; }
+.grade-pill.grade-none { opacity: 0.55; font-size: 0.7rem; }
+
+/* ── 雷達列：逼近關卡（±1% 內）的列左緣一條藍線 ── */
+.holding-row.radar-near { box-shadow: inset 3px 0 0 var(--sig-blue); }
+
 /* ── 通知詳情「為什麼通知你」 ── */
 .why-box {
 	margin-top: 0.9rem;

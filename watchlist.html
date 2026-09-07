@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="31">
+  <meta name="app-version" content="32">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=31" rel="stylesheet">
+  <link href="watchlist.css?v=32" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -202,21 +202,27 @@
       </div>
     </section>
 
-    <!-- ═══ 📊 持股 ═══ -->
-    <section id="view-holdings" class="app-view">
+    <!-- ═══ 🏆 評分 ═══
+         取代原本的持股分頁：券商 API 尚未對使用者開放，持股全靠手填、多數人是空的；
+         每日評分才是產品的核心產出，卻只有一個開新視窗的連結。持股資訊沒有消失，
+         併進自選列（損益、距價位）與雷達列（「持」標記）。 -->
+    <section id="view-scores" class="app-view">
       <div class="view-head">
-        <h2 class="view-title">我的持股</h2>
-        <span class="view-sub" id="holdings-price-note"></span>
+        <h2 class="view-title">🏆 評分</h2>
+        <span class="view-sub" id="scores-date"></span>
       </div>
-      <div class="card panel-card mb-3" id="holdings-summary-card" style="display:none">
-        <div class="holding-summary">
-          <div class="hd-block"><div class="hd-label">總市值</div><div class="hd-value" id="hd-total">—</div></div>
-          <div class="hd-block"><div class="hd-label">今日損益</div><div class="hd-value" id="hd-day-pl">—</div></div>
-          <div class="hd-block"><div class="hd-label">未實現損益</div><div class="hd-value" id="hd-unrealized">—</div></div>
-        </div>
+      <div class="chip-row" id="scores-filters">
+        <button class="filter-chip active" data-f="mine" onclick="setScoresFilter('mine')">我的自選</button>
+        <button class="filter-chip" data-f="overall" onclick="setScoresFilter('overall')">綜合排行</button>
+        <button class="filter-chip" data-f="improving" onclick="setScoresFilter('improving')">進步中</button>
+        <button class="filter-chip" data-f="picks" onclick="setScoresFilter('picks')">策略選股</button>
       </div>
       <div class="card panel-card">
-        <div class="card-body p-0" id="holdings-list"></div>
+        <div class="card-body p-0" id="scores-list"></div>
+      </div>
+      <div class="small text-muted p-2" style="font-size:.72rem">
+        評分＝基本面 50%＋技術量能 50%，每日盤前更新；分頁只放摘要，
+        <span class="hs-link" onclick="openDailyReportFromHistory()">看完整報告 →</span>
       </div>
     </section>
 
@@ -277,6 +283,7 @@
             <button class="filter-chip" data-f="signal" onclick="setWatchFilter('signal')">有訊號</button>
             <button class="filter-chip" data-f="up" onclick="setWatchFilter('up')">上漲</button>
             <button class="filter-chip" data-f="down" onclick="setWatchFilter('down')">下跌</button>
+            <button class="filter-chip" data-f="holding" onclick="setWatchFilter('holding')">持股</button>
           </div>
         </div>
         <div class="card-body p-0">
@@ -297,8 +304,8 @@
   <button class="bottom-nav-item" data-tab="home" onclick="switchTab('home')">
     <span class="bn-icon">🏠</span><span>首頁</span>
   </button>
-  <button class="bottom-nav-item" data-tab="holdings" onclick="switchTab('holdings')">
-    <span class="bn-icon">📊</span><span>持股</span>
+  <button class="bottom-nav-item" data-tab="scores" onclick="switchTab('scores')">
+    <span class="bn-icon">🏆</span><span>評分</span>
   </button>
   <button class="bottom-nav-item" data-tab="live" onclick="switchTab('live')">
     <span class="bn-icon">⚡</span><span>盤中</span>
@@ -841,14 +848,15 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
 }
 
 // ── PWA v2: App Shell 狀態 ──
-const APP_TABS = ["home", "holdings", "live", "inbox", "watch"];
+const APP_TABS = ["home", "scores", "live", "inbox", "watch"];
 let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc）
 let inboxLoadedAt = 0;
 let inboxSupportsRead = true;   // migrate_pwa_v2.sql 未執行時自動降級
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
-let watchFilter = "all";        // all / signal / up / down
+let watchFilter = "all";        // all / signal / up / down / holding
+let scoresFilter = "mine";      // mine / overall / improving / picks
 
 // ── 事件彙整功能（Feature 2）────────────────────────────────────
 // 查詢抓「近 90 天 + 未來」的事件窗口；「今日事件」只呈現
@@ -2190,6 +2198,10 @@ function switchTab(tab, silent = false) {
   if (tab === "live") {
     Promise.all([loadIntradayQuotes(true), refreshInbox(false)]).then(() => renderLive());
   }
+  // 評分頁靠報告資料；登入後那次載入還沒回來就先顯示載入中，回來再畫
+  if (tab === "scores" && !sharedReportData) {
+    loadSharedReportData().then(() => renderScores()).catch(() => {});
+  }
   // 輪詢間隔跟分頁有關（盤中雷達要快一點），換分頁就重排
   if (changed) _scheduleAutoRefresh();
   renderCurrentTab();
@@ -2204,7 +2216,7 @@ window.addEventListener("hashchange", () => {
 function renderCurrentTab() {
   if (!currentTab) return;
   if (currentTab === "home") renderHome();
-  else if (currentTab === "holdings") renderHoldings();
+  else if (currentTab === "scores") renderScores();
   else if (currentTab === "live") renderLive();
   else if (currentTab === "inbox") renderInbox();
   else renderWatchlist(watchlistRows);
@@ -3098,16 +3110,41 @@ function renderHome() {
     sendTodayImportantInfoNotification(newsRows);
 }
 
-// ── PWA v2: 📊 持股 ──────────────────────────────────────────────
-// 資料來源兩種：券商同步的 broker_holdings（python main.py --sync-holdings）
-// 有資料就優先；一筆都沒有時退回 watchlist.shares 手動輸入。
-// 平均成本兩種來源都沿用 watchlist.avg_cost——元富 API 查不到成本，
-// 使用者在 🔔 通知設定 → 📊 持股 輸入的值是唯一來源。
-function fmtSyncTime(iso) {
-  const d = new Date(iso || "");
-  if (isNaN(d)) return "";
-  return `${d.getMonth() + 1}/${d.getDate()} ` +
-         `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} `;
+// ── 持股資料層 ───────────────────────────────────────────────────
+// 持股不再是獨立分頁：資訊併進自選列（損益、距價位）與雷達列（「持」標記）。
+// 來源兩種：券商同步的 broker_holdings（python main.py --sync-holdings，
+// 尚未對使用者開放、通常是空的）優先；否則退回 watchlist.shares 手動輸入。
+// 平均成本兩種來源都沿用 watchlist.avg_cost——元富 API 查不到成本。
+function holdingBySid() {
+  const map = new Map();
+  for (const h of holdingEntries()) map.set(h.sid, h);
+  return map;
+}
+
+// 雷達與自選列共用的「離關卡多遠」：關卡來自每日報告資料（K 線圖畫的就是這組），
+// 取現價之下最近的支撐、之上最近的壓力。距離以現價為分母、百分比表示。
+const RADAR_NEAR_PCT = 1.0;   // 距關卡 1% 內算「逼近」，與後端 MONITOR_NEAR_PCT 預設一致
+
+function nearestLevels(sid, price) {
+  const lv = sharedReportData?.stock_data?.[sid]?.levels;
+  const none = { support: null, resistance: null, supPct: null, resPct: null };
+  if (!lv || !(price > 0)) return none;
+  const sups = (lv.support || []).map(Number).filter(v => Number.isFinite(v) && v < price);
+  const ress = (lv.resistance || []).map(Number).filter(v => Number.isFinite(v) && v > price);
+  const support = sups.length ? Math.max(...sups) : null;
+  const resistance = ress.length ? Math.min(...ress) : null;
+  return {
+    support, resistance,
+    supPct: support != null ? (price - support) / price * 100 : null,
+    resPct: resistance != null ? (resistance - price) / price * 100 : null,
+  };
+}
+
+// 這檔股票今天觸發過的訊號（通知紀錄的今日列，只算監控與盤後；最新在前）
+function todaySignalsOf(sid) {
+  return inboxRows.filter(r =>
+    String(r.stock_id || "").trim() === sid && isToday(r.sent_at) &&
+    ["monitor", "post_market", "postmarket"].includes(String(r.source || "monitor")));
 }
 
 function holdingEntries() {
@@ -3141,92 +3178,103 @@ function holdingEntries() {
   });
 }
 
-function renderHoldings() {
-  const listEl = document.getElementById("holdings-list");
-  if (!listEl) return;
-  const summaryCard = document.getElementById("holdings-summary-card");
-  const noteEl = document.getElementById("holdings-price-note");
-  const useBroker = brokerHoldings.length > 0;
-  const holds = holdingEntries();
+// ── 🏆 評分頁 ────────────────────────────────────────────────────
+// 資料全在 sharedReportData（登入後載入的每日報告 JSON）：
+//   investment_scores[sid] → total_score / rating(S–E) / score_change / industry_category
+//   rankings.overall / improving → 排行代號陣列；strategies[].rows → 兩個策略的 Top N
+// 這頁只放摘要與「跟我有關的」；完整報告仍是 report.html，避免同一份報告渲染兩次而漂移。
+function setScoresFilter(f) {
+  scoresFilter = f;
+  document.querySelectorAll("#scores-filters .filter-chip").forEach(c =>
+    c.classList.toggle("active", c.dataset.f === f));
+  renderScores();
+}
 
-  if (!holds.length) {
-    summaryCard.style.display = "none";
-    noteEl.textContent = "";
-    listEl.innerHTML = `
-      <div class="view-empty">
-        尚未設定持股<br>
-        <span style="font-size:.78rem">到 ⭐ 自選 → 🔔 通知設定 → 📊 持股，輸入持有股數與平均成本；<br>
-        或設定券商同步（見 BROKER_SYNC.md）自動帶入元富證券庫存</span><br>
-        <button class="btn btn-sm btn-outline-info mt-3" onclick="switchTab('watch')">前往自選股 →</button>
-      </div>`;
+// 評級膠囊：S/A 強、B 中性、C/D/E 弱。用等級專屬色，不借用漲跌的紅綠
+function gradePill(rating) {
+  const g = String(rating || "").toUpperCase();
+  if (!g) return `<span class="grade-pill grade-none">未評</span>`;
+  const cls = (g === "S" || g === "A") ? "grade-hi" : g === "B" ? "grade-mid" : "grade-lo";
+  return `<span class="grade-pill ${cls}">${escapeHtml(g)}</span>`;
+}
+
+function scoreRowHtml(sid, s, opts = {}) {
+  const name = getPreferredStockName(sid, s?.stock_name) || sid;
+  const total = s?.total_score != null && Number.isFinite(Number(s.total_score)) ? Number(s.total_score) : null;
+  const chg = s?.score_change != null && Number.isFinite(Number(s.score_change)) ? Number(s.score_change) : null;
+  const chgHtml = chg == null ? "" :
+    `<span class="${chg > 0.05 ? "chg-up" : chg < -0.05 ? "chg-down" : "chg-flat"}" style="font-size:.72rem">${chg > 0.05 ? "▲" : chg < -0.05 ? "▼" : "—"}${Math.abs(chg).toFixed(1)}</span>`;
+  const q = getQuote(sid);
+  const sub = [s?.industry_category, opts.note].filter(Boolean).map(escapeHtml).join(" · ");
+  const inWatch = watchlistRows.some(r => String(r.stock_id || "").trim() === sid);
+  const addBtn = (!inWatch && opts.allowAdd)
+    ? `<button class="btn btn-sm btn-outline-light btn-ghost ms-1" onclick="event.stopPropagation();addStockFromScores('${escapeHtml(sid)}')">＋自選</button>`
+    : "";
+  return `
+    <div class="holding-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
+      ${gradePill(s?.rating)}
+      <div class="hr-left">
+        <div class="hr-title">${escapeHtml(name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(sid)}</span>${addBtn}</div>
+        <div class="hr-sid">${sub || "&nbsp;"}</div>
+      </div>
+      <div class="hr-right">
+        <div class="hr-price">${total != null ? total.toFixed(0) : "—"} ${chgHtml}</div>
+        <div class="hr-sub">${q ? `${q.price.toFixed(2)} ${fmtChgHtml(q.changePct)}` : ""}</div>
+      </div>
+    </div>`;
+}
+
+function renderScores() {
+  const listEl = document.getElementById("scores-list");
+  if (!listEl) return;
+  const dateEl = document.getElementById("scores-date");
+  const data = sharedReportData;
+  if (!data) {
+    dateEl.textContent = "";
+    listEl.innerHTML = `<div class="view-empty">報告資料載入中…</div>`;
     return;
   }
+  dateEl.textContent = data.date ? `${data.date} 盤前評分` : "";
+  const scores = data.investment_scores || {};
+  const rankings = data.rankings || {};
 
-  noteEl.textContent = useBroker
-    ? `元富證券 ${fmtSyncTime(brokerHoldingsAt)}同步 · 以最近收盤價計算`
-    : "以最近收盤價計算";
-  let total = 0, dayPl = 0, unreal = 0;
-  let hasQuote = false, hasCost = false, missingCost = false;
-
-  const rowsHtml = holds.map(h => {
-    const q = getQuote(h.sid);
-    const sig = latestSignalOf(h.sid);
-    if (!(h.cost > 0)) missingCost = true;
-
-    let value = null, pl = null;
-    if (q) {
-      hasQuote = true;
-      value = q.price * h.shares;
-      total += value;
-      if (q.changePct !== null) {
-        const prev = q.price / (1 + q.changePct / 100);
-        dayPl += (q.price - prev) * h.shares;
-      }
-      if (h.cost != null && h.cost > 0) {
-        hasCost = true;
-        pl = (q.price - h.cost) * h.shares;
-        unreal += pl;
-      }
+  let html = "";
+  if (scoresFilter === "mine") {
+    const mine = [...new Set(watchlistRows.map(r => String(r.stock_id || "").trim()).filter(Boolean))];
+    if (!mine.length) {
+      html = `<div class="view-empty">尚未加入自選股<br>
+        <button class="btn btn-sm btn-outline-info mt-3" onclick="switchTab('watch')">前往自選股 →</button></div>`;
+    } else {
+      const scoreOf = sid => (scores[sid] && Number.isFinite(Number(scores[sid].total_score))) ? Number(scores[sid].total_score) : -1;
+      mine.sort((a, b) => scoreOf(b) - scoreOf(a));
+      html = mine.map(sid => scoreRowHtml(sid, scores[sid], { note: scores[sid] ? "" : "本期未評分" })).join("");
     }
+  } else if (scoresFilter === "overall" || scoresFilter === "improving") {
+    const ids = (rankings[scoresFilter] || []).slice(0, 20);
+    html = ids.length
+      ? ids.map((sid, i) => scoreRowHtml(String(sid), scores[sid], { note: `第 ${i + 1} 名`, allowAdd: true })).join("")
+      : `<div class="view-empty">本期沒有排行資料</div>`;
+  } else {
+    const strategies = data.strategies || [];
+    html = strategies.length
+      ? strategies.map(st => `
+        <div class="home-sec-title p-2 pb-0">${escapeHtml(st.emoji || "")} ${escapeHtml(st.name || "")}
+          <span class="text-muted" style="font-size:.72rem;font-weight:400">${escapeHtml(st.description || "")}</span></div>
+        ${(st.rows || []).slice(0, 10).map(r => {
+          const sid = String(r.stock_id || "").trim();
+          const s = scores[sid] || { stock_name: r.stock_name, industry_category: r.industry_category };
+          return scoreRowHtml(sid, s, { note: `策略分 ${Number(r.composite_score || 0).toFixed(0)}`, allowAdd: true });
+        }).join("")}`).join("")
+      : `<div class="view-empty">本期沒有策略選股</div>`;
+  }
+  listEl.innerHTML = html;
+}
 
-    const sigHtml = sig
-      ? `<span class="wl-signal-badge sev-${inferSeverity(sig)}">${alertGlyph(sig)} ${escapeHtml(alertTypeLabel(sig))}</span>`
-      : "";
-    const plHtml = pl !== null
-      ? `<span class="${pl >= 0 ? "chg-up" : "chg-down"}">${pl >= 0 ? "+" : ""}${Math.round(pl).toLocaleString()}</span>`
-      : "";
-    const metaParts = [`${h.shares.toLocaleString()} 股`, ...h.extra];
-    if (h.cost != null) metaParts.push(`成本 ${h.cost}`);
-
-    return `
-      <div class="holding-row" onclick="openKLineFromWatchlist('${escapeHtml(h.sid)}')">
-        <div class="hr-left">
-          <div class="hr-sid">${escapeHtml(h.sid)} · ${metaParts.join(" · ")}</div>
-          <div class="hr-title">${escapeHtml(h.name)} ${sigHtml}</div>
-        </div>
-        <div class="hr-right">
-          <div class="hr-price">${q ? q.price.toFixed(2) : "—"} ${q ? fmtChgHtml(q.changePct) : ""}</div>
-          <div class="hr-sub">${value !== null ? "市值 " + Math.round(value).toLocaleString() : "無報價資料"} ${plHtml}</div>
-        </div>
-      </div>`;
-  }).join("");
-  const costHint = useBroker && missingCost
-    ? `<div class="small text-muted p-2" style="font-size:.72rem">
-        部分持股未設定成本，未實現損益僅計入已設定的部分。成本請到
-        ⭐ 自選 → 🔔 通知設定 → 📊 持股 輸入（未加入自選的請先加入）。</div>`
-    : "";
-  listEl.innerHTML = rowsHtml + costHint;
-
-  summaryCard.style.display = "";
-  document.getElementById("hd-total").textContent = hasQuote ? `$${Math.round(total).toLocaleString()}` : "—";
-  const dayEl = document.getElementById("hd-day-pl");
-  dayEl.innerHTML = hasQuote
-    ? `<span class="${dayPl >= 0 ? "chg-up" : "chg-down"}">${dayPl >= 0 ? "+" : ""}$${Math.round(dayPl).toLocaleString()}</span>`
-    : "—";
-  const unrealEl = document.getElementById("hd-unrealized");
-  unrealEl.innerHTML = hasCost
-    ? `<span class="${unreal >= 0 ? "chg-up" : "chg-down"}">${unreal >= 0 ? "+" : ""}$${Math.round(unreal).toLocaleString()}</span>`
-    : "—";
+// 排行列的「＋自選」：沿用自選頁的新增流程（方案上限與代號驗證都在那裡）
+function addStockFromScores(sid) {
+  switchTab("watch");
+  const inp = document.getElementById("inp-stock");
+  if (inp) { inp.value = sid; addStock(); }
 }
 
 // ── PWA v2: ⚡ 盤中雷達 ──────────────────────────────────────────
@@ -3292,50 +3340,93 @@ function _signalLevelLabel(signal, level) {
   return `關卡 ${value.toFixed(2)}`;
 }
 
+// 雷達是「狀態驅動」而不是「事件驅動」：每檔自選股永遠有一列——現價（intraday_state，
+// 後端只在盤中寫、收盤後留最後一筆＝收盤狀態）、離最近支撐／壓力多遠（報告資料的
+// levels）、當前訊號、今天觸發過什麼（通知紀錄）。以前這頁只是「今天的通知」換個皮，
+// 沒發通知就是空頁；通知本身留給通知分頁，這裡不再重複列一遍。
 function renderLive() {
   const listEl = document.getElementById("live-list");
   if (!listEl) return;
   const isOpen = _isMarketOpenNow();
   const statusEl = document.getElementById("live-status");
-  const todayKey = taipeiDateKey(new Date());
-  const rows = inboxRows.filter(r => taipeiDateKey(r.sent_at) === todayKey);
-  statusEl.textContent = isOpen
-    ? `🟢 盤中（09:00–13:35）· 今日 ${rows.length} 則通知`
-    : `⚪ 已收盤 — 今日 ${rows.length} 則通知`;
+  const holdings = holdingBySid();
 
-  const counts = { orange: 0, blue: 0, info: 0 };
-  rows.forEach(r => { const sev = inferSeverity(r); if (counts[sev] !== undefined) counts[sev]++; });
+  const rows = watchlistRows.map(r => {
+    const sid = String(r.stock_id || "").trim();
+    const iq = intradayQuoteMap[sid] || null;
+    const q = getQuote(sid);
+    const price = q ? q.price : null;
+    const lv = nearestLevels(sid, price);
+    const active = (iq && iq.signal && iq.signal !== "none") ? iq : null;
+    const today = todaySignalsOf(sid);
+    const nearPct = Math.min(lv.supPct != null ? lv.supPct : Infinity,
+                             lv.resPct != null ? lv.resPct : Infinity);
+    return {
+      sid, q, iq, lv, active, today, nearPct,
+      sev: active ? inferSeverity(active) : null,
+      name: getPreferredStockName(sid, r.stock_name) || sid,
+      holding: holdings.get(sid) || null,
+    };
+  });
+
+  const latestAt = rows.reduce((m, x) =>
+    (x.iq?.updated_at && (!m || x.iq.updated_at > m)) ? x.iq.updated_at : m, null);
+  const nSignal = rows.filter(x => x.active).length;
+  const nNear = rows.filter(x => !x.active && x.nearPct <= RADAR_NEAR_PCT).length;
+  const nQuiet = rows.length - nSignal - nNear;
+  statusEl.textContent = isOpen
+    ? `🟢 盤中（09:00–13:35）· 自選 ${rows.length} 檔`
+    : `⚪ 已收盤${latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${rows.length} 檔`;
+  // 三格數的是「自選股的狀態」，跟首頁三格數「事件」不同，標籤刻意不用同一組字
   document.getElementById("live-stats").innerHTML = `
-    <div class="home-stat"><div class="hs-num sev-orange">${counts.orange}</div><div class="hs-label">🟠 強訊號</div></div>
-    <div class="home-stat"><div class="hs-num sev-blue">${counts.blue}</div><div class="hs-label">🔵 注意</div></div>
-    <div class="home-stat"><div class="hs-num sev-info">${counts.info}</div><div class="hs-label">⚪ 資訊</div></div>
+    <div class="home-stat"><div class="hs-num sev-orange">${nSignal}</div><div class="hs-label">⚡ 有訊號</div></div>
+    <div class="home-stat"><div class="hs-num sev-blue">${nNear}</div><div class="hs-label">🎯 逼近關卡</div></div>
+    <div class="home-stat"><div class="hs-num sev-info">${nQuiet}</div><div class="hs-label">— 平靜</div></div>
   `;
   if (!rows.length) {
-    listEl.innerHTML = `<div class="view-empty">今日尚無通知<br><span style="font-size:.78rem;opacity:.8">監控、盤後與每日報告通知會顯示在這裡</span></div>`;
+    listEl.innerHTML = `<div class="view-empty">尚未加入自選股<br>
+      <span style="font-size:.78rem;opacity:.8">雷達會顯示每檔自選股的現價、離關卡多遠與今日訊號</span><br>
+      <button class="btn btn-sm btn-outline-info mt-3" onclick="switchTab('watch')">前往自選股 →</button></div>`;
     return;
   }
 
-  listEl.innerHTML = rows.map(r => {
-    const sev = inferSeverity(r);
-    const sid = String(r.stock_id || "").trim();
-    const quote = intradayQuoteMap[sid];
-    const priceStr = quote?.price != null ? quote.price.toFixed(2) : "";
-    const chgHtml = quote?.changePct != null ? fmtChgHtml(quote.changePct) : "";
-    const levelStr = _signalLevelLabel(_signalKindFromAlert(r), _signalLevelFromAlert(r));
-    const quoteHtml = priceStr
-      ? `現價 <strong>${escapeHtml(priceStr)}</strong> ${chgHtml}${levelStr ? `<span style="margin-left:.5em;opacity:.7">· ${escapeHtml(levelStr)}</span>` : ""}`
-      : escapeHtml(r.body || "");
+  // 排序：強訊號 → 注意 → 距關卡最近 → 漲跌幅絕對值大
+  const sevRank = { orange: 0, blue: 1 };
+  rows.sort((a, b) => {
+    const ra = a.active ? (sevRank[a.sev] ?? 2) : 3;
+    const rb = b.active ? (sevRank[b.sev] ?? 2) : 3;
+    if (ra !== rb) return ra - rb;
+    if (a.nearPct !== b.nearPct) return a.nearPct - b.nearPct;
+    return Math.abs(b.q?.changePct ?? 0) - Math.abs(a.q?.changePct ?? 0);
+  });
+
+  listEl.innerHTML = `<div class="card panel-card"><div class="card-body p-0">` + rows.map(x => {
+    const tags = [];
+    if (x.active) {
+      const lvl = x.iq.level != null ? ` ${Number(x.iq.level).toFixed(2)}` : "";
+      tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${x.sev}"></i>${escapeHtml(alertTypeLabel(x.active))}${lvl}</span>`);
+    }
+    if (x.holding) tags.push(`<span class="wl-signal-badge wl-tag-holding">持</span>`);
+    const dist = [];
+    if (x.lv.resPct != null) dist.push(`壓力 ${x.lv.resistance.toFixed(2)}（+${x.lv.resPct.toFixed(1)}%）`);
+    if (x.lv.supPct != null) dist.push(`支撐 ${x.lv.support.toFixed(2)}（−${x.lv.supPct.toFixed(1)}%）`);
+    const nearCls = (!x.active && x.nearPct <= RADAR_NEAR_PCT) ? " radar-near" : "";
+    const todayHtml = x.today.length
+      ? `今日 ${x.today.length} 則 · ${escapeHtml(alertTypeLabel(x.today[0]))} ${fmtTime(x.today[0].sent_at)}`
+      : "今日無訊號";
     return `
-      <div class="signal-card sev-${sev}" onclick="openInboxDetail('${escapeHtml(String(r.id))}')">
-        <div class="sc-head">
-          <span class="sc-type sev-${sev}">${signalIconSvg(r, 18) || alertGlyph(r)} ${escapeHtml(alertTypeLabel(r))}</span>
-          <span class="sc-time">${fmtTime(r.sent_at)}</span>
+      <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${escapeHtml(x.sid)}')">
+        <div class="hr-left">
+          <div class="hr-title">${escapeHtml(x.name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(x.sid)}</span> ${tags.join(" ")}</div>
+          <div class="hr-sid">${dist.length ? dist.join(" · ") : "無關卡資料"}</div>
+          <div class="hr-sid">${todayHtml}</div>
         </div>
-        ${sid ? `<div class="sc-stock">${escapeHtml(stockLabelOf(sid))}</div>` : ""}
-        <div class="sc-detail">${quoteHtml}</div>
-        <div class="sc-foot">${sid ? "查看走勢" : "查看通知"} →</div>
+        <div class="hr-right">
+          <div class="hr-price">${x.q ? x.q.price.toFixed(2) : "—"}</div>
+          <div class="hr-sub">${x.q ? fmtChgHtml(x.q.changePct) : "無報價"}</div>
+        </div>
       </div>`;
-  }).join("");
+  }).join("") + `</div></div>`;
 }
 
 // 自訂規則通知的 event_key 形如 "2330:rule:{uuid}:2026-08-30"
@@ -3787,6 +3878,10 @@ function filteredWatchRows(rows) {
   if (watchFilter === "signal") {
     return rows.filter(r => latestSignalOf(String(r.stock_id).trim()));
   }
+  if (watchFilter === "holding") {
+    const holds = holdingBySid();
+    return rows.filter(r => holds.has(String(r.stock_id).trim()));
+  }
   if (watchFilter === "up" || watchFilter === "down") {
     return rows.filter(r => {
       const q = getQuote(String(r.stock_id).trim());
@@ -3803,6 +3898,7 @@ function renderWatchlist(rows) {
   grid.innerHTML = "";
   renderWatchCount(rows.length);
   const visible = filteredWatchRows(rows);
+  const holdingsBySid = holdingBySid();   // 每列查一次 Map，不要每列重算持股清單
   const emptyEl = document.getElementById("wl-empty");
   emptyEl.style.display = visible.length ? "none" : "";
   emptyEl.textContent = rows.length
@@ -3837,8 +3933,22 @@ function renderWatchlist(rows) {
       const sev = inferSeverity(sig);
       tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${sev}"></i>${escapeHtml(alertTypeLabel(sig))}</span>`);
     }
-    if (Number(row.shares) > 0) {
-      tags.push(`<span class="wl-signal-badge wl-tag-holding">持股</span>`);
+    // 持股資訊併在列上（持股分頁已改為評分頁）：股數、損益％、距自訂上下價位
+    const hold = holdingsBySid.get(sid);
+    if (hold) {
+      tags.push(`<span class="wl-signal-badge wl-tag-holding">持股 ${hold.shares.toLocaleString()} 股</span>`);
+      if (q && hold.cost > 0) {
+        const plPct = (q.price - hold.cost) / hold.cost * 100;
+        tags.push(`<span class="wl-signal-badge ${plPct >= 0 ? "chg-up" : "chg-down"}">損益 ${plPct >= 0 ? "+" : ""}${plPct.toFixed(1)}%</span>`);
+      }
+      if (q && row.target_price_low != null && Number(row.target_price_low) > 0) {
+        const d = (q.price - Number(row.target_price_low)) / q.price * 100;
+        tags.push(`<span class="wl-signal-badge${d <= 3 ? " wl-tag-warn" : ""}">距下跌價位 ${d.toFixed(1)}%</span>`);
+      }
+      if (q && row.target_price_high != null && Number(row.target_price_high) > 0) {
+        const d = (Number(row.target_price_high) - q.price) / q.price * 100;
+        tags.push(`<span class="wl-signal-badge">距上漲價位 ${d.toFixed(1)}%</span>`);
+      }
     }
     // 超出方案上限的股票：資料保留、通知暫停。標出來使用者才知道為什麼沒通知
     const active = isWatchRowActive(row);
