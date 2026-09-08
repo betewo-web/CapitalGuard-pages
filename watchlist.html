@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="36">
+  <meta name="app-version" content="37">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=36" rel="stylesheet">
+  <link href="watchlist.css?v=37" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -424,7 +424,7 @@
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
-        <h5 class="mb-0">方案與用量</h5>
+        <h5 class="mb-0">方案與用量 <span class="plan-ver-head" id="plan-modal-ver"></span></h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3" id="plan-modal-body">
@@ -1396,6 +1396,9 @@ function openPlanModal(focus) {
   const rulesInst = rulesEl && bootstrap.Modal.getInstance(rulesEl);
   if (rulesInst && rulesEl.classList.contains("show")) rulesInst.hide();
 
+  // 版本放標題列：底部那行註記只在方案資料載入成功時才畫，用戶找不到版本就是這樣
+  const verEl = document.getElementById("plan-modal-ver");
+  if (verEl) verEl.textContent = `App v${appVersion()}`;
   renderPlanModal(focus);
   bootstrap.Modal.getOrCreateInstance(document.getElementById("planModal")).show();
   // 開面板時順便刷新一次狀態與付款紀錄（付款導回、管理員剛指派都靠這個）

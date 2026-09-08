@@ -2669,6 +2669,7 @@ button.user-chip:hover { border-color: rgba(60, 230, 209, 0.45); color: var(--te
 .plan-foot-note { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.8rem; line-height: 1.5; }
 /* 版本號：回報問題時一眼看出跑的是哪一版 */
 .plan-ver { float: right; margin-left: 0.6rem; font-family: "Space Grotesk", sans-serif; opacity: 0.7; }
+.plan-ver-head { font-size: 0.72rem; font-weight: 500; opacity: 0.75; margin-left: 0.4rem; font-family: "Space Grotesk", sans-serif; }
 
 /* ── 強制更新畫面（S31）：蓋住整個 App，直到拿到新版 ── */
 .update-gate {
