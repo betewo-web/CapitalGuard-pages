@@ -2446,6 +2446,30 @@ body.has-bottom-nav .qa-panel {
 /* ── 雷達列：逼近關卡（±1% 內）的列左緣一條藍線 ── */
 .holding-row.radar-near { box-shadow: inset 3px 0 0 var(--sig-blue); }
 
+/* ── K 線視窗頂端「今日訊號」：盤中狀態＋今天的通知（雷達列點進來要看得到時間） ── */
+.kline-signals {
+	border: 1px solid rgba(86, 168, 255, 0.3);
+	border-radius: 12px;
+	background: rgba(86, 168, 255, 0.07);
+	padding: 0.55rem 0.7rem 0.35rem;
+	margin-bottom: 0.6rem;
+}
+.kline-signals .ks-head {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+	font-size: 0.8rem;
+	color: var(--text-1);
+	margin-bottom: 0.4rem;
+}
+.kline-signals .ks-title { font-weight: 700; color: var(--accent-2); }
+.kline-signals .ks-now { display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.kline-signals .ks-at { font-size: 0.7rem; color: var(--text-muted); margin-left: 0.25rem; }
+.kline-signals .ks-item { margin-bottom: 0.4rem; padding: 0.5rem 0.6rem; }
+.kline-signals .ks-item:last-child { margin-bottom: 0.2rem; }
+.kline-signals .ks-empty { font-size: 0.76rem; color: var(--text-muted); padding-bottom: 0.3rem; }
+
 /* ── 通知詳情「為什麼通知你」 ── */
 .why-box {
 	margin-top: 0.9rem;

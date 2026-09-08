@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="33">
+  <meta name="app-version" content="34">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=33" rel="stylesheet">
+  <link href="watchlist.css?v=34" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -631,6 +631,7 @@
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-2">
+        <div id="kline-signals" class="kline-signals" style="display:none;"></div>
         <div id="kline-dim-detail-panel" style="display:none;" class="mb-2">
           <div id="kline-dim-detail-content" class="p-2 rounded kline-dim-detail-box"></div>
         </div>
@@ -853,6 +854,7 @@ let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc）
 let inboxLoadedAt = 0;
 let inboxSupportsRead = true;   // migrate_pwa_v2.sql 未執行時自動降級
+let intradaySupportsLevels = true;   // migrate_intraday_levels.sql 未執行時自動降級（PostgREST 對不存在的欄位回 400）
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
 let watchFilter = "all";        // all / signal / up / down / holding
@@ -2198,6 +2200,9 @@ function switchTab(tab, silent = false) {
   if (tab === "inbox") refreshInbox(false);
   if (tab === "live") {
     Promise.all([loadIntradayQuotes(true), refreshInbox(false)]).then(() => renderLive());
+    // 關卡的備援來源是報告資料：登入那次載入失敗（手機網路）後原本再也沒人重抓，
+    // 雷達就一直「無關卡資料」。這裡補一次（有快取就直接回傳，不會重下 6MB）
+    if (!sharedReportData) loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
   }
   // 評分頁靠報告資料；登入後那次載入還沒回來就先顯示載入中，回來再畫。
   // 已載入但還是昨天的（PWA 沒真的關過）→ 過期才重抓，不進輪詢
@@ -2245,11 +2250,20 @@ async function loadIntradayQuotes(force = false) {
 
   intradayQuotesLoadingPromise = (async () => {
     try {
-      const rows = await sbGet("intraday_state", {
-        select: "stock_id,stock_name,price,prev_close,change_pct,volume,signal,severity,level,signal_at,updated_at",
+      const cols = "stock_id,stock_name,price,prev_close,change_pct,volume,signal,severity,level,signal_at,updated_at";
+      const query = () => ({
+        select: intradaySupportsLevels ? `${cols},levels` : cols,
         stock_id: `in.(${sids.join(",")})`,
         limit: String(Math.max(30, sids.length * 2)),
-      }, state.accessToken);
+      });
+      let rows;
+      try {
+        rows = await sbGet("intraday_state", query(), state.accessToken);
+      } catch (e) {
+        if (!intradaySupportsLevels) throw e;
+        intradaySupportsLevels = false;   // 欄位還沒建：改不帶 levels 再試一次，之後都不帶
+        rows = await sbGet("intraday_state", query(), state.accessToken);
+      }
       const map = {};
       for (const row of rows || []) {
         const sid = String(row.stock_id || "").trim();
@@ -2276,6 +2290,7 @@ async function loadIntradayQuotes(force = false) {
           signal_at:  row.signal_at || null,
           stock_name: row.stock_name || "",
           updated_at: row.updated_at || null,
+          levels:     _intradayLevels(row.levels),
         };
       }
       intradayQuoteMap = map;
@@ -2290,6 +2305,14 @@ async function loadIntradayQuotes(force = false) {
   } finally {
     intradayQuotesLoadingPromise = null;
   }
+}
+
+// intraday_state.levels：監控當日凍結的支撐／壓力（訊號就是用這組判斷的）。只留正數。
+function _intradayLevels(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const nums = arr => (Array.isArray(arr) ? arr : []).map(Number).filter(v => Number.isFinite(v) && v > 0);
+  const support = nums(raw.support), resistance = nums(raw.resistance);
+  return (support.length || resistance.length) ? { support, resistance } : null;
 }
 
 async function fetchFinMindQuote(sid) {
@@ -3124,12 +3147,18 @@ function holdingBySid() {
   return map;
 }
 
-// 雷達與自選列共用的「離關卡多遠」：關卡來自每日報告資料（K 線圖畫的就是這組），
-// 取現價之下最近的支撐、之上最近的壓力。距離以現價為分母、百分比表示。
+// 雷達與自選列共用的「離關卡多遠」：取現價之下最近的支撐、之上最近的壓力，
+// 距離以現價為分母、百分比表示。關卡來源兩個，同一套演算法（都排除今日 K 棒）：
+//   1. intraday_state.levels —— 監控當日凍結、訊號就是用它判斷的，跟報價一起每 15 秒到、
+//      涵蓋每一檔自選股（需 migrate_intraday_levels.sql；沒跑時這裡是 null）
+//   2. 每日報告 stock_data[sid].levels —— 6MB 才到，而且只涵蓋進榜的股票；K 線圖畫的是這組
+// 以前只有 2：訊號都已經顯示「跌破支撐」了，關卡那行還在等報告檔、沒進榜的更是永遠沒有。
 const RADAR_NEAR_PCT = 1.0;   // 距關卡 1% 內算「逼近」，與後端 MONITOR_NEAR_PCT 預設一致
+// 訊號自帶的 level 是「關卡價」的只有支撐／壓力類（爆量的 level 是成交量、漲跌停是板價）
+const RADAR_LEVEL_KINDS = ["break_sup", "near_sup", "reclaim_sup", "break_res", "near_res"];
 
 function nearestLevels(sid, price) {
-  const lv = sharedReportData?.stock_data?.[sid]?.levels;
+  const lv = intradayQuoteMap?.[sid]?.levels || sharedReportData?.stock_data?.[sid]?.levels;
   const none = { support: null, resistance: null, supPct: null, resPct: null };
   if (!lv || !(price > 0)) return none;
   const sups = (lv.support || []).map(Number).filter(v => Number.isFinite(v) && v < price);
@@ -3448,6 +3477,13 @@ function renderLive() {
     if (x.lv.resPct != null) dist.push(`壓力 ${x.lv.resistance.toFixed(2)}（+${x.lv.resPct.toFixed(1)}%）`);
     if (x.lv.supPct != null) dist.push(`支撐 ${x.lv.support.toFixed(2)}（−${x.lv.supPct.toFixed(1)}%）`);
     const nearCls = (!x.active && x.nearPct <= RADAR_NEAR_PCT) ? " radar-near" : "";
+    // 沒有關卡時分三種：訊號本身帶關卡就先顯示它（不會再出現「跌破支撐」旁邊寫「無關卡資料」）、
+    // 報告檔還在路上就說載入中、兩個來源都沒有才是真的沒有
+    let distHtml = dist.join(" · ");
+    const levelKind = x.active && RADAR_LEVEL_KINDS.includes(x.active.signal) && x.iq.level != null;
+    if (!dist.length && levelKind) distHtml = `${escapeHtml(_signalLevelLabel(x.active.signal, x.iq.level))}（訊號關卡）`;
+    else if (!dist.length && !sharedReportData && !x.iq?.levels) distHtml = "關卡載入中…";
+    else if (!dist.length) distHtml = "無關卡資料";
     const todayHtml = x.today.length
       ? `今日 ${x.today.length} 則 · ${escapeHtml(alertTypeLabel(x.today[0]))} ${fmtTime(x.today[0].sent_at)}`
       : "今日無訊號";
@@ -3455,7 +3491,7 @@ function renderLive() {
       <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${escapeHtml(x.sid)}')">
         <div class="hr-left">
           <div class="hr-title">${escapeHtml(x.name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(x.sid)}</span> ${tags.join(" ")}</div>
-          <div class="hr-sid">${dist.length ? dist.join(" · ") : "無關卡資料"}</div>
+          <div class="hr-sid">${distHtml}</div>
           <div class="hr-sid">${todayHtml}</div>
         </div>
         <div class="hr-right">
@@ -4313,7 +4349,8 @@ async function openKLineFromWatchlist(sid) {
   document.getElementById("kline-code").textContent = sidKey;
   document.getElementById("kline-name").textContent = "載入中...";
   document.getElementById("kline-industry").textContent = universe[sidKey]?.i || "";
-  document.getElementById("kline-price").textContent = "—";
+  document.getElementById("kline-price").textContent = _klinePriceText(sidKey, null);
+  renderKLineSignals(sidKey);   // 盤中狀態與今天的通知都在記憶體，不用等報告檔
   setKLineMaInfo("讀取共用報表資料中...");
   document.getElementById("kline-score-bars").innerHTML = "";
   closeKLineDimDetail();
@@ -4358,7 +4395,7 @@ async function openKLineFromWatchlist(sid) {
       sharedReportData = data;
 
       renderKLineScoreBars(liveStock);
-      document.getElementById("kline-price").textContent = liveStock.levels?.current ? Number(liveStock.levels.current).toFixed(2) : "—";
+      document.getElementById("kline-price").textContent = _klinePriceText(sidKey, liveStock.levels);
       setKLineMaInfo(formatKLineMaText(liveStock.levels?.ma || {}));
       renderKLineLevels(liveStock.levels || {});
       document.getElementById("kline-industry").textContent = normalizeIndustry(liveStock.industry || displayIndustry || "");
@@ -4371,7 +4408,7 @@ async function openKLineFromWatchlist(sid) {
     document.getElementById("kline-name").textContent = stock.name || universe[sidKey]?.n || sidKey;
     document.getElementById("kline-industry").textContent = normalizeIndustry(stock.industry || universe[sidKey]?.i || "");
     const levels = stock.levels || {};
-    document.getElementById("kline-price").textContent = levels.current ? Number(levels.current).toFixed(2) : "—";
+    document.getElementById("kline-price").textContent = _klinePriceText(sidKey, levels);
 
     const ma = levels.ma || {};
     setKLineMaInfo(formatKLineMaText(ma));
@@ -4388,6 +4425,65 @@ async function openKLineFromWatchlist(sid) {
     document.getElementById("kline-chart").innerHTML = `<div class="kline-empty">K線資料讀取失敗：${escapeHtml(e.message || "unknown")}<br><span style="font-size:.75rem;opacity:.8;">請確認目前瀏覽的站點已部署 report_data_latest.json</span></div>`;
     closeKLineDimDetail();
   }
+}
+
+// 標題列的「現價」：有盤中報價就用它（報告檔的 levels.current 是昨收，盤中會差一截）
+function _klinePriceText(sid, levels) {
+  const q = getQuote(sid);
+  if (q && Number.isFinite(q.price)) return q.price.toFixed(2);
+  const cur = Number(levels?.current);
+  return Number.isFinite(cur) && cur > 0 ? cur.toFixed(2) : "—";
+}
+
+// K 線視窗頂端的「今日訊號」：現在的盤中狀態（intraday_state）＋今天發過的通知
+// （alert_history，點一則就開通知詳情）。雷達列點進來原本只剩 K 線，
+// 訊號時間與通知內容都看不到；兩個來源都已在記憶體，畫面一開就有。
+function renderKLineSignals(sid) {
+  const el = document.getElementById("kline-signals");
+  if (!el) return;
+  const iq = intradayQuoteMap[sid] || null;
+  const today = todaySignalsOf(sid);
+  if (!iq && !today.length) { el.innerHTML = ""; el.style.display = "none"; return; }
+
+  let now = "";
+  if (iq) {
+    if (iq.signal && iq.signal !== "none") {
+      const lvl = _signalLevelLabel(iq.signal, iq.level);
+      const since = iq.signal_at ? ` · ${fmtTime(iq.signal_at, !isToday(iq.signal_at))} 起` : "";
+      now = `<span class="wl-signal-badge"><i class="sev-dot sev-${inferSeverity(iq)}"></i>${escapeHtml(alertTypeLabel(iq))}</span>` +
+            `${lvl ? ` ${escapeHtml(lvl)}` : ""}${since}`;
+    } else {
+      now = "目前無訊號";
+    }
+    if (iq.updated_at) now += `<span class="ks-at">報價 ${fmtTime(iq.updated_at, !isToday(iq.updated_at))}</span>`;
+  }
+
+  const items = today.map(r => {
+    const sev = inferSeverity(r);
+    const id = escapeHtml(String(r.id));
+    return `
+      <div class="inbox-item ks-item" data-sev="${sev}" role="button" tabindex="0"
+           onclick="openInboxDetailFromKLine('${id}')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetailFromKLine('${id}');}">
+        ${signalIconSvg(r, 26) || `<span class="sev-dot sev-${sev} ib-sev"></span>`}
+        <div class="ib-main">
+          <div class="ib-title">${escapeHtml(r.title || "")}</div>
+          <div class="ib-body">${escapeHtml(r.body || "")}</div>
+        </div>
+        <span class="ib-time">${fmtTime(r.sent_at)}</span>
+      </div>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="ks-head"><span class="ks-title">今日訊號</span>${now ? `<span class="ks-now">${now}</span>` : ""}</div>
+    ${items || `<div class="ks-empty">今天還沒有通知</div>`}`;
+  el.style.display = "";
+}
+
+// 兩個 modal 疊在一起會搶 backdrop，先關 K 線再開通知詳情（詳情裡的「查看個股」會再開回來）
+function openInboxDetailFromKLine(rowId) {
+  bootstrap.Modal.getInstance(document.getElementById("klineModal"))?.hide();
+  openInboxDetail(rowId);
 }
 
 function formatKLineMaText(maObj) {
