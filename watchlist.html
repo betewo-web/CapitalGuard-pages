@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="34">
+  <meta name="app-version" content="35">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=34" rel="stylesheet">
+  <link href="watchlist.css?v=35" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -40,6 +40,19 @@
     <div class="ug-title">正在更新 App</div>
     <div class="ug-msg"></div>
     <button type="button" class="btn btn-sm btn-outline-light mt-3" onclick="location.reload()">立即重新載入</button>
+  </div>
+</div>
+
+<!-- ── 首次使用免責同意（COMPLIANCE.md）：登入後未同意前蓋住整個 App ── -->
+<div id="disclaimer-gate" class="update-gate" style="display:none" role="dialog" aria-modal="true" aria-labelledby="dg-title">
+  <div class="ug-box dg-box">
+    <div class="ug-title" id="dg-title">使用前請先確認</div>
+    <div class="ug-msg dg-msg">
+      <p>CapitalGuard 是公開市場資料的整理與統計工具。所有分數、訊號、事件、篩選結果與 AI 說明，都是資料計算的呈現，<b>不是投資建議</b>，也不對任何股票做買賣、持有或進出場的推介。</p>
+      <p>本服務並非證券投資顧問事業，不提供個別化投資諮詢。資料可能延遲、缺漏或有誤，推播不保證即時送達。投資決策請自行判斷並承擔全部風險。</p>
+    </div>
+    <label class="dg-check"><input type="checkbox" id="dg-agree" onchange="document.getElementById('dg-btn').disabled=!this.checked"> 我已閱讀並了解上述說明</label>
+    <button type="button" id="dg-btn" class="btn btn-sm btn-outline-light mt-3" disabled onclick="acceptDisclaimer()">開始使用</button>
   </div>
 </div>
 
@@ -213,17 +226,25 @@
       </div>
       <div class="chip-row" id="scores-filters">
         <button class="filter-chip active" data-f="mine" onclick="setScoresFilter('mine')">我的自選</button>
-        <button class="filter-chip" data-f="overall" onclick="setScoresFilter('overall')">綜合排行</button>
-        <button class="filter-chip" data-f="improving" onclick="setScoresFilter('improving')">進步中</button>
-        <button class="filter-chip" data-f="picks" onclick="setScoresFilter('picks')">策略選股</button>
+        <button class="filter-chip" data-f="screen" onclick="setScoresFilter('screen')">自訂篩選</button>
+        <button class="filter-chip" data-f="picks" onclick="setScoresFilter('picks')">條件範本</button>
+      </div>
+      <!-- 自訂篩選：排序與條件全由使用者設定，前端只做排序／過濾，不計算分數（COMPLIANCE.md） -->
+      <div id="scores-screen-tools" class="screen-tools" style="display:none">
+        <label>排序<select id="scr-sort" onchange="updateScreen()"></select></label>
+        <label>產業<select id="scr-industry" onchange="updateScreen()"><option value="">全部</option></select></label>
+        <label>總分 ≥<input id="scr-min" type="number" inputmode="numeric" min="0" max="100" step="5" onchange="updateScreen()"></label>
+        <label>筆數<select id="scr-limit" onchange="updateScreen()"><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+        <div class="screen-note">依你設定的條件排序與過濾，不是推薦名單。</div>
       </div>
       <div class="card panel-card">
         <div class="card-body p-0" id="scores-list"></div>
       </div>
       <div class="small text-muted p-2" style="font-size:.72rem">
-        評分＝基本面 50%＋技術量能 50%，每日盤前更新；分頁只放摘要，
+        分數＝基本面 50%＋技術量能 50%，每日盤前更新；分頁只放摘要，
         <span class="hs-link" onclick="openDailyReportFromHistory()">看完整報告 →</span>
       </div>
+      <div class="disclaimer-note">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
     </section>
 
     <!-- ═══ ⚡ 盤中雷達 ═══ -->
@@ -858,7 +879,7 @@ let intradaySupportsLevels = true;   // migrate_intraday_levels.sql 未執行時
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
 let watchFilter = "all";        // all / signal / up / down / holding
-let scoresFilter = "mine";      // mine / overall / improving / picks
+let scoresFilter = "mine";      // mine / screen / picks
 
 // ── 事件彙整功能（Feature 2）────────────────────────────────────
 // 查詢抓「近 90 天 + 未來」的事件窗口；「今日事件」只呈現
@@ -962,10 +983,9 @@ const _EVENT_IMPORTANCE_CLASS = {
   low: "event-low",
 };
 
+// 事件不再顯示多空方向標籤（那是對個股的判斷，不是資料）；
+// 只有日程類事件保留一個「日程」標籤（COMPLIANCE.md）。
 const _EVENT_DIRECTION_META = {
-  bullish:  { label: "偏多", className: "event-bullish" },
-  bearish:  { label: "偏空", className: "event-bearish" },
-  neutral:  { label: "中性", className: "event-neutral" },
   calendar: { label: "日程", className: "event-calendar" },
 };
 
@@ -999,13 +1019,13 @@ function renderEventBreakdown(ev) {
     const shown = key === "base" ? value : `${key === "contradiction" ? "−" : "+"}${value}`;
     return `<span class="event-score-part${key === "contradiction" && value ? " is-negative" : ""}">${label} ${shown}</span>`;
   }).join("");
-  return `<details class="event-score-details"><summary>評分明細</summary><div class="event-score-parts">${chips}</div></details>`;
+  return `<details class="event-score-details"><summary>顯著度明細</summary><div class="event-score-parts">${chips}</div></details>`;
 }
 
 function renderEventCard(sid, ev, options = {}) {
   const typeLabel = _EVENT_TYPE_LABEL[ev.event_type] || ev.event_type || "事件";
   const score = eventScoreOf(ev);
-  const direction = _EVENT_DIRECTION_META[ev.direction] || _EVENT_DIRECTION_META.neutral;
+  const direction = _EVENT_DIRECTION_META[ev.direction] || null;
   const sidName = universe[sid]?.n || sid;
   const titlePrefix = options.showStock ? `${escapeHtml(sid)} ${escapeHtml(sidName)} · ` : "";
   const linkHtml = ev.source_url
@@ -1015,7 +1035,7 @@ function renderEventCard(sid, ev, options = {}) {
     ? (options.grouped ? "" : `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>`)
     : (ev.ai_analysis
       ? `<div class="event-ai-text">${escapeHtml(ev.ai_analysis)}</div>`
-      : `<button class="btn btn-xs btn-outline-info" onclick="requestAiAnalysis('${escapeHtml(sid)}','${escapeHtml(ev.title)}',this)">AI 解讀</button>`);
+      : `<button class="btn btn-xs btn-outline-info" onclick="requestAiAnalysis('${escapeHtml(sid)}','${escapeHtml(ev.title)}',this)">AI 說明資料</button>`);
   const newBadge = isNewToday(ev) ? `<span class="event-new-badge">新</span>` : "";
   const dateChip = ev.event_date ? `<span class="event-date-chip">${escapeHtml(ev.event_date)}</span>` : "";
   return `
@@ -1023,9 +1043,9 @@ function renderEventCard(sid, ev, options = {}) {
       <div class="event-meta-row">
         ${newBadge}
         <span class="event-type-badge">${escapeHtml(typeLabel)}</span>
-        <span class="event-direction ${direction.className}">${direction.label}</span>
+        ${direction ? `<span class="event-direction ${direction.className}">${direction.label}</span>` : ""}
         ${dateChip}
-        <span class="event-score-badge">${score}</span>
+        <span class="event-score-badge" title="顯著度：這筆資料有多不尋常，不是多空判斷">${score}</span>
       </div>
       <div class="event-title">${titlePrefix}${escapeHtml(ev.title || "")}</div>
       ${ev.content ? `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>` : ""}
@@ -1141,7 +1161,7 @@ async function requestAiAnalysis(sid, eventTitle, btnEl) {
     const data = await resp.json().catch(() => ({}));
     if (handleUpdateRequired(data)) return;
     if (data.code === "plan_required" || data.code === "ai_limit") {
-      btnEl.textContent = "AI 解讀";
+      btnEl.textContent = "AI 說明資料";
       btnEl.disabled = false;
       openPlanModal(data.code === "ai_limit" ? "ai_limit" : "ai");
       return;
@@ -1949,10 +1969,37 @@ async function doTokenLogin() {
   }
 }
 
+// ── 首次使用免責同意（COMPLIANCE.md）──────────────────────────────
+// 每台裝置同意一次；聲明版本改了就要重新同意。閘門是 fixed 全螢幕，
+// 未同意前 App 在底下照常載入，但碰不到。
+const DISCLAIMER_KEY = "cg-disclaimer-accepted";
+const DISCLAIMER_VERSION = "2026-09-08";
+function disclaimerAccepted() {
+  try { return localStorage.getItem(DISCLAIMER_KEY) === DISCLAIMER_VERSION; } catch { return true; }
+}
+function showDisclaimerGate() {
+  const gate = document.getElementById("disclaimer-gate");
+  const btn = document.getElementById("dg-btn");
+  const chk = document.getElementById("dg-agree");
+  if (!gate || !btn || !chk) return;
+  const accepted = disclaimerAccepted();
+  chk.checked = accepted;
+  chk.parentElement.style.display = accepted ? "none" : "";
+  btn.disabled = !accepted;
+  btn.textContent = accepted ? "關閉" : "開始使用";
+  gate.style.display = "flex";
+}
+function acceptDisclaimer() {
+  try { localStorage.setItem(DISCLAIMER_KEY, DISCLAIMER_VERSION); } catch {}
+  const gate = document.getElementById("disclaimer-gate");
+  if (gate) gate.style.display = "none";
+}
+
 // ── 主畫面 ──────────────────────────────────────────────────────
 async function showMain() {
   document.getElementById("login-section").style.display = "none";
   document.getElementById("main-section").style.display  = "";
+  if (!disclaimerAccepted()) showDisclaimerGate();
   renderPlanBadge();
   document.getElementById("nav-logout").style.display = "inline-flex";
   document.getElementById("nav-refresh-btn").style.display = "inline-flex";
@@ -3212,8 +3259,11 @@ function holdingEntries() {
 
 // ── 🏆 評分頁 ────────────────────────────────────────────────────
 // 資料全在 sharedReportData（登入後載入的每日報告 JSON）：
-//   investment_scores[sid] → total_score / rating(S–E) / score_change / industry_category
-//   rankings.overall / improving → 排行代號陣列；strategies[].rows → 兩個策略的 Top N
+//   investment_scores[sid] → total_score / score_change / fundamental_score_v2 /
+//                            technical_volume_score / fundamental_change / technical_change / industry_category
+//   strategies[].rows → 兩個條件範本的前 N 檔
+// 沒有 S–E 字母評級、沒有後端排行榜：「自訂篩選」由使用者自己選排序欄位與條件，
+// 前端只做排序與過濾，不計算分數（COMPLIANCE.md）。
 // 這頁只放摘要與「跟我有關的」；完整報告仍是 report.html，避免同一份報告渲染兩次而漂移。
 function setScoresFilter(f) {
   scoresFilter = f;
@@ -3222,12 +3272,76 @@ function setScoresFilter(f) {
   renderScores();
 }
 
-// 評級膠囊：S/A 強、B 中性、C/D/E 弱。用等級專屬色，不借用漲跌的紅綠
-function gradePill(rating) {
-  const g = String(rating || "").toUpperCase();
-  if (!g) return `<span class="grade-pill grade-none">未評</span>`;
-  const cls = (g === "S" || g === "A") ? "grade-hi" : g === "B" ? "grade-mid" : "grade-lo";
-  return `<span class="grade-pill ${cls}">${escapeHtml(g)}</span>`;
+// ── 自訂篩選（使用者條件，存在本機） ──
+const SCREEN_SORTS = {
+  total_score: "總分", score_change: "總分變化",
+  fundamental_score_v2: "基本面", technical_volume_score: "技術量能",
+  fundamental_change: "基本面變化", technical_change: "技術量能變化",
+};
+const SCREEN_KEY = "cg-screen";
+const SCREEN_DEFAULT = { sort: "total_score", industry: "", min: 0, limit: 20 };
+let screenState = loadScreenState();
+let _screenIndustriesReady = false;
+
+function loadScreenState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SCREEN_KEY) || "{}");
+    const st = Object.assign({}, SCREEN_DEFAULT, saved);
+    if (!SCREEN_SORTS[st.sort]) st.sort = SCREEN_DEFAULT.sort;
+    st.min = Math.max(0, Math.min(100, Number(st.min) || 0));
+    st.limit = [20, 50, 100].includes(Number(st.limit)) ? Number(st.limit) : SCREEN_DEFAULT.limit;
+    st.industry = String(st.industry || "");
+    return st;
+  } catch { return Object.assign({}, SCREEN_DEFAULT); }
+}
+
+function syncScreenTools(scores) {
+  const tools = document.getElementById("scores-screen-tools");
+  if (!tools) return;
+  tools.style.display = scoresFilter === "screen" ? "" : "none";
+  if (scoresFilter !== "screen") return;
+  const sortEl = document.getElementById("scr-sort");
+  if (sortEl && !sortEl.options.length) {
+    sortEl.innerHTML = Object.entries(SCREEN_SORTS)
+      .map(([k, label]) => `<option value="${k}">${label}</option>`).join("");
+  }
+  const indEl = document.getElementById("scr-industry");
+  if (indEl && !_screenIndustriesReady) {
+    const industries = [...new Set(Object.values(scores).map(s => s?.industry_category).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "zh-Hant"));
+    indEl.innerHTML = `<option value="">全部</option>` +
+      industries.map(i => `<option value="${escapeHtml(i)}">${escapeHtml(i)}</option>`).join("");
+    _screenIndustriesReady = industries.length > 0;
+  }
+  if (sortEl) sortEl.value = screenState.sort;
+  if (indEl) indEl.value = screenState.industry;
+  const minEl = document.getElementById("scr-min");
+  if (minEl) minEl.value = screenState.min;
+  const limEl = document.getElementById("scr-limit");
+  if (limEl) limEl.value = String(screenState.limit);
+}
+
+function updateScreen() {
+  const v = id => document.getElementById(id)?.value;
+  screenState = {
+    sort: SCREEN_SORTS[v("scr-sort")] ? v("scr-sort") : SCREEN_DEFAULT.sort,
+    industry: String(v("scr-industry") || ""),
+    min: Math.max(0, Math.min(100, Number(v("scr-min")) || 0)),
+    limit: [20, 50, 100].includes(Number(v("scr-limit"))) ? Number(v("scr-limit")) : SCREEN_DEFAULT.limit,
+  };
+  try { localStorage.setItem(SCREEN_KEY, JSON.stringify(screenState)); } catch {}
+  renderScores();
+}
+
+// 純排序與過濾：只讀報告裡後端算好的欄位
+function runScreen(scores) {
+  const num = x => (x != null && Number.isFinite(Number(x))) ? Number(x) : null;
+  return Object.entries(scores)
+    .filter(([, s]) => s && num(s[screenState.sort]) != null)
+    .filter(([, s]) => !screenState.industry || s.industry_category === screenState.industry)
+    .filter(([, s]) => (num(s.total_score) ?? -1) >= screenState.min)
+    .sort((a, b) => num(b[1][screenState.sort]) - num(a[1][screenState.sort]))
+    .slice(0, screenState.limit);
 }
 
 function scoreRowHtml(sid, s, opts = {}) {
@@ -3244,7 +3358,6 @@ function scoreRowHtml(sid, s, opts = {}) {
     : "";
   return `
     <div class="holding-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
-      ${gradePill(s?.rating)}
       <div class="hr-left">
         <div class="hr-title">${escapeHtml(name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(sid)}</span>${addBtn}</div>
         <div class="hr-sid">${sub || "&nbsp;"}</div>
@@ -3266,9 +3379,9 @@ function renderScores() {
     listEl.innerHTML = `<div class="view-empty">報告資料載入中…</div>`;
     return;
   }
-  dateEl.textContent = data.date ? `${data.date} 盤前評分` : "";
+  dateEl.textContent = data.date ? `${data.date} 盤前資料` : "";
   const scores = data.investment_scores || {};
-  const rankings = data.rankings || {};
+  syncScreenTools(scores);
 
   let html = "";
   if (scoresFilter === "mine") {
@@ -3281,11 +3394,17 @@ function renderScores() {
       mine.sort((a, b) => scoreOf(b) - scoreOf(a));
       html = mine.map(sid => scoreRowHtml(sid, scores[sid], { note: scores[sid] ? "" : "本期未評分" })).join("");
     }
-  } else if (scoresFilter === "overall" || scoresFilter === "improving") {
-    const ids = (rankings[scoresFilter] || []).slice(0, 20);
-    html = ids.length
-      ? ids.map((sid, i) => scoreRowHtml(String(sid), scores[sid], { note: `第 ${i + 1} 名`, allowAdd: true })).join("")
-      : `<div class="view-empty">本期沒有排行資料</div>`;
+  } else if (scoresFilter === "screen") {
+    const rows = runScreen(scores);
+    const label = SCREEN_SORTS[screenState.sort] || "";
+    html = rows.length
+      ? rows.map(([sid, s]) => {
+          const val = Number(s[screenState.sort]);
+          const signed = screenState.sort.endsWith("change") && val > 0 ? "+" : "";
+          const note = screenState.sort === "total_score" ? "" : `${label} ${signed}${val.toFixed(1)}`;
+          return scoreRowHtml(String(sid), s, { note, allowAdd: true });
+        }).join("")
+      : `<div class="view-empty">沒有符合條件的股票，請放寬條件</div>`;
   } else {
     const strategies = data.strategies || [];
     html = strategies.length
@@ -3295,14 +3414,14 @@ function renderScores() {
         ${(st.rows || []).slice(0, 10).map(r => {
           const sid = String(r.stock_id || "").trim();
           const s = scores[sid] || { stock_name: r.stock_name, industry_category: r.industry_category };
-          return scoreRowHtml(sid, s, { note: `策略分 ${Number(r.composite_score || 0).toFixed(0)}`, allowAdd: true });
+          return scoreRowHtml(sid, s, { note: `範本分 ${Number(r.composite_score || 0).toFixed(0)}`, allowAdd: true });
         }).join("")}`).join("")
-      : `<div class="view-empty">本期沒有策略選股</div>`;
+      : `<div class="view-empty">本期沒有符合範本條件的股票</div>`;
   }
   listEl.innerHTML = html;
 }
 
-// 排行列的「＋自選」：沿用自選頁的新增流程（方案上限與代號驗證都在那裡）
+// 篩選列的「＋自選」：沿用自選頁的新增流程（方案上限與代號驗證都在那裡）
 function addStockFromScores(sid) {
   switchTab("watch");
   const inp = document.getElementById("inp-stock");
@@ -6096,11 +6215,11 @@ function _showPwaInstructionsModal(afterWait = false) {
   </div>
   <div id="qa-messages" class="qa-messages"></div>
   <div class="qa-input-row">
-    <input id="qa-input" class="qa-input" type="text" placeholder="例：今天為什麼跌？" maxlength="200"
+    <input id="qa-input" class="qa-input" type="text" placeholder="例：營收年增是怎麼算的？" maxlength="200"
       onkeydown="if(event.key==='Enter')sendQaQuestion()">
     <button class="qa-send-btn" onclick="sendQaQuestion()">送出</button>
   </div>
-  <div class="qa-footer-hint">AI 回答僅供參考，不構成投資建議</div>
+  <div class="qa-footer-hint">AI 只解釋公開資料的意思，不提供買賣建議、不預測股價；回答可能有誤，僅供參考</div>
 </div>
 </body>
 </html>

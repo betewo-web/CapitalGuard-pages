@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="app-version" content="34">
+<meta name="app-version" content="35">
 <title>台股每日分析報告</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -49,7 +49,10 @@
   .ranking-btn { border:1px solid #b8c8c4; background:#fff; color:#31534c; border-radius:5px;
                  padding:.3rem .65rem; font-size:.76rem; cursor:pointer; }
   .ranking-btn.active { background:#173b35; border-color:#173b35; color:#fff; font-weight:700; }
-  .rating-mark { font-weight:700; font-size:.9rem; }
+  .screen-tools label { display:inline-flex; align-items:center; gap:.3rem; font-size:.76rem; color:#31534c; }
+  .screen-tools select, .screen-tools input { font-size:.76rem; padding:.2rem .4rem; border:1px solid #b8c8c4; border-radius:5px; background:#fff; }
+  .screen-note { width:100%; font-size:.72rem; color:#667085; }
+  .disclaimer-note { font-size:.74rem; color:#667085; line-height:1.6; padding:.6rem 0; }
   .direction-up { color:#177245; } .direction-down { color:#b42318; } .direction-flat { color:#667085; }
   .score-reason { display:block; max-width:270px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#667085; }
   .score-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.5rem; }
@@ -139,7 +142,8 @@
 
   <!-- Report Content -->
   <div class="content-wrap">
-    <div id="report-info" class="text-muted small mb-3"></div>
+    <div id="report-info" class="text-muted small mb-1"></div>
+    <div class="disclaimer-note mb-3">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。</div>
     <div id="report-body"></div>
   </div>
 </div>
@@ -378,7 +382,6 @@ function renderReport(data) {
   const strategies = data.strategies || [];
   _stockData = data.stock_data || {};  // 儲存詳細資料供 Modal 使用
   _investmentScores = data.investment_scores || {};
-  _rankings = data.rankings || {};
   document.getElementById("report-info").textContent =
     `分析日期：${date}　共分析 ${Object.keys(data.universe || {}).length} 支股票`;
 
@@ -389,18 +392,18 @@ function renderReport(data) {
     const card = document.createElement("div");
     card.className = "strat-card";
     card.innerHTML = `
-      <div class="strat-hd score-hd">統一投資評分
+      <div class="strat-hd score-hd">每日資料分數
         <span class="sub">基本面 50% + 技術量能 50%</span>
-        <span class="sub float-end opacity-75 d-none d-sm-inline">後端標準化、歷史趨勢與可解釋分數</span>
+        <span class="sub float-end opacity-75 d-none d-sm-inline">依你設定的條件排序與過濾，不是推薦名單</span>
       </div>
-      <div class="ranking-tools" id="ranking-tools"></div>
+      <div class="ranking-tools screen-tools" id="ranking-tools"></div>
       <div class="table-responsive" id="investment-ranking"></div>`;
     body.appendChild(card);
-    renderInvestmentRanking("overall");
+    renderInvestmentScreen();
   }
 
   if (!strategies.length && !Object.keys(_investmentScores).length) {
-    body.innerHTML = '<div class="alert alert-info">此報告無策略資料（可能為舊版 JSON）。</div>';
+    body.innerHTML = '<div class="alert alert-info">此報告無篩選資料（可能為舊版 JSON）。</div>';
     return;
   }
 
@@ -410,7 +413,7 @@ function renderReport(data) {
     card.className = "strat-card";
     card.innerHTML = `
       <div class="strat-hd ${isRocket ? "bg-rocket" : "bg-gold"}">
-        ${strat.emoji} ${strat.name} <span class="sub">前 ${strat.rows.length} 名</span>
+        ${strat.emoji} ${strat.name} <span class="sub">符合條件 ${strat.rows.length} 檔</span>
         <span class="sub float-end opacity-75 d-none d-sm-inline">${strat.description}</span>
       </div>
       <div class="table-responsive">
@@ -420,26 +423,58 @@ function renderReport(data) {
   });
 }
 
-const RANKING_LABELS = {
-  overall:"綜合 Top 100", fundamental:"基本面 Top 100", technical:"技術強勢 Top 100",
-  improving:"總分改善", fundamental_improving:"基本面改善", technical_breakout:"技術突破"
+// 自訂篩選：沒有後端排行榜。排序欄位、產業、最低總分、筆數全由使用者設定，
+// 這裡只做排序與過濾，不計算分數（COMPLIANCE.md）。條件存在本機。
+const SCREEN_SORTS = {
+  total_score:"總分", score_change:"總分變化", fundamental_score_v2:"基本面",
+  technical_volume_score:"技術量能", fundamental_change:"基本面變化", technical_change:"技術量能變化"
 };
-let _investmentScores = {}, _rankings = {}, _activeRanking = "overall";
+const SCREEN_KEY = "cg-screen";
+let _investmentScores = {};
+let _screen = (() => {
+  const d = { sort:"total_score", industry:"", min:0, limit:50 };
+  try { return Object.assign(d, JSON.parse(localStorage.getItem(SCREEN_KEY) || "{}")); } catch { return d; }
+})();
 
-function renderInvestmentRanking(rankingId) {
-  _activeRanking = rankingId;
+function updateScreen() {
+  const v = id => document.getElementById(id)?.value;
+  _screen = {
+    sort: SCREEN_SORTS[v("scr-sort")] ? v("scr-sort") : "total_score",
+    industry: String(v("scr-industry") || ""),
+    min: Math.max(0, Math.min(100, Number(v("scr-min")) || 0)),
+    limit: [20,50,100,0].includes(Number(v("scr-limit"))) ? Number(v("scr-limit")) : 50,
+  };
+  try { localStorage.setItem(SCREEN_KEY, JSON.stringify(_screen)); } catch {}
+  renderInvestmentScreen();
+}
+
+function renderInvestmentScreen() {
   const tools = document.getElementById("ranking-tools");
   const target = document.getElementById("investment-ranking");
   if (!tools || !target) return;
-  tools.innerHTML = Object.entries(RANKING_LABELS).map(([id,label]) =>
-    `<button class="ranking-btn ${id===rankingId?'active':''}" onclick="renderInvestmentRanking('${id}')">${label}</button>`
-  ).join("");
-  const ids = _rankings[rankingId] || [];
-  target.innerHTML = buildInvestmentTable(ids);
+  const num = x => (x != null && !isNaN(x)) ? +x : null;
+  const industries = [...new Set(Object.values(_investmentScores).map(s => s.industry_category).filter(Boolean))]
+    .sort((a,b) => a.localeCompare(b, "zh-Hant"));
+  tools.innerHTML = `
+    <label>排序<select id="scr-sort" onchange="updateScreen()">${Object.entries(SCREEN_SORTS).map(([k,l]) =>
+      `<option value="${k}" ${k===_screen.sort?'selected':''}>${l}</option>`).join("")}</select></label>
+    <label>產業<select id="scr-industry" onchange="updateScreen()"><option value="">全部</option>${industries.map(i =>
+      `<option value="${escapeHtml(i)}" ${i===_screen.industry?'selected':''}>${escapeHtml(i)}</option>`).join("")}</select></label>
+    <label>總分 ≥<input id="scr-min" type="number" min="0" max="100" step="5" value="${_screen.min}" onchange="updateScreen()"></label>
+    <label>筆數<select id="scr-limit" onchange="updateScreen()">${[[20,"20"],[50,"50"],[100,"100"],[0,"全部"]].map(([n,l]) =>
+      `<option value="${n}" ${n===_screen.limit?'selected':''}>${l}</option>`).join("")}</select></label>
+    <div class="screen-note">依你設定的條件排序與過濾，不是推薦名單。</div>`;
+  const ids = Object.entries(_investmentScores)
+    .filter(([,s]) => num(s[_screen.sort]) != null)
+    .filter(([,s]) => !_screen.industry || s.industry_category === _screen.industry)
+    .filter(([,s]) => (num(s.total_score) ?? -1) >= _screen.min)
+    .sort((a,b) => num(b[1][_screen.sort]) - num(a[1][_screen.sort]))
+    .map(([sid]) => sid);
+  target.innerHTML = buildInvestmentTable(_screen.limit ? ids.slice(0, _screen.limit) : ids);
 }
 
 function buildInvestmentTable(ids) {
-  if (!ids.length) return '<p class="text-muted p-3 mb-0">尚無足夠歷史資料。</p>';
+  if (!ids.length) return '<p class="text-muted p-3 mb-0">沒有符合條件的股票，請放寬條件。</p>';
   const rows = ids.map((sid, index) => {
     const score = _investmentScores[sid] || {};
     const direction = score.score_direction || "new";
@@ -454,16 +489,15 @@ function buildInvestmentTable(ids) {
       <td><span class="stock-link" onclick="openInvestmentDetail('${sid}')">${sid}</span></td>
       <td class="d-none d-md-table-cell"><small class="text-muted">${escapeHtml(score.industry_category||'')}</small></td>
       <td><span class="score-badge ${scoreClass(score.total_score)}">${fmt(score.total_score)}</span></td>
-      <td><span class="rating-mark ${directionClass}">${score.rating||'—'}${arrow}</span></td>
       <td class="d-none d-sm-table-cell">${fmt(score.fundamental_score_v2)}</td>
       <td class="d-none d-sm-table-cell">${fmt(score.technical_volume_score)}</td>
-      <td class="${directionClass}">${change}</td>
+      <td class="${directionClass}">${change}${arrow}</td>
       <td class="d-none d-lg-table-cell"><span class="score-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</span></td>
     </tr>`;
   }).join("");
   return `<table class="table table-hover table-sm"><thead><tr>
     <th>#</th><th>名稱</th><th>代號</th><th class="d-none d-md-table-cell">產業</th>
-    <th>總分</th><th>評級</th><th class="d-none d-sm-table-cell">基本</th>
+    <th>總分</th><th class="d-none d-sm-table-cell">基本</th>
     <th class="d-none d-sm-table-cell">技術量能</th><th>變化</th><th class="d-none d-lg-table-cell">主要解釋</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
@@ -484,9 +518,9 @@ function openInvestmentDetail(sid) {
   document.getElementById("sm-industry").textContent = score.industry_category || "";
   const trend = (score.score_trend || []).map(point => `${point.date.slice(5)} ${(+point.score).toFixed(0)}`).join(" → ");
   document.getElementById("sm-trend").textContent = trend ? `分數趨勢：${trend}` : "分數趨勢：資料累積中";
-  const direction = score.score_direction === "improving" ? "改善" : score.score_direction === "deteriorating" ? "惡化" : "持平";
+  const direction = score.score_direction === "improving" ? "較前日上升" : score.score_direction === "deteriorating" ? "較前日下降" : "與前日持平";
   document.getElementById("sm-summary").innerHTML = [
-    ["綜合", `${(+score.total_score).toFixed(1)} / ${score.rating||'—'} · ${direction}`],
+    ["綜合", `${(+score.total_score).toFixed(1)} · ${direction}`],
     ["基本面", formatScore(score.fundamental_score_v2)],
     ["技術量能", formatScore(score.technical_volume_score)]
   ].map(item => `<div class="score-cell"><small class="text-muted">${item[0]}</small><strong>${item[1]}</strong></div>`).join("");
@@ -515,7 +549,7 @@ function openInvestmentDetail(sid) {
   ];
   const historyLabels = {
     retest_held:'回測守住', breakout:'突破待回測', retest_failed:'回測失敗', none:'無近期突破',
-    Bullish:'偏多', Neutral:'中性', Bearish:'偏空'
+    Bullish:'價漲量增', Neutral:'無明顯型態', Bearish:'價跌量增'
   };
   document.getElementById("sm-history").innerHTML = historyMetrics.map(([label,value,unit]) => {
     const numeric = value != null && value !== '' && !isNaN(value);
@@ -705,5 +739,6 @@ function _buildOption(pd, levels, period) {
   };
 }
 </script>
+<div class="container-fluid"><div class="disclaimer-note text-center">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。</div></div>
 </body>
 </html>
