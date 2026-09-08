@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="32">
+  <meta name="app-version" content="33">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=32" rel="stylesheet">
+  <link href="watchlist.css?v=33" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -2153,6 +2153,7 @@ function _onAppResume() {
   if (!state.userId || document.hidden) return;
   _autoRefreshOnce().catch(() => {});
   loadPlanState().catch(() => {});   // 回前景無條件重問方案，不等通知的節奏
+  refreshReportIfStale();            // 報告是昨天的就重抓（只在回前景，不進輪詢）
   _scheduleAutoRefresh();
 }
 
@@ -2198,10 +2199,12 @@ function switchTab(tab, silent = false) {
   if (tab === "live") {
     Promise.all([loadIntradayQuotes(true), refreshInbox(false)]).then(() => renderLive());
   }
-  // 評分頁靠報告資料；登入後那次載入還沒回來就先顯示載入中，回來再畫
+  // 評分頁靠報告資料；登入後那次載入還沒回來就先顯示載入中，回來再畫。
+  // 已載入但還是昨天的（PWA 沒真的關過）→ 過期才重抓，不進輪詢
   if (tab === "scores" && !sharedReportData) {
     loadSharedReportData().then(() => renderScores()).catch(() => {});
   }
+  if (tab === "scores" || tab === "home") refreshReportIfStale();
   // 輪詢間隔跟分頁有關（盤中雷達要快一點），換分頁就重排
   if (changed) _scheduleAutoRefresh();
   renderCurrentTab();
@@ -3282,6 +3285,40 @@ function addStockFromScores(sid) {
 // taipeiDateKey() 換算的，兩邊時區不一致時狀態列會自相矛盾（人在國外、
 // 或裝置時區設錯就會遇到）。自動更新的節奏也靠這個函式，錯了會整天用
 // 收盤的間隔輪詢。
+// ── 報告資料的「過期才重抓」 ───────────────────────────────────────
+// 報告 JSON 有 6MB、一天只換一次，所以刻意不進輪詢（test_pwa_platform_compat 釘住）。
+// 但手機上的 PWA 幾乎不會真的關閉——只是被凍在背景再還原——記憶體裡那份會停在
+// 打開 App 那天：報告早上 06:54 已上傳，評分頁到晚上還顯示昨天（2026-09-08 實際發生）。
+// 規則：報告日期比台北今天舊、且已過報告應產出的時間，回前景或進評分頁時重抓一次；
+// 兩次重抓至少隔 60 分鐘（報告失敗、假日沒新檔時不會一直重下載 6MB）。
+const REPORT_READY_MINUTES  = 7 * 60;          // 06:15 排程＋約 40 分鐘產出，07:00 後才視為「今天應該有了」
+const REPORT_STALE_RETRY_MS = 60 * 60 * 1000;
+let _reportStaleFetchedAt = 0;
+const _TPE_TIME_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Taipei", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
+function _taipeiMinutesNow() {
+  const parts = _TPE_TIME_FMT.formatToParts(new Date());
+  const part = type => Number(parts.find(item => item.type === type)?.value);
+  const hour = part("hour") % 24, minute = part("minute");
+  return (Number.isFinite(hour) && Number.isFinite(minute)) ? hour * 60 + minute : 0;
+}
+
+function reportDataIsStale() {
+  const date = String(sharedReportData?.date || "");
+  if (!date) return false;                               // 還沒載入過：交給登入那次載入
+  if (date >= taipeiDateKey(new Date())) return false;   // 已是今天的
+  return _taipeiMinutesNow() >= REPORT_READY_MINUTES;    // 今天的報告應該產出了才重抓
+}
+
+function refreshReportIfStale() {
+  if (!state.userId || !reportDataIsStale()) return;
+  if (Date.now() - _reportStaleFetchedAt < REPORT_STALE_RETRY_MS) return;
+  _reportStaleFetchedAt = Date.now();
+  loadSharedReportData(true).then(() => renderCurrentTab()).catch(() => {});
+}
+
 function _isMarketOpenNow() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Taipei",
