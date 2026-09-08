@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="35">
+  <meta name="app-version" content="36">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=35" rel="stylesheet">
+  <link href="watchlist.css?v=36" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -3600,7 +3600,12 @@ function renderLive() {
     // 報告檔還在路上就說載入中、兩個來源都沒有才是真的沒有
     let distHtml = dist.join(" · ");
     const levelKind = x.active && RADAR_LEVEL_KINDS.includes(x.active.signal) && x.iq.level != null;
+    // 現在沒有進行中的訊號，但今天發過支撐／壓力類通知（event_key 帶關卡價）：先用那個價位。
+    // 典型情境：下面那行寫著「今日 1 則 · 突破壓力 11:05」，上面卻是「無關卡資料」
+    const todayLv = x.today.map(r => [_signalKindFromAlert(r), _signalLevelFromAlert(r)])
+      .find(([k, l]) => RADAR_LEVEL_KINDS.includes(k) && l != null);
     if (!dist.length && levelKind) distHtml = `${escapeHtml(_signalLevelLabel(x.active.signal, x.iq.level))}（訊號關卡）`;
+    else if (!dist.length && todayLv) distHtml = `${escapeHtml(_signalLevelLabel(todayLv[0], todayLv[1]))}（今日訊號）`;
     else if (!dist.length && !sharedReportData && !x.iq?.levels) distHtml = "關卡載入中…";
     else if (!dist.length) distHtml = "無關卡資料";
     const todayHtml = x.today.length
