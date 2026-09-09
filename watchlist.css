@@ -1823,8 +1823,18 @@ body.has-bottom-nav .qa-panel {
 
 .inbox-item.unread .ib-title { font-weight: 700; }
 
+/* SVG 是 flex item：width 屬性不是最小寬度，標題或內文一長就會被擠扁成一條。
+   釘死尺寸並禁止收縮，長短文字的列圖示才會一樣大。 */
 .inbox-item > .sig-ico {
+	flex: 0 0 auto;
+	width: 30px;
+	height: 30px;
 	margin-top: 1px;
+}
+
+.kline-signals .ks-item > .sig-ico {
+	width: 26px;
+	height: 26px;
 }
 
 
