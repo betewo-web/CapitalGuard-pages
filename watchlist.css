@@ -2731,3 +2731,25 @@ button.user-chip:hover { border-color: rgba(60, 230, 209, 0.45); color: var(--te
 .count-badge.is-full { background: var(--sig-orange); color: #2b1600; }
 .qa-float-btn.is-locked { filter: grayscale(1); opacity: 0.55; }
 
+
+/* 統計頁：分數明細 modal（點一列）。數字用等寬對齊，前期分數降一階 */
+.sd-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.sd-total { font-size: 1.9rem; font-weight: 700; color: var(--text-0); line-height: 1; }
+.sd-total .score-unit { font-size: 0.8rem; font-weight: 500; margin-left: 0.1rem; color: var(--text-1); }
+.sd-headchg { font-size: 0.95rem; font-weight: 600; }
+.sd-sub { font-size: 0.74rem; color: var(--text-1); margin-left: auto; }
+.sd-split { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--text-1); margin: 0.45rem 0 0.2rem; }
+.sd-split b { color: var(--text-0); font-weight: 600; }
+.sd-sec { font-size: 0.76rem; font-weight: 600; color: var(--text-1); margin: 0.85rem 0 0.3rem; letter-spacing: 0.02em; }
+.sd-reason { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.35rem 0;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.07); font-size: 0.82rem; line-height: 1.5; color: var(--text-0); }
+.sd-reason-contrib { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 0.8rem; }
+.sd-table { width: 100%; font-size: 0.8rem; border-collapse: collapse; color: var(--text-0); }
+.sd-table td { padding: 0.27rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.sd-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 0.6rem; }
+.sd-table td.sd-prev { color: var(--text-1); }
+.sd-table td.sd-prev:not(:empty)::after { content: "→"; margin-left: 0.3rem; opacity: 0.6; }
+.sd-trend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.75rem; font-size: 0.74rem; color: var(--text-1);
+	font-variant-numeric: tabular-nums; }
+.sd-trend b { color: var(--text-0); font-weight: 600; }
+.sd-note { font-size: 0.7rem; color: var(--text-1); line-height: 1.6; margin-top: 0.9rem; }

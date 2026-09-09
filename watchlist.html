@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="40">
+  <meta name="app-version" content="41">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=40" rel="stylesheet">
+  <link href="watchlist.css?v=41" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -586,6 +586,23 @@
       </div>
       <div class="modal-body p-3" id="events-modal-body">
         <p class="text-muted small">載入中…</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 分數明細 Modal（統計頁點一列）──
+     只顯示報告裡 apply_score_history 算好的子項分數、前期對照與變化原因；前端不重算、不下判斷（COMPLIANCE.md）。 -->
+<div class="modal fade sheet-modal" id="scoreDetailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="score-detail-title">分數明細</h5>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3" id="score-detail-body"></div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="score-detail-kline">看 K 線 →</button>
       </div>
     </div>
   </div>
@@ -3360,7 +3377,7 @@ function scoreRowHtml(sid, s, opts = {}) {
     ? `<button class="btn btn-sm btn-outline-light btn-ghost ms-1" onclick="event.stopPropagation();addStockFromScores('${escapeHtml(sid)}')">＋自選</button>`
     : "";
   return `
-    <div class="holding-row score-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
+    <div class="holding-row score-row" onclick="openScoreDetail('${escapeHtml(sid)}')">
       <div class="hr-left">
         <div class="hr-title">${escapeHtml(name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(sid)}</span>${addBtn}</div>
         <div class="hr-sid">${sub || "&nbsp;"}</div>
@@ -3422,6 +3439,114 @@ function renderScores() {
       : `<div class="view-empty">本期沒有符合範本條件的股票</div>`;
   }
   listEl.innerHTML = html;
+}
+
+// ── 統計頁：分數明細（點一列）──────────────────────────────────────────────
+// 資料全部來自報告 JSON 的 investment_scores[sid]：
+//   component_changes[col] = {now, prev, delta}、change_reasons[]（後端對照前一期快照算好）、
+//   prev_score_date、score_trend。前端只排版，不重算分數、不加判斷詞（COMPLIANCE.md）。
+const SCORE_COMPONENT_GROUPS = [
+  ["基本面（50%）", [
+    ["revenue_score", "營收成長"], ["profitability_score", "獲利能力"], ["earnings_growth_score", "EPS 成長"],
+    ["financial_health_score", "財務體質"], ["cashflow_score", "現金流"], ["valuation_score_v2", "估值"],
+  ]],
+  ["技術量能（50%）", [
+    ["trend_score", "趨勢"], ["momentum_score", "動能"], ["price_structure_score", "價格結構"],
+    ["volume_score", "成交量"], ["price_volume_score", "量價關係"], ["institutional_score", "法人籌碼"],
+    ["margin_score", "融資融券"],
+  ]],
+];
+
+function fmtScoreDelta(value, digits = 1) {
+  const v = Number(value);
+  if (value == null || !Number.isFinite(v)) return `<span class="chg-flat">—</span>`;
+  const cls = v > 0.05 ? "chg-up" : v < -0.05 ? "chg-down" : "chg-flat";
+  const arrow = v > 0.05 ? "▲" : v < -0.05 ? "▼" : "—";
+  return `<span class="${cls}">${arrow}${Math.abs(v).toFixed(digits)}</span>`;
+}
+
+function fmtScoreValue(value, digits = 0) {
+  const v = Number(value);
+  return (value == null || !Number.isFinite(v)) ? "—" : v.toFixed(digits);
+}
+
+function openScoreDetail(sid) {
+  const sidKey = String(sid || "").trim();
+  const s = sharedReportData?.investment_scores?.[sidKey];
+  const name = getPreferredStockName(sidKey, s?.stock_name) || sidKey;
+  document.getElementById("score-detail-title").innerHTML =
+    `${escapeHtml(name)} <span class="badge-sid" style="font-size:.7rem">${escapeHtml(sidKey)}</span>`;
+  const body = document.getElementById("score-detail-body");
+  const klineBtn = document.getElementById("score-detail-kline");
+  klineBtn.onclick = () => {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("scoreDetailModal")).hide();
+    openKLineFromWatchlist(sidKey);
+  };
+
+  if (!s) {
+    body.innerHTML = `<div class="view-empty">本期未評分（不在流動性篩選後的股票池，或資料不足）</div>`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("scoreDetailModal")).show();
+    return;
+  }
+
+  const date = sharedReportData?.date || "";
+  const prevDate = s.prev_score_date || "";
+  const changes = s.component_changes || {};
+  const reasons = Array.isArray(s.change_reasons) ? s.change_reasons : [];
+
+  const head = `
+    <div class="sd-head">
+      <div class="sd-total">${fmtScoreValue(s.total_score)}<span class="score-unit">分</span></div>
+      <div class="sd-headchg">${fmtScoreDelta(s.score_change)}</div>
+      <div class="sd-sub">${escapeHtml(date)}${prevDate ? ` · 對照 ${escapeHtml(prevDate)}` : ""}</div>
+    </div>
+    <div class="sd-split">
+      <div>基本面 <b>${fmtScoreValue(s.fundamental_score_v2)}</b> ${fmtScoreDelta(s.fundamental_change)}</div>
+      <div>技術量能 <b>${fmtScoreValue(s.technical_volume_score)}</b> ${fmtScoreDelta(s.technical_change)}</div>
+    </div>`;
+
+  const reasonHtml = reasons.length
+    ? reasons.map(r => `
+        <div class="sd-reason">
+          <div>${escapeHtml(r.text || "")}</div>
+          <div class="sd-reason-contrib">${r.contribution != null ? fmtScoreDelta(r.contribution) : ""}</div>
+        </div>`).join("")
+    : `<div class="sd-reason"><div>${prevDate ? "各子項變化都小於 1 分" : "首次評分，尚無前期可對照"}</div></div>`;
+
+  const tableHtml = SCORE_COMPONENT_GROUPS.map(([groupLabel, cols]) => `
+    <div class="sd-sec">${escapeHtml(groupLabel)}</div>
+    <table class="sd-table">
+      ${cols.map(([col, label]) => {
+        const c = changes[col] || {};
+        const now = c.now != null ? c.now : s[col];
+        return `<tr>
+          <td>${escapeHtml(label)}</td>
+          <td class="num sd-prev">${c.prev != null ? fmtScoreValue(c.prev) : ""}</td>
+          <td class="num">${fmtScoreValue(now)}</td>
+          <td class="num">${fmtScoreDelta(c.delta)}</td>
+        </tr>`;
+      }).join("")}
+    </table>`).join("");
+
+  const trend = Array.isArray(s.score_trend) ? s.score_trend : [];
+  const trendHtml = trend.length
+    ? `<div class="sd-sec">近期總分</div>
+       <div class="sd-trend">${trend.map(pt =>
+         `<span>${escapeHtml(String(pt.date || "").slice(5))} <b>${fmtScoreValue(pt.score, 1)}</b></span>`).join("")}</div>`
+    : "";
+
+  body.innerHTML = `
+    ${head}
+    <div class="sd-sec">總分變化的來源</div>
+    ${reasonHtml}
+    ${tableHtml}
+    ${trendHtml}
+    <div class="sd-note">
+      「來源」欄的數字是該子項對總分變化的近似貢獻（子項差值 × 權重）。成交量、動能、法人籌碼、
+      融資融券為全市場百分位排名，其他股票的資料改變也會使排名移動。
+      分數是公開資料的統計整理，不是投資建議。
+    </div>`;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("scoreDetailModal")).show();
 }
 
 // 篩選列的「＋自選」：沿用自選頁的新增流程（方案上限與代號驗證都在那裡）
