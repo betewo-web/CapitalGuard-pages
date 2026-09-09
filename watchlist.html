@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="41">
+  <meta name="app-version" content="42">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=41" rel="stylesheet">
+  <link href="watchlist.css?v=42" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -2055,13 +2055,13 @@ function logout() {
 // 與其讓新鮮度取決於平台手勢，這裡統一排程，三個平台看到的資料一樣新。
 //
 //   • 只在分頁位於前景時輪詢（document.hidden 就停），省電也省 Supabase 用量
-//   • 盤中報價所有分頁一律每 15 秒拉一次（後端約 12 秒寫一輪，
-//     端到端落後才能壓在 40 秒內）；Inbox 較重，維持雷達 30 秒、
+//   • 盤中報價所有分頁一律每 5 秒拉一次（後端每 5 秒固定節奏寫一輪，
+//     端到端落後壓在 15 秒內）；Inbox 較重，維持雷達 30 秒、
 //     其他分頁 90 秒的節奏，不跟著報價一起抓
 //   • 收盤後只每 5 分鐘拉一次 Inbox（盤後提醒與每日報告會在這時候進來）
 //   • 從背景切回前景時無條件更新一次——手機把 PWA 凍結在背景是常態，
 //     回來的那一刻資料往往已經過期好幾個小時
-const QUOTE_MS_MARKET   = 15000;
+const QUOTE_MS_MARKET   = 5000;    // 監控每 5 秒寫一次 intraday_state，前端跟著 5 秒拉（一次輕量 REST）
 const INBOX_MS_LIVE_TAB = 30000;
 const INBOX_MS_MARKET   = 90000;
 const REFRESH_MS_CLOSED = 300000;
@@ -2550,7 +2550,7 @@ function signalIconSvg(row, size = 18) {
 // type 與參數名不同就會存出後端看不懂的規則（後端遇到未知型別一律不觸發）。
 // tier 決定何時評估；preview 標示前端能否在瀏覽器裡先算給使用者看。
 const RULE_TIERS = {
-  intraday:    { label: "盤中", note: "每 15 秒評估" },
+  intraday:    { label: "盤中", note: "每 5 秒評估" },
   technical:   { label: "技術", note: "盤中以即時價接日線計算" },
   chips:       { label: "籌碼", note: "盤後 T86 發布後" },
   fundamental: { label: "基本面", note: "每日分析後" },
@@ -2677,7 +2677,7 @@ function alertTypeLabel(row) {
   if (sig && SIGNAL_LABEL_MAP[sig]) return SIGNAL_LABEL_MAP[sig];
   if (String(row.source || "") === "rule") return "自訂規則";
   const t = String(row.title || "");
-  const m = t.match(/(跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|帶量上攻|帶量下殺|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
+  const m = t.match(/(跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|帶量上漲|帶量下跌|帶量上攻|帶量下殺|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
   if (m) return m[1].replace("達到自訂", "");
   if (String(row.source || "").startsWith("daily_report")) return "每日報告";
   return "通知";
@@ -3216,7 +3216,7 @@ function holdingBySid() {
 
 // 雷達與自選列共用的「離關卡多遠」：取現價之下最近的支撐、之上最近的壓力，
 // 距離以現價為分母、百分比表示。關卡來源兩個，同一套演算法（都排除今日 K 棒）：
-//   1. intraday_state.levels —— 監控當日凍結、訊號就是用它判斷的，跟報價一起每 15 秒到、
+//   1. intraday_state.levels —— 監控當日凍結、訊號就是用它判斷的，跟報價一起每 5 秒到、
 //      涵蓋每一檔自選股（需 migrate_intraday_levels.sql；沒跑時這裡是 null）
 //   2. 每日報告 stock_data[sid].levels —— 6MB 才到，而且只涵蓋進榜的股票；K 線圖畫的是這組
 // 以前只有 2：訊號都已經顯示「跌破支撐」了，關卡那行還在等報告檔、沒進榜的更是永遠沒有。
