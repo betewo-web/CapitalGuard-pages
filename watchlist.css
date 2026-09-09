@@ -1823,10 +1823,6 @@ body.has-bottom-nav .qa-panel {
 
 .inbox-item.unread .ib-title { font-weight: 700; }
 
-.inbox-item .ib-sev {
-	margin-top: 5px;
-}
-
 .inbox-item > .sig-ico {
 	margin-top: 1px;
 }
@@ -2276,7 +2272,7 @@ body.has-bottom-nav .qa-panel {
 	font-weight: 700;
 }
 
-/* 自製訊號圖示（signalIconSvg）：只用於盤中雷達卡，Inbox 列維持圓點燈號 */
+/* 自製訊號圖示（signalIconSvg）：雷達卡與通知匣列共用，通知匣不再放圓點燈號 */
 .sc-type .sig-ico {
 	flex-shrink: 0;
 	vertical-align: -4px;
