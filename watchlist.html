@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="39">
+  <meta name="app-version" content="40">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=39" rel="stylesheet">
+  <link href="watchlist.css?v=40" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -224,6 +224,7 @@
         <h2 class="view-title">📊 統計整理</h2>
         <span class="view-sub" id="scores-date"></span>
       </div>
+      <div class="disclaimer-note">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
       <div class="chip-row" id="scores-filters">
         <button class="filter-chip active" data-f="mine" onclick="setScoresFilter('mine')">我的自選</button>
         <button class="filter-chip" data-f="screen" onclick="setScoresFilter('screen')">自訂篩選</button>
@@ -240,11 +241,10 @@
       <div class="card panel-card">
         <div class="card-body p-0" id="scores-list"></div>
       </div>
-      <div class="small text-muted p-2" style="font-size:.72rem">
+      <div class="view-hint p-2">
         分數＝基本面 50%＋技術量能 50%，每日盤前更新；分頁只放摘要，
         <span class="hs-link" onclick="openDailyReportFromHistory()">看完整報告 →</span>
       </div>
-      <div class="disclaimer-note">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
     </section>
 
     <!-- ═══ ⚡ 盤中雷達 ═══ -->
@@ -3360,13 +3360,13 @@ function scoreRowHtml(sid, s, opts = {}) {
     ? `<button class="btn btn-sm btn-outline-light btn-ghost ms-1" onclick="event.stopPropagation();addStockFromScores('${escapeHtml(sid)}')">＋自選</button>`
     : "";
   return `
-    <div class="holding-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
+    <div class="holding-row score-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
       <div class="hr-left">
         <div class="hr-title">${escapeHtml(name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(sid)}</span>${addBtn}</div>
         <div class="hr-sid">${sub || "&nbsp;"}</div>
       </div>
       <div class="hr-right">
-        <div class="hr-price">${total != null ? total.toFixed(0) : "—"} ${chgHtml}</div>
+        <div class="hr-price">${total != null ? `${total.toFixed(0)}<span class="score-unit">分</span>` : "—"} ${chgHtml}</div>
         <div class="hr-sub">${q ? `${q.price.toFixed(2)} ${fmtChgHtml(q.changePct)}` : ""}</div>
       </div>
     </div>`;

@@ -1728,7 +1728,7 @@ body.has-bottom-nav .qa-panel {
 
 .view-sub {
 	font-size: 0.78rem;
-	color: var(--text-muted);
+	color: var(--text-1);
 }
 
 /* ── 訊號等級 ── */
@@ -2440,13 +2440,21 @@ body.has-bottom-nav .qa-panel {
 	max-width: 9rem;
 }
 .screen-tools input { width: 4.2rem; }
-.screen-note { width: 100%; font-size: 0.68rem; color: var(--text-2, #8a93a8); }
+/* 說明文字已經縮小，顏色就不能再用最淡的 --text-muted（#9292a3 在深底上約 4.6:1），
+   一律用 --text-1（#c9c9d4，約 10:1）。免責放在標題正下方，先看到再看分數。 */
+.screen-note { width: 100%; font-size: 0.7rem; color: var(--text-1); }
 .disclaimer-note {
-	font-size: 0.68rem;
-	line-height: 1.55;
-	color: var(--text-2, #8a93a8);
-	padding: 0.2rem 0.6rem 0.8rem;
+	font-size: 0.72rem;
+	line-height: 1.6;
+	color: var(--text-1);
+	padding: 0.15rem 0.6rem 0.6rem;
 }
+.view-hint { font-size: 0.74rem; line-height: 1.6; color: var(--text-1); }
+/* 統計列：分數是這一頁的主角，用最亮的字色與較大字級；輔助列（產業・備註）用 --text-1 */
+.holding-row.score-row .hr-price { color: var(--text-0); font-size: 1.12rem; }
+.holding-row.score-row .score-unit { font-size: 0.74rem; font-weight: 500; margin-left: 0.08rem; color: var(--text-1); }
+.holding-row.score-row .hr-sid,
+.holding-row.score-row .hr-sub { color: var(--text-1); }
 .dg-box { max-width: 380px; text-align: left; }
 .dg-msg p { margin: 0 0 0.6rem; }
 .dg-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--text-0); margin-top: 0.4rem; }
