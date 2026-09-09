@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="38">
+  <meta name="app-version" content="39">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=38" rel="stylesheet">
+  <link href="watchlist.css?v=39" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -215,13 +215,13 @@
       </div>
     </section>
 
-    <!-- ═══ 🏆 評分 ═══
+    <!-- ═══ 📊 統計 ═══
          取代原本的持股分頁：券商 API 尚未對使用者開放，持股全靠手填、多數人是空的；
          每日評分才是產品的核心產出，卻只有一個開新視窗的連結。持股資訊沒有消失，
          併進自選列（損益、距價位）與雷達列（「持」標記）。 -->
     <section id="view-scores" class="app-view">
       <div class="view-head">
-        <h2 class="view-title">🏆 評分</h2>
+        <h2 class="view-title">📊 統計整理</h2>
         <span class="view-sub" id="scores-date"></span>
       </div>
       <div class="chip-row" id="scores-filters">
@@ -326,7 +326,7 @@
     <span class="bn-icon">🏠</span><span>首頁</span>
   </button>
   <button class="bottom-nav-item" data-tab="scores" onclick="switchTab('scores')">
-    <span class="bn-icon">🏆</span><span>評分</span>
+    <span class="bn-icon">📊</span><span>統計</span>
   </button>
   <button class="bottom-nav-item" data-tab="live" onclick="switchTab('live')">
     <span class="bn-icon">⚡</span><span>盤中</span>
@@ -3260,7 +3260,7 @@ function holdingEntries() {
   });
 }
 
-// ── 🏆 評分頁 ────────────────────────────────────────────────────
+// ── 📊 統計頁（view-scores）────────────────────────────────────────────────────
 // 資料全在 sharedReportData（登入後載入的每日報告 JSON）：
 //   investment_scores[sid] → total_score / score_change / fundamental_score_v2 /
 //                            technical_volume_score / fundamental_change / technical_change / industry_category
