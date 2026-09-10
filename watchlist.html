@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="46">
+  <meta name="app-version" content="47">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=46" rel="stylesheet">
+  <link href="watchlist.css?v=47" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -3221,7 +3221,7 @@ function renderHome() {
       <div class="home-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
         <span class="hr-name">${escapeHtml(name)}</span>
         <span class="badge-sid" style="font-size:.68rem">${escapeHtml(sid)}</span>
-        <span class="hr-meta">${q ? q.price.toFixed(2) : ""}</span>
+        <span class="hr-meta">${q ? fmtLevel(q.price) : ""}</span>
         ${q ? fmtChgHtml(q.changePct) : ""}
         ${sigDot}
       </div>`;
@@ -3269,6 +3269,71 @@ function holdingBySid() {
 const RADAR_NEAR_PCT = 1.0;   // 距關卡 1% 內算「逼近」，與後端 MONITOR_NEAR_PCT 預設一致
 // 訊號自帶的 level 是「關卡價」的只有支撐／壓力類（爆量的 level 是成交量、漲跌停是板價）
 const RADAR_LEVEL_KINDS = ["break_sup", "near_sup", "reclaim_sup", "break_res", "near_res"];
+
+// 列表列的價位一律不顯示小數：關卡、均線、現價並排時，小數點吃掉的寬度比它帶來的
+// 資訊多。要精確到分請看 K 線視窗——那裡仍是兩位小數。
+function fmtLevel(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n).toLocaleString() : "—";
+}
+
+// ── 均線位置 ────────────────────────────────────────────────────────────────
+// 數字取自報告的 investment_scores[sid].ma20/60/120/240，那正是趨勢分數的原料
+// （scoring/investment_score.py 的 moving_averages）。前端不重算——重算就是
+// 第二份指標實作，遲早跟後端算出不同結果。
+const MA_PERIODS = [[20, "月線"], [60, "季線"], [120, "半年線"], [240, "年線"]];
+
+function maPositions(sid, price) {
+  const s = sharedReportData?.investment_scores?.[sid];
+  if (!s || !(price > 0)) return [];
+  const out = [];
+  for (const [n, label] of MA_PERIODS) {
+    const v = Number(s["ma" + n]);
+    if (Number.isFinite(v) && v > 0) out.push({ n, label, value: v, pct: (price - v) / price * 100 });
+  }
+  return out;
+}
+
+// ── 位置條：現價與支撐／壓力／均線的相對位置 ───────────────────────────────
+// 現價固定在正中央，其他標記依「離現價幾 %」左右擺，用對數刻度而不是線性：
+// 實測 35 檔自選股，最近壓力的中位距離只有 6.5%，但最近支撐是 33.9%、年線 49.1%
+// ——線性窗會把近處全部擠成一團。對數窗 ±40% 涵蓋 75% 的標記，距離
+// 2%/5%/10%/20% 分別落在 3.2/8.0/15.6/29.8 px，都分得開；超出窗的貼在邊緣並降
+// 透明度，表示「還很遠」。
+// 這是文字的補充編碼、不是唯一來源（數字就在下一行），所以不是色彩單獨編碼。
+const STRIP_W = 116, STRIP_H = 14, STRIP_SPAN = 0.40;
+
+function positionStripSvg(price, lv, mas) {
+  if (!(price > 0)) return "";
+  const mid = STRIP_W / 2, half = mid - 3;
+  const k = half / Math.log(1 + STRIP_SPAN);
+  const tick = (v, color, h) => {
+    const off = k * Math.log(v / price);
+    const x = (mid + Math.max(-half, Math.min(half, off))).toFixed(1);
+    const far = Math.abs(off) > half ? ' opacity=".35"' : "";
+    return `<line x1="${x}" y1="${STRIP_H / 2 - h}" x2="${x}" y2="${STRIP_H / 2 + h}"`
+      + ` stroke="${color}" stroke-width="2" stroke-linecap="round"${far}/>`;
+  };
+  const tips = [];
+  let g = `<line x1="3" y1="${STRIP_H / 2}" x2="${STRIP_W - 3}" y2="${STRIP_H / 2}"`
+    + ` stroke="rgba(146,146,163,.3)" stroke-width="1"/>`;
+  // 支撐／壓力先畫、畫滿高：它們是這條的主角，顏色也各自有既有語意。
+  // 均線後畫但畫矮，落在支撐上面時兩者都還看得到（矮的那根蓋不住高的兩端）。
+  // 四條均線刻意同高同色——14px 高的圖形塞不下四種可辨識的高度，硬編只會變裝飾；
+  // 是哪一條由下一行的文字與 title 說明，這裡呈現的是「均線帶」的位置。
+  if (lv.support != null) { g += tick(lv.support, "#26a69a", 6); tips.push(`支撐 ${fmtLevel(lv.support)}`); }
+  if (lv.resistance != null) { g += tick(lv.resistance, "#ef5350", 6); tips.push(`壓力 ${fmtLevel(lv.resistance)}`); }
+  mas.forEach(m => {
+    g += tick(m.value, "rgba(191,208,238,.65)", 3.5);
+    tips.push(`${m.label} ${fmtLevel(m.value)}`);
+  });
+  if (!tips.length) return "";
+  // 現價最後畫、外圍先描一圈底色，與任何標記重疊時都還看得見
+  g += `<line x1="${mid}" y1="1" x2="${mid}" y2="${STRIP_H - 1}" stroke="#0d1424" stroke-width="4"/>`
+    + `<line x1="${mid}" y1="1" x2="${mid}" y2="${STRIP_H - 1}" stroke="#e8eefc" stroke-width="2"/>`;
+  return `<svg class="pos-strip" width="${STRIP_W}" height="${STRIP_H}" viewBox="0 0 ${STRIP_W} ${STRIP_H}"`
+    + ` aria-hidden="true"><title>現價 ${fmtLevel(price)}／${escapeHtml(tips.join("、"))}</title>${g}</svg>`;
+}
 
 function nearestLevels(sid, price) {
   const lv = intradayQuoteMap?.[sid]?.levels || sharedReportData?.stock_data?.[sid]?.levels;
@@ -3430,7 +3495,7 @@ function scoreRowHtml(sid, s, opts = {}) {
       </div>
       <div class="hr-right">
         <div class="hr-price">${total != null ? `${total.toFixed(0)}<span class="score-unit">分</span>` : "—"} ${chgHtml}</div>
-        <div class="hr-sub">${q ? `${q.price.toFixed(2)} ${fmtChgHtml(q.changePct)}` : ""}</div>
+        <div class="hr-sub">${q ? `${fmtLevel(q.price)} ${fmtChgHtml(q.changePct)}` : ""}</div>
       </div>
     </div>`;
 }
@@ -3516,6 +3581,25 @@ function fmtScoreValue(value, digits = 0) {
   return (value == null || !Number.isFinite(v)) ? "—" : v.toFixed(digits);
 }
 
+// 趨勢分數（技術量能 20%＝總分 10%）完全由 MA20/60/120/240 算出：現價是否在每條
+// 之上、每條是否比 20 天前高、四條是否由短到長遞減排列，取平均。表格只給分數看不
+// 出原料，這一段把四條均線的實際位置列出來。只描述資料，不加判斷詞。
+function maExplainHtml(sid, s) {
+  const price = Number(getQuote(sid)?.price ?? s.close);
+  const mas = maPositions(sid, price);
+  if (!mas.length) return "";
+  const items = mas.map(m =>
+    `<span class="sd-ma-item">${escapeHtml(m.label)} <b>${fmtLevel(m.value)}</b>`
+    + `<span class="${m.pct >= 0 ? "chg-up" : "chg-down"}">`
+    + `${m.pct >= 0 ? "+" : "−"}${Math.abs(m.pct).toFixed(1)}%</span></span>`).join("");
+  return `<div class="sd-ma">
+    <div class="sd-ma-head">趨勢分的原料　現價 ${fmtLevel(price)}</div>
+    <div class="sd-ma-list">${items}</div>
+    <div class="sd-ma-note">百分比是現價相對該均線的距離。趨勢分數取「現價是否在各均線之上」、
+      「各均線是否高於 20 天前」與「四條是否由短到長遞減排列」三組條件的平均。</div>
+  </div>`;
+}
+
 function openScoreDetail(sid) {
   const sidKey = String(sid || "").trim();
   const s = sharedReportData?.investment_scores?.[sidKey];
@@ -3572,7 +3656,8 @@ function openScoreDetail(sid) {
           <td class="num">${fmtScoreDelta(c.delta)}</td>
         </tr>`;
       }).join("")}
-    </table>`).join("");
+    </table>
+    ${groupLabel.startsWith("技術量能") ? maExplainHtml(sidKey, s) : ""}`).join("");
 
   const trend = Array.isArray(s.score_trend) ? s.score_trend : [];
   const trendHtml = trend.length
@@ -3687,16 +3772,18 @@ function _signalLevelFromAlert(row) {
   return Number.isFinite(level) ? level : null;
 }
 
-function _signalLevelLabel(signal, level) {
+// compact=true 給列表列用（整數）；K 線視窗維持兩位小數，那裡是看精確數字的地方
+function _signalLevelLabel(signal, level, compact = false) {
   if (level == null || !Number.isFinite(Number(level))) return "";
   const value = Number(level);
+  const p = compact ? fmtLevel(value) : value.toFixed(2);
   if (signal === "volume_spike") return `成交量 ${Math.round(value).toLocaleString()} 張`;
-  if (["break_sup", "near_sup", "reclaim_sup"].includes(signal)) return `支撐 ${value.toFixed(2)}`;
-  if (["break_res", "near_res"].includes(signal)) return `壓力 ${value.toFixed(2)}`;
-  if (["target_high", "target_low"].includes(signal)) return `目標價 ${value.toFixed(2)}`;
-  if (signal === "limit_up") return `漲停價 ${value.toFixed(2)}`;
-  if (signal === "limit_down") return `跌停價 ${value.toFixed(2)}`;
-  return `關卡 ${value.toFixed(2)}`;
+  if (["break_sup", "near_sup", "reclaim_sup"].includes(signal)) return `支撐 ${p}`;
+  if (["break_res", "near_res"].includes(signal)) return `壓力 ${p}`;
+  if (["target_high", "target_low"].includes(signal)) return `目標價 ${p}`;
+  if (signal === "limit_up") return `漲停價 ${p}`;
+  if (signal === "limit_down") return `跌停價 ${p}`;
+  return `關卡 ${p}`;
 }
 
 // 雷達是「狀態驅動」而不是「事件驅動」：每檔自選股永遠有一列——現價（intraday_state，
@@ -3723,6 +3810,7 @@ function renderLive() {
     return {
       sid, q, iq, lv, active, today, nearPct,
       sev: active ? inferSeverity(active) : null,
+      ma: maPositions(sid, price),
       name: getPreferredStockName(sid, r.stock_name) || sid,
       holding: holdings.get(sid) || null,
     };
@@ -3762,13 +3850,18 @@ function renderLive() {
   listEl.innerHTML = `<div class="card panel-card"><div class="card-body p-0">` + rows.map(x => {
     const tags = [];
     if (x.active) {
-      const lvl = x.iq.level != null ? ` ${Number(x.iq.level).toFixed(2)}` : "";
+      const lvl = x.iq.level != null ? ` ${fmtLevel(x.iq.level)}` : "";
       tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${x.sev}"></i>${escapeHtml(alertTypeLabel(x.active))}${lvl}</span>`);
     }
     if (x.holding) tags.push(`<span class="wl-signal-badge wl-tag-holding">持</span>`);
     const dist = [];
-    if (x.lv.resPct != null) dist.push(`壓力 ${x.lv.resistance.toFixed(2)}（+${x.lv.resPct.toFixed(1)}%）`);
-    if (x.lv.supPct != null) dist.push(`支撐 ${x.lv.support.toFixed(2)}（−${x.lv.supPct.toFixed(1)}%）`);
+    if (x.lv.resPct != null) dist.push(`壓力 ${fmtLevel(x.lv.resistance)}（+${x.lv.resPct.toFixed(1)}%）`);
+    if (x.lv.supPct != null) dist.push(`支撐 ${fmtLevel(x.lv.support)}（−${x.lv.supPct.toFixed(1)}%）`);
+    // 只列離現價最近的那一條均線：四條全列一定換行，其餘的位置交給位置條表示
+    if (x.ma.length) {
+      const near = x.ma.reduce((a, b) => Math.abs(b.pct) < Math.abs(a.pct) ? b : a);
+      dist.push(`${near.label} ${fmtLevel(near.value)}（${near.pct >= 0 ? "+" : "−"}${Math.abs(near.pct).toFixed(1)}%）`);
+    }
     const nearCls = (!x.active && x.nearPct <= RADAR_NEAR_PCT) ? " radar-near" : "";
     // 沒有關卡時分三種：訊號本身帶關卡就先顯示它（不會再出現「跌破支撐」旁邊寫「無關卡資料」）、
     // 報告檔還在路上就說載入中、兩個來源都沒有才是真的沒有
@@ -3778,8 +3871,8 @@ function renderLive() {
     // 典型情境：下面那行寫著「今日 1 則 · 突破壓力 11:05」，上面卻是「無關卡資料」
     const todayLv = x.today.map(r => [_signalKindFromAlert(r), _signalLevelFromAlert(r)])
       .find(([k, l]) => RADAR_LEVEL_KINDS.includes(k) && l != null);
-    if (!dist.length && levelKind) distHtml = `${escapeHtml(_signalLevelLabel(x.active.signal, x.iq.level))}（訊號關卡）`;
-    else if (!dist.length && todayLv) distHtml = `${escapeHtml(_signalLevelLabel(todayLv[0], todayLv[1]))}（今日訊號）`;
+    if (!dist.length && levelKind) distHtml = `${escapeHtml(_signalLevelLabel(x.active.signal, x.iq.level, true))}（訊號關卡）`;
+    else if (!dist.length && todayLv) distHtml = `${escapeHtml(_signalLevelLabel(todayLv[0], todayLv[1], true))}（今日訊號）`;
     else if (!dist.length && !sharedReportData && !x.iq?.levels) distHtml = "關卡載入中…";
     else if (!dist.length) distHtml = "無關卡資料";
     const todayHtml = x.today.length
@@ -3789,11 +3882,12 @@ function renderLive() {
       <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${escapeHtml(x.sid)}')">
         <div class="hr-left">
           <div class="hr-title">${escapeHtml(x.name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(x.sid)}</span> ${tags.join(" ")}</div>
+          ${positionStripSvg(x.q ? x.q.price : null, x.lv, x.ma)}
           <div class="hr-sid">${distHtml}</div>
           <div class="hr-sid">${todayHtml}</div>
         </div>
         <div class="hr-right">
-          <div class="hr-price">${x.q ? x.q.price.toFixed(2) : "—"}</div>
+          <div class="hr-price">${x.q ? fmtLevel(x.q.price) : "—"}</div>
           <div class="hr-sub">${x.q ? fmtChgHtml(x.q.changePct) : "無報價"}</div>
         </div>
       </div>`;
@@ -4295,7 +4389,7 @@ function renderWatchlist(rows) {
     const q = getQuote(sid);
     const sig = latestSignalOf(sid);
     const quoteLine = q
-      ? `<div class="wl-quote"><span class="wq-price">${q.price.toFixed(2)}</span>${fmtChgHtml(q.changePct)}</div>`
+      ? `<div class="wl-quote"><span class="wq-price">${fmtLevel(q.price)}</span>${fmtChgHtml(q.changePct)}</div>`
       : `<div class="wl-quote wl-quote-idle">—</div>`;
 
     // 標籤用等級圓點而不是 emoji：同一個等級在全站都是同一顆顏色

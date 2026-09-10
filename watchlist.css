@@ -2466,6 +2466,53 @@ body.has-bottom-nav .qa-panel {
 .dg-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--text-0); margin-top: 0.4rem; }
 .dg-check input { width: 1.05rem; height: 1.05rem; }
 
+/* ── 位置條：現價與支撐／壓力／均線的相對位置（雷達列） ──
+   高度只有 14px，比一行 .hr-sid（約 16px）還矮，加進列裡不會改變版面節奏。
+   overflow 不設 hidden——標記本來就貼在 viewBox 內，設了反而在某些
+   WebKit 版本上把 stroke-linecap 的圓頭切掉。 */
+.pos-strip {
+	display: block;
+	margin: 0.2rem 0 0.12rem;
+	max-width: 100%;
+}
+
+/* ── 分數明細：趨勢分的原料（四條均線的位置） ── */
+.sd-ma {
+	margin: 0.1rem 0 0.55rem;
+	padding: 0.5rem 0.6rem;
+	border-radius: 10px;
+	border: 1px solid rgba(121, 157, 255, 0.22);
+	background: rgba(24, 38, 74, 0.42);
+}
+
+.sd-ma-head {
+	font-size: 0.72rem;
+	color: var(--text-1);
+	margin-bottom: 0.3rem;
+}
+
+.sd-ma-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.3rem 0.7rem;
+	font-size: 0.76rem;
+	color: var(--text-0);
+}
+
+.sd-ma-item {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.25rem;
+	white-space: nowrap;
+}
+
+.sd-ma-note {
+	margin-top: 0.35rem;
+	font-size: 0.68rem;
+	line-height: 1.45;
+	color: var(--text-muted);
+}
+
 /* ── 雷達列：逼近關卡（±1% 內）的列左緣一條藍線 ── */
 .holding-row.radar-near { box-shadow: inset 3px 0 0 var(--sig-blue); }
 
