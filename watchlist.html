@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="49">
+  <meta name="app-version" content="50">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=49" rel="stylesheet">
+  <link href="watchlist.css?v=50" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -3820,19 +3820,19 @@ function renderLive() {
       tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${x.sev}"></i>${escapeHtml(alertTypeLabel(x.active))}${lvl}</span>`);
     }
     if (x.holding) tags.push(`<span class="wl-signal-badge wl-tag-holding">持</span>`);
-    // 使用者定案的精簡格式（2026-09-10）：
-    //   壓(193)距2.6% · 撐(172)距8.7%
-    //   月(184)之上 2.3% · 季(200)之下 1%
-    // 壓力／支撐只講距離（方向由字義決定：壓力必在上、支撐必在下）；均線要講
-    // 之上／之下，因為現價在均線的哪一邊才是重點。
+    // 使用者定案的精簡格式（2026-09-11）：
+    //   壓(193) 距離2.6% · 撐(172) 距離8.7%
+    //   月(184) 之上2.3% · 季(200) 之下1%
+    // 括號後空一格，關係詞與數字之間不空。壓力／支撐只講距離（方向由字義決定：
+    // 壓力必在上、支撐必在下）；均線要講之上／之下，現價在均線的哪一邊才是重點。
     const dist = [];
-    if (x.lv.resPct != null) dist.push(`壓(${fmtLevel(x.lv.resistance)})距${fmtPct(x.lv.resPct)}%`);
-    if (x.lv.supPct != null) dist.push(`撐(${fmtLevel(x.lv.support)})距${fmtPct(x.lv.supPct)}%`);
+    if (x.lv.resPct != null) dist.push(`壓(${fmtLevel(x.lv.resistance)}) 距離${fmtPct(x.lv.resPct)}%`);
+    if (x.lv.supPct != null) dist.push(`撐(${fmtLevel(x.lv.support)}) 距離${fmtPct(x.lv.supPct)}%`);
     // 均線行只放月線與季線：半年線、年線離現價中位數 20%／49%，放進來只是佔位，
     // 四條全列也一定換行。要看全部四條，分數明細裡有。
     const MA_SHORT = { 20: "月", 60: "季" };
     const maLine = x.ma.filter(m => MA_SHORT[m.n])
-      .map(m => `${MA_SHORT[m.n]}(${fmtLevel(m.value)})${m.pct >= 0 ? "之上" : "之下"} ${fmtPct(m.pct)}%`)
+      .map(m => `${MA_SHORT[m.n]}(${fmtLevel(m.value)}) ${m.pct >= 0 ? "之上" : "之下"}${fmtPct(m.pct)}%`)
       .join(" · ");
     const nearCls = (!x.active && x.nearPct <= RADAR_NEAR_PCT) ? " radar-near" : "";
     // 沒有關卡時分三種：訊號本身帶關卡就先顯示它（不會再出現「跌破支撐」旁邊寫「無關卡資料」）、
