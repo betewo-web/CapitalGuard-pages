@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="44">
+  <meta name="app-version" content="45">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=44" rel="stylesheet">
+  <link href="watchlist.css?v=45" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -2619,6 +2619,13 @@ const RULE_CATALOG = [
       { k: "slow", label: "慢線", type: "number", def: 20, min: 3, max: 240 },
       { k: "dir", label: "方向", type: "select", def: "up",
         options: [["up", "黃金交叉（向上）"], ["down", "死亡交叉（向下）"]] },
+    ] },
+  { type: "price_vs_ma", tier: "technical", name: "股價站上／跌破均線",
+    params: [
+      { k: "period", label: "均線", type: "select", def: 20,
+        options: [[5, "5 日（週線）"], [10, "10 日"], [20, "20 日（月線）"], [60, "60 日（季線）"]] },
+      { k: "dir", label: "方向", type: "select", def: "up",
+        options: [["up", "站上（向上穿越）"], ["down", "跌破（向下穿越）"]] },
     ] },
   { type: "rsi_above", tier: "technical", name: "RSI 高於",
     params: [{ k: "value", label: "RSI", type: "number", def: 70, min: 1, max: 99 }] },
