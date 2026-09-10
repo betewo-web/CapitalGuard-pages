@@ -2466,16 +2466,6 @@ body.has-bottom-nav .qa-panel {
 .dg-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--text-0); margin-top: 0.4rem; }
 .dg-check input { width: 1.05rem; height: 1.05rem; }
 
-/* ── 位置條：現價與支撐／壓力／均線的相對位置（雷達列） ──
-   高度只有 14px，比一行 .hr-sid（約 16px）還矮，加進列裡不會改變版面節奏。
-   overflow 不設 hidden——標記本來就貼在 viewBox 內，設了反而在某些
-   WebKit 版本上把 stroke-linecap 的圓頭切掉。 */
-.pos-strip {
-	display: block;
-	margin: 0.2rem 0 0.12rem;
-	max-width: 100%;
-}
-
 /* ── 分數明細：趨勢分的原料（四條均線的位置） ── */
 .sd-ma {
 	margin: 0.1rem 0 0.55rem;

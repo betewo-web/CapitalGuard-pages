@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="47">
+  <meta name="app-version" content="48">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=47" rel="stylesheet">
+  <link href="watchlist.css?v=48" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -3294,47 +3294,6 @@ function maPositions(sid, price) {
   return out;
 }
 
-// ── 位置條：現價與支撐／壓力／均線的相對位置 ───────────────────────────────
-// 現價固定在正中央，其他標記依「離現價幾 %」左右擺，用對數刻度而不是線性：
-// 實測 35 檔自選股，最近壓力的中位距離只有 6.5%，但最近支撐是 33.9%、年線 49.1%
-// ——線性窗會把近處全部擠成一團。對數窗 ±40% 涵蓋 75% 的標記，距離
-// 2%/5%/10%/20% 分別落在 3.2/8.0/15.6/29.8 px，都分得開；超出窗的貼在邊緣並降
-// 透明度，表示「還很遠」。
-// 這是文字的補充編碼、不是唯一來源（數字就在下一行），所以不是色彩單獨編碼。
-const STRIP_W = 116, STRIP_H = 14, STRIP_SPAN = 0.40;
-
-function positionStripSvg(price, lv, mas) {
-  if (!(price > 0)) return "";
-  const mid = STRIP_W / 2, half = mid - 3;
-  const k = half / Math.log(1 + STRIP_SPAN);
-  const tick = (v, color, h) => {
-    const off = k * Math.log(v / price);
-    const x = (mid + Math.max(-half, Math.min(half, off))).toFixed(1);
-    const far = Math.abs(off) > half ? ' opacity=".35"' : "";
-    return `<line x1="${x}" y1="${STRIP_H / 2 - h}" x2="${x}" y2="${STRIP_H / 2 + h}"`
-      + ` stroke="${color}" stroke-width="2" stroke-linecap="round"${far}/>`;
-  };
-  const tips = [];
-  let g = `<line x1="3" y1="${STRIP_H / 2}" x2="${STRIP_W - 3}" y2="${STRIP_H / 2}"`
-    + ` stroke="rgba(146,146,163,.3)" stroke-width="1"/>`;
-  // 支撐／壓力先畫、畫滿高：它們是這條的主角，顏色也各自有既有語意。
-  // 均線後畫但畫矮，落在支撐上面時兩者都還看得到（矮的那根蓋不住高的兩端）。
-  // 四條均線刻意同高同色——14px 高的圖形塞不下四種可辨識的高度，硬編只會變裝飾；
-  // 是哪一條由下一行的文字與 title 說明，這裡呈現的是「均線帶」的位置。
-  if (lv.support != null) { g += tick(lv.support, "#26a69a", 6); tips.push(`支撐 ${fmtLevel(lv.support)}`); }
-  if (lv.resistance != null) { g += tick(lv.resistance, "#ef5350", 6); tips.push(`壓力 ${fmtLevel(lv.resistance)}`); }
-  mas.forEach(m => {
-    g += tick(m.value, "rgba(191,208,238,.65)", 3.5);
-    tips.push(`${m.label} ${fmtLevel(m.value)}`);
-  });
-  if (!tips.length) return "";
-  // 現價最後畫、外圍先描一圈底色，與任何標記重疊時都還看得見
-  g += `<line x1="${mid}" y1="1" x2="${mid}" y2="${STRIP_H - 1}" stroke="#0d1424" stroke-width="4"/>`
-    + `<line x1="${mid}" y1="1" x2="${mid}" y2="${STRIP_H - 1}" stroke="#e8eefc" stroke-width="2"/>`;
-  return `<svg class="pos-strip" width="${STRIP_W}" height="${STRIP_H}" viewBox="0 0 ${STRIP_W} ${STRIP_H}"`
-    + ` aria-hidden="true"><title>現價 ${fmtLevel(price)}／${escapeHtml(tips.join("、"))}</title>${g}</svg>`;
-}
-
 function nearestLevels(sid, price) {
   const lv = intradayQuoteMap?.[sid]?.levels || sharedReportData?.stock_data?.[sid]?.levels;
   const none = { support: null, resistance: null, supPct: null, resPct: null };
@@ -3854,14 +3813,16 @@ function renderLive() {
       tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${x.sev}"></i>${escapeHtml(alertTypeLabel(x.active))}${lvl}</span>`);
     }
     if (x.holding) tags.push(`<span class="wl-signal-badge wl-tag-holding">持</span>`);
+    // 措辭一律從現價出發：「壓力 193（之下 2.6%）」＝現價在壓力之下 2.6%，
+    // 「支撐 172（之上 8.7%）」＝現價在支撐之上 8.7%。均線同一套寫法，另起一行。
     const dist = [];
-    if (x.lv.resPct != null) dist.push(`壓力 ${fmtLevel(x.lv.resistance)}（+${x.lv.resPct.toFixed(1)}%）`);
-    if (x.lv.supPct != null) dist.push(`支撐 ${fmtLevel(x.lv.support)}（−${x.lv.supPct.toFixed(1)}%）`);
-    // 只列離現價最近的那一條均線：四條全列一定換行，其餘的位置交給位置條表示
-    if (x.ma.length) {
-      const near = x.ma.reduce((a, b) => Math.abs(b.pct) < Math.abs(a.pct) ? b : a);
-      dist.push(`${near.label} ${fmtLevel(near.value)}（${near.pct >= 0 ? "+" : "−"}${Math.abs(near.pct).toFixed(1)}%）`);
-    }
+    if (x.lv.resPct != null) dist.push(`壓力 ${fmtLevel(x.lv.resistance)}（之下 ${x.lv.resPct.toFixed(1)}%）`);
+    if (x.lv.supPct != null) dist.push(`支撐 ${fmtLevel(x.lv.support)}（之上 ${x.lv.supPct.toFixed(1)}%）`);
+    // 均線行只放月線與季線：半年線、年線離現價中位數 20%／49%，放進來只是佔位，
+    // 四條全列也一定換行。要看全部四條，分數明細裡有。
+    const maLine = x.ma.filter(m => m.n === 20 || m.n === 60)
+      .map(m => `${m.label} ${fmtLevel(m.value)}（${m.pct >= 0 ? "之上" : "之下"} ${Math.abs(m.pct).toFixed(1)}%）`)
+      .join(" · ");
     const nearCls = (!x.active && x.nearPct <= RADAR_NEAR_PCT) ? " radar-near" : "";
     // 沒有關卡時分三種：訊號本身帶關卡就先顯示它（不會再出現「跌破支撐」旁邊寫「無關卡資料」）、
     // 報告檔還在路上就說載入中、兩個來源都沒有才是真的沒有
@@ -3882,8 +3843,8 @@ function renderLive() {
       <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${escapeHtml(x.sid)}')">
         <div class="hr-left">
           <div class="hr-title">${escapeHtml(x.name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(x.sid)}</span> ${tags.join(" ")}</div>
-          ${positionStripSvg(x.q ? x.q.price : null, x.lv, x.ma)}
           <div class="hr-sid">${distHtml}</div>
+          ${maLine ? `<div class="hr-sid">${maLine}</div>` : ""}
           <div class="hr-sid">${todayHtml}</div>
         </div>
         <div class="hr-right">
