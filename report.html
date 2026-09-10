@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="app-version" content="45">
+<meta name="app-version" content="46">
 <title>台股每日分析報告</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -707,10 +707,13 @@ function _buildOption(pd, levels, period) {
   });
   const defBars = period==='monthly'?5760:period==='weekly'?720:90;
   const dzStart = Math.max(0, Math.round(100 - 100*defBars/Math.max(n,1)));
+  // 月K 幾乎不會有 60 根，ma60 整條是 null——沒有值就不進圖例，免得留一個空項目
+  const hasMa60 = Array.isArray(pd.ma60) && pd.ma60.some(v => v !== null && v !== undefined);
   return {
     animation:false, backgroundColor:'#fff',
     grid:[{left:55,right:45,top:40,height:'56%'},{left:55,right:45,top:'72%',height:'18%'}],
-    legend:{data:['日K','MA5','MA10','MA20','成交量(張)'],top:4,itemWidth:12,textStyle:{fontSize:10}},
+    legend:{data:hasMa60?['日K','MA5','MA10','MA20','MA60','成交量(張)']
+                        :['日K','MA5','MA10','MA20','成交量(張)'],top:4,itemWidth:12,textStyle:{fontSize:10}},
     tooltip:{trigger:'axis',axisPointer:{type:'cross'},backgroundColor:'rgba(255,255,255,.95)',
       formatter:function(p){
         if(!p.length) return '';
@@ -734,6 +737,7 @@ function _buildOption(pd, levels, period) {
       {name:'MA5', type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma5 ||[],symbol:'none',lineStyle:{width:1.2,color:'#ff9800'}},
       {name:'MA10',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma10||[],symbol:'none',lineStyle:{width:1.2,color:'#2196f3'}},
       {name:'MA20',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma20||[],symbol:'none',lineStyle:{width:1.5,color:'#9c27b0'}},
+      ...(hasMa60?[{name:'MA60',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma60,symbol:'none',lineStyle:{width:1.8,color:'#6d4cff'}}]:[]),
       {name:'成交量(張)',type:'bar',xAxisIndex:1,yAxisIndex:1,data:volData,barMaxWidth:8}
     ]
   };

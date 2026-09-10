@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="45">
+  <meta name="app-version" content="46">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=45" rel="stylesheet">
+  <link href="watchlist.css?v=46" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -5186,19 +5186,22 @@ function processWatchlistFinMindRaw(raw, sid, name, industry) {
   const ma5 = maWatchlist(closes, 5);
   const ma10 = maWatchlist(closes, 10);
   const ma20 = maWatchlist(closes, 20);
-  const daily = { dates, ohlcv, ma5, ma10, ma20 };
+  const ma60 = maWatchlist(closes, 60);
+  const daily = { dates, ohlcv, ma5, ma10, ma20, ma60 };
 
   const weeklyAgg = aggWatchlist(raw, "W");
   const weeklyCloses = weeklyAgg.ohlcv.map(d => d[3]);
   weeklyAgg.ma5 = maWatchlist(weeklyCloses, 5);
   weeklyAgg.ma10 = maWatchlist(weeklyCloses, 10);
   weeklyAgg.ma20 = maWatchlist(weeklyCloses, 20);
+  weeklyAgg.ma60 = maWatchlist(weeklyCloses, 60);
 
   const monthlyAgg = aggWatchlist(raw, "M");
   const monthlyCloses = monthlyAgg.ohlcv.map(d => d[3]);
   monthlyAgg.ma5 = maWatchlist(monthlyCloses, 5);
   monthlyAgg.ma10 = maWatchlist(monthlyCloses, 10);
   monthlyAgg.ma20 = maWatchlist(monthlyCloses, 20);
+  monthlyAgg.ma60 = maWatchlist(monthlyCloses, 60);
 
   const dimDetails = computeWatchlistDimDetails(daily);
   const scores = {};
@@ -5215,7 +5218,7 @@ function processWatchlistFinMindRaw(raw, sid, name, industry) {
     weekly: weeklyAgg,
     monthly: monthlyAgg,
     chips: {},
-    levels: computeWatchlistLevels(raw, ma5, ma20, ma20),
+    levels: computeWatchlistLevels(raw, ma5, ma10, ma20, ma60),
   };
 }
 
@@ -5262,7 +5265,7 @@ function aggWatchlist(raw, freq) {
   };
 }
 
-function computeWatchlistLevels(raw, ma5, ma20, ma60) {
+function computeWatchlistLevels(raw, ma5, ma10, ma20, ma60) {
   const w = 5;
   const res = [];
   const sup = [];
@@ -5303,6 +5306,7 @@ function computeWatchlistLevels(raw, ma5, ma20, ma60) {
 
   const ma = {};
   if (ma5[n - 1]) ma.MA5 = ma5[n - 1];
+  if (ma10[n - 1]) ma.MA10 = ma10[n - 1];
   if (ma20[n - 1]) ma.MA20 = ma20[n - 1];
   if (ma60[n - 1]) ma.MA60 = ma60[n - 1];
 
@@ -5581,7 +5585,12 @@ function buildKLineOption(pd, chips, levels, period) {
     };
   });
 
-  const legendData = ["K線", "MA5", "MA10", "MA20", "成交量(張)"];
+  // 月K 幾乎不會有 60 根，ma60 整條是 null——沒有值就不進圖例，
+  // 免得出現一個永遠空白的項目
+  const hasMa60 = Array.isArray(pd.ma60) && pd.ma60.some(v => v !== null && v !== undefined);
+  const legendData = hasMa60
+    ? ["K線", "MA5", "MA10", "MA20", "MA60", "成交量(張)"]
+    : ["K線", "MA5", "MA10", "MA20", "成交量(張)"];
   if (hasChips) {
     const chipLabel = currentChipsView === "foreign" ? "外資" : currentChipsView === "trust" ? "投信" : currentChipsView === "dealer" ? "自營商" : "三大合計";
     legendData.push(`${chipLabel}淨買超`);
@@ -5600,6 +5609,7 @@ function buildKLineOption(pd, chips, levels, period) {
     { name: "MA5", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma5 || [], symbol: "none", lineStyle: { width: 1.2, color: "#ff9800" } },
     { name: "MA10", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma10 || [], symbol: "none", lineStyle: { width: 1.2, color: "#2196f3" } },
     { name: "MA20", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma20 || [], symbol: "none", lineStyle: { width: 1.5, color: "#9c27b0" } },
+    ...(hasMa60 ? [{ name: "MA60", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma60, symbol: "none", lineStyle: { width: 1.8, color: "#6d4cff" } }] : []),
     { name: "成交量(張)", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volData, barMaxWidth: 8 },
   ];
 
