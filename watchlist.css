@@ -2203,6 +2203,9 @@ body.has-bottom-nav .qa-panel {
 }
 .rule-nudge-progress i.on { background: var(--accent-2); }
 .rule-nudge-meta { margin-left: 0.35rem; font-size: 0.72rem; color: var(--text-muted); }
+#rule-nudge-popup-body .rule-nudge-lead { font-size: 0.86rem; }
+#ruleNudgeModal .modal-footer { gap: 0.4rem; flex-wrap: nowrap; }
+#ruleNudgeModal .modal-footer .btn { white-space: nowrap; }
 .rule-nudge-sub { font-size: 0.74rem; color: var(--text-muted); margin-bottom: 0.4rem; }
 .rule-nudge-foot { margin-top: 0.55rem; font-size: 0.78rem; }
 .rule-nudge-foot .hs-link { color: var(--accent-2); cursor: pointer; }

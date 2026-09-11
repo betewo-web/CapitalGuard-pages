@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="51">
+  <meta name="app-version" content="52">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=51" rel="stylesheet">
+  <link href="watchlist.css?v=52" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -350,6 +350,25 @@
      兩個 modal 互相切換時，Bootstrap 得先把上層淡出、backdrop 收掉，
      再淡入下層——中間那一格沒有任何 modal，畫面會閃一下自選清單。
      改成同一個面板換內容，就沒有那個空檔了。 -->
+<!-- 自訂規則推薦彈窗：開啟 App 時主動跳出，條件與首頁卡片相同，另外再加頻率上限。
+     內容由 renderRuleNudgePopup() 畫；不用 Web Push 是刻意的，見 maybeShowRuleNudgePopup() 註解。 -->
+<div class="modal fade sheet-modal" id="ruleNudgeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">📐 設定你的通知規則</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body p-3" id="rule-nudge-popup-body"></div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-light btn-ghost" onclick="dismissRuleNudgeForever()">不再提醒</button>
+        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">稍後再說</button>
+        <button type="button" class="btn btn-sm btn-success btn-accent-sm" onclick="openRulesFromPopup()">自己組合條件 →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade sheet-modal" id="rulesModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
     <div class="modal-content kline-modal-content">
@@ -2045,6 +2064,9 @@ async function showMain() {
   ensurePushSubscriptionRegistered();
   refreshInbox(true);
   loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
+  // 延後再跳：免責聲明閘、強制更新閘、金流導回的方案面板都在這之前處理，
+  // 直接跳會疊在它們上面（_screenIsBusy 會擋，但那樣這次就白白錯過了）
+  setTimeout(maybeShowRuleNudgePopup, 1800);
   _lastRefreshAt = Date.now();
   _lastInboxRefreshAt = Date.now();
   _scheduleAutoRefresh();
@@ -2726,6 +2748,91 @@ function snoozeRuleNudge() {
   renderRuleNudge();
 }
 
+// 「不再提醒」＝把 snooze 推到很遠的未來。用同一把鑰匙，首頁卡片與彈窗一起靜音，
+// 不要為了永久關閉再開一個 key——兩個開關各自記狀態遲早會出現「關了還跳」。
+function dismissRuleNudgeForever() {
+  try { localStorage.setItem(RULE_NUDGE_SNOOZE_KEY, String(Date.now() + 36500 * 86400e3)); } catch {}
+  hideRuleNudgePopup();
+  renderRuleNudge();
+}
+
+// ── 彈出視窗 ──
+// 刻意「不」用 Web Push 做這件事：推播權限是盤中訊號的命脈，拿它推銷功能，
+// 使用者一旦嫌吵關掉就很難拿回來（MONITOR_MAX_RULE_ALERTS_PER_STOCK 也是同一個考量）。
+// 所以主動提醒最多做到「開 App 時跳一次視窗」，而且有三重節流：
+//   1. 最多跳 RULE_NUDGE_POPUP_MAX 次；2. 兩次至少隔 RULE_NUDGE_POPUP_GAP_DAYS 天；
+//   3. 按「稍後再說」走 7 天靜音、「不再提醒」永久靜音。
+// 達到 3 條規則後永遠不再跳，首頁卡片也同步消失。
+const RULE_NUDGE_POPUP_KEY = "cg-rule-nudge-popup";
+const RULE_NUDGE_POPUP_MAX = 3;
+const RULE_NUDGE_POPUP_GAP_DAYS = 3;
+
+function ruleNudgePopupState() {
+  try { return JSON.parse(localStorage.getItem(RULE_NUDGE_POPUP_KEY) || "{}") || {}; } catch { return {}; }
+}
+
+function noteRuleNudgePopupShown() {
+  const st = ruleNudgePopupState();
+  try {
+    localStorage.setItem(RULE_NUDGE_POPUP_KEY,
+      JSON.stringify({ n: Number(st.n || 0) + 1, last: Date.now() }));
+  } catch {}
+}
+
+// 已經有別的視窗佔著畫面時不要疊上去：免責聲明閘、強制更新閘都是全螢幕 div，
+// Bootstrap modal 疊兩層則會把背景鎖住解不開（方案面板已經踩過一次）。
+function _screenIsBusy() {
+  if (document.querySelector(".modal.show")) return true;
+  return Array.from(document.querySelectorAll(".update-gate"))
+    .some(el => el.style.display && el.style.display !== "none");
+}
+
+function maybeShowRuleNudgePopup() {
+  if (!ruleNudgeShouldPrompt()) return;
+  const st = ruleNudgePopupState();
+  if (Number(st.n || 0) >= RULE_NUDGE_POPUP_MAX) return;
+  if (st.last && Date.now() - Number(st.last) < RULE_NUDGE_POPUP_GAP_DAYS * 86400e3) return;
+  if (_screenIsBusy()) return;
+  renderRuleNudgePopup();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("ruleNudgeModal")).show();
+  noteRuleNudgePopupShown();
+}
+
+function hideRuleNudgePopup() {
+  const el = document.getElementById("ruleNudgeModal");
+  const inst = el && bootstrap.Modal.getInstance(el);
+  if (inst) inst.hide();
+}
+
+function openRulesFromPopup() {
+  hideRuleNudgePopup();
+  // 等前一個 modal 的淡出跑完再開下一個，否則 Bootstrap 會把 body 的捲動鎖留著
+  setTimeout(() => openRulesModal(), 220);
+}
+
+function renderRuleNudgePopup() {
+  const body = document.getElementById("rule-nudge-popup-body");
+  if (!body) return;
+  const n = (ruleNudge.rules || []).length;
+  const target = ruleNudgeTarget();
+  const tpls = ruleTemplateSuggestions();
+  const planLine = planState.ready
+    ? `${escapeHtml(planState.plan.name)}可設 ${planState.plan.rule_limit} 條`
+    : "";
+  const dots = Array.from({ length: target }, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("");
+  body.innerHTML = `
+    <div class="rule-nudge-lead">
+      ${n === 0 ? "你還沒有自訂通知規則。" : `你目前只設定了 ${n} 條規則。`}
+      自訂規則可以把價格、量能、法人買賣超或月營收條件組起來，全部成立時才通知你，
+      不用整天盯盤。
+    </div>
+    <div class="rule-nudge-progress" title="已設定 ${n}/${target} 條">${dots}<span class="rule-nudge-meta">${n}/${target}${planLine ? "・" + planLine : ""}</span></div>
+    ${tpls.length ? `
+      <div class="rule-nudge-sub">一鍵加入（套用到全部自選股，之後可在自訂規則裡改門檻或範圍）</div>
+      <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "popup")}</div>` : ""}
+    <div id="rule-popup-msg" class="small mt-2"></div>`;
+}
+
 // 使用者已有的條件型別不再推薦——同型別再加一條通常只是門檻不同，自己編輯比較合適
 function ruleTemplateSuggestions(max = 3) {
   const owned = new Set();
@@ -2752,6 +2859,15 @@ function ruleTemplateChipsHtml(tpls, ctx) {
   }).join("");
 }
 
+// 首頁卡片與彈窗共用的判斷：規則不足、有自選股可套用、未靜音。
+// 沒有自選股時規則無處套用，先讓「尚未加入自選股」那行引導，不要兩個提示搶。
+// rules 為 null＝尚未載入或 alert_rules 表不存在，一律不提示。
+function ruleNudgeShouldPrompt() {
+  const rules = ruleNudge.rules;
+  if (!rules) return false;
+  return rules.length < ruleNudgeTarget() && watchlistRows.length > 0 && !ruleNudgeSnoozed();
+}
+
 function renderRuleNudge() {
   const card = document.getElementById("home-rule-nudge");
   const body = document.getElementById("home-rule-nudge-body");
@@ -2759,8 +2875,7 @@ function renderRuleNudge() {
   const rules = ruleNudge.rules;
   const target = ruleNudgeTarget();
   const n = rules ? rules.length : 0;
-  // 沒有自選股時規則無處套用，先讓「尚未加入自選股」那行引導，不要兩個提示搶
-  const show = !!rules && n < target && watchlistRows.length > 0 && !ruleNudgeSnoozed();
+  const show = ruleNudgeShouldPrompt();
   card.style.display = show ? "" : "none";
   if (!show) return;
 
@@ -2787,7 +2902,8 @@ function renderRuleNudge() {
 async function addRuleTemplate(idx, ctx, btn) {
   const t = RULE_TEMPLATES[idx];
   if (!t || !state.userId) return;
-  const msgEl = document.getElementById(ctx === "modal" ? "rules-msg" : "rule-nudge-msg");
+  const msgEl = document.getElementById(
+    ctx === "modal" ? "rules-msg" : ctx === "popup" ? "rule-popup-msg" : "rule-nudge-msg");
   if (btn) { btn.disabled = true; btn.textContent = "加入中…"; }
   try {
     await sbPost("alert_rules", {
@@ -2811,6 +2927,13 @@ async function addRuleTemplate(idx, ctx, btn) {
   if (ctx === "modal") {
     setRulesMsg(`已加入「${t.name}」`);
     refreshRules();
+  } else if (ctx === "popup") {
+    renderRuleNudge();
+    // 條數已達標就沒有理由再佔著畫面；否則重畫剩下的範本
+    if (!ruleNudgeShouldPrompt()) { hideRuleNudgePopup(); return; }
+    renderRuleNudgePopup();
+    const el = document.getElementById("rule-popup-msg");
+    if (el) { el.textContent = `已加入「${t.name}」`; el.className = "small mt-2 text-muted"; }
   } else {
     renderRuleNudge();
     const el = document.getElementById("rule-nudge-msg");
