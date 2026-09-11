@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="50">
+  <meta name="app-version" content="51">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=50" rel="stylesheet">
+  <link href="watchlist.css?v=51" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -191,6 +191,12 @@
           <div class="home-sec-title"><span id="home-events-headline">📋 今日事件</span></div>
           <div class="home-stat-row" id="home-events-stats"></div>
         </div>
+      </div>
+
+      <!-- 自訂規則推薦：規則數未達 RULE_NUDGE_TARGET 條時顯示，內容由 renderRuleNudge() 畫；
+           達標、沒有自選股、或按過「稍後再說」（7 天）就整張收起 -->
+      <div class="card panel-card mb-3" id="home-rule-nudge" style="display:none">
+        <div class="card-body p-3" id="home-rule-nudge-body"></div>
       </div>
 
       <div class="card panel-card mb-3">
@@ -2673,6 +2679,145 @@ const RULE_CATALOG = [
 
 const RULE_CATALOG_BY_TYPE = Object.fromEntries(RULE_CATALOG.map(c => [c.type, c]));
 
+// ── 自訂規則推薦（rule nudge）────────────────────────────────────
+// 規則少於 RULE_NUDGE_TARGET 條的使用者（免費版或付費版都一樣）在首頁看到
+// 一張卡：目前幾條、幾條可一鍵加入的範本、以及進編輯器的入口。
+// 範本只是「預先填好參數的目錄條目」：type 與參數名必須是 RULE_CATALOG 裡有的
+// （test_rule_ui_catalog.py 釘住），否則會存出後端看不懂、永遠不觸發的規則。
+// 名稱只描述條件、不下判斷（COMPLIANCE.md）。範本一律套用到全部自選股。
+const RULE_NUDGE_TARGET = 3;
+const RULE_NUDGE_SNOOZE_KEY = "cg-rule-nudge-snooze-until";
+const RULE_NUDGE_SNOOZE_DAYS = 7;
+const RULE_TEMPLATES = [
+  { name: "跌幅超過 5%",            conditions: [{ type: "change_pct_below", value: 5 }] },
+  { name: "量能達 20 日均量 2 倍",  conditions: [{ type: "volume_vs_ma", window: 20, ratio: 2, op: "above" }] },
+  { name: "三大法人連續買超 3 天",  conditions: [{ type: "consec_net_buy", who: "total", days: 3 }] },
+  { name: "突破 20 日前高",         conditions: [{ type: "break_prior_high", window: 20 }] },
+  { name: "跌破 20 日均線",         conditions: [{ type: "price_vs_ma", period: 20, dir: "down" }] },
+  { name: "月營收 YoY 高於 30%",    conditions: [{ type: "revenue_yoy", value: 30 }] },
+];
+
+// rules = null 代表尚未載入或表不存在（migrate_alert_rules.sql 未執行）→ 不顯示推薦
+let ruleNudge = { rules: null };
+
+async function loadRuleNudgeState() {
+  if (!state.accessToken) return;
+  try {
+    const rows = await sbGet("alert_rules", { select: "id,conditions", order: "created_at.asc" }, state.accessToken);
+    ruleNudge.rules = rows || [];
+  } catch (e) {
+    ruleNudge.rules = null;
+  }
+}
+
+// 目標條數不能超過方案上限：免費版上限就是 3，其他方案更高，所以實際上都是 3；
+// 但 plans 表的數字若日後調低，這裡跟著縮，不會出現「達上限了還在推薦」
+function ruleNudgeTarget() {
+  const limit = planLimitOf("alert_rules");
+  return limit === null ? RULE_NUDGE_TARGET : Math.min(RULE_NUDGE_TARGET, limit);
+}
+
+function ruleNudgeSnoozed() {
+  try { return Number(localStorage.getItem(RULE_NUDGE_SNOOZE_KEY) || 0) > Date.now(); } catch { return false; }
+}
+
+function snoozeRuleNudge() {
+  try { localStorage.setItem(RULE_NUDGE_SNOOZE_KEY, String(Date.now() + RULE_NUDGE_SNOOZE_DAYS * 86400e3)); } catch {}
+  renderRuleNudge();
+}
+
+// 使用者已有的條件型別不再推薦——同型別再加一條通常只是門檻不同，自己編輯比較合適
+function ruleTemplateSuggestions(max = 3) {
+  const owned = new Set();
+  for (const r of ruleNudge.rules || []) {
+    for (const c of (Array.isArray(r.conditions) ? r.conditions : [])) if (c && c.type) owned.add(c.type);
+  }
+  return RULE_TEMPLATES.filter(t => !t.conditions.some(c => owned.has(c.type))).slice(0, max);
+}
+
+// 首頁卡片與規則面板共用；ctx 決定訊息寫到哪個元素、加入後刷新哪一邊
+function ruleTemplateChipsHtml(tpls, ctx) {
+  return tpls.map(t => {
+    const idx = RULE_TEMPLATES.indexOf(t);
+    const tier = ruleTierOf(t.conditions);
+    return `
+      <div class="rule-tpl">
+        <div class="rule-tpl-text">
+          <span class="rule-tpl-name">${escapeHtml(t.name)}</span>
+          <span class="rule-tier tier-${tier}">${RULE_TIERS[tier].label}</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-light btn-ghost rule-tpl-add"
+                onclick="addRuleTemplate(${idx}, '${ctx}', this)">＋ 加入</button>
+      </div>`;
+  }).join("");
+}
+
+function renderRuleNudge() {
+  const card = document.getElementById("home-rule-nudge");
+  const body = document.getElementById("home-rule-nudge-body");
+  if (!card || !body) return;
+  const rules = ruleNudge.rules;
+  const target = ruleNudgeTarget();
+  const n = rules ? rules.length : 0;
+  // 沒有自選股時規則無處套用，先讓「尚未加入自選股」那行引導，不要兩個提示搶
+  const show = !!rules && n < target && watchlistRows.length > 0 && !ruleNudgeSnoozed();
+  card.style.display = show ? "" : "none";
+  if (!show) return;
+
+  const tpls = ruleTemplateSuggestions();
+  const dots = Array.from({ length: target }, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("");
+  const planLine = planState.ready
+    ? `${escapeHtml(planState.plan.name)}可設 ${planState.plan.rule_limit} 條`
+    : "";
+  body.innerHTML = `
+    <div class="home-sec-title">📐 自訂通知規則
+      <span class="hs-link" onclick="snoozeRuleNudge()" title="7 天內不再顯示">稍後再說</span>
+    </div>
+    <div class="rule-nudge-lead">
+      ${n === 0 ? "還沒有自訂規則。" : `已設定 ${n} 條。`}把價格、量能、法人或營收條件組起來，全部成立時才通知你。
+    </div>
+    <div class="rule-nudge-progress" title="已設定 ${n}/${target} 條">${dots}<span class="rule-nudge-meta">${n}/${target}${planLine ? "・" + planLine : ""}</span></div>
+    ${tpls.length ? `
+      <div class="rule-nudge-sub">一鍵加入（套用到全部自選股，之後可在自訂規則裡改門檻或範圍）</div>
+      <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "home")}</div>` : ""}
+    <div class="rule-nudge-foot"><span class="hs-link" onclick="openRulesModal()">自己組合條件 →</span></div>
+    <div id="rule-nudge-msg" class="small mt-1"></div>`;
+}
+
+async function addRuleTemplate(idx, ctx, btn) {
+  const t = RULE_TEMPLATES[idx];
+  if (!t || !state.userId) return;
+  const msgEl = document.getElementById(ctx === "modal" ? "rules-msg" : "rule-nudge-msg");
+  if (btn) { btn.disabled = true; btn.textContent = "加入中…"; }
+  try {
+    await sbPost("alert_rules", {
+      user_id: state.userId, name: t.name, stock_id: null, severity: null,
+      conditions: t.conditions, enabled: true,
+    }, state.accessToken, true);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "＋ 加入"; }
+    if (!msgEl) return;
+    if (isLimitError(e, "alert_rules")) {
+      msgEl.innerHTML = limitPromptHtml("alert_rules", e);
+      msgEl.className = "small mt-1";
+    } else {
+      msgEl.textContent = `加入失敗：${e.message || e}`;
+      msgEl.className = "small mt-1 text-danger";
+    }
+    return;
+  }
+  await loadRuleNudgeState();
+  loadPlanState().catch(() => {});   // 方案面板的用量計數跟著更新
+  if (ctx === "modal") {
+    setRulesMsg(`已加入「${t.name}」`);
+    refreshRules();
+  } else {
+    renderRuleNudge();
+    const el = document.getElementById("rule-nudge-msg");
+    if (el) { el.textContent = `已加入「${t.name}」`; el.className = "small mt-1 text-muted"; }
+  }
+}
+
 const SIGNAL_LABEL_MAP = {
   break_sup:   "跌破支撐",
   near_sup:    "逼近支撐",
@@ -3157,6 +3302,8 @@ function renderHome() {
   const now = new Date();
   const week = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
   dateEl.textContent = `${now.getMonth() + 1}/${now.getDate()}（${week}）`;
+
+  renderRuleNudge();
 
   // 今日事件摘要——只數「今天首次入庫」或「事件日就是今天」的列，
   // 早已知道、每天重新確認的舊事件不灌水
@@ -3934,6 +4081,8 @@ async function refreshRules() {
     ]);
     alertRules = rows || [];
     planState.activeRuleIds = activeIds;
+    ruleNudge.rules = alertRules;   // 首頁推薦卡與面板看同一份，面板裡增刪後首頁跟著變
+    renderRuleNudge();
   } catch (e) {
     // 表不存在（migration 未執行）時給明確指示，而不是空白畫面
     listEl.innerHTML = `<div class="view-empty">讀取失敗：${escapeHtml(String(e.message || e))}<br>
@@ -3942,16 +4091,23 @@ async function refreshRules() {
   }
   document.getElementById("rules-count").innerHTML = rulesCountLabel();
 
+  // 未達推薦目標條數時，面板裡也給範本（與首頁卡片同一組）
+  const tpls = alertRules.length < ruleNudgeTarget() ? ruleTemplateSuggestions() : [];
+  const tplHtml = tpls.length ? `
+      <div class="rules-empty-sub">${alertRules.length ? "還可以加入範本" : "或先從範本開始"}（套用到全部自選股）</div>
+      <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "modal")}</div>` : "";
+
   if (!alertRules.length) {
     listEl.innerHTML = `<div class="rules-empty">
       <div class="rules-empty-icon">${ICON_RULES}</div>
       <div class="rules-empty-title">尚無自訂規則</div>
       <div class="rules-empty-hint">用上面的「新增規則」把條件組起來，<br>全部成立時才會通知你</div>
+      ${tplHtml}
     </div>`;
     return;
   }
 
-  listEl.innerHTML = alertRules.map(r => {
+  listEl.innerHTML = (tplHtml ? `<div class="rule-tpl-strip">${tplHtml}</div>` : "") + alertRules.map(r => {
     const conds = Array.isArray(r.conditions) ? r.conditions : [];
     const tier = ruleTierOf(conds);
     const scope = r.stock_id
@@ -4288,6 +4444,7 @@ async function loadWatchlist() {
     loadActiveIds("active_watchlist"),   // 方案上限內仍生效的列（BILLING.md）
     loadBrokerHoldings(),
     loadPlanState(),
+    loadRuleNudgeState(),   // 首頁的自訂規則推薦卡要知道目前幾條
   ]);
   planState.activeWatchIds = activeIds;
   watchlistRows = (rows || []).map(row => {
