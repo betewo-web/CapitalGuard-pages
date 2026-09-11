@@ -2206,9 +2206,22 @@ body.has-bottom-nav .qa-panel {
 #rule-nudge-popup-body .rule-nudge-lead { font-size: 0.86rem; }
 #ruleNudgeModal .modal-footer { gap: 0.4rem; flex-wrap: nowrap; }
 #ruleNudgeModal .modal-footer .btn { white-space: nowrap; }
-.rule-nudge-sub { font-size: 0.74rem; color: var(--text-muted); margin-bottom: 0.4rem; }
-.rule-nudge-foot { margin-top: 0.55rem; font-size: 0.78rem; }
-.rule-nudge-foot .hs-link { color: var(--accent-2); cursor: pointer; }
+/* 主要入口：自己設定條件。放在範本之前，範本只是「或者」 */
+.rule-nudge-cta { margin: 0.1rem 0 0.75rem; font-weight: 700; }
+.rule-nudge-or {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin-bottom: 0.45rem;
+	font-size: 0.74rem;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+.rule-nudge-or::before, .rule-nudge-or::after {
+	content: "";
+	flex: 1 1 auto;
+	border-top: 1px solid var(--border);
+}
 
 .rule-tpl-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .rule-tpl {

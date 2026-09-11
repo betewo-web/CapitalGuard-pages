@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="52">
+  <meta name="app-version" content="53">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=52" rel="stylesheet">
+  <link href="watchlist.css?v=53" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -363,7 +363,6 @@
       <div class="modal-footer py-2">
         <button type="button" class="btn btn-sm btn-outline-light btn-ghost" onclick="dismissRuleNudgeForever()">不再提醒</button>
         <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">稍後再說</button>
-        <button type="button" class="btn btn-sm btn-success btn-accent-sm" onclick="openRulesFromPopup()">自己組合條件 →</button>
       </div>
     </div>
   </div>
@@ -2807,7 +2806,15 @@ function hideRuleNudgePopup() {
 function openRulesFromPopup() {
   hideRuleNudgePopup();
   // 等前一個 modal 的淡出跑完再開下一個，否則 Bootstrap 會把 body 的捲動鎖留著
-  setTimeout(() => openRulesModal(), 220);
+  setTimeout(openRuleEditorFromNudge, 220);
+}
+
+// 推薦的主要入口是「自己設定條件」：直接落在編輯器，不是先看一頁清單再找按鈕。
+// openRulesModal 會先切到清單並非同步拉規則；緊接著切到編輯 pane，
+// 清單回來只更新清單 pane 的內容，不會把使用者切回去。
+function openRuleEditorFromNudge() {
+  openRulesModal();
+  openRuleEditor(null);
 }
 
 function renderRuleNudgePopup() {
@@ -2823,12 +2830,14 @@ function renderRuleNudgePopup() {
   body.innerHTML = `
     <div class="rule-nudge-lead">
       ${n === 0 ? "你還沒有自訂通知規則。" : `你目前只設定了 ${n} 條規則。`}
-      自訂規則可以把價格、量能、法人買賣超或月營收條件組起來，全部成立時才通知你，
-      不用整天盯盤。
+      條件由你決定：價格、量能、法人買賣超、月營收都能自由組合，
+      全部成立才通知你，不用整天盯盤。
     </div>
     <div class="rule-nudge-progress" title="已設定 ${n}/${target} 條">${dots}<span class="rule-nudge-meta">${n}/${target}${planLine ? "・" + planLine : ""}</span></div>
+    <button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center rule-nudge-cta"
+            onclick="openRulesFromPopup()">＋ 自己設定條件</button>
     ${tpls.length ? `
-      <div class="rule-nudge-sub">一鍵加入（套用到全部自選股，之後可在自訂規則裡改門檻或範圍）</div>
+      <div class="rule-nudge-or"><span>或一鍵加入範本（套用到全部自選股，之後可改門檻）</span></div>
       <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "popup")}</div>` : ""}
     <div id="rule-popup-msg" class="small mt-2"></div>`;
 }
@@ -2889,13 +2898,14 @@ function renderRuleNudge() {
       <span class="hs-link" onclick="snoozeRuleNudge()" title="7 天內不再顯示">稍後再說</span>
     </div>
     <div class="rule-nudge-lead">
-      ${n === 0 ? "還沒有自訂規則。" : `已設定 ${n} 條。`}把價格、量能、法人或營收條件組起來，全部成立時才通知你。
+      ${n === 0 ? "還沒有自訂規則。" : `已設定 ${n} 條。`}條件由你決定：價格、量能、法人買賣超、月營收都能自由組合，全部成立才通知你。
     </div>
     <div class="rule-nudge-progress" title="已設定 ${n}/${target} 條">${dots}<span class="rule-nudge-meta">${n}/${target}${planLine ? "・" + planLine : ""}</span></div>
+    <button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center rule-nudge-cta"
+            onclick="openRuleEditorFromNudge()">＋ 自己設定條件</button>
     ${tpls.length ? `
-      <div class="rule-nudge-sub">一鍵加入（套用到全部自選股，之後可在自訂規則裡改門檻或範圍）</div>
+      <div class="rule-nudge-or"><span>或一鍵加入範本（套用到全部自選股，之後可改門檻）</span></div>
       <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "home")}</div>` : ""}
-    <div class="rule-nudge-foot"><span class="hs-link" onclick="openRulesModal()">自己組合條件 →</span></div>
     <div id="rule-nudge-msg" class="small mt-1"></div>`;
 }
 
