@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="53">
+  <meta name="app-version" content="54">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=53" rel="stylesheet">
+  <link href="watchlist.css?v=54" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -399,43 +399,42 @@
           <div id="rules-msg" class="rules-msg"></div>
         </div>
 
-        <!-- pane 2：編輯器 -->
+        <!-- pane 2：編輯器。三步驟由上而下：範圍 → 條件 → 名稱（選填），
+             底下一段白話摘要即時翻譯目前的設定，使用者不必自己腦內組合。
+             「通知等級」欄位已拿掉（2026-09-12）：一律依條件自動判定，
+             與後端 CONDITION_REGISTRY 的等級一致（下跌方向＝🟠，其餘＝🔵）。 -->
         <div id="rules-pane-editor" style="display:none">
-          <div class="rule-field">
-          <label for="rule-name">規則名稱</label>
-          <input id="rule-name" type="text" class="rule-input" maxlength="40"
-                 placeholder="例如：量增突破" oninput="renderRulePreview()">
-        </div>
-
-        <div class="rule-row">
-          <div class="rule-field">
-            <label for="rule-scope">套用範圍</label>
-            <select id="rule-scope" class="rule-input" onchange="renderRulePreview()"></select>
+          <div class="rule-step">
+            <div class="rule-step-head"><span class="rule-step-no">1</span>要看哪些股票？</div>
+            <select id="rule-scope" class="rule-input" aria-label="套用範圍" onchange="renderRulePreview()"></select>
+            <div class="rule-hint">選「全部自選股」時，之後新加入的自選股也會一起套用。</div>
           </div>
-          <div class="rule-field">
-            <label for="rule-severity">通知等級</label>
-            <select id="rule-severity" class="rule-input">
-              <option value="">依條件自動判定</option>
-              <option value="orange">🟠 強訊號（要處理部位）</option>
-              <option value="blue">🔵 注意（知道即可）</option>
-            </select>
+
+          <div class="rule-step">
+            <div class="rule-step-head"><span class="rule-step-no">2</span>什麼情況要通知你？
+              <span class="rule-step-sub">多個條件要全部成立才通知</span></div>
+            <div id="rule-conditions"></div>
+            <button type="button" class="btn btn-sm btn-outline-light w-100 justify-content-center rule-add-cond"
+                    onclick="addRuleCondition()">＋ 再加一個條件（且）</button>
           </div>
-        </div>
 
-        <div class="rule-cond-head">
-          <span>條件<span class="text-muted small">（全部成立才發送）</span></span>
-          <button type="button" class="btn btn-sm btn-outline-light" onclick="addRuleCondition()">＋ 加條件</button>
-        </div>
-        <div id="rule-conditions"></div>
+          <div class="rule-step">
+            <div class="rule-step-head"><span class="rule-step-no">3</span>幫規則取個名字
+              <span class="rule-step-sub">選填</span></div>
+            <input id="rule-name" type="text" class="rule-input" maxlength="40"
+                   placeholder="例如：量增突破" oninput="renderRulePreview()">
+            <div class="rule-hint">留空會依條件自動命名；通知標題會顯示這個名字。</div>
+          </div>
 
-        <div class="rule-preview" id="rule-preview"></div>
-        <div id="rule-editor-msg" class="small mt-2 text-muted"></div>
+          <div class="rule-summary" id="rule-summary"></div>
+          <div class="rule-preview" id="rule-preview"></div>
+          <div id="rule-editor-msg" class="small mt-2 text-muted"></div>
         </div>
       </div>
 
       <div class="modal-footer py-2" id="rules-footer" style="display:none">
         <button type="button" class="btn btn-sm btn-outline-light" onclick="showRulesPane('list')">取消</button>
-        <button type="button" class="btn btn-sm btn-primary" onclick="saveRule()">儲存規則</button>
+        <button type="button" class="btn btn-sm btn-primary" onclick="saveRule()">儲存並啟用</button>
       </div>
     </div>
   </div>
@@ -4246,11 +4245,6 @@ async function refreshRules() {
     const scope = r.stock_id
       ? `${escapeHtml(r.stock_id)} ${escapeHtml(stockNameOf(r.stock_id))}`.trim()
       : "全部自選股";
-    // 等級用圓點而不是 emoji；沒設等級時留一顆空心的，名稱才不會左右跳
-    const sevCls = r.severity === "orange" ? "sev-orange"
-                 : r.severity === "blue"   ? "sev-blue" : "sev-auto";
-    const sevTitle = r.severity === "orange" ? "強訊號"
-                   : r.severity === "blue"   ? "注意" : "依條件自動判定";
     // 一條條列出來，比一長串「　＋　」串在一起好讀，也看得出「全部成立」
     const condChips = conds.length
       ? conds.map(c => `<li class="rule-cond-chip">${escapeHtml(describeCondition(c))}</li>`).join("")
@@ -4261,7 +4255,6 @@ async function refreshRules() {
     return `
       <div class="rule-card${r.enabled ? "" : " is-off"}${active ? "" : " is-inactive"}">
         <div class="rule-card-head">
-          <i class="sev-dot ${sevCls}" title="${sevTitle}"></i>
           <span class="rule-card-name">${escapeHtml(r.name || "(未命名)")}</span>
           ${r.enabled ? "" : '<span class="rule-off-tag">已停用</span>'}
           ${active ? "" : '<span class="rule-off-tag plan-lock-tag" title="超出目前方案的規則數上限，升級後恢復">🔒 超出方案</span>'}
@@ -4306,7 +4299,9 @@ function describeCondition(c) {
       const hit = (p.options || []).find(o => String(o[0]) === String(v));
       return hit ? hit[1] : String(v);
     }
-    return `${p.label.replace(/（.*?）/g, "")} ${v}`;
+    // 「漲幅 %」這種帶單位的標籤，數值接在後面比較像人話：漲幅 5%，而不是「漲幅 % 5」
+    const label = p.label.replace(/（.*?）/g, "").trim();
+    return label.includes("%") ? `${label.replace("%", "").trim()} ${v}%` : `${label} ${v}`;
   });
   return parts.length ? `${spec.name}｜${parts.join("、")}` : spec.name;
 }
@@ -4356,7 +4351,6 @@ function openRuleEditor(id) {
   const r = id ? alertRules.find(x => String(x.id) === String(id)) : null;
   document.getElementById("rules-modal-title").textContent = r ? "編輯規則" : "新增規則";
   document.getElementById("rule-name").value = (r && r.name) || "";
-  document.getElementById("rule-severity").value = (r && r.severity) || "";
   document.getElementById("rule-editor-msg").textContent = "";
 
   const scopeEl = document.getElementById("rule-scope");
@@ -4438,12 +4432,19 @@ function renderRuleConditions() {
                oninput="onConditionParamChange(${i}, '${p.k}', this.value)"></label>`;
     }).join("");
 
+    // 只剩一條時不給刪：刪掉會被補回預設條件，等於沒動，按鈕只會讓人困惑
+    const removeBtn = editorConditions.length > 1
+      ? `<button type="button" class="btn btn-sm btn-outline-danger"
+                 onclick="removeRuleCondition(${i})" title="移除這個條件">✕</button>`
+      : "";
     return `
+      ${i > 0 ? `<div class="rule-and">且</div>` : ""}
       <div class="rule-cond">
         <div class="rule-cond-top">
-          <select class="rule-input" onchange="onConditionTypeChange(${i}, this.value)">${opts}</select>
-          <button type="button" class="btn btn-sm btn-outline-danger"
-                  onclick="removeRuleCondition(${i})" title="移除這個條件">✕</button>
+          <span class="rule-cond-index">條件 ${i + 1}</span>
+          <select class="rule-input" aria-label="條件 ${i + 1} 的類型"
+                  onchange="onConditionTypeChange(${i}, this.value)">${opts}</select>
+          ${removeBtn}
         </div>
         <div class="rule-cond-tier">${RULE_TIERS[spec.tier].label}　${RULE_TIERS[spec.tier].note}</div>
         ${params ? `<div class="rule-params">${params}</div>` : ""}
@@ -4453,14 +4454,43 @@ function renderRuleConditions() {
   renderRulePreview();
 }
 
+// 留空名稱時的自動命名：條件名稱用「＋」串起來，例如「突破前高＋量能對比均量」
+function autoRuleName(conds) {
+  const names = (conds || []).map(c => (RULE_CATALOG_BY_TYPE[c && c.type] || {}).name).filter(Boolean);
+  return names.join("＋").slice(0, 40);
+}
+
+// 白話摘要：把目前的範圍＋條件翻成一句話，隨每次改動即時更新。
+// 使用者看的是這句，不用自己在腦中把三個下拉選單組合起來。
+function renderRuleSummary() {
+  const el = document.getElementById("rule-summary");
+  if (!el) return;
+  const nameEl = document.getElementById("rule-name");
+  const auto = autoRuleName(editorConditions);
+  if (nameEl && auto) nameEl.placeholder = `留空＝「${auto}」`;
+  const name = (nameEl && nameEl.value.trim()) || auto || "（未命名）";
+  const scopeEl = document.getElementById("rule-scope");
+  const sid = scopeEl ? scopeEl.value : "";
+  const scope = sid ? `${sid} ${stockNameOf(sid)}`.trim() : "全部自選股";
+  const chips = editorConditions.map(c => `<span class="rs-chip">${escapeHtml(describeCondition(c))}</span>`)
+    .join('<span class="rs-and">且</span>');
+  const tier = ruleTierOf(editorConditions);
+  el.innerHTML = `
+    <div class="rp-title">這條規則的意思</div>
+    <div class="rs-line">「${escapeHtml(name)}」：<b>${escapeHtml(scope)}</b> 出現 ${chips} 時通知你。</div>
+    <div class="rs-meta">評估時機：${RULE_TIERS[tier].label}（${RULE_TIERS[tier].note}）。
+      通知等級依條件自動判定：下跌方向的條件（跌破、跌幅、向下交叉）為 🟠 強訊號，其餘為 🔵 注意。</div>`;
+}
+
 async function saveRule() {
   const msgEl = document.getElementById("rule-editor-msg");
-  const name = document.getElementById("rule-name").value.trim();
+  const name = document.getElementById("rule-name").value.trim() || autoRuleName(editorConditions);
   const stockId = document.getElementById("rule-scope").value || null;
-  const severity = document.getElementById("rule-severity").value || null;
   if (!editorConditions.length) { msgEl.textContent = "至少要有一個條件"; return; }
 
-  const body = { name, stock_id: stockId, severity, conditions: editorConditions, enabled: true };
+  // severity 一律 null＝依條件自動判定（後端 ConditionSpec.severity_for）。
+  // 編輯舊規則也會被改成自動——這是 2026-09-12 拿掉等級欄位時的決定。
+  const body = { name, stock_id: stockId, severity: null, conditions: editorConditions, enabled: true };
   try {
     if (editingRuleId) {
       await sbPatch("alert_rules", { id: `eq.${editingRuleId}` }, body, state.accessToken);
@@ -4486,6 +4516,7 @@ async function saveRule() {
 // RSI、MACD、均線交叉不在這裡重算——那會變成第二份指標實作，
 // 遲早跟後端算出不同結果（評分與通知就曾因此分歧過）。
 function renderRulePreview() {
+  renderRuleSummary();
   const el = document.getElementById("rule-preview");
   const previewable = editorConditions.filter(c => (RULE_CATALOG_BY_TYPE[c.type] || {}).preview);
   const deferred = editorConditions.filter(c => !(RULE_CATALOG_BY_TYPE[c.type] || {}).preview);
