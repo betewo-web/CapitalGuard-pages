@@ -86,11 +86,14 @@ body.has-bottom-nav .page-shell {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	color: #072533;
-	font-size: 1.05rem;
-	font-weight: 700;
-	background: linear-gradient(135deg, #56a8ff, #3ce6d1);
-	box-shadow: 0 0 0 4px rgba(86, 168, 255, 0.18);
+	background: #0e1528;
+	box-shadow: 0 0 0 4px rgba(60, 230, 209, 0.16);
+}
+
+.brand-icon svg {
+	width: 100%;
+	height: 100%;
+	display: block;
 }
 
 .brand-title {
@@ -195,7 +198,6 @@ body.has-bottom-nav .page-shell {
 	.brand-icon {
 		width: 24px;
 		height: 24px;
-		font-size: 0.92rem;
 	}
 
 	.brand-title {
