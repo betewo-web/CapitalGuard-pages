@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="56">
+  <meta name="app-version" content="57">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,12 +14,12 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=56" rel="stylesheet">
+  <link href="watchlist.css?v=57" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#0e1528">
+  <meta name="theme-color" content="#0f0f1a">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -59,16 +59,16 @@
 <!-- ── iOS 加入主畫面提示橫幅 ── -->
 <div id="ios-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;
   background:linear-gradient(135deg,rgba(14,21,40,.97),rgba(17,26,50,.97));
-  border-top:1px solid rgba(60,230,209,.35);padding:12px 16px;
+  border-top:1px solid rgba(139,124,255,.35);padding:12px 16px;
   display:none;align-items:center;gap:10px;backdrop-filter:blur(10px);">
   <img src="icons/icon.svg" width="36" height="36" style="border-radius:8px;flex-shrink:0" alt="">
   <span style="color:#c4d2ee;font-size:.875rem;line-height:1.4;flex:1">
     點選瀏覽器底部的
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#56a8ff" viewBox="0 0 16 16" style="vertical-align:-2px;margin:0 2px">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#f5c542" viewBox="0 0 16 16" style="vertical-align:-2px;margin:0 2px">
       <path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6-.096.087L1.5 7.5a.5.5 0 0 0 .707.707l.147-.147V13.5A1.5 1.5 0 0 0 3.854 15h8.292A1.5 1.5 0 0 0 13.646 13.5V8.06l.147.147A.5.5 0 0 0 14.5 7.5l-.05-.267L8.354 1.146zM8 7a.5.5 0 0 1 .5.5V9h1a.5.5 0 0 1 0 1h-1v1.5a.5.5 0 0 1-1 0V10h-1a.5.5 0 0 1 0-1h1V7.5A.5.5 0 0 1 8 7z"/>
     </svg>
-    <strong style="color:#3ce6d1">分享</strong>，再點
-    <strong style="color:#3ce6d1">加入主畫面</strong> 即可安裝此 App
+    <strong style="color:#8b7cff">分享</strong>，再點
+    <strong style="color:#8b7cff">加入主畫面</strong> 即可安裝此 App
   </span>
   <button onclick="document.getElementById('ios-install-banner').style.display='none';localStorage.setItem('pwa-ios-banner-dismissed','1')"
     style="background:none;border:none;color:#8da1c6;font-size:1.2rem;padding:4px 8px;cursor:pointer;flex-shrink:0">✕</button>
@@ -78,7 +78,7 @@
 <nav class="navbar modern-navbar navbar-dark sticky-top">
   <div class="container-lg py-1 py-md-3">
     <span class="navbar-brand app-brand mb-0">
-      <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 512 512"><g fill="none" stroke="#3ce6d1" stroke-linecap="round"><circle cx="256" cy="256" r="139" stroke-width="25"/><circle cx="256" cy="256" r="84" stroke-width="22"/><path stroke-width="13" d="M256 70V49M442 256h21M256 442v21M70 256H49"/><path stroke-width="20" d="M227 256h58M256 227v58"/></g></svg></span>
+      <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 512 512"><g fill="none" stroke-linecap="round"><circle cx="256" cy="256" r="139" stroke="#8b7cff" stroke-width="25"/><circle cx="256" cy="256" r="84" stroke="#c4b5fd" stroke-width="22"/><path stroke="#f5c542" stroke-width="13" d="M256 70V49M442 256h21M256 442v21M70 256H49"/><path stroke="#f5c542" stroke-width="20" d="M227 256h58M256 227v58"/></g></svg></span>
       <span class="brand-title">台股監控</span>
     </span>
     <div class="nav-user-actions">
@@ -561,7 +561,7 @@
             <label class="form-label mb-1" style="color:#4ade80;font-size:.82rem;font-weight:600;letter-spacing:.02em;">📉 觸及下跌價格時通知</label>
             <div class="input-group input-group-sm">
               <input id="inp-target-low" type="number" class="form-control" placeholder="如 120.0" step="0.01" min="0"
-                style="background:#1a2540;color:#e2eafc;border-color:#3ce6d1;font-size:.95rem;">
+                style="background:#1a2540;color:#e2eafc;border-color:#8b7cff;font-size:.95rem;">
               <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('low')" title="清除" style="color:#8da1c6;border-color:#3a4a70;">✕</button>
             </div>
           </div>
@@ -5924,16 +5924,16 @@ function buildKLineOption(pd, chips, levels, period) {
     if (v === undefined || v === null) return null;
     return {
       value: v,
-      itemStyle: { color: v >= 0 ? "rgba(60, 230, 209, 0.75)" : "rgba(255, 95, 133, 0.75)" },
+      itemStyle: { color: v >= 0 ? "rgba(139, 124, 255, 0.85)" : "rgba(146, 146, 163, 0.6)" },   // 買超紫、賣超灰：不用青（舊品牌色）也不用紅系（台股紅＝漲）
     };
   });
   const hasChips = period === "daily" && currentChipsView !== "hide" && dates.length > 0 && chipsSeriesData.some(v => v !== null);
 
   const grids = hasChips
     ? [
-      { left: 38, right: 18, top: 38, height: "54%" },
-      { left: 38, right: 18, top: "67%", height: "9%" },
-      { left: 38, right: 18, top: "80%", height: "8%" },
+      { left: 38, right: 18, top: 38, height: "52%" },
+      { left: 38, right: 18, top: "64%", height: "10%" },
+      { left: 38, right: 18, top: "78%", height: "10%" },
     ]
     : [
       { left: 38, right: 18, top: 38, height: "68%" },
@@ -5963,8 +5963,11 @@ function buildKLineOption(pd, chips, levels, period) {
         splitLine: { lineStyle: { color: "rgba(148,171,220,0.18)" } },
       };
     }
+    // 成交量與籌碼都是長條圖，y 軸一定要含 0：scale:true 會讓軸從資料最小值起算，
+    // 法人連續買超（全正）或連續賣超（全負）那幾天，長條從 0 畫起就被 grid 裁掉下半段，
+    // 看起來像副圖「沒顯示完整」。
     return {
-      scale: true,
+      scale: false,
       gridIndex: i,
       splitNumber: 2,
       axisLabel: { fontSize: 10, color: "#a6badf" },
@@ -6067,6 +6070,9 @@ function buildKLineOption(pd, chips, levels, period) {
         throttle: 320,
         realtime: false,
         minValueSpan,
+        // 手機：手指放在圖上往上下滑要能捲動 modal。預設會對 touchmove preventDefault，
+        // 整張 canvas 把捲動吃掉，副圖在螢幕下方就永遠滑不到。
+        preventDefaultMouseMove: false,
       },
       {
         type: "slider",
@@ -6671,7 +6677,7 @@ function _showInstallSuccessToast() {
     'position:fixed', 'bottom:80px', 'left:50%', 'transform:translateX(-50%)',
     'z-index:9997', 'padding:12px 16px', 'border-radius:14px',
     'background:linear-gradient(135deg,rgba(14,21,40,.97),rgba(17,26,50,.97))',
-    'border:1px solid rgba(60,230,209,.45)', 'backdrop-filter:blur(14px)',
+    'border:1px solid rgba(139,124,255,.45)', 'backdrop-filter:blur(14px)',
     'box-shadow:0 8px 32px rgba(0,0,0,.45)',
     'display:flex', 'align-items:center', 'gap:10px',
     'font-size:.875rem', 'color:#c4d2ee', 'max-width:calc(100vw - 32px)',
@@ -6681,8 +6687,8 @@ function _showInstallSuccessToast() {
     <span style="font-size:1.5rem;flex-shrink:0">\u2705</span>
     <span style="white-space:nowrap;font-weight:500">\u5df2\u52a0\u5165\u4e3b\u756b\u9762\uff01</span>
     <button id="pwa-open-btn"
-      style="background:linear-gradient(135deg,#3ce6d1,#56a8ff);border:none;
-             border-radius:9px;padding:6px 14px;color:#090d16;font-weight:700;
+      style="background:linear-gradient(135deg,#8b7cff,#c4b5fd);border:none;
+             border-radius:9px;padding:6px 14px;color:#120c2e;font-weight:700;
              font-size:.82rem;cursor:pointer;white-space:nowrap;flex-shrink:0">
       \u958b\u555f App \u2197
     </button>
@@ -6720,13 +6726,13 @@ function _showPwaInstructionsModal(afterWait = false) {
         在 Safari 瀏覽器中，點選下方工具列的<strong class="text-info"> 分享 </strong>按鈕：
       </p>
       <div class="text-center mb-3" style="font-size:2rem">
-        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="#56a8ff" viewBox="0 0 16 16">
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="#f5c542" viewBox="0 0 16 16">
           <path d="M8.354 1.146a.5.5 0 0 0-.708 0l-3 3a.5.5 0 1 0 .708.708L7.5 2.707V11.5a.5.5 0 0 0 1 0V2.707l2.146 2.147a.5.5 0 0 0 .708-.708l-3-3zM1 13.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6a.5.5 0 0 0-1 0v6H2v-6a.5.5 0 0 0-1 0v6z"/>
         </svg>
       </div>
       <p class="mb-2 text-muted" style="font-size:.9rem">然後向下捲動，點選：</p>
       <div class="d-flex align-items-center gap-2 mb-3 p-2 rounded" style="background:rgba(255,255,255,.06)">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#3ce6d1" viewBox="0 0 16 16">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#8b7cff" viewBox="0 0 16 16">
           <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v13.5a.5.5 0 0 1-.777.416L8 13.101l-5.223 2.815A.5.5 0 0 1 2 15.5V2zm2-1a1 1 0 0 0-1 1v12.566l4.723-2.482a.5.5 0 0 1 .554 0L13 14.566V2a1 1 0 0 0-1-1H4z"/>
         </svg>
         <strong class="text-light">加入主畫面（Add to Home Screen）</strong>
@@ -6758,7 +6764,7 @@ function _showPwaInstructionsModal(afterWait = false) {
         <div class="modal-content kline-modal-content">
           <div class="modal-header py-2">
             <h5 class="mb-0">
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="#3ce6d1" viewBox="0 0 16 16" class="me-2" style="vertical-align:-2px">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="#8b7cff" viewBox="0 0 16 16" class="me-2" style="vertical-align:-2px">
                 <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
                 <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
               </svg>加入主畫面

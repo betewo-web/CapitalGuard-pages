@@ -1,23 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#0e1528"/>
-      <stop offset="100%" style="stop-color:#111a32"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17142b"/>
+      <stop offset="1" stop-color="#0b0b13"/>
     </linearGradient>
+    <radialGradient id="glow" cx="256" cy="256" r="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b7cff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#8b7cff" stop-opacity="0"/>
+    </radialGradient>
   </defs>
-  <!-- Full bleed background (maskable icons should fill the entire canvas) -->
+  <!-- Full bleed (maskable). Same tile treatment without the inner border; mark at 0.64 stays
+       well inside the 80% safe zone (outer extent r≈162 < 205). -->
   <rect width="512" height="512" fill="url(#bg)"/>
-  <!-- D05 geometry scaled 0.78 so everything sits inside the 80% safe zone (r <= 205) -->
-  <circle cx="256" cy="256" r="130" stroke="#3ce6d1" stroke-width="23" fill="none"/>
-  <circle cx="256" cy="256" r="78" stroke="#3ce6d1" stroke-width="20" fill="none"/>
-  <g stroke="#3ce6d1" stroke-width="12" stroke-linecap="round">
-    <line x1="256" y1="83" x2="256" y2="64"/>
-    <line x1="429" y1="256" x2="448" y2="256"/>
-    <line x1="256" y1="429" x2="256" y2="448"/>
-    <line x1="83" y1="256" x2="64" y2="256"/>
+  <circle cx="256" cy="256" r="200" fill="url(#glow)"/>
+  <circle cx="256" cy="256" r="106" stroke="#8b7cff" stroke-width="15" fill="none"/>
+  <circle cx="256" cy="256" r="64" stroke="#c4b5fd" stroke-width="13" fill="none"/>
+  <g stroke="#f5c542" stroke-width="10" stroke-linecap="round">
+    <line x1="256" y1="114" x2="256" y2="99"/>
+    <line x1="398" y1="256" x2="413" y2="256"/>
+    <line x1="256" y1="398" x2="256" y2="413"/>
+    <line x1="114" y1="256" x2="99" y2="256"/>
   </g>
-  <g stroke="#3ce6d1" stroke-width="19" stroke-linecap="round">
-    <line x1="229" y1="256" x2="283" y2="256"/>
-    <line x1="256" y1="229" x2="256" y2="283"/>
+  <g stroke="#f5c542" stroke-width="14" stroke-linecap="round">
+    <line x1="234" y1="256" x2="278" y2="256"/>
+    <line x1="256" y1="234" x2="256" y2="278"/>
   </g>
 </svg>
