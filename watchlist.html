@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="64">
+  <meta name="app-version" content="66">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=64" rel="stylesheet">
+  <link href="watchlist.css?v=66" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -57,7 +57,7 @@
 
 <!-- ── 零掃碼上線（ONBOARDING.md）：三個全螢幕閘 ──────────────────────
      browser-gate   邀請連結在 LINE／FB 內建瀏覽器裡被打開：不兌換登入碼，教他跳到真正的瀏覽器
-     ios-first-gate iPhone 在 Safari 打開邀請連結：先加入主畫面，再在 App 裡輸入短碼
+    mobile-install-gate 手機瀏覽器打開邀請連結：先安裝，再從 App 貼上短碼
      onboard-gate   登入後的安裝精靈：安裝 → 開啟通知 → 完成 -->
 <div id="browser-gate" class="update-gate" style="display:none" role="dialog" aria-modal="true">
   <div class="ug-box ob-box">
@@ -76,22 +76,21 @@
   </div>
 </div>
 
-<div id="ios-first-gate" class="update-gate" style="display:none" role="dialog" aria-modal="true">
+<div id="mobile-install-gate" class="update-gate" style="display:none" role="dialog" aria-modal="true">
   <div class="ug-box ob-box">
     <div style="font-size:2.2rem">📲</div>
-    <div class="ug-title">iPhone 請先安裝，再登入</div>
+    <div class="ug-title" id="mobile-install-title">手機請先安裝，再登入</div>
     <div class="ug-msg">
-      <p>iPhone 只有「加入主畫面」的 App 才能收到推播通知，而且 App 與 Safari 的登入狀態不共用。</p>
-      <ol class="ob-ol">
-        <li>點 Safari 下方的「分享」，選「<b>加入主畫面</b>」</li>
+      <p id="mobile-install-reason">安裝成 App 後才能穩定接收推播通知。</p>
+      <ol class="ob-ol" id="mobile-install-steps">
+        <li>將「台股監控」安裝到主畫面</li>
         <li>從桌面打開「台股監控」</li>
-        <li>輸入 LINE 訊息裡的 <b>8 碼登入碼</b></li>
+        <li>回 LINE 點「複製登入碼」，再到 App 按貼上圖示</li>
       </ol>
       <p class="ob-note">連結裡的登入碼還沒使用；短碼與它同一組，用一個另一個就作廢。</p>
     </div>
-    <div class="ob-actions">
-      <button type="button" class="btn btn-sm btn-primary" onclick="_showPwaInstructionsModal()">看圖解</button>
-      <a id="ios-first-continue" class="btn btn-sm btn-outline-light" href="#">直接在 Safari 使用</a>
+    <div class="ob-actions" id="mobile-install-actions">
+      <button type="button" class="btn btn-sm btn-primary" onclick="installPwa()">安裝 App</button>
     </div>
   </div>
 </div>
@@ -2071,12 +2070,24 @@ async function copyInviteLink() {
   }
 }
 
-function showIosFirstGate() {
-  const cont = document.getElementById("ios-first-continue");
-  const u = new URL(location.href);
-  u.searchParams.set("here", "1");
-  cont.href = u.toString();
-  document.getElementById("ios-first-gate").style.display = "flex";
+function showMobileInstallGate() {
+  const title = document.getElementById("mobile-install-title");
+  const reason = document.getElementById("mobile-install-reason");
+  const steps = document.getElementById("mobile-install-steps");
+  const actions = document.getElementById("mobile-install-actions");
+  if (_isIOS) {
+    title.textContent = "iPhone 請先安裝，再登入";
+    reason.textContent = "iPhone 只有加入主畫面的 App 才能收到推播通知，而且 App 與 Safari 的登入狀態不共用。";
+    steps.innerHTML = `<li>點 Safari 下方的「分享」，選「<b>加入主畫面</b>」</li>
+      <li>從桌面打開「台股監控」</li>
+      <li>回 LINE 點「複製登入碼」，再到 App 按貼上圖示</li>`;
+    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_showPwaInstructionsModal()">看圖解</button>`;
+  } else {
+    title.textContent = "Android 請先安裝，再登入";
+    reason.textContent = "先安裝成 App，通知與登入都會留在主畫面的台股監控，不會散落在瀏覽器分頁。";
+    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="installPwa()">安裝 App</button>`;
+  }
+  document.getElementById("mobile-install-gate").style.display = "flex";
 }
 
 // ── 安裝精靈：安裝 → 開啟通知 → 完成 ─────────────────────────────────
@@ -2265,9 +2276,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (urlCode) {
     // 兩種情況先不兌換、把碼留在網址裡（ONBOARDING.md）：
     //  - 內建瀏覽器：這裡登入了也開不了通知，碼一用掉，跳到 Chrome 就變「已失效」
-    //  - iPhone 的 Safari：加入主畫面的 App 與 Safari 不共用登入狀態，要先裝再登
+    //  - 手機瀏覽器：先安裝 PWA，再從 App 以短碼登入，確保通知能啟用
     if (_inAppBrowser) { showBrowserGate(); return; }
-    if (_isIOS && !_pwaIsStandalone && qs.get("here") !== "1") { showIosFirstGate(); return; }
+    if (_isMobile && !_pwaIsStandalone) { showMobileInstallGate(); return; }
 
     history.replaceState(null, "", location.pathname);
     try {
@@ -6514,6 +6525,8 @@ const _pwaIsStandalone = window.matchMedia('(display-mode: standalone)').matches
 // 在 Safari 分頁裡 pushManager.subscribe() 一定丟 NotAllowedError。
 const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
   || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const _isAndroid = /Android/i.test(navigator.userAgent);
+const _isMobile = _isIOS || _isAndroid;
 
 // LINE／FB／IG 的內建瀏覽器是 WebView：它有 PushManager（所以按鈕會出現），
 // 但底下沒有接推播服務，subscribe() 一定丟 AbortError
