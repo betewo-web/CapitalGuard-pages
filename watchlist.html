@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="84">
+  <meta name="app-version" content="85">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=84" rel="stylesheet">
+  <link href="watchlist.css?v=85" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2330,6 +2330,9 @@ function _attemptOpenInstalledApp(automatic) {
 // Chrome 被忽略幾次後也會「暫時不再詢問」（權限仍是 default）。兩種都要改走手動開啟的說明。
 let _obPushBlockedShown = false;
 let _obPushPromptSuppressed = false;
+// 這一次開啟 App 之後才按下的「不允許」。權限是綁在網域上的，重裝 App 不會清掉，
+// 沒有這個旗標就會對第一次裝起來的人說「你剛才選了不允許」。
+let _obPushDeniedNow = false;
 // 通知步驟的兩個畫面："ask"（說明＋預告系統會問一次）→ "why"（完整理由，才出現「暫時不開啟」）
 let _obPushView = "ask";
 function _pushPermission() {
@@ -2342,13 +2345,21 @@ function _pushPromptUnavailable() {
   return _pushPermissionBlocked() || _obPushPromptSuppressed;
 }
 
-// 「被拒絕」與「瀏覽器暫時不再詢問」是兩種處境，開頭那句話不能混用
+// 三種處境，開頭那句話不能混用：
+//  ① 剛剛在這次操作裡按了「不允許」
+//  ② 進來的時候就已經是封鎖狀態——權限是綁在網域上的，重裝 App 也還在，
+//     說「你剛才選了不允許」對第一次裝起來的人就是錯的
+//  ③ 權限還是 default，但瀏覽器不再跳出詢問（Chrome 連續忽略後的暫時封鎖）
 function _pushBlockedCopy() {
-  return _pushPermissionBlocked()
+  if (!_pushPermissionBlocked()) {
+    return { lead: "瀏覽器已經不會再跳出通知的詢問視窗。",
+             how: "在這裡再按幾次也不會有反應，要麻煩你手動打開：" };
+  }
+  return _obPushDeniedNow
     ? { lead: "你剛才選了「不允許」。",
         how: "瀏覽器記住了那個選擇，之後不會再跳出詢問，要麻煩你手動打開：" }
-    : { lead: "瀏覽器已經不會再跳出通知的詢問視窗。",
-        how: "在這裡再按幾次也不會有反應，要麻煩你手動打開：" };
+    : { lead: "這台裝置之前把本站的通知關掉了。",
+        how: "通知權限是記在網域上的，重新安裝 App 也還在，要麻煩你手動打開：" };
 }
 
 // 封鎖之後只能從系統／瀏覽器設定打開，路徑每個平台都不一樣
@@ -2359,9 +2370,11 @@ function _pushUnblockSteps() {
     "打開「允許通知」",
     "回到這個畫面，按下方的「啟用通知」",
   ];
+  // 裝成 WebAPK 之後 App 裡沒有網址列，只能走系統設定；但「網站層級」的封鎖是記在
+  // Chrome 裡的，系統那邊看起來是開的、網站仍然被擋，所以第二條路一定要給。
   if (_isAndroid && _pwaIsStandalone) return [
-    "長按桌面的「台股監控」圖示 →「應用程式資訊」",
-    "點「通知」，把通知打開",
+    "長按桌面的「台股監控」圖示 →「應用程式資訊」→「通知」，確認通知是開著的",
+    `還是不行的話，打開 Chrome →「⋮ → 設定 → 網站設定 → 通知」，找到 <b>${location.hostname}</b> 改成「允許」`,
     "回到這個畫面，按下方的「啟用通知」",
   ];
   return [
@@ -2401,6 +2414,7 @@ async function onboardEnablePush() {
   }
   // 剛剛按的就是「不允許」：換成「為什麼要開 + 怎麼打開」，而不是丟一行錯誤讓他乾瞪眼
   if (_pushPermissionBlocked()) {
+    _obPushDeniedNow = true;
     await _onboardShowPushBlocked("通知關著就收不到任何提醒，請依上面的步驟打開後，再按一次「啟用通知」。");
     return;
   }
