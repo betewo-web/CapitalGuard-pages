@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="68">
+  <meta name="app-version" content="69">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=68" rel="stylesheet">
+  <link href="watchlist.css?v=69" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -100,7 +100,6 @@
     <ol class="ob-steps" id="ob-steps"></ol>
     <div class="ug-msg" id="ob-body"></div>
     <div class="ob-actions" id="ob-actions"></div>
-    <button type="button" class="btn btn-link btn-sm ob-skip" id="ob-skip" onclick="skipOnboarding()">稍後再說</button>
   </div>
 </div>
 
@@ -2116,11 +2115,6 @@ function resumeOnboarding() {
   renderOnboarding();
 }
 
-function skipOnboarding() {
-  _obSave({ stage: "done", skipped: true });
-  document.getElementById("onboard-gate").style.display = "none";
-}
-
 async function renderOnboarding() {
   const s = _obState();
   if (!s) return;
@@ -2132,7 +2126,6 @@ async function renderOnboarding() {
   const steps = document.getElementById("ob-steps");
   const body = document.getElementById("ob-body");
   const actions = document.getElementById("ob-actions");
-  const skip = document.getElementById("ob-skip");
 
   // 通知已經開了就跳過那一步（例如 Android 在瀏覽器裡先開了通知才安裝）
   if (s.stage === "push" && "serviceWorker" in navigator && "PushManager" in window) {
@@ -2147,7 +2140,6 @@ async function renderOnboarding() {
   const idx = order.indexOf(s.stage);
   steps.innerHTML = order.map((k, i) =>
     `<li class="${i < idx ? "is-done" : i === idx ? "is-current" : ""}">${i < idx ? "✓ " : ""}${labels[k]}</li>`).join("");
-  skip.style.display = s.stage === "finish" ? "none" : "";
 
   if (s.stage === "install") {
     icon.textContent = "📲";
@@ -2155,8 +2147,7 @@ async function renderOnboarding() {
     if (_isIOS) {
       body.innerHTML = `<p>iPhone 請用 Safari 的「分享」→「<b>加入主畫面</b>」。</p>
         <p class="ob-note">裝好後從桌面打開 App，輸入 LINE 訊息裡的 8 碼登入碼，就會接著開啟通知。</p>`;
-      actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_showPwaInstructionsModal()">看圖解</button>
-        <button type="button" class="btn btn-sm btn-outline-light" onclick="skipOnboarding()">我已加入主畫面</button>`;
+      actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_showPwaInstructionsModal()">看圖解</button>`;
     } else {
       body.innerHTML = `<p>裝到桌面之後，通知會像一般 App 一樣跳出來，開啟也不用再經過 LINE。</p>
         <p class="ob-note">按下去會出現瀏覽器的安裝確認；沒有出現的話，用瀏覽器選單的「加到主畫面」。</p>`;
