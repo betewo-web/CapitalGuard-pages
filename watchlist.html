@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="88">
+  <meta name="app-version" content="89">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=88" rel="stylesheet">
+  <link href="watchlist.css?v=89" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2218,9 +2218,11 @@ async function renderOnboarding() {
       : (_pwaIsStandalone ? "最後一步：開啟通知" : "開啟通知");
     const blockedCopy = _obPushBlockedShown ? _pushBlockedCopy() : null;
     if (_obPushBlockedShown) {
-      body.innerHTML = `<p>${blockedCopy.lead}<b>通知就是這個服務的核心</b>：自訂規則成立、盤後報告完成、自選股有新事件，全都靠通知送到你手上；關著的話，這些提醒只能等你自己想到打開 App 才看得到。</p>
-         <p>${blockedCopy.how}</p>
+      body.innerHTML = `<p>${blockedCopy.lead}</p>
+         <p>開啟之後，<b>自訂規則成立、盤後報告完成、自選股有新事件</b>才會主動通知你；關著的話，這些只能等你自己想到打開 App 才看得到。</p>
+         <p class="ob-lead-sm">${blockedCopy.how}</p>
          <ol class="ob-ol">${_pushUnblockSteps().map(t => `<li>${t}</li>`).join("")}</ol>
+         ${_pushUnblockFallback() ? `<p class="ob-note ob-fallback">${_pushUnblockFallback()}</p>` : ""}
          <div id="ob-push-msg" class="ob-note" role="status" aria-live="polite"></div>`;
     } else if (_obPushView === "why") {
       body.innerHTML = `<p><b>沒有通知，等於只剩一半的服務。</b></p>
@@ -2356,37 +2358,39 @@ function _pushBlockedCopy() {
              how: "在這裡再按幾次也不會有反應，要麻煩你手動打開：" };
   }
   return _obPushDeniedNow
-    ? { lead: "你剛才選了「不允許」。",
-        how: "瀏覽器記住了那個選擇，之後不會再跳出詢問，要麻煩你手動打開：" }
-    : { lead: "這台裝置之前把本站的通知關掉了。",
-        how: "通知權限是記在網域上的，重新安裝 App 也還在，要麻煩你手動打開：" };
+    ? { lead: "你剛才選了「不允許」，瀏覽器記住了，之後不會再問。",
+        how: "三個步驟就能開回來（<b>第 2 步最常被漏掉</b>）：" }
+    : { lead: "這台裝置之前把本站的通知關掉了（權限記在網域上，重裝 App 也還在）。",
+        how: "三個步驟就能開回來（<b>第 2 步最常被漏掉</b>）：" };
 }
 
 // 封鎖之後只能從系統／瀏覽器設定打開，路徑每個平台都不一樣
 function _pushUnblockSteps() {
   if (_isIOS) return [
-    "回到 iPhone 的「設定」→「通知」",
-    "往下找到「台股監控」並點進去",
-    "打開「允許通知」",
-    "回到這個畫面，按下方的「啟用通知」",
+    "打開 iPhone 的「<b>設定</b>」→「<b>通知</b>」，找到「<b>台股監控</b>」，打開「允許通知」",
+    "<b>把 App 從多工列滑掉、完全關閉</b>，再從主畫面重新開啟",
+    "回到這裡，按「<b>啟用通知</b>」",
   ];
   // 裝成 WebAPK 之後 App 裡沒有網址列，只能走系統設定；但「網站層級」的封鎖是記在
   // Chrome 裡的，系統那邊看起來是開的、網站仍然被擋，所以第二條路一定要給。
   if (_isAndroid && _pwaIsStandalone) return [
-    "長按桌面的「台股監控」圖示 →「應用程式資訊」→「通知」，確認是開著的（順便確認 <b>Chrome</b> 這個 App 的通知也是開的）",
-    `打開 <b>Chrome</b> →「⋮ → 設定 → 網站設定 → 通知」，在<b>「已封鎖」清單</b>裡找到 `
-      + `<b>${location.hostname}</b>，點進去改成「允許」（有「重設權限」就按它）`,
-    `清單裡找不到的話：Chrome →「設定 → 網站設定 → 全部網站」→ 找 <b>${location.hostname}</b> `
-      + `→「清除並重設」。權限會退回「詢問」，但本站資料也會一起清掉（App 會登出，`
-      + `回 LINE 傳「登入」拿一組新的 8 碼再登入即可）`,
-    "把這個 App 從多工列滑掉、完全關閉再開啟——設定改了不會自動傳進已經開著的 App",
-    "重新開啟後，按下方的「啟用通知」",
+    "<b>長按</b>桌面的「台股監控」圖示 →「<b>應用程式資訊</b>」→「<b>通知</b>」，把它打開",
+    "<b>把 App 從多工列滑掉、完全關閉</b>，再從桌面重新開啟",
+    "回到這裡，按「<b>啟用通知</b>」",
   ];
   return [
-    "點網址列左邊的鎖頭（或 <b>ⓘ</b>）圖示",
-    "選「網站設定」或「權限」，把「通知」改成「允許」",
-    "回到這個畫面，按下方的「啟用通知」",
+    "點網址列左邊的<b>鎖頭</b>（或 <b>ⓘ</b>）圖示 →「<b>網站設定</b>」",
+    "把「<b>通知</b>」改成「<b>允許</b>」",
+    "<b>重新整理頁面</b>，再按「<b>啟用通知</b>」",
   ];
+}
+
+// 少數情況（例如當初是在 Chrome 分頁裡被封鎖的）系統設定打開了仍然不通——那是「網站
+// 層級」的封鎖，只能從 Chrome 的網站設定解除。放在步驟外面，不要擋住九成的人的主線。
+function _pushUnblockFallback() {
+  if (!_isAndroid || !_pwaIsStandalone) return "";
+  return `還是關著嗎？打開 <b>Chrome</b> →「設定 → 網站設定 → 通知」，`
+    + `把 <b>${location.hostname}</b> 改成「允許」，再重開一次 App。`;
 }
 
 // 重畫成解除步驟，並把這次按下去的結果寫在下面——不然使用者只會覺得按鈕壞了
@@ -6909,9 +6913,11 @@ function _showPushEnableHelp() {
 
 // 首頁通知列在權限被封鎖時要給得出步驟；精靈裡那份說明用的是同一個 _pushUnblockSteps()
 function _showPushUnblockHelp() {
-  alert('這台裝置把本站的通知關掉了，瀏覽器不會再跳出詢問，請手動打開：\n\n'
-    + _pushUnblockSteps().slice(0, -1).map((t, i) => `${i + 1}. ${t.replace(/<[^>]+>/g, '')}`).join('\n')
-    + '\n\n打開之後回到這裡，按「啟用通知」。\n\n' + _pushDiagnosticLine());
+  const fallback = _pushUnblockFallback();
+  alert('通知目前是關閉的，三個步驟就能開回來（第 2 步最常被漏掉）：\n\n'
+    + _pushUnblockSteps().map((t, i) => `${i + 1}. ${t.replace(/<[^>]+>/g, '')}`).join('\n\n')
+    + (fallback ? `\n\n${fallback.replace(/<[^>]+>/g, '')}` : '')
+    + '\n\n' + _pushDiagnosticLine());
 }
 
 // 「設定裡明明開了，App 還是說關著」時唯一能分辨的東西：App 自己讀到什麼。

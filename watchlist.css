@@ -2827,8 +2827,18 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .ob-box .ug-title { text-align: center; }
 .ob-box .ug-msg p { margin: 0 0 0.55rem; }
 .ob-note { font-size: 0.74rem; color: var(--text-2, #8da1c6); }
-.ob-ol { padding-left: 1.2rem; margin: 0.3rem 0 0.6rem; }
-.ob-ol li { margin-bottom: 0.3rem; }
+/* 解除封鎖的步驟是「照著做」的清單，不是說明文：行距與項目間距要拉開，
+   動作的關鍵字用粗體提亮，眼睛才掃得到下一步要按哪裡。 */
+.ob-ol { padding-left: 1.35rem; margin: 0.45rem 0 0.7rem; }
+.ob-ol li { margin-bottom: 0.6rem; line-height: 1.7; }
+.ob-ol li:last-child { margin-bottom: 0; }
+.ob-ol b { color: var(--text-0); font-weight: 700; }
+.ob-lead-sm { margin-bottom: 0.25rem !important; }
+.ob-fallback {
+	margin-top: 0.7rem;
+	padding-top: 0.6rem;
+	border-top: 1px solid rgba(146, 146, 163, 0.22);
+}
 .ob-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-top: 0.9rem; }
 .ob-actions .btn { min-width: 8.5rem; }
 .ob-skip { display: block; margin: 0.6rem auto 0; color: var(--text-2, #8da1c6); font-size: 0.78rem; text-decoration: none; }
