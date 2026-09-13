@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="67">
+  <meta name="app-version" content="68">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=67" rel="stylesheet">
+  <link href="watchlist.css?v=68" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2074,13 +2074,18 @@ function showMobileInstallGate() {
   const actions = document.getElementById("mobile-install-actions");
   if (_isIOS) {
     title.textContent = "iPhone 請先安裝，再登入";
-    steps.innerHTML = `<li>點 Safari 下方的「分享」，選「<b>加入主畫面</b>」</li>
+    steps.innerHTML = `<li>點 Safari 下方的
+      <svg aria-label="分享" role="img" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-5px;margin:0 3px">
+        <path d="M12 15V3m0 0L8 7m4-4 4 4"/><path d="M7 10H5.5A1.5 1.5 0 0 0 4 11.5v7A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H17"/>
+      </svg>「分享」，選「<b>加入主畫面</b>」（不是「加入書籤」）</li>
       <li>從桌面打開「台股監控」</li>
       <li>回 LINE 點「複製登入碼」，再到 App 按貼上圖示</li>`;
-    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_showPwaInstructionsModal()">看圖解</button>`;
+    actions.innerHTML = "";
+    actions.style.display = "none";
   } else {
     title.textContent = "Android 請先安裝，再登入";
     actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="installPwa()">安裝 App</button>`;
+    actions.style.display = "";
   }
   document.getElementById("mobile-install-gate").style.display = "flex";
 }
