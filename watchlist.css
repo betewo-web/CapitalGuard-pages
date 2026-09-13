@@ -1322,9 +1322,10 @@ body.has-bottom-nav .qa-panel {
 
 /* K 線容器：高度隨視窗（以前固定 460px，手機上三個 grid 擠在一起）；
    touch-action: pan-y 讓瀏覽器接管垂直捲動、水平拖曳與雙指縮放仍交給 ECharts，
-   手指上下滑就不會同時捲 modal 又平移圖表 */
+   手指上下滑就不會同時捲 modal 又平移圖表。
+   2026-09-13 再加高一階：主圖分到的像素變多，K 棒本身才看得清楚（買不買、實體長短）。 */
 #kline-chart {
-	height: clamp(300px, 62vh, 560px);
+	height: clamp(360px, 70vh, 640px);
 	border: 1px solid #2f3f66;
 	border-radius: 8px;
 	touch-action: pan-y;
@@ -1483,7 +1484,7 @@ body.has-bottom-nav .qa-panel {
 
 @media (max-width: 860px) {
 	#kline-chart {
-		height: clamp(280px, 55vh, 460px);
+		height: clamp(320px, 64vh, 540px);
 	}
 
 	.kline-select-group {

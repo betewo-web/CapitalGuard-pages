@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="91">
+  <meta name="app-version" content="92">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=91" rel="stylesheet">
+  <link href="watchlist.css?v=92" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -915,6 +915,7 @@ let klineTouchStartPoint = null;
 let klineTouchDomEl = null;
 let klineTouchDomHandlers = null;
 let klineTouchGlobalHandlers = null;
+let klineLastBuildArgs = null;   // 轉向／視窗變高時要用同一份資料重排版面（高度是像素算的）
 let watchlistRows = [];
 let intradayQuoteMap = {};
 let intradayQuotesLoadingPromise = null;
@@ -5929,10 +5930,10 @@ function renderKLineChartWhenVisible(sid, period) {
   const run = () => {
     renderKLineChart(sid, period);
     requestAnimationFrame(() => {
-      if (klineChart) klineChart.resize();
+      if (klineChart) { klineChart.resize(); relayoutKLineChart(); }
     });
     setTimeout(() => {
-      if (klineChart) klineChart.resize();
+      if (klineChart) { klineChart.resize(); relayoutKLineChart(); }
     }, 150);
   };
 
@@ -5967,23 +5968,33 @@ function renderKLineChart(sid, period) {
     klineChart = echarts.init(el, null, { renderer: "canvas" });
     bindKLineTouchInteraction();
   }
-  klineChart.setOption(buildKLineOption(periodData, chips, levels, period), { notMerge: true });
-  updateKLineChipsNote(chips, period);
+  // 版面（主圖／副圖／縮放條的高度）是按容器像素分的，所以要把實際高度傳進去
+  klineLastBuildArgs = [periodData, chips, levels, period];
+  klineChart.setOption(buildKLineOption(periodData, chips, levels, period, el.clientHeight), { notMerge: true });
+  updateKLineChipsNote(chips, period, periodData);
 }
 
 // 籌碼下拉旁的說明：目前檢視沒有資料（例如報告沒這檔的法人資料、FinMind 備援也拿不到）
 // 就講清楚，不要讓使用者對著一片空白猜
-function updateKLineChipsNote(chips, period) {
+function updateKLineChipsNote(chips, period, periodData) {
   const note = document.getElementById("kline-chips-note");
   if (!note) return;
   const view = currentChipsView;
   const series = Array.isArray(chips?.[view]) ? chips[view] : [];
-  const hasData = Array.isArray(chips?.dates) && chips.dates.length > 0
-    && series.some(v => v !== null && v !== undefined && !Number.isNaN(Number(v)));
+  const hasValue = v => v !== null && v !== undefined && !Number.isNaN(Number(v));
+  const hasData = Array.isArray(chips?.dates) && chips.dates.length > 0 && series.some(hasValue);
   let text = "";
   if (view !== "hide") {
     if (period !== "daily") text = "籌碼副圖只在日K顯示";
     else if (!hasData) text = "此檢視無籌碼資料";
+    else {
+      // 籌碼歷史比 K 線短的時候副圖左半邊是空的（歷史逐日累積、慢慢往回補）。
+      // 直接講從哪天開始有，不要讓人以為是漏抓。80＝日K 預設視窗根數（見 buildKLineOption）
+      const kDates = periodData?.dates || [];
+      const windowStart = kDates.length ? kDates[Math.max(0, kDates.length - 80)] : "";
+      const firstChip = chips.dates.find((d, i) => hasValue(series[i]));
+      if (windowStart && firstChip && firstChip > windowStart) text = `籌碼資料自 ${firstChip.slice(5)} 起`;
+    }
   }
   note.textContent = text;
   note.style.display = text ? "" : "none";
@@ -6129,13 +6140,14 @@ async function fetchWatchlistFinMindStock(sid, name, industry) {
   }
 }
 
-// 未進榜的自選股報告裡沒有籌碼時序：直接向 FinMind 拿近 60 日三大法人買賣超，
+// 未進榜的自選股報告裡沒有籌碼時序：直接向 FinMind 拿近 240 日三大法人買賣超
+// （K 線預設視窗 80 根、往回拉還能看更早，籌碼只有 60 天的話左邊一大段是空的），
 // 欄位對齊報告的 chips（dates / foreign / trust / dealer / total，單位張）。
 // 外資＝Foreign_Investor（不含外資自營，與 T86 的口徑一致）；三大合計含外資自營商。
 async function fetchWatchlistFinMindChips(sid) {
   try {
     const start = new Date();
-    start.setDate(start.getDate() - 60);
+    start.setDate(start.getDate() - 240);
     const startDate = start.toISOString().slice(0, 10);
     const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInstitutionalInvestorsBuySell&data_id=${encodeURIComponent(sid)}&start_date=${startDate}`;
     const resp = await fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(20000) : undefined });
@@ -6298,7 +6310,7 @@ function computeWatchlistLevels(raw, ma5, ma10, ma20, ma60) {
   };
 }
 
-function buildKLineOption(pd, chips, levels, period) {
+function buildKLineOption(pd, chips, levels, period, chartHeight) {
   const dates = pd.dates || [];
   const ohlcv = pd.ohlcv || [];
   const n = dates.length;
@@ -6363,17 +6375,24 @@ function buildKLineOption(pd, chips, levels, period) {
   });
   const hasChips = period === "daily" && currentChipsView !== "hide" && dates.length > 0 && chipsSeriesData.some(v => v !== null);
 
-  // 圖例改成單列可捲動（type:"scroll"），主圖 top 固定 30 就不會被換行的圖例壓到
-  const grids = hasChips
-    ? [
-      { left: 46, right: 18, top: 30, height: "50%" },
-      { left: 46, right: 18, top: "63%", height: "11%" },
-      { left: 46, right: 18, top: "79%", height: "11%" },
-    ]
-    : [
-      { left: 46, right: 18, top: 30, height: "66%" },
-      { left: 46, right: 18, top: "77%", height: "13%" },
-    ];
+  // 版面改用像素排，不再用百分比：以前最後一個 grid 收在 90%、下面的縮放條又固定
+  // bottom:2 / height:12，容器一矮（clamp 下限）日期就壓到縮放條，縮放條本身只剩一條
+  // 看不出是什麼的殘影。現在把「圖例／日期／縮放條」各自要的高度先扣掉，剩下的才分給圖，
+  // 主圖拿到的比例也從 50% 拉到 ~66%（K 棒因此變高）。
+  const chartH = Math.max(240, Math.round(chartHeight) || 440);
+  const legendH = 24;                 // 單列可捲動圖例
+  const sliderH = mobile ? 16 : 18;   // 下方時間軸縮放條
+  const sliderBottom = 4;
+  const dateLabelH = 18;              // 最下面那排日期
+  const gridGap = 8;                  // 主圖與副圖之間
+  const subCount = hasChips ? 2 : 1;
+  const usable = Math.max(120, chartH - legendH - (sliderBottom + sliderH + dateLabelH) - gridGap * subCount);
+  const subH = Math.max(38, Math.round(usable * (hasChips ? 0.16 : 0.20)));
+  const mainH = Math.max(110, usable - subH * subCount);
+  const gridBox = { left: 46, right: 18 };
+  const grids = [{ ...gridBox, top: legendH, height: mainH }];
+  grids.push({ ...gridBox, top: legendH + mainH + gridGap, height: subH });
+  if (hasChips) grids.push({ ...gridBox, top: legendH + mainH + gridGap + subH + gridGap, height: subH });
   // 副圖 y 軸：成交量原始值是「股」，六位數在 46px 內放不下、也跟圖例的「(張)」對不上；
   // 統一換算成張、超過一萬張用「萬」，籌碼（本來就是張）同一個格式
   const fmtLots = lots => {
@@ -6406,8 +6425,10 @@ function buildKLineOption(pd, chips, levels, period) {
       return {
         scale: true,
         gridIndex: i,
-        boundaryGap: ["4%", "4%"],
-        splitNumber: 4,
+        boundaryGap: ["2%", "2%"],   // 上下留白從 4% 收到 2%，同樣的價格區間 K 棒再高一點
+        // 刻度切細一階：scale:true 會把上下界湊成整數刻度，splitNumber 4 時 28–49 會被撐成
+        // 25–50，下緣多出一整格空白、K 棒被擠到上半部；6 會湊成 27–51，貼得比較近
+        splitNumber: 6,
         axisLabel: { fontSize: 10, color: "#a6badf" },
         splitLine: { lineStyle: { color: "rgba(148,171,220,0.18)" } },
       };
@@ -6539,14 +6560,35 @@ function buildKLineOption(pd, chips, levels, period) {
         preventDefaultMouseMove: false,
       },
       {
+        // 最下面那條是「時間軸縮放條」（拖兩端改期間、拖中間平移）。ECharts 預設是淺色系，
+        // 疊在深色面板上、又被壓到 12px，看起來像一塊被裁掉一半的白圖，沒人看得出是控制項。
         type: "slider",
         xAxisIndex: gridIndexes,
-        bottom: 2,
-        height: 12,
+        left: 46,
+        right: 18,
+        bottom: sliderBottom,
+        height: sliderH,
         realtime: true,
         showDetail: false,
+        brushSelect: false,          // 在條上拖曳＝平移，不要變成框選新區間
         minValueSpan,
         maxValueSpan,
+        backgroundColor: "rgba(16,26,48,0.75)",
+        borderColor: "rgba(148,171,220,0.28)",
+        fillerColor: "rgba(139,124,255,0.20)",
+        dataBackground: {
+          lineStyle: { color: "rgba(148,171,220,0.45)", width: 1 },
+          areaStyle: { color: "rgba(148,171,220,0.10)" },
+        },
+        selectedDataBackground: {
+          lineStyle: { color: "rgba(139,124,255,0.85)", width: 1 },
+          areaStyle: { color: "rgba(139,124,255,0.22)" },
+        },
+        handleStyle: { color: "#8b7cff", borderColor: "#cbd6f5", borderWidth: 1 },
+        handleSize: "110%",
+        moveHandleSize: 4,
+        moveHandleStyle: { color: "rgba(139,124,255,0.5)" },
+        emphasis: { handleStyle: { color: "#a89bff" } },
       },
     ],
     series,
@@ -6562,16 +6604,33 @@ document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => 
   clearKLineLongPressTimer();
   klineMobileTooltipLocked = false;
   klineTouchStartPoint = null;
+  klineLastBuildArgs = null;
   currentKLineSid = null;
 });
 
 document.getElementById("klineModal").addEventListener("shown.bs.modal", () => {
-  if (klineChart) klineChart.resize();
+  if (klineChart) { klineChart.resize(); relayoutKLineChart(); }
 });
+
+// 主圖／副圖／縮放條的高度是按容器像素分的，容器變高變矮（轉向、鍵盤收起）要重排；
+// 只 merge 版面相關的設定、不帶 start/end，使用者拉過的期間才不會被重置回預設 80 根
+function relayoutKLineChart() {
+  const el = document.getElementById("kline-chart");
+  if (!klineChart || klineChart.isDisposed() || !klineLastBuildArgs || !el) return;
+  const opt = buildKLineOption(...klineLastBuildArgs, el.clientHeight);
+  const dataZoom = opt.dataZoom.map(z => {
+    const merged = { ...z };
+    delete merged.start;
+    delete merged.end;
+    return merged;
+  });
+  klineChart.setOption({ grid: opt.grid, dataZoom });
+}
 
 window.addEventListener("resize", () => {
   if (klineChart) {
     klineChart.resize();
+    relayoutKLineChart();
     bindKLineTouchInteraction();
   }
 });
