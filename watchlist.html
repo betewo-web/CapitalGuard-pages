@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="90">
+  <meta name="app-version" content="91">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=90" rel="stylesheet">
+  <link href="watchlist.css?v=91" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -7115,9 +7115,11 @@ async function togglePushSubscription() {
   try {
     const permission = await permissionPromise;
     if (permission !== 'granted') {
-      txt.textContent = permission === 'denied'
-        ? '已拒絕授權通知權限'
-        : '尚未授權通知權限，請再試一次';
+      // 被拒絕之後這條列要立刻換成「如何啟用通知」——按鈕留在「啟用通知」等於死路，
+      // 按下去只會再拿到一次 denied。Android 靠 Permissions API 的 change 事件補了這件事，
+      // 但 Safari 不支援 notifications 這個 descriptor，所以一定要自己重畫。
+      await initPushUI();
+      if (permission !== 'denied') txt.textContent = '尚未授權通知權限，請再試一次';
       return;
     }
     const reg = await _swReadyOrNull();
