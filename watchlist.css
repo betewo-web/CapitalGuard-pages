@@ -2723,7 +2723,29 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	animation: nav-refresh-spin 0.9s linear infinite;
 }
 .ug-title { font-weight: 700; color: var(--text-0); font-size: 1.05rem; margin-bottom: 0.4rem; }
-.ug-msg { font-size: 0.82rem; line-height: 1.6; }
+.ug-msg { color: var(--text-0); font-size: 0.86rem; line-height: 1.65; }
+
+/* 登入與首次啟動畫面是操作指引，不使用一般資訊區的低對比 muted 色。 */
+#login-section,
+#login-section .text-muted,
+#login-section .form-label,
+#login-section .btn-link,
+#login-section .small,
+.ob-box,
+.ob-box .ug-msg,
+.ob-box .ob-note,
+.ob-box .ob-ol {
+	color: var(--text-0) !important;
+}
+#login-section .card-header .text-muted,
+#login-section .collapse .text-muted {
+	color: var(--text-1) !important;
+}
+#login-section .form-label { font-weight: 600; }
+#login-section .btn-link { font-weight: 600; text-decoration-color: rgba(245, 245, 247, 0.55); }
+#short-code-msg:empty,
+#manual-login-msg:empty,
+#login-msg:empty { display: none; }
 @media (prefers-reduced-motion: reduce) {
 	.ug-spin { animation: none; }
 }
