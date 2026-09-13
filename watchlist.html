@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="81">
+  <meta name="app-version" content="82">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=81" rel="stylesheet">
+  <link href="watchlist.css?v=82" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2407,7 +2407,8 @@ function finishOnboarding() {
 async function _showSetupDoneNotification() {
   try {
     if (!("serviceWorker" in navigator) || Notification.permission !== "granted") return;
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await _swReadyOrNull();
+    if (!reg) return;
     await reg.showNotification("設定完成 ✅", {
       body: "台股監控的通知已經開啟，之後的提醒會像這樣跳出來。",
       icon: "icons/icon-192.png",
@@ -2695,9 +2696,8 @@ async function initAppUpdater() {
   if (!("serviceWorker" in navigator)) return;
   if (_appUpdaterStarted) return;
   _appUpdaterStarted = true;
-  let reg;
-  try { reg = await navigator.serviceWorker.ready; }
-  catch { _appUpdaterStarted = false; return; }
+  const reg = await _swReadyOrNull(10000);
+  if (!reg) { _appUpdaterStarted = false; return; }
   _hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     // 第一次安裝 SW 也會觸發（從沒有 controller 變成有），那不是更新，不重載
@@ -3387,7 +3387,8 @@ async function maybeShowPushNudgePopup() {
   // initPushUI() 查訂閱狀態是非同步且沒被 await；這裡再查一次，避免搶在它前面把已訂閱誤判成未訂閱
   if (!pushNudgeNeedsInstall() && "serviceWorker" in navigator && "PushManager" in window) {
     try {
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await _swReadyOrNull();
+      if (!reg) return false;
       _pushSubscribed = !!(await reg.pushManager.getSubscription());
     } catch { return false; }
   }
@@ -3654,7 +3655,8 @@ function alertTypeLabel(row) {
     });
 
     try {
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await _swReadyOrNull();
+      if (!reg) return;
       await reg.showNotification(`今日重要資訊：${newsRows.length} 則`, {
         body: topRows.join("\n"),
         icon: NOTIFICATION_ICON,
@@ -6890,8 +6892,8 @@ async function ensurePushSubscriptionRegistered() {
   if (!state.userId || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
   try {
     await _syncRotatedPushSubscription();
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
+    const reg = await _swReadyOrNull();
+    const sub = reg && await reg.pushManager.getSubscription();
     if (!sub) return;
     await _rememberVapidKeyForSw();
     const rows = await sbGet('push_subscriptions', {
