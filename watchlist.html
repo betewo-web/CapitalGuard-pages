@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="89">
+  <meta name="app-version" content="90">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=89" rel="stylesheet">
+  <link href="watchlist.css?v=90" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -6916,17 +6916,7 @@ function _showPushUnblockHelp() {
   const fallback = _pushUnblockFallback();
   alert('通知目前是關閉的，三個步驟就能開回來（第 2 步最常被漏掉）：\n\n'
     + _pushUnblockSteps().map((t, i) => `${i + 1}. ${t.replace(/<[^>]+>/g, '')}`).join('\n\n')
-    + (fallback ? `\n\n${fallback.replace(/<[^>]+>/g, '')}` : '')
-    + '\n\n' + _pushDiagnosticLine());
-}
-
-// 「設定裡明明開了，App 還是說關著」時唯一能分辨的東西：App 自己讀到什麼。
-// Android 的權限有兩層（WebAPK 的系統通知開關 ＋ Chrome 的網站設定），只開一層仍然是 denied。
-function _pushDiagnosticLine() {
-  return `App 目前讀到：權限=${_pushPermission()}`
-    + `、執行於=${_pwaIsStandalone ? '已安裝的 App' : '瀏覽器分頁'}`
-    + `、訂閱=${_pushSubscribed ? '有' : '無'}`
-    + `、來源=${location.origin}`;
+    + (fallback ? `\n\n${fallback.replace(/<[^>]+>/g, '')}` : ''));
 }
 
 // 存 / 刪 Supabase 的訂閱紀錄。pushsubscriptionchange 也共用 _savePushSubscription。
