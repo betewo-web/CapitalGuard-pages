@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="87">
+  <meta name="app-version" content="88">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=87" rel="stylesheet">
+  <link href="watchlist.css?v=88" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2373,9 +2373,12 @@ function _pushUnblockSteps() {
   // 裝成 WebAPK 之後 App 裡沒有網址列，只能走系統設定；但「網站層級」的封鎖是記在
   // Chrome 裡的，系統那邊看起來是開的、網站仍然被擋，所以第二條路一定要給。
   if (_isAndroid && _pwaIsStandalone) return [
-    "長按桌面的「台股監控」圖示 →「應用程式資訊」→「通知」，確認通知是開著的",
+    "長按桌面的「台股監控」圖示 →「應用程式資訊」→「通知」，確認是開著的（順便確認 <b>Chrome</b> 這個 App 的通知也是開的）",
     `打開 <b>Chrome</b> →「⋮ → 設定 → 網站設定 → 通知」，在<b>「已封鎖」清單</b>裡找到 `
       + `<b>${location.hostname}</b>，點進去改成「允許」（有「重設權限」就按它）`,
+    `清單裡找不到的話：Chrome →「設定 → 網站設定 → 全部網站」→ 找 <b>${location.hostname}</b> `
+      + `→「清除並重設」。權限會退回「詢問」，但本站資料也會一起清掉（App 會登出，`
+      + `回 LINE 傳「登入」拿一組新的 8 碼再登入即可）`,
     "把這個 App 從多工列滑掉、完全關閉再開啟——設定改了不會自動傳進已經開著的 App",
     "重新開啟後，按下方的「啟用通知」",
   ];
