@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="77">
+  <meta name="app-version" content="79">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=77" rel="stylesheet">
+  <link href="watchlist.css?v=79" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2116,7 +2116,10 @@ function _obSave(s) {
 }
 
 function startOnboarding(reason) {
-  _obSave({ stage: _pwaIsStandalone ? "push" : "install", reason, at: Date.now() });
+  // 手機短碼只會在安裝後的 App 內使用；成功兌換本身就代表安裝步驟已完成。
+  // 不再依賴部分 Android WebAPK 會誤報的 display-mode 判斷，避免登入後退回第 1 步。
+  const installed = reason === "short_code" || _pwaIsStandalone;
+  _obSave({ stage: installed ? "push" : "install", reason, at: Date.now() });
   renderOnboarding();
 }
 
@@ -2297,6 +2300,8 @@ async function _showSetupDoneNotification() {
 
 // ── 初始化 ──────────────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", async () => {
+  // 未登入的 PWA 也必須監聽新版；否則會永遠停在舊登入畫面，看見已移除的入口與舊驗證邏輯。
+  initAppUpdater();
   // 開頁第一件事：這一版還能不能用（S31）。太舊就停在更新畫面，不進登入或主畫面
   if (!(await enforceAppVersion())) return;
 
@@ -2550,11 +2555,15 @@ function _stopAutoRefresh() {
 const APP_UPDATE_CHECK_MS = 10 * 60 * 1000;
 let _reloadPending = false;
 let _hadController = false;
+let _appUpdaterStarted = false;
 
 async function initAppUpdater() {
   if (!("serviceWorker" in navigator)) return;
+  if (_appUpdaterStarted) return;
+  _appUpdaterStarted = true;
   let reg;
-  try { reg = await navigator.serviceWorker.ready; } catch { return; }
+  try { reg = await navigator.serviceWorker.ready; }
+  catch { _appUpdaterStarted = false; return; }
   _hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     // 第一次安裝 SW 也會觸發（從沒有 controller 變成有），那不是更新，不重載
