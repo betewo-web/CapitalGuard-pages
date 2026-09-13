@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="63">
+  <meta name="app-version" content="64">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,8 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=63" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <link href="watchlist.css?v=64" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -180,33 +179,16 @@
             <input id="inp-short-code" class="form-control form-control-lg ob-code-input" placeholder="ABCD-EFGH"
                    maxlength="9" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false"
                    inputmode="latin" onkeydown="if(event.key==='Enter')doShortCodeLogin()">
+            <button class="btn btn-outline-light btn-lg px-3" type="button" id="paste-code-btn"
+                    onclick="pasteShortCodeLogin()" title="貼上 LINE 登入碼" aria-label="貼上 LINE 登入碼">
+              <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3.5" width="10" height="10" rx="1.5"/><path d="M6 3.5V2.8A1.3 1.3 0 0 1 7.3 1.5h1.4A1.3 1.3 0 0 1 10 2.8v.7M5.5 7h5M5.5 10h3.5"/>
+              </svg>
+            </button>
             <button class="btn btn-primary btn-lg" type="button" id="short-code-btn" onclick="doShortCodeLogin()">登入</button>
           </div>
-          <div class="text-muted small mt-2">還沒有登入碼？加入 LINE 官方帳號好友，或在聊天室傳「登入」，馬上就會收到。</div>
+          <div class="text-muted small mt-2">在 LINE 訊息點「複製登入碼」，回到 App 後按貼上圖示即可登入。</div>
           <div id="short-code-msg" class="mt-2 small"></div>
-        </div>
-
-        <hr class="mb-4" style="border-color:#2a2d3d">
-
-        <!-- QR Code 掃碼登入（電腦用：手機 LINE 掃電腦上的碼） -->
-        <div id="qr-wrap">
-          <p class="text-muted small mb-3">
-            電腦版：用手機 LINE 掃描 QR Code<br>
-            <span style="font-size:.8rem">首次使用將自動建立帳號，無需任何輸入</span>
-          </p>
-          <div id="qrcode" class="d-inline-block p-2 bg-white rounded mb-3"
-               style="min-width:208px;min-height:208px;"></div>
-          <div id="qr-status" class="text-muted small mb-3">
-            <span class="spinner-border spinner-border-sm me-1"></span> 產生 QR Code 中...
-          </div>
-          <button class="btn btn-outline-light" onclick="initLiffLogin()">重新產生 QR Code</button>
-        </div>
-
-        <!-- 掃碼成功後顯示 -->
-        <div id="qr-success" style="display:none">
-          <div style="font-size:3.5rem">✅</div>
-          <p class="mt-2 fw-semibold">綁定成功！</p>
-          <p class="text-muted small">正在登入...</p>
         </div>
 
         <div id="login-msg" class="mt-2 small"></div>
@@ -217,11 +199,11 @@
         <hr class="mt-4" style="border-color:#2a2d3d">
         <button class="btn btn-link text-muted small p-0" type="button"
                 data-bs-toggle="collapse" data-bs-target="#manual-login-wrap">
-          無法掃碼？ ▸
+          還沒有登入碼？ ▸
         </button>
         <div class="collapse mt-3" id="manual-login-wrap">
-          <p class="text-muted small mb-2">在手機上直接開啟 LINE 登入，驗證後會自動進入 App：</p>
-          <a id="liff-direct-link" class="btn btn-outline-light mb-3" href="#" target="_blank" rel="noopener">用 LINE 登入</a>
+          <p class="text-muted small mb-2">加入 LINE 官方帳號好友，或在聊天室傳「登入」取得新碼：</p>
+          <a id="liff-direct-link" class="btn btn-outline-light mb-3" href="https://liff.line.me/2010668840-DXPfjNlx" target="_blank" rel="noopener">用 LINE 登入</a>
           <div class="row g-2 align-items-end text-start">
             <div class="col-md-8">
               <label class="form-label text-muted small">已有存取碼（Access Token）</label>
@@ -835,7 +817,6 @@
 // ═══════════════════════════════════════════════════════════════
 const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
 const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
-const LIFF_ID       = "2010668840-DXPfjNlx";
 const REPORT_DATA_URL = "report_data_latest.json";
 // Web Push 公鑰：執行 generate_vapid.py 產生後填入（決對不要提交真實金鑰）
 const VAPID_PUBLIC_KEY = 'BEVYyLc3V5Jagd_VR_iEwISXxL5Sa1gDscEzzH2j1ZHewi5VoDLHVu1L0hZ9yYWvu51t-h_e45UK6rkhFBH80oQ';
@@ -1989,9 +1970,6 @@ async function validateStockCode(sid) {
   return { found: false, name: "", verifiable: true };
 }
 
-// ── LIFF 掃碼登入 ────────────────────────────────────────────────
-let pollTimer = null;
-
 // LINE 登入一律走 line-login Edge Function（SECURITY.md）：
 // 前端碰不到 pending_line_auth 表，也不再呼叫 get_or_create_user。
 async function lineLogin(body) {
@@ -2038,6 +2016,25 @@ async function doShortCodeLogin() {
     msg.innerHTML = `<span class="text-danger">❌ ${e.message}</span>`;
   } finally {
     btn.disabled = false;
+  }
+}
+
+async function pasteShortCodeLogin() {
+  const inp = document.getElementById("inp-short-code");
+  const msg = document.getElementById("short-code-msg");
+  try {
+    if (!navigator.clipboard?.readText) throw new Error("clipboard unavailable");
+    const raw = await navigator.clipboard.readText();
+    const code = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (code.length !== 8) {
+      msg.innerHTML = '<span class="text-warning">剪貼簿裡找不到 8 碼登入碼，請回 LINE 點「複製登入碼」。</span>';
+      return;
+    }
+    inp.value = `${code.slice(0, 4)}-${code.slice(4)}`;
+    await doShortCodeLogin();
+  } catch {
+    msg.innerHTML = '<span class="text-warning">iPhone 未允許讀取剪貼簿，請長按輸入框選「貼上」。</span>';
+    inp.focus();
   }
 }
 
@@ -2243,78 +2240,14 @@ async function _showSetupDoneNotification() {
   } catch {}
 }
 
-async function initLiffLogin() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  const qrDiv    = document.getElementById("qrcode");
-  const statusEl = document.getElementById("qr-status");
-  const msgEl    = document.getElementById("login-msg");
-  qrDiv.innerHTML = "";
-  msgEl.innerHTML = "";
-  statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 產生中...';
-  const direct = document.getElementById("liff-direct-link");
-  if (direct) direct.href = `https://liff.line.me/${LIFF_ID}`;
-
-  // 工作階段由後端建立；session_token 是隨機 UUID，也是 QR 上唯一的內容
-  let sessionToken;
-  try {
-    ({ session_token: sessionToken } = await lineLogin({ action: "start" }));
-  } catch (e) {
-    statusEl.innerHTML = `<span class="text-danger">❌ 無法建立 QR Code：${e.message}</span>`;
-    return;
-  }
-
-  const liffUrl = `https://liff.line.me/${LIFF_ID}?token=${sessionToken}`;
-  new QRCode(qrDiv, { text: liffUrl, width: 200, height: 200, colorDark: "#000", colorLight: "#fff" });
-  statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 請先加入好友並完成綁定（10 分鐘內有效）…';
-
-  pollTimer = setInterval(() => pollForLogin(sessionToken), 3000);
-  setTimeout(() => {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    statusEl.innerHTML = '<span class="text-warning">⏰ 尚未完成加好友或綁定，QR Code 已過期，請點「重新產生」</span>';
-  }, 10 * 60 * 1000);
-}
-
-async function pollForLogin(sessionToken) {
-  let data;
-  try {
-    data = await lineLogin({ action: "poll", session_token: sessionToken });
-  } catch (e) {
-    // 404／410 = 工作階段已被消費或過期：停止輪詢，請使用者重新產生；其他暫時性錯誤下一輪再試
-    if (/不存在|過期|已使用/.test(String(e.message))) {
-      clearInterval(pollTimer); pollTimer = null;
-      document.getElementById("qr-status").innerHTML =
-        '<span class="text-warning">⏰ QR Code 已失效，請點「重新產生 QR Code」</span>';
-    }
-    return;
-  }
-  if (data.pending) return;
-  clearInterval(pollTimer); pollTimer = null;
-  document.getElementById("qr-wrap").style.display    = "none";
-  document.getElementById("qr-success").style.display = "";
-  try {
-    await finishLogin(data);
-  } catch (e) {
-    document.getElementById("qr-success").style.display = "none";
-    document.getElementById("qr-wrap").style.display    = "";
-    document.getElementById("login-msg").innerHTML = `<span class="text-danger">❌ 登入失敗：${e.message}</span>`;
-  }
-}
-
 // ── 初始化 ──────────────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", async () => {
   // 開頁第一件事：這一版還能不能用（S31）。太舊就停在更新畫面，不進登入或主畫面
   if (!(await enforceAppVersion())) return;
 
   const qs = new URLSearchParams(location.search);
-  const forceShowQr = qs.get("show_qr") === "1";
-
-  if (forceShowQr) {
-    localStorage.removeItem("sma_session");
-    history.replaceState(null, "", location.pathname);
-  }
-
   const saved = localStorage.getItem("sma_session");
-  if (!forceShowQr && saved) {
+  if (saved) {
     try {
       const s = JSON.parse(saved);
       state = s;
@@ -2328,7 +2261,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // 從 URL ?code= 一次性登入碼登入（LIFF 驗證後跳轉、LINE 邀請連結、報告推播）。
   // 碼用過即刪，不像舊的 ?token= 會把長期 token 留在通知中心與伺服器紀錄裡。
-  const urlCode = forceShowQr ? null : qs.get("code");
+  const urlCode = qs.get("code");
   if (urlCode) {
     // 兩種情況先不兌換、把碼留在網址裡（ONBOARDING.md）：
     //  - 內建瀏覽器：這裡登入了也開不了通知，碼一用掉，跳到 Chrome 就變「已失效」
@@ -2349,7 +2282,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   showLoginInAppHint();
 
   // 舊版 ?token= 仍相容（推播裡的個人化連結）；RLS 只回本人那一列
-  const urlToken = forceShowQr ? null : qs.get("token");
+  const urlToken = qs.get("token");
   if (urlToken) {
     // 清除 URL 參數，避免 token 留在瀏覽器歷史
     history.replaceState(null, "", location.pathname);
@@ -2362,10 +2295,9 @@ window.addEventListener("DOMContentLoaded", async () => {
         await showMain();
         return;
       }
-    } catch { /* token 無效，fall through 到 QR code 畫面 */ }
+    } catch { /* token 無效，fall through 到登入畫面 */ }
   }
 
-  initLiffLogin();
 });
 
 async function loadUniverse() {
@@ -2558,7 +2490,7 @@ function _stopAutoRefresh() {
 // 「重新整理」鈕也只是軟更新資料，JavaScript 還是舊的。所以：
 //   1. 定期 registration.update() 抓 sw.js；CACHE_VERSION 變了瀏覽器就裝新 SW
 //      （sw.js 有 skipWaiting + clients.claim，新 SW 會立刻接管）
-//   2. 接管時觸發 controllerchange → 在使用者沒在輸入、沒開面板、沒在掃碼時 reload
+//   2. 接管時觸發 controllerchange → 在使用者沒在輸入、沒開面板時 reload
 //   3. 從背景切回前景也檢查一次，最常見的「隔天打開還是舊版」就靠這個
 const APP_UPDATE_CHECK_MS = 10 * 60 * 1000;
 let _reloadPending = false;
@@ -2588,7 +2520,7 @@ function _maybeReload() {
   if (!_reloadPending) return;
   const el = document.activeElement;
   const typing = !!el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
-  const busy = typing || !!document.querySelector(".modal.show") || !!pollTimer;
+  const busy = typing || !!document.querySelector(".modal.show");
   if (!document.hidden && busy) {
     setTimeout(_maybeReload, 30 * 1000);   // 等使用者忙完再重載
     return;
