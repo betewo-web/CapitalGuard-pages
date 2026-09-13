@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="92">
+  <meta name="app-version" content="93">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=92" rel="stylesheet">
+  <link href="watchlist.css?v=93" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1196,29 +1196,83 @@ function renderEventMetrics(ev) {
   return parts.length ? `<div class="event-metrics">${parts.join("")}</div>` : "";
 }
 
+// ── 事件「來源」────────────────────────────────────────────────────────────
+// 以前「來源」直接連到後端抓資料用的 API 網址：證交所 rwd 端點打開是一頁 JSON、OpenAPI
+// 會直接下載檔案、FinMind 連到的是文件首頁——使用者看到的都不是資料本身。
+// 這裡把兩件事分開：標籤照後端 source_url 說「資料從哪來」，連結則指向同一份資料、
+// 同一檔個股的網頁版（Yahoo 股市的個股頁，2026-09-13 逐頁確認存在）；沒有網頁版的
+// （證交所公告）才連原始資料並標明。test_pwa_tabs 會比對後端寫出的每個 source_url 都對得到一列。
+const _isCalendarEvent = ev => ev.direction === "calendar" || ev.event_type === "conference";
+const _YAHOO_TW = (sid, page) => `https://tw.stock.yahoo.com/quote/${encodeURIComponent(sid)}/${page}`;
+const _EVENT_SOURCE_PAGES = [
+  { match: "twse.com.tw/rwd/zh/exRight/TWT48U", label: "證交所 除權息預告表",
+    page: sid => _YAHOO_TW(sid, "dividend"), pageLabel: "Yahoo 股市 股利" },
+  { match: "openapi.twse.com.tw/v1/opendata/t187ap05_L", label: "證交所 OpenAPI 月營收",
+    page: sid => _YAHOO_TW(sid, "revenue"), pageLabel: "Yahoo 股市 營收" },
+  { match: "twse.com.tw/rwd/zh/fund/T86", label: "證交所 三大法人買賣超",
+    page: sid => _YAHOO_TW(sid, "institutional-trading"), pageLabel: "Yahoo 股市 法人買賣" },
+  { match: "twse.com.tw/rwd/zh/marginTrading/MI_MARGN", label: "證交所 融資融券餘額",
+    page: sid => _YAHOO_TW(sid, "margin"), pageLabel: "Yahoo 股市 資券" },
+  { match: "finmindtrade.com", label: "FinMind 財報",
+    page: (sid, ev) => _YAHOO_TW(sid, /eps/.test(String(ev.event_code || "")) ? "eps" : "income-statement"),
+    pageLabel: "Yahoo 股市 財報" },
+  { match: "finance.yahoo.com/quote/", label: "Yahoo Finance 日K",
+    // 財報日／法說會日程沒有台灣版頁面，維持原本的 Yahoo Finance 個股頁（那是正常網頁，不是 JSON）
+    page: (sid, ev) => _isCalendarEvent(ev) ? ev.source_url : _YAHOO_TW(sid, "technical-analysis"),
+    pageLabel: (sid, ev) => _isCalendarEvent(ev) ? "Yahoo Finance 個股頁" : "Yahoo 股市 技術分析" },
+  { match: "twse.com.tw/rwd/zh/announcement/announcement", label: "證交所 公告",
+    page: null, pageLabel: "原始資料 (JSON)" },
+];
+
+function eventSourceHtml(sid, ev) {
+  const url = String(ev?.source_url || "");
+  let label = "", href = "", linkText = "";
+  if (!url) {
+    // 訊號引擎／評分變化這類是系統從既有資料算出來的，沒有外部來源
+    label = "系統計算";
+  } else {
+    const spec = _EVENT_SOURCE_PAGES.find(s => url.includes(s.match));
+    if (spec) {
+      label = spec.label;
+      href = spec.page ? (spec.page(sid, ev) || url) : url;
+      linkText = typeof spec.pageLabel === "function" ? spec.pageLabel(sid, ev) : spec.pageLabel;
+    } else {
+      try { label = new URL(url).hostname.replace(/^www\./, ""); } catch { label = "外部來源"; }
+      href = url;
+      linkText = "開啟";
+    }
+  }
+  const link = href
+    ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" class="event-source-link">${escapeHtml(linkText)} ↗</a>`
+    : "";
+  return `<span class="event-source" title="這筆資料的來源">來源：${escapeHtml(label)}</span>${link}`;
+}
+
 function renderEventCard(sid, ev, options = {}) {
   const typeLabel = _EVENT_TYPE_LABEL[ev.event_type] || ev.event_type || "事件";
   const score = eventScoreOf(ev);
   const direction = _EVENT_DIRECTION_META[ev.direction] || null;
   const sidName = universe[sid]?.n || sid;
   const titlePrefix = options.showStock ? `${escapeHtml(sid)} ${escapeHtml(sidName)} · ` : "";
-  const linkHtml = ev.source_url
-    ? `<a href="${escapeHtml(ev.source_url)}" target="_blank" rel="noopener" class="event-source-link">來源</a>`
-    : "";
+  const linkHtml = eventSourceHtml(sid, ev);
   // AI 按鈕用 data 屬性帶事件身分（dedupe_key），不把標題塞進 inline onclick：標題含引號會炸
   const actionHtml = options.todayMode
     ? (options.grouped ? "" : `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>`)
     : (ev.ai_analysis
       ? `<div class="event-ai-text">${escapeHtml(ev.ai_analysis)}</div>`
       : `<button class="btn btn-xs btn-outline-info" data-ev-key="${escapeHtml(ev.dedupe_key || "")}" data-ev-title="${escapeHtml(ev.title || "")}" onclick="requestAiAnalysis('${escapeHtml(sid)}', this)">AI 說明資料</button>`);
-  const newBadge = isNewToday(ev) ? `<span class="event-new-badge">新</span>` : "";
+  const newToday = isNewToday(ev);
+  const newBadge = newToday ? `<span class="event-new-badge">新</span>` : "";
   // 事件日＝資料本身的日期（季報是季底、籌碼是前一交易日、除息是未來日）；
-  // 與系統記錄的觀察日不同時兩個都標，不然「今天出現的 2026-06-30」看起來像資料錯了
-  const observedKey = taipeiDateKey(ev.observed_at || ev.created_at);
+  // 與系統首次記錄的日期不同時兩個都標，不然「今天出現的 2026-06-30」看起來像資料錯了。
+  // 第二個日期用 created_at（首見日），不用 observed_at：後端每天重跑會刷新 observed_at，
+  // 曾標成「觀察 今天」，讓三週前的季報看起來像今天的新事件——但自選列的事件數與「新」徽章
+  // 都只認 created_at，使用者就會問「明明有新事件為什麼數字沒變」。今天首見的卡片已有「新」徽章，不再重複標日期。
+  const firstSeenKey = taipeiDateKey(ev.created_at || ev.observed_at);
   const dateChip = ev.event_date
     ? `<span class="event-date-chip" title="事件日：資料本身的日期">${escapeHtml(ev.event_date)}</span>`
-      + (observedKey && observedKey !== ev.event_date
-        ? `<span class="event-date-chip event-date-observed" title="觀察日：系統記錄這筆資料的日期">觀察 ${escapeHtml(observedKey)}</span>`
+      + (!newToday && firstSeenKey && firstSeenKey !== ev.event_date
+        ? `<span class="event-date-chip event-date-observed" title="首見日：系統第一次記錄這筆資料的日期">首見 ${escapeHtml(firstSeenKey)}</span>`
         : "")
     : "";
   return `
@@ -4292,6 +4346,26 @@ function nearestLevels(sid, price) {
   };
 }
 
+// 雷達列與自選列共用的兩行文字（使用者定案的精簡格式，2026-09-11）：
+//   壓(193) 距離2.6% · 撐(172) 距離8.7%
+//   月(184) 之上2.3% · 季(200) 之下1%
+// 括號後空一格，關係詞與數字之間不空。壓力／支撐只講距離（方向由字義決定：壓力必在上、
+// 支撐必在下）；均線要講之上／之下，現價在均線的哪一邊才是重點。
+// 均線行只放月線與季線：半年線、年線離現價中位數 20%／49%，放進來只是佔位，四條全列也一定換行。
+// 兩個分頁共用同一個函式：格式只能有一份，改一邊另一邊就漂移。
+function levelLinesOf(sid, price) {
+  const lv = nearestLevels(sid, price);
+  const dist = [];
+  if (lv.resPct != null) dist.push(`壓(${fmtLevel(lv.resistance)}) 距離${fmtPct(lv.resPct)}%`);
+  if (lv.supPct != null) dist.push(`撐(${fmtLevel(lv.support)}) 距離${fmtPct(lv.supPct)}%`);
+  const MA_SHORT = { 20: "月", 60: "季" };
+  const ma = maPositions(sid, price);
+  const maLine = ma.filter(m => MA_SHORT[m.n])
+    .map(m => `${MA_SHORT[m.n]}(${fmtLevel(m.value)}) ${m.pct >= 0 ? "之上" : "之下"}${fmtPct(m.pct)}%`)
+    .join(" · ");
+  return { lv, ma, dist, distLine: dist.join(" · "), maLine };
+}
+
 // 這檔股票今天觸發過的訊號（通知紀錄的今日列，只算監控與盤後；最新在前）
 function todaySignalsOf(sid) {
   return inboxRows.filter(r =>
@@ -4744,15 +4818,15 @@ function renderLive() {
     const iq = intradayQuoteMap[sid] || null;
     const q = getQuote(sid);
     const price = q ? q.price : null;
-    const lv = nearestLevels(sid, price);
+    const lines = levelLinesOf(sid, price);
+    const lv = lines.lv;
     const active = (iq && iq.signal && iq.signal !== "none") ? iq : null;
     const today = todaySignalsOf(sid);
     const nearPct = Math.min(lv.supPct != null ? lv.supPct : Infinity,
                              lv.resPct != null ? lv.resPct : Infinity);
     return {
-      sid, q, iq, lv, active, today, nearPct,
+      sid, q, iq, lv, lines, active, today, nearPct,
       sev: active ? inferSeverity(active) : null,
-      ma: maPositions(sid, price),
       name: getPreferredStockName(sid, r.stock_name) || sid,
       holding: holdings.get(sid) || null,
     };
@@ -4796,24 +4870,13 @@ function renderLive() {
       tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${x.sev}"></i>${escapeHtml(alertTypeLabel(x.active))}${lvl}</span>`);
     }
     if (x.holding) tags.push(`<span class="wl-signal-badge wl-tag-holding">持</span>`);
-    // 使用者定案的精簡格式（2026-09-11）：
-    //   壓(193) 距離2.6% · 撐(172) 距離8.7%
-    //   月(184) 之上2.3% · 季(200) 之下1%
-    // 括號後空一格，關係詞與數字之間不空。壓力／支撐只講距離（方向由字義決定：
-    // 壓力必在上、支撐必在下）；均線要講之上／之下，現價在均線的哪一邊才是重點。
-    const dist = [];
-    if (x.lv.resPct != null) dist.push(`壓(${fmtLevel(x.lv.resistance)}) 距離${fmtPct(x.lv.resPct)}%`);
-    if (x.lv.supPct != null) dist.push(`撐(${fmtLevel(x.lv.support)}) 距離${fmtPct(x.lv.supPct)}%`);
-    // 均線行只放月線與季線：半年線、年線離現價中位數 20%／49%，放進來只是佔位，
-    // 四條全列也一定換行。要看全部四條，分數明細裡有。
-    const MA_SHORT = { 20: "月", 60: "季" };
-    const maLine = x.ma.filter(m => MA_SHORT[m.n])
-      .map(m => `${MA_SHORT[m.n]}(${fmtLevel(m.value)}) ${m.pct >= 0 ? "之上" : "之下"}${fmtPct(m.pct)}%`)
-      .join(" · ");
+    // 兩行文字的格式在 levelLinesOf（與自選列共用）；要看全部四條均線，分數明細裡有。
+    const dist = x.lines.dist;
+    const maLine = x.lines.maLine;
     const nearCls = (!x.active && x.nearPct <= RADAR_NEAR_PCT) ? " radar-near" : "";
     // 沒有關卡時分三種：訊號本身帶關卡就先顯示它（不會再出現「跌破支撐」旁邊寫「無關卡資料」）、
     // 報告檔還在路上就說載入中、兩個來源都沒有才是真的沒有
-    let distHtml = dist.join(" · ");
+    let distHtml = x.lines.distLine;
     const levelKind = x.active && RADAR_LEVEL_KINDS.includes(x.active.signal) && x.iq.level != null;
     // 現在沒有進行中的訊號，但今天發過支撐／壓力類通知（event_key 帶關卡價）：先用那個價位。
     // 典型情境：下面那行寫著「今日 1 則 · 突破壓力 11:05」，上面卻是「無關卡資料」
@@ -5411,6 +5474,14 @@ function renderWatchlist(rows) {
       tags.push(`<span class="wl-signal-badge wl-tag-locked" title="超出目前方案的自選股上限，不再產生通知；升級後恢復">🔒 超出方案</span>`);
     }
 
+    // 離關卡多遠／在均線哪一邊：與雷達列同一個函式、同一組來源（intraday_state.levels 與
+    // 報告的 investment_scores.maNN）。以前只有雷達有，使用者在自選頁看不到；沒有資料的股票
+    // （剛加入還沒跑過監控、或不在評分名單內）這兩行就不出現，不佔位。
+    const lines = q ? levelLinesOf(sid, q.price) : { distLine: "", maLine: "" };
+    const levelsHtml = (lines.distLine || lines.maLine)
+      ? `<div class="wl-levels">${[lines.distLine, lines.maLine].filter(Boolean).map(t => `<span>${escapeHtml(t)}</span>`).join("")}</div>`
+      : "";
+
     const item = document.createElement("article");
     item.className = active ? "wl-row" : "wl-row is-inactive";
     item.dataset.id = row.id;
@@ -5423,6 +5494,7 @@ function renderWatchlist(rows) {
         </div>
         ${quoteLine}
       </div>
+      ${levelsHtml}
       <div class="wl-row-foot">
         <div class="wl-tags">${tags.join("")}</div>
         <div class="wl-row-actions">
@@ -5752,16 +5824,27 @@ async function openKLineFromWatchlist(sid) {
 
       document.getElementById("kline-name").textContent = displayName;
       document.getElementById("kline-industry").textContent = displayIndustry;
-      setKLineMaInfo(inUniverse
-        ? "共享檔未提供 K 線細節，現在改用 FinMind 即時抓取中..."
-        : "找不到共享資料，現在改用 FinMind 即時抓取中...");
+      // 報告的 stock_data 只涵蓋進榜的 ~30 檔，其他自選股的關卡與均線以前只能等 FinMind
+      // 從瀏覽器現抓（免費額度、逾時都會失敗），失敗就整段空白——同一份資料雷達列明明有。
+      // 先用記憶體裡的兩個來源填上（intraday_state.levels 與 investment_scores 的 ma20/60），
+      // FinMind 成功再換成完整的 MA5/10/20/60。
+      const fallback = fallbackKLineLevels(sidKey);
+      const hasFallbackMa = Object.keys(fallback.ma).length > 0;
+      renderKLineLevels(fallback);
+      setKLineMaInfo(hasFallbackMa
+        ? `${formatKLineMaText(fallback.ma)} · 讀取完整 K 線中...`
+        : (inUniverse
+          ? "共享檔未提供 K 線細節，現在改用 FinMind 即時抓取中..."
+          : "找不到共享資料，現在改用 FinMind 即時抓取中..."));
       document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">即時抓取 K 線資料中...</div>';
 
       const liveStock = await fetchWatchlistFinMindStock(sidKey, displayName, displayIndustry);
       if (!liveStock) {
-        setKLineMaInfo(inUniverse
-          ? "FinMind 即時抓取失敗，請稍後再試"
-          : "FinMind 即時抓取失敗，請確認代號是否正確");
+        setKLineMaInfo(hasFallbackMa
+          ? `${formatKLineMaText(fallback.ma)}（K 線抓取失敗，請稍後再試）`
+          : (inUniverse
+            ? "FinMind 即時抓取失敗，請稍後再試"
+            : "FinMind 即時抓取失敗，請確認代號是否正確"));
         document.getElementById("kline-chart").innerHTML = inUniverse
           ? `<div class="kline-empty">${escapeHtml(sidKey)} 尚未在共享檔內，且 FinMind 即時抓取失敗。</div>`
           : `<div class="kline-empty">無法即時抓取 ${escapeHtml(sidKey)} 的 K 線資料。</div>`;
@@ -5800,6 +5883,22 @@ async function openKLineFromWatchlist(sid) {
     setKLineMaInfo("讀取共用資料失敗");
     document.getElementById("kline-chart").innerHTML = `<div class="kline-empty">K線資料讀取失敗：${escapeHtml(e.message || "unknown")}<br><span style="font-size:.75rem;opacity:.8;">請確認目前瀏覽的站點已部署 report_data_latest.json</span></div>`;
   }
+}
+
+// 未進榜自選股的關卡與均線備援：關卡讀 intraday_state.levels（監控對每檔自選股都算，
+// 雷達列用的同一組）、均線讀報告 investment_scores 的 ma20/ma60（評分股都有；不在前端重算）。
+// 回傳形狀與報告的 stock.levels 相同，renderKLineLevels／formatKLineMaText 直接吃。
+function fallbackKLineLevels(sid) {
+  const lv = intradayQuoteMap?.[sid]?.levels || null;
+  const s = sharedReportData?.investment_scores?.[sid];
+  const ma = {};
+  if (s) {
+    for (const n of [20, 60]) {
+      const v = Number(s["ma" + n]);
+      if (Number.isFinite(v) && v > 0) ma["MA" + n] = Math.round(v * 100) / 100;
+    }
+  }
+  return { support: lv?.support || [], resistance: lv?.resistance || [], ma };
 }
 
 // 標題列的「現價」：有盤中報價就用它（報告檔的 levels.current 是昨收，盤中會差一截）

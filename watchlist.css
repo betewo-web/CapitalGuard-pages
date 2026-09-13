@@ -599,6 +599,19 @@ body.has-bottom-nav .page-shell {
 	font-weight: 500;
 }
 
+/* 自選列的關卡／均線行（與雷達列同一組文字）：兩段各自不換行，放不下時整段換到下一行 */
+.wl-levels {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.1rem 0.7rem;
+	font-size: 0.72rem;
+	line-height: 1.35;
+	color: var(--text-1);
+	font-variant-numeric: tabular-nums;
+}
+.wl-levels span { white-space: nowrap; }
+.wl-row.is-inactive .wl-levels { opacity: 0.5; }
+
 .wl-row-foot {
 	display: flex;
 	align-items: center;
@@ -755,6 +768,13 @@ body.has-bottom-nav .page-shell {
 	color: var(--text-muted) !important;
 }
 
+/* 整站是深色主題但沒有掛 data-bs-theme="dark"，Bootstrap 5.3 的 .text-muted 因此是
+   淺色主題用的近黑色 rgba(33,37,41,.75)——所有掛這個類別的說明文字（事件說明、載入中、
+   表單提示、付款紀錄）在深底上都看不見。統一改成本站的 muted 色；登入區另有更亮的覆寫。 */
+.text-muted {
+	color: var(--text-muted) !important;
+}
+
 /* ── 事件 Badge（Feature 2） ─────────────────────────────────── */
 /* 尺寸吃 .wl-icon-btn 那組共用規則，這裡只描述狀態顏色 */
 .wl-events-btn {
@@ -820,7 +840,7 @@ body.has-bottom-nav .page-shell {
 }
 .events-empty-tip {
 	font-size: 0.72rem;
-	color: rgba(140, 170, 220, 0.55);
+	color: rgba(160, 190, 240, 0.82);
 	max-width: 280px;
 	margin: 0 auto 0.6rem;
 	line-height: 1.5;
@@ -935,8 +955,11 @@ body.has-bottom-nav .page-shell {
 	line-height: 1.4;
 	overflow-wrap: anywhere;
 }
-.event-content { font-size: 0.76rem; }
-.event-source-link { font-size: 0.72rem; color: #7eb0f8; }
+/* 事件說明文字：以前只掛 Bootstrap 的 .text-muted，而 5.3 的 .text-muted 是淺色主題的
+   rgba(33,37,41,.75)——近黑字印在深色卡片上，等於看不見（對比 1.1:1）。這裡明確給亮度。 */
+.event-content { font-size: 0.76rem; color: var(--text-1) !important; line-height: 1.45; }
+.event-source { font-size: 0.7rem; color: var(--text-muted); }
+.event-source-link { font-size: 0.72rem; color: #7eb0f8; white-space: nowrap; }
 .event-actions {
 	display: flex;
 	align-items: center;
