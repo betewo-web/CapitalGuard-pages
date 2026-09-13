@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="79">
+  <meta name="app-version" content="80">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=79" rel="stylesheet">
+  <link href="watchlist.css?v=80" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2123,6 +2123,13 @@ function startOnboarding(reason) {
   renderOnboarding();
 }
 
+// 使用者自己說「App 不在了」：把進度退回第一步。display-mode 在部分 Android WebAPK
+// 會誤報，所以只由他按下去觸發，不自動降階——自動降會把裝好的人鎖在安裝步驟。
+function onboardBackToInstall() {
+  _obSave({ stage: "install", reason: "reinstall", at: Date.now() });
+  renderOnboarding();
+}
+
 // 開機時：精靈還沒走完就接著走（Android 裝完從桌面開啟的那一次）
 function resumeOnboarding() {
   const s = _obState();
@@ -2178,10 +2185,27 @@ async function renderOnboarding() {
       <p class="ob-note">從桌面圖示打開 App，就會接著完成最後一步：開啟通知。</p>`;
     actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_openInstalledApp()">開啟 App</button>`;
   } else if (s.stage === "push") {
-    icon.textContent = "🔔";
-    title.textContent = _pwaIsStandalone ? "最後一步：開啟通知" : "開啟通知";
-    body.innerHTML = `<p>自訂規則成立、盤後報告完成、自選股有新事件時，通知會直接送到這台裝置。</p>
-      <div id="ob-push-msg" class="ob-note"></div>`;
+    // 按過「不允許」之後瀏覽器就不再跳出詢問，只留一行「請再試一次」等於把人卡死在這一步：
+    // 改成講清楚「為什麼非開不可」＋ 這台裝置解除封鎖的步驟，按鈕照樣留著讓他弄好再按。
+    _obPushBlockedShown = _pushPromptUnavailable();
+    icon.textContent = _obPushBlockedShown ? "🔕" : "🔔";
+    title.textContent = _obPushBlockedShown
+      ? "通知目前是關閉的"
+      : (_pwaIsStandalone ? "最後一步：開啟通知" : "開啟通知");
+    const blockedCopy = _obPushBlockedShown ? _pushBlockedCopy() : null;
+    body.innerHTML = _obPushBlockedShown
+      ? `<p>${blockedCopy.lead}<b>通知就是這個服務的核心</b>：自訂規則成立、盤後報告完成、自選股有新事件，全都靠通知送到你手上；關著的話，這些提醒只能等你自己想到打開 App 才看得到。</p>
+         <p>${blockedCopy.how}</p>
+         <ol class="ob-ol">${_pushUnblockSteps().map(t => `<li>${t}</li>`).join("")}</ol>
+         <div id="ob-push-msg" class="ob-note" role="status" aria-live="polite"></div>`
+      : `<p>自訂規則成立、盤後報告完成、自選股有新事件時，通知會直接送到這台裝置。</p>
+         <div id="ob-push-msg" class="ob-note" role="status" aria-live="polite"></div>`;
+    // 進度存在 localStorage，而 Android 刪掉 App 不會清掉 Chrome 的儲存：
+    // 人在瀏覽器分頁裡卻停在「已裝好、只差通知」時，要給他回到第一步的路。
+    if (!_pwaIsStandalone) {
+      body.innerHTML += `<p class="ob-note">現在是在瀏覽器分頁裡，不是桌面上的 App。
+        <a href="#" onclick="onboardBackToInstall(); return false;">App 已經不在桌面上了？回到第一步重新安裝</a></p>`;
+    }
     actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" id="ob-push-btn" onclick="onboardEnablePush()">啟用通知</button>`;
   } else if (s.stage === "finish") {
     icon.textContent = "🎉";
@@ -2259,10 +2283,66 @@ function _attemptOpenInstalledApp(automatic) {
   }, 1500);
 }
 
+// 權限被封鎖（按過「不允許」）之後，requestPermission() 會立刻回 denied、什麼都不跳；
+// Chrome 被忽略幾次後也會「暫時不再詢問」（權限仍是 default）。兩種都要改走手動開啟的說明。
+let _obPushBlockedShown = false;
+let _obPushPromptSuppressed = false;
+function _pushPermission() {
+  return typeof Notification !== "undefined" ? Notification.permission : "unsupported";
+}
+function _pushPermissionBlocked() {
+  return _pushPermission() === "denied";
+}
+function _pushPromptUnavailable() {
+  return _pushPermissionBlocked() || _obPushPromptSuppressed;
+}
+
+// 「被拒絕」與「瀏覽器暫時不再詢問」是兩種處境，開頭那句話不能混用
+function _pushBlockedCopy() {
+  return _pushPermissionBlocked()
+    ? { lead: "你剛才選了「不允許」。",
+        how: "瀏覽器記住了那個選擇，之後不會再跳出詢問，要麻煩你手動打開：" }
+    : { lead: "瀏覽器已經不會再跳出通知的詢問視窗。",
+        how: "在這裡再按幾次也不會有反應，要麻煩你手動打開：" };
+}
+
+// 封鎖之後只能從系統／瀏覽器設定打開，路徑每個平台都不一樣
+function _pushUnblockSteps() {
+  if (_isIOS) return [
+    "回到 iPhone 的「設定」→「通知」",
+    "往下找到「台股監控」並點進去",
+    "打開「允許通知」",
+    "回到這個畫面，按下方的「啟用通知」",
+  ];
+  if (_isAndroid && _pwaIsStandalone) return [
+    "長按桌面的「台股監控」圖示 →「應用程式資訊」",
+    "點「通知」，把通知打開",
+    "回到這個畫面，按下方的「啟用通知」",
+  ];
+  return [
+    "點網址列左邊的鎖頭（或 <b>ⓘ</b>）圖示",
+    "選「網站設定」或「權限」，把「通知」改成「允許」",
+    "回到這個畫面，按下方的「啟用通知」",
+  ];
+}
+
+// 重畫成解除步驟，並把這次按下去的結果寫在下面——不然使用者只會覺得按鈕壞了
+async function _onboardShowPushBlocked(note) {
+  await renderOnboarding();
+  const msg = document.getElementById("ob-push-msg");
+  if (msg) msg.textContent = note;   // renderOnboarding 重建過按鈕，本來就是可以再按的
+}
+
 async function onboardEnablePush() {
   const btn = document.getElementById("ob-push-btn");
   const msg = document.getElementById("ob-push-msg");
+  const stamp = `（${new Date().toLocaleTimeString("zh-TW", { hour12: false })} 檢查）`;
+  if (_pushPermissionBlocked()) {
+    await _onboardShowPushBlocked(`通知權限還是關閉的${stamp}。請依上面的步驟打開之後，再按一次「啟用通知」。`);
+    return;
+  }
   if (btn) btn.disabled = true;
+  const askedAt = Date.now();
   // 走同一條訂閱路徑（權限請求在手勢的同一個 tick），結果看 _pushSubscribed
   await togglePushSubscription();
   if (_pushSubscribed) {
@@ -2271,11 +2351,35 @@ async function onboardEnablePush() {
     renderOnboarding();
     return;
   }
-  // 失敗原因 togglePushSubscription 已寫進首頁通知列，照抄過來
+  // 剛剛按的就是「不允許」：換成「為什麼要開 + 怎麼打開」，而不是丟一行錯誤讓他乾瞪眼
+  if (_pushPermissionBlocked()) {
+    await _onboardShowPushBlocked("通知關著就收不到任何提醒，請依上面的步驟打開後，再按一次「啟用通知」。");
+    return;
+  }
+  // 權限還是 default 卻立刻回來＝詢問窗根本沒出現（Chrome 被忽略幾次後的暫時封鎖），
+  // 再按幾次也一樣不會跳，同樣給手動開啟的步驟。
+  if (_pushPermission() === "default" && Date.now() - askedAt < 500) {
+    _obPushPromptSuppressed = true;
+    await _onboardShowPushBlocked(`瀏覽器沒有跳出詢問${stamp}，請依上面的步驟直接打開通知。`);
+    return;
+  }
+  // 其他失敗原因 togglePushSubscription 已寫進首頁通知列，照抄過來
   const txt = document.getElementById("push-status-text");
   if (msg) msg.textContent = txt ? txt.textContent : "尚未開啟，請再試一次";
   if (btn) btn.disabled = false;
 }
+
+// 他去設定裡把通知打開再切回來：畫面還停在封鎖說明，這裡重畫成可以直接訂閱的樣子
+function _onboardRecheckPushPermission() {
+  if (document.hidden) return;
+  const s = _obState();
+  if (!s || s.stage !== "push") return;
+  if (_pushPermission() === "granted") _obPushPromptSuppressed = false;
+  if (_obPushBlockedShown !== _pushPromptUnavailable()) renderOnboarding();
+}
+document.addEventListener("visibilitychange", _onboardRecheckPushPermission);
+// iOS 從背景還原走 bfcache，不一定會觸發 visibilitychange
+window.addEventListener("pageshow", e => { if (e.persisted) _onboardRecheckPushPermission(); });
 
 function finishOnboarding() {
   _obSave({ stage: "done", at: Date.now() });
@@ -2306,29 +2410,42 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (!(await enforceAppVersion())) return;
 
   const qs = new URLSearchParams(location.search);
-  const saved = localStorage.getItem("sma_session");
-  if (saved) {
-    try {
-      const s = JSON.parse(saved);
-      state = s;
-      await showMain();
-      loadUniverse();
-      resumeOnboarding();
-      return;
-    } catch { localStorage.removeItem("sma_session"); }
-  }
-  loadUniverse();
-
   // 從 URL ?code= 一次性登入碼登入（LIFF 驗證後跳轉、LINE 邀請連結、報告推播）。
   // 碼用過即刪，不像舊的 ?token= 會把長期 token 留在通知中心與伺服器紀錄裡。
   const urlCode = qs.get("code");
+  const saved = localStorage.getItem("sma_session");
+
+  async function resumeSavedSession() {
+    if (!saved) return false;
+    try { state = JSON.parse(saved); } catch { localStorage.removeItem("sma_session"); return false; }
+    await showMain();
+    resumeOnboarding();
+    return true;
+  }
+
+  // 帶著邀請碼進來＝使用者剛在 LINE 點了「開始使用」，要求從頭走一遍。
+  // 以前這裡先還原舊 session 就 return，連閘門都沒走到：把 PWA 刪掉之後再點連結，
+  // 精靈會接著上一次存在 localStorage 的進度（Android 刪 App 不會清掉 Chrome 的儲存），
+  // 直接跳到「② 開啟通知」。有碼的時候一律先過閘門，再決定要不要沿用舊的登入。
   if (urlCode) {
     // 兩種情況先不兌換、把碼留在網址裡（ONBOARDING.md）：
     //  - 內建瀏覽器：這裡登入了也開不了通知，碼一用掉，跳到 Chrome 就變「已失效」
     //  - 手機瀏覽器：先安裝 PWA，再從 App 以短碼登入，確保通知能啟用
     if (_inAppBrowser) { showBrowserGate(); return; }
-    if (_isMobile && !_pwaIsStandalone) { showMobileInstallGate(); return; }
+    if (_isMobile && !_pwaIsStandalone) {
+      // 上一次的進度歸零：不然裝回來從桌面開啟時，精靈會沿用舊的 stage 直接跳過安裝
+      _obSave({ stage: "install", reason: "invite", at: Date.now() });
+      showMobileInstallGate();
+      return;
+    }
+  } else if (await resumeSavedSession()) {
+    loadUniverse();
+    return;
+  }
 
+  loadUniverse();
+
+  if (urlCode) {
     history.replaceState(null, "", location.pathname);
     try {
       const data = await lineLogin({ action: "poll", session_token: urlCode });
@@ -2337,7 +2454,9 @@ window.addEventListener("DOMContentLoaded", async () => {
         if (data.kind === "invite_link") startOnboarding("invite");
         return;
       }
-    } catch { /* 登入碼無效或已用過，fall through 到登入畫面 */ }
+    } catch { /* 登入碼無效或已用過，fall through */ }
+    // 碼過期或已用過，但這台裝置本來就登入著：回到原本的畫面，不要把人踢去登入頁
+    if (await resumeSavedSession()) return;
   }
   showLoginInAppHint();
 

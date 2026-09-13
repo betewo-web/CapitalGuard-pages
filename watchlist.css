@@ -2692,13 +2692,16 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .plan-ver-head { font-size: 0.72rem; font-weight: 500; opacity: 0.75; margin-left: 0.4rem; font-family: "Space Grotesk", sans-serif; }
 
 /* ── 強制更新畫面（S31）：蓋住整個 App，直到拿到新版 ── */
+/* align-items: center 會把「比螢幕高」的內容連同頂端一起切掉、而且捲不到，
+   小螢幕看通知被封鎖的說明就會少掉第一段。置中改交給 .ug-box 的 margin: auto。 */
 .update-gate {
 	position: fixed;
 	inset: 0;
 	z-index: 20000;
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	justify-content: center;
+	overflow-y: auto;
 	padding: 1.5rem;
 	background: rgba(11, 11, 19, 0.96);
 	backdrop-filter: blur(6px);
@@ -2706,6 +2709,7 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .ug-box {
 	max-width: 320px;
 	width: 100%;
+	margin: auto;
 	text-align: center;
 	padding: 1.8rem 1.4rem;
 	border-radius: 16px;
