@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="66">
+  <meta name="app-version" content="67">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=66" rel="stylesheet">
+  <link href="watchlist.css?v=67" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -81,13 +81,11 @@
     <div style="font-size:2.2rem">📲</div>
     <div class="ug-title" id="mobile-install-title">手機請先安裝，再登入</div>
     <div class="ug-msg">
-      <p id="mobile-install-reason">安裝成 App 後才能穩定接收推播通知。</p>
       <ol class="ob-ol" id="mobile-install-steps">
         <li>將「台股監控」安裝到主畫面</li>
         <li>從桌面打開「台股監控」</li>
         <li>回 LINE 點「複製登入碼」，再到 App 按貼上圖示</li>
       </ol>
-      <p class="ob-note">連結裡的登入碼還沒使用；短碼與它同一組，用一個另一個就作廢。</p>
     </div>
     <div class="ob-actions" id="mobile-install-actions">
       <button type="button" class="btn btn-sm btn-primary" onclick="installPwa()">安裝 App</button>
@@ -2072,19 +2070,16 @@ async function copyInviteLink() {
 
 function showMobileInstallGate() {
   const title = document.getElementById("mobile-install-title");
-  const reason = document.getElementById("mobile-install-reason");
   const steps = document.getElementById("mobile-install-steps");
   const actions = document.getElementById("mobile-install-actions");
   if (_isIOS) {
     title.textContent = "iPhone 請先安裝，再登入";
-    reason.textContent = "iPhone 只有加入主畫面的 App 才能收到推播通知，而且 App 與 Safari 的登入狀態不共用。";
     steps.innerHTML = `<li>點 Safari 下方的「分享」，選「<b>加入主畫面</b>」</li>
       <li>從桌面打開「台股監控」</li>
       <li>回 LINE 點「複製登入碼」，再到 App 按貼上圖示</li>`;
     actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_showPwaInstructionsModal()">看圖解</button>`;
   } else {
     title.textContent = "Android 請先安裝，再登入";
-    reason.textContent = "先安裝成 App，通知與登入都會留在主畫面的台股監控，不會散落在瀏覽器分頁。";
     actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="installPwa()">安裝 App</button>`;
   }
   document.getElementById("mobile-install-gate").style.display = "flex";
