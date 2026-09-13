@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="80">
+  <meta name="app-version" content="81">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=80" rel="stylesheet">
+  <link href="watchlist.css?v=81" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2108,6 +2108,18 @@ function showMobileInstallGate() {
 // 進度存在 localStorage：Android 裝完從桌面開啟時是同一個 profile，精靈接著跑「通知」那一步；
 // iPhone 的 App 是全新的儲存空間，會從短碼登入重新進來，精靈只剩通知那一步。
 const ONBOARD_KEY = "cg-onboard";
+
+// navigator.serviceWorker.ready 在註冊失敗（或還沒註冊成功）時的行為是
+// 「不 reject、也永遠不 resolve」。直接 await 會把整個精靈的重畫卡在這裡，
+// 使用者按按鈕就真的一點反應都沒有——這正是要修的那個症狀，所以加上逾時。
+function _swReadyOrNull(ms = 3000) {
+  if (!("serviceWorker" in navigator)) return Promise.resolve(null);
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise(resolve => setTimeout(() => resolve(null), ms)),
+  ]).catch(() => null);
+}
+
 function _obState() {
   try { return JSON.parse(localStorage.getItem(ONBOARD_KEY) || "null"); } catch { return null; }
 }
@@ -2155,8 +2167,8 @@ async function renderOnboarding() {
   // 通知已經開了就跳過那一步（例如 Android 在瀏覽器裡先開了通知才安裝）
   if (s.stage === "push" && "serviceWorker" in navigator && "PushManager" in window) {
     try {
-      const reg = await navigator.serviceWorker.ready;
-      if (await reg.pushManager.getSubscription()) { s.stage = "finish"; _obSave(s); }
+      const reg = await _swReadyOrNull();
+      if (reg && await reg.pushManager.getSubscription()) { s.stage = "finish"; _obSave(s); }
     } catch {}
   }
 
@@ -2328,6 +2340,9 @@ function _pushUnblockSteps() {
 
 // 重畫成解除步驟，並把這次按下去的結果寫在下面——不然使用者只會覺得按鈕壞了
 async function _onboardShowPushBlocked(note) {
+  // 先寫進現在的畫面：重畫是 async 的，萬一它慢或卡住，按下去也要立刻看得到回應
+  const before = document.getElementById("ob-push-msg");
+  if (before) before.textContent = note;
   await renderOnboarding();
   const msg = document.getElementById("ob-push-msg");
   if (msg) msg.textContent = note;   // renderOnboarding 重建過按鈕，本來就是可以再按的
@@ -6763,8 +6778,8 @@ async function initPushUI() {
   }
 
   try {
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
+    const reg = await _swReadyOrNull();
+    const sub = reg && await reg.pushManager.getSubscription();
     _pushSubscribed = !!sub;
     btn.style.display = '';
     if (sub) {
@@ -6955,8 +6970,8 @@ async function togglePushSubscription() {
   if (_pushSubscribed) {
     btn.disabled = true;
     try {
-      const reg = await navigator.serviceWorker.ready;
-      const existing = await reg.pushManager.getSubscription();
+      const reg = await _swReadyOrNull();
+      const existing = reg && await reg.pushManager.getSubscription();
       if (existing) {
         await existing.unsubscribe();
         // 即使刪除失敗也不擋：後端收到 410 會自動清掉過期訂閱
@@ -6989,7 +7004,8 @@ async function togglePushSubscription() {
         : '尚未授權通知權限，請再試一次';
       return;
     }
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await _swReadyOrNull();
+    if (!reg) throw new Error('瀏覽器的背景服務還沒就緒，請重新整理後再試一次');
     const sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
