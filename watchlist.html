@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="76">
+  <meta name="app-version" content="77">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=76" rel="stylesheet">
+  <link href="watchlist.css?v=77" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -200,7 +200,6 @@
         </button>
         <div class="collapse mt-3" id="manual-login-wrap">
           <p class="text-muted small mb-2">加入 LINE 官方帳號好友，或在聊天室傳「登入」取得新碼：</p>
-          <a id="liff-direct-link" class="btn btn-outline-light mb-3" href="https://liff.line.me/2010668840-DXPfjNlx" target="_blank" rel="noopener">用 LINE 登入</a>
           <div class="row g-2 align-items-end text-start">
             <div class="col-md-8">
               <label class="form-label text-muted small">已有存取碼（Access Token）</label>
@@ -1993,14 +1992,22 @@ function finishLogin(row) {
 }
 
 // ── 短碼登入（ONBOARDING.md）：LINE 官方帳號傳來的 8 碼 ─────────────
-// 給 iPhone 在已安裝的 App 裡用（連結開不進 App），也是所有「連結打不開」的萬用備援。
+// 手機安裝 PWA 後的唯一登入入口；桌面邀請連結仍可直接登入。
+const SHORT_CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/;
+function clearShortCodeInput() {
+  const inp = document.getElementById("inp-short-code");
+  inp.value = "";
+  inp.focus();
+}
+
 async function doShortCodeLogin() {
   const inp = document.getElementById("inp-short-code");
   const btn = document.getElementById("short-code-btn");
   const msg = document.getElementById("short-code-msg");
   const code = (inp.value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (code.length !== 8) {
+  if (!SHORT_CODE_RE.test(code)) {
     msg.innerHTML = '<span class="text-warning">登入碼是 8 個英數字，例如 ABCD-EFGH</span>';
+    clearShortCodeInput();
     return;
   }
   btn.disabled = true;
@@ -2011,8 +2018,7 @@ async function doShortCodeLogin() {
     startOnboarding("short_code");
   } catch (e) {
     msg.innerHTML = `<span class="text-danger">❌ ${e.message}</span>`;
-    inp.value = "";
-    inp.focus();
+    clearShortCodeInput();
   } finally {
     btn.disabled = false;
   }
@@ -2025,8 +2031,9 @@ async function pasteShortCodeLogin() {
     if (!navigator.clipboard?.readText) throw new Error("clipboard unavailable");
     const raw = await navigator.clipboard.readText();
     const code = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (code.length !== 8) {
+    if (!SHORT_CODE_RE.test(code)) {
       msg.innerHTML = '<span class="text-warning">剪貼簿裡找不到 8 碼登入碼，請回 LINE 點「複製登入碼」。</span>';
+      clearShortCodeInput();
       return;
     }
     inp.value = `${code.slice(0, 4)}-${code.slice(4)}`;
