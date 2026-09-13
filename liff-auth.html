@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="61">
+  <meta name="app-version" content="63">
   <title>台股監控 — LINE 帳號綁定</title>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
@@ -188,13 +188,15 @@ async function main() {
 
   // 2 秒後開啟 watchlist.html：帶一次性登入碼（2 分鐘內有效、用過即失效）。
   // 網址裡不再出現長期 access_token。
+  // 在 LINE 裡：external:true 交給系統瀏覽器（內建瀏覽器訂不到推播）；
+  // 不在 LINE 裡（相機掃碼直接開 Chrome）：以前這裡什麼都不做，畫面就停在「即將開啟」。
   setTimeout(() => {
+    if (!result.login_code) return;
+    const dest = `https://betewo-web.github.io/CapitalGuard-pages/watchlist.html?code=${encodeURIComponent(result.login_code)}`;
     try {
-      if (liff.isInClient() && result.login_code) {
-        const dest = `https://betewo-web.github.io/CapitalGuard-pages/watchlist.html?code=${encodeURIComponent(result.login_code)}`;
-        liff.openWindow({ url: dest, external: true });
-      }
+      if (liff.isInClient()) { liff.openWindow({ url: dest, external: true }); return; }
     } catch {}
+    location.href = dest;
   }, 2000);
 }
 

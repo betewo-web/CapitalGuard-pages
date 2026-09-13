@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="61">
+  <meta name="app-version" content="63">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=61" rel="stylesheet">
+  <link href="watchlist.css?v=63" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -53,6 +53,58 @@
     </div>
     <label class="dg-check"><input type="checkbox" id="dg-agree" onchange="document.getElementById('dg-btn').disabled=!this.checked"> 我已閱讀並了解上述說明</label>
     <button type="button" id="dg-btn" class="btn btn-sm btn-outline-light mt-3" disabled onclick="acceptDisclaimer()">開始使用</button>
+  </div>
+</div>
+
+<!-- ── 零掃碼上線（ONBOARDING.md）：三個全螢幕閘 ──────────────────────
+     browser-gate   邀請連結在 LINE／FB 內建瀏覽器裡被打開：不兌換登入碼，教他跳到真正的瀏覽器
+     ios-first-gate iPhone 在 Safari 打開邀請連結：先加入主畫面，再在 App 裡輸入短碼
+     onboard-gate   登入後的安裝精靈：安裝 → 開啟通知 → 完成 -->
+<div id="browser-gate" class="update-gate" style="display:none" role="dialog" aria-modal="true">
+  <div class="ug-box ob-box">
+    <div style="font-size:2.2rem">🌐</div>
+    <div class="ug-title">請改用瀏覽器開啟</div>
+    <div class="ug-msg">
+      <p>你現在是在 <b id="bg-app-name">LINE</b> 的內建瀏覽器裡。它收不到推播通知，也沒辦法把 App 裝到桌面。</p>
+      <p>點右上角的「<b>⋮</b>」或「<b>⋯</b>」→「<b>以其他瀏覽器開啟</b>」，或複製連結貼到 Chrome／Safari。</p>
+      <p class="ob-note">登入碼還沒使用，換到瀏覽器後會自動登入。</p>
+    </div>
+    <div class="ob-actions">
+      <a id="bg-chrome-link" class="btn btn-sm btn-primary" style="display:none" href="#">用 Chrome 開啟</a>
+      <button type="button" class="btn btn-sm btn-outline-light" onclick="copyInviteLink()">複製連結</button>
+    </div>
+    <div id="bg-copy-msg" class="ob-note mt-2"></div>
+  </div>
+</div>
+
+<div id="ios-first-gate" class="update-gate" style="display:none" role="dialog" aria-modal="true">
+  <div class="ug-box ob-box">
+    <div style="font-size:2.2rem">📲</div>
+    <div class="ug-title">iPhone 請先安裝，再登入</div>
+    <div class="ug-msg">
+      <p>iPhone 只有「加入主畫面」的 App 才能收到推播通知，而且 App 與 Safari 的登入狀態不共用。</p>
+      <ol class="ob-ol">
+        <li>點 Safari 下方的「分享」，選「<b>加入主畫面</b>」</li>
+        <li>從桌面打開「台股監控」</li>
+        <li>輸入 LINE 訊息裡的 <b>8 碼登入碼</b></li>
+      </ol>
+      <p class="ob-note">連結裡的登入碼還沒使用；短碼與它同一組，用一個另一個就作廢。</p>
+    </div>
+    <div class="ob-actions">
+      <button type="button" class="btn btn-sm btn-primary" onclick="_showPwaInstructionsModal()">看圖解</button>
+      <a id="ios-first-continue" class="btn btn-sm btn-outline-light" href="#">直接在 Safari 使用</a>
+    </div>
+  </div>
+</div>
+
+<div id="onboard-gate" class="update-gate" style="display:none" role="dialog" aria-modal="true" aria-labelledby="ob-title">
+  <div class="ug-box ob-box">
+    <div id="ob-icon" style="font-size:2.2rem">👋</div>
+    <div class="ug-title" id="ob-title">歡迎使用</div>
+    <ol class="ob-steps" id="ob-steps"></ol>
+    <div class="ug-msg" id="ob-body"></div>
+    <div class="ob-actions" id="ob-actions"></div>
+    <button type="button" class="btn btn-link btn-sm ob-skip" id="ob-skip" onclick="skipOnboarding()">稍後再說</button>
   </div>
 </div>
 
@@ -111,15 +163,35 @@
   <div id="login-section">
     <div class="card panel-card mb-4">
       <div class="card-header py-3 d-flex align-items-center justify-content-between">
-        <h5 class="mb-0 panel-title">掃碼登入</h5>
-        <span class="small text-muted">Quick Sign-In</span>
+        <h5 class="mb-0 panel-title">登入</h5>
+        <span class="small text-muted">Sign-In</span>
       </div>
       <div class="card-body p-4 text-center">
 
-        <!-- QR Code 掃碼登入 -->
+        <!-- 內建瀏覽器提醒：在這裡登入也開不了通知、裝不了 App -->
+        <div id="login-inapp-hint" class="alert py-2 small text-start ob-inapp" style="display:none">
+          🌐 你在 <b id="login-inapp-name">LINE</b> 的內建瀏覽器裡。請點右上角「⋮」→「以其他瀏覽器開啟」，用 Chrome／Safari 開啟本站，通知與安裝才會正常。
+        </div>
+
+        <!-- 短碼登入（ONBOARDING.md）：LINE 官方帳號傳來的 8 碼；加好友或傳「登入」就會收到 -->
+        <div id="short-code-wrap" class="text-start mb-4">
+          <label class="form-label text-muted small" for="inp-short-code">輸入 LINE 傳給你的 8 碼登入碼</label>
+          <div class="d-flex gap-2">
+            <input id="inp-short-code" class="form-control form-control-lg ob-code-input" placeholder="ABCD-EFGH"
+                   maxlength="9" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false"
+                   inputmode="latin" onkeydown="if(event.key==='Enter')doShortCodeLogin()">
+            <button class="btn btn-primary btn-lg" type="button" id="short-code-btn" onclick="doShortCodeLogin()">登入</button>
+          </div>
+          <div class="text-muted small mt-2">還沒有登入碼？加入 LINE 官方帳號好友，或在聊天室傳「登入」，馬上就會收到。</div>
+          <div id="short-code-msg" class="mt-2 small"></div>
+        </div>
+
+        <hr class="mb-4" style="border-color:#2a2d3d">
+
+        <!-- QR Code 掃碼登入（電腦用：手機 LINE 掃電腦上的碼） -->
         <div id="qr-wrap">
           <p class="text-muted small mb-3">
-            用 LINE 掃描 QR Code，自動取得帳號<br>
+            電腦版：用手機 LINE 掃描 QR Code<br>
             <span style="font-size:.8rem">首次使用將自動建立帳號，無需任何輸入</span>
           </p>
           <div id="qrcode" class="d-inline-block p-2 bg-white rounded mb-3"
@@ -1945,6 +2017,232 @@ function finishLogin(row) {
   return showMain();
 }
 
+// ── 短碼登入（ONBOARDING.md）：LINE 官方帳號傳來的 8 碼 ─────────────
+// 給 iPhone 在已安裝的 App 裡用（連結開不進 App），也是所有「連結打不開」的萬用備援。
+async function doShortCodeLogin() {
+  const inp = document.getElementById("inp-short-code");
+  const btn = document.getElementById("short-code-btn");
+  const msg = document.getElementById("short-code-msg");
+  const code = (inp.value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (code.length !== 8) {
+    msg.innerHTML = '<span class="text-warning">登入碼是 8 個英數字，例如 ABCD-EFGH</span>';
+    return;
+  }
+  btn.disabled = true;
+  msg.textContent = "驗證中…";
+  try {
+    const data = await lineLogin({ action: "redeem", short_code: code });
+    await finishLogin(data);
+    startOnboarding("short_code");
+  } catch (e) {
+    msg.innerHTML = `<span class="text-danger">❌ ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 內建瀏覽器裡的登入畫面：先講清楚，不然他登入完才發現通知開不了
+function showLoginInAppHint() {
+  const el = document.getElementById("login-inapp-hint");
+  if (!el || !_inAppBrowser) return;
+  document.getElementById("login-inapp-name").textContent = _inAppBrowser;
+  el.style.display = "";
+}
+
+// ── 邀請連結在錯的地方被打開：兩個「先別兌換」的閘 ───────────────────
+function showBrowserGate() {
+  document.getElementById("bg-app-name").textContent = _inAppBrowser || "App";
+  // Android 可以用 intent:// 直接指名 Chrome；LINE 的內建瀏覽器不一定放行，所以複製連結才是保底
+  const chrome = document.getElementById("bg-chrome-link");
+  if (/Android/i.test(navigator.userAgent)) {
+    const u = new URL(location.href);
+    chrome.href = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=com.android.chrome;end`;
+    chrome.style.display = "";
+  }
+  document.getElementById("browser-gate").style.display = "flex";
+}
+
+async function copyInviteLink() {
+  const msg = document.getElementById("bg-copy-msg");
+  const url = location.href;
+  try {
+    await navigator.clipboard.writeText(url);
+    msg.textContent = "已複製，開啟 Chrome／Safari 後貼到網址列。";
+  } catch {
+    // 內建瀏覽器可能不給剪貼簿：把網址秀出來讓他長按複製
+    msg.innerHTML = `無法自動複製，請長按選取：<br><code style="word-break:break-all">${url}</code>`;
+  }
+}
+
+function showIosFirstGate() {
+  const cont = document.getElementById("ios-first-continue");
+  const u = new URL(location.href);
+  u.searchParams.set("here", "1");
+  cont.href = u.toString();
+  document.getElementById("ios-first-gate").style.display = "flex";
+}
+
+// ── 安裝精靈：安裝 → 開啟通知 → 完成 ─────────────────────────────────
+// 進度存在 localStorage：Android 裝完從桌面開啟時是同一個 profile，精靈接著跑「通知」那一步；
+// iPhone 的 App 是全新的儲存空間，會從短碼登入重新進來，精靈只剩通知那一步。
+const ONBOARD_KEY = "cg-onboard";
+function _obState() {
+  try { return JSON.parse(localStorage.getItem(ONBOARD_KEY) || "null"); } catch { return null; }
+}
+function _obSave(s) {
+  try { s ? localStorage.setItem(ONBOARD_KEY, JSON.stringify(s)) : localStorage.removeItem(ONBOARD_KEY); } catch {}
+}
+
+function startOnboarding(reason) {
+  _obSave({ stage: _pwaIsStandalone ? "push" : "install", reason, at: Date.now() });
+  renderOnboarding();
+}
+
+// 開機時：精靈還沒走完就接著走（Android 裝完從桌面開啟的那一次）
+function resumeOnboarding() {
+  const s = _obState();
+  if (!s || s.stage === "done") return;
+  if ((s.stage === "install" || s.stage === "installed") && _pwaIsStandalone) { s.stage = "push"; _obSave(s); }
+  // 沒裝、也還在瀏覽器裡：不重複糾纏，每日的推播提醒會接手
+  if (s.stage === "install" && !_pwaIsStandalone && Date.now() - (s.at || 0) > 10 * 60 * 1000) return;
+  renderOnboarding();
+}
+
+function skipOnboarding() {
+  _obSave({ stage: "done", skipped: true });
+  document.getElementById("onboard-gate").style.display = "none";
+}
+
+async function renderOnboarding() {
+  const s = _obState();
+  if (!s) return;
+  // 免責同意閘與精靈同為全螢幕、同 z-index，精靈在 DOM 後面會蓋住它：先同意，acceptDisclaimer 再把精靈叫回來
+  if (!disclaimerAccepted()) return;
+  const gate = document.getElementById("onboard-gate");
+  const icon = document.getElementById("ob-icon");
+  const title = document.getElementById("ob-title");
+  const steps = document.getElementById("ob-steps");
+  const body = document.getElementById("ob-body");
+  const actions = document.getElementById("ob-actions");
+  const skip = document.getElementById("ob-skip");
+
+  // 通知已經開了就跳過那一步（例如 Android 在瀏覽器裡先開了通知才安裝）
+  if (s.stage === "push" && "serviceWorker" in navigator && "PushManager" in window) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if (await reg.pushManager.getSubscription()) { s.stage = "finish"; _obSave(s); }
+    } catch {}
+  }
+
+  const order = ["install", "push", "finish"];
+  const labels = { install: "① 安裝 App", push: "② 開啟通知", finish: "③ 完成" };
+  const idx = order.indexOf(s.stage);
+  steps.innerHTML = order.map((k, i) =>
+    `<li class="${i < idx ? "is-done" : i === idx ? "is-current" : ""}">${i < idx ? "✓ " : ""}${labels[k]}</li>`).join("");
+  skip.style.display = s.stage === "finish" ? "none" : "";
+
+  if (s.stage === "install") {
+    icon.textContent = "📲";
+    title.textContent = "把 App 裝到桌面";
+    if (_isIOS) {
+      body.innerHTML = `<p>iPhone 請用 Safari 的「分享」→「<b>加入主畫面</b>」。</p>
+        <p class="ob-note">裝好後從桌面打開 App，輸入 LINE 訊息裡的 8 碼登入碼，就會接著開啟通知。</p>`;
+      actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_showPwaInstructionsModal()">看圖解</button>
+        <button type="button" class="btn btn-sm btn-outline-light" onclick="skipOnboarding()">我已加入主畫面</button>`;
+    } else {
+      body.innerHTML = `<p>裝到桌面之後，通知會像一般 App 一樣跳出來，開啟也不用再經過 LINE。</p>
+        <p class="ob-note">按下去會出現瀏覽器的安裝確認；沒有出現的話，用瀏覽器選單的「加到主畫面」。</p>`;
+      actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" id="ob-install-btn" onclick="onboardInstall()">安裝 App</button>`;
+    }
+  } else if (s.stage === "installed") {
+    icon.textContent = "✅";
+    title.textContent = "安裝成功！";
+    body.innerHTML = `<p>「台股監控」已經在你的桌面上。</p>
+      <p class="ob-note">從桌面圖示打開 App，就會接著完成最後一步：開啟通知。</p>`;
+    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_openInstalledApp()">開啟 App</button>`;
+  } else if (s.stage === "push") {
+    icon.textContent = "🔔";
+    title.textContent = _pwaIsStandalone ? "最後一步：開啟通知" : "開啟通知";
+    body.innerHTML = `<p>自訂規則成立、盤後報告完成、自選股有新事件時，通知會直接送到這台裝置。</p>
+      <div id="ob-push-msg" class="ob-note"></div>`;
+    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" id="ob-push-btn" onclick="onboardEnablePush()">啟用通知</button>`;
+  } else if (s.stage === "finish") {
+    icon.textContent = "🎉";
+    title.textContent = "全部完成";
+    body.innerHTML = `<p>${_pwaIsStandalone ? "App 已安裝、" : ""}通知已開啟。之後有提醒會直接跳出來，也會留在「通知」分頁。</p>
+      <p class="ob-note">剛剛有一則「設定完成」的通知，代表這台裝置真的收得到。</p>`;
+    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="finishOnboarding()">開始使用</button>`;
+    if (!s.notified) { s.notified = true; _obSave(s); _showSetupDoneNotification(); }
+  } else {
+    gate.style.display = "none";
+    return;
+  }
+  gate.style.display = "flex";
+}
+
+// 安裝一定要在使用者手勢裡呼叫 prompt()，所以是按鈕，不是自動
+function onboardInstall() {
+  const btn = document.getElementById("ob-install-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "等待瀏覽器…"; }
+  installPwa();
+  // beforeinstallprompt 沒來（Firefox、桌機 Safari、已裝過）：installPwa 2.5 秒後會開圖解，這裡把按鈕還原
+  setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = "安裝 App"; } }, 3000);
+}
+
+// appinstalled 進來：精靈顯示「安裝成功」，等他從桌面打開再做通知
+function _onboardInstalled() {
+  const s = _obState();
+  if (!s || s.stage !== "install") return;
+  s.stage = "installed"; _obSave(s);
+  // 桌面開啟時是 standalone → resumeOnboarding 會把 installed 推進到 push
+  renderOnboarding();
+}
+
+function _openInstalledApp() {
+  const startUrl = new URL("./watchlist.html", document.baseURI).href;
+  const opened = window.open(startUrl, "_blank");
+  if (!opened) location.href = startUrl;
+}
+
+async function onboardEnablePush() {
+  const btn = document.getElementById("ob-push-btn");
+  const msg = document.getElementById("ob-push-msg");
+  if (btn) btn.disabled = true;
+  // 走同一條訂閱路徑（權限請求在手勢的同一個 tick），結果看 _pushSubscribed
+  await togglePushSubscription();
+  if (_pushSubscribed) {
+    const s = _obState() || { stage: "push" };
+    s.stage = "finish"; _obSave(s);
+    renderOnboarding();
+    return;
+  }
+  // 失敗原因 togglePushSubscription 已寫進首頁通知列，照抄過來
+  const txt = document.getElementById("push-status-text");
+  if (msg) msg.textContent = txt ? txt.textContent : "尚未開啟，請再試一次";
+  if (btn) btn.disabled = false;
+}
+
+function finishOnboarding() {
+  _obSave({ stage: "done", at: Date.now() });
+  document.getElementById("onboard-gate").style.display = "none";
+  initPushUI();
+}
+
+// 本地跳一則通知讓他親眼看到；真正的端到端（伺服器 → 推播服務 → 這台裝置）
+// 由管理端 invite_admin.py push-test 驗。頁面的通知一律經 service worker 顯示。
+async function _showSetupDoneNotification() {
+  try {
+    if (!("serviceWorker" in navigator) || Notification.permission !== "granted") return;
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification("設定完成 ✅", {
+      body: "台股監控的通知已經開啟，之後的提醒會像這樣跳出來。",
+      icon: "icons/icon-192.png",
+      badge: "icons/badge-96.png",
+      tag: "setup-done",
+    });
+  } catch {}
+}
+
 async function initLiffLogin() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   const qrDiv    = document.getElementById("qrcode");
@@ -2022,21 +2320,33 @@ window.addEventListener("DOMContentLoaded", async () => {
       state = s;
       await showMain();
       loadUniverse();
+      resumeOnboarding();
       return;
     } catch { localStorage.removeItem("sma_session"); }
   }
   loadUniverse();
 
-  // 從 URL ?code= 一次性登入碼登入（LIFF 驗證後跳轉）。碼 2 分鐘內有效、用過即刪，
-  // 不像舊的 ?token= 會把長期 token 留在通知中心與伺服器紀錄裡。
+  // 從 URL ?code= 一次性登入碼登入（LIFF 驗證後跳轉、LINE 邀請連結、報告推播）。
+  // 碼用過即刪，不像舊的 ?token= 會把長期 token 留在通知中心與伺服器紀錄裡。
   const urlCode = forceShowQr ? null : qs.get("code");
   if (urlCode) {
+    // 兩種情況先不兌換、把碼留在網址裡（ONBOARDING.md）：
+    //  - 內建瀏覽器：這裡登入了也開不了通知，碼一用掉，跳到 Chrome 就變「已失效」
+    //  - iPhone 的 Safari：加入主畫面的 App 與 Safari 不共用登入狀態，要先裝再登
+    if (_inAppBrowser) { showBrowserGate(); return; }
+    if (_isIOS && !_pwaIsStandalone && qs.get("here") !== "1") { showIosFirstGate(); return; }
+
     history.replaceState(null, "", location.pathname);
     try {
       const data = await lineLogin({ action: "poll", session_token: urlCode });
-      if (data.access_token) { await finishLogin(data); return; }
-    } catch { /* 登入碼無效或已用過，fall through 到 QR code 畫面 */ }
+      if (data.access_token) {
+        await finishLogin(data);
+        if (data.kind === "invite_link") startOnboarding("invite");
+        return;
+      }
+    } catch { /* 登入碼無效或已用過，fall through 到登入畫面 */ }
   }
+  showLoginInAppHint();
 
   // 舊版 ?token= 仍相容（推播裡的個人化連結）；RLS 只回本人那一列
   const urlToken = forceShowQr ? null : qs.get("token");
@@ -2131,6 +2441,7 @@ function acceptDisclaimer() {
   try { localStorage.setItem(DISCLAIMER_KEY, DISCLAIMER_VERSION); } catch {}
   const gate = document.getElementById("disclaimer-gate");
   if (gate) gate.style.display = "none";
+  resumeOnboarding();   // 安裝精靈排在免責同意之後（renderOnboarding 在未同意前不顯示）
 }
 
 // ── 主畫面 ──────────────────────────────────────────────────────
@@ -2977,10 +3288,16 @@ function renderPushNudgePopup() {
   const btn = document.getElementById("push-nudge-enable-btn");
   if (!body) return;
   const install = pushNudgeNeedsInstall();
-  if (btn) btn.style.display = install ? "none" : "";
+  // 內建瀏覽器按「啟用通知」一定失敗，提醒就不要給那顆按鈕，直接教他怎麼跳出去
+  const inApp = !install && !!_inAppBrowser;
+  if (btn) btn.style.display = (install || inApp) ? "none" : "";
   body.innerHTML = install
     ? `<div class="rule-nudge-lead">iPhone 需先用 Safari 的「分享 → 加入主畫面」安裝，才能開啟推播通知。</div>
        <div class="small text-secondary">安裝後從主畫面開啟，再到首頁按「啟用通知」。</div>`
+    : inApp
+    ? `<div class="rule-nudge-lead">${_inAppBrowser} 的內建瀏覽器不支援推播通知。</div>
+       <div class="small text-secondary">請點右上角的「⋮」或「⋯」→「以其他瀏覽器開啟」，
+       用 Chrome 登入後點「⋮ → 加到主畫面」裝起來，再按首頁的「啟用通知」。</div>`
     : `<div class="rule-nudge-lead">你尚未開啟推播通知。</div>
        <ul class="small ps-3 mb-2">
          <li>自訂規則的條件成立時，通知會直接送到這台裝置</li>
@@ -6266,6 +6583,19 @@ const _pwaIsStandalone = window.matchMedia('(display-mode: standalone)').matches
 const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
   || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+// LINE／FB／IG 的內建瀏覽器是 WebView：它有 PushManager（所以按鈕會出現），
+// 但底下沒有接推播服務，subscribe() 一定丟 AbortError
+// 「Registration failed - push service error」。使用者從 LINE 掃 QR 綁定後
+// 很容易就停在這裡，所以要直接告訴他「用 Chrome 開」而不是丟英文錯誤給他。
+const _inAppBrowser = (() => {
+  const ua = navigator.userAgent || '';
+  if (/\bLine\//i.test(ua))          return 'LINE';
+  if (/FBAN|FBAV|FB_IAB/i.test(ua))  return 'Facebook';
+  if (/Instagram/i.test(ua))         return 'Instagram';
+  if (/MicroMessenger/i.test(ua))    return 'WeChat';
+  return '';
+})();
+
 // 目前是否已訂閱。togglePushSubscription() 需要「不 await 就知道要訂閱還是取消」，
 // 否則權限請求前面會多出 await，Safari 會判定已經脫離使用者手勢。
 let _pushSubscribed = false;
@@ -6303,7 +6633,10 @@ async function initPushUI() {
   }
 
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-    showHint('🔇', '此瀏覽器不支援推播通知');
+    // WebView 有的連 PushManager 都沒有，訊息一樣要指向「用 Chrome 開」
+    showHint('🔇', _inAppBrowser
+      ? `${_inAppBrowser} 內建瀏覽器不支援推播通知，請用「以其他瀏覽器開啟」改用 Chrome`
+      : '此瀏覽器不支援推播通知');
     return;
   }
 
@@ -6325,8 +6658,11 @@ async function initPushUI() {
       btn.className     = 'btn btn-sm btn-outline-danger';
     } else {
       placeBar(homeHead);
-      icon.textContent  = '🔇';
-      txt.textContent   = '尚未啟用推播通知';
+      // 內建瀏覽器按下去一定失敗，與其讓他撞牆，不如先講怎麼跳出去（按鈕留著讓他仍可試）
+      icon.textContent  = _inAppBrowser ? '🌐' : '🔇';
+      txt.textContent   = _inAppBrowser
+        ? `${_inAppBrowser} 內建瀏覽器無法啟用通知，請用「以其他瀏覽器開啟」改用 Chrome`
+        : '尚未啟用推播通知';
       btn.innerHTML     = '<span class="d-none d-sm-inline">啟用瀏覽器通知</span><span class="d-sm-none">啟用通知</span>';
       btn.className     = 'btn btn-sm btn-outline-light';
     }
@@ -6444,6 +6780,56 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// pushManager.subscribe() 失敗的原因幾乎都在瀏覽器／作業系統，不在我們的後端——
+// 失敗時連一個請求都還沒送出去。Chromium 丟的是英文的
+// 「Registration failed - push service error」（AbortError），使用者看了不知道
+// 能做什麼，所以這裡翻成可以照著做的步驟。
+function _pushFailureHint(e) {
+  const name = (e && e.name) || '';
+  const msg  = (e && e.message) || String(e);
+
+  // iOS 在 Safari 分頁（未加入主畫面）訂閱一定失敗，訊息要講清楚怎麼辦
+  if (_isIOS && !_pwaIsStandalone) {
+    return { short: '請先用「分享 → 加入主畫面」安裝後，再開啟通知' };
+  }
+  if (name === 'NotAllowedError') {
+    return { short: '尚未授權通知權限，請在瀏覽器設定中允許此網站發送通知' };
+  }
+  // 同一個瀏覽器裡留有「用別的 VAPID 公鑰訂的舊訂閱」時，會擋住新的訂閱
+  if (name === 'InvalidStateError') {
+    return {
+      short: '瀏覽器留有舊的推播訂閱，清除本站資料後再試一次',
+      detail: '這個瀏覽器裡還有一筆舊的推播訂閱擋住新的訂閱。\n\n'
+            + '請到瀏覽器設定 → 隱私權 → 網站資料，清除本站的資料後重新整理，再按一次「啟用通知」。',
+    };
+  }
+  if (name === 'AbortError' || /push service|Registration failed/i.test(msg)) {
+    if (_inAppBrowser) {
+      return {
+        short: `${_inAppBrowser} 內建瀏覽器無法啟用通知，請改用 Chrome 開啟`,
+        detail: `你現在是在 ${_inAppBrowser} 的內建瀏覽器裡，這種瀏覽器不支援推播通知。\n\n`
+              + '請這樣做（一分鐘）：\n'
+              + '① 點右上角的「⋮」或「⋯」→「以其他瀏覽器開啟」（或複製網址貼到 Chrome）。\n'
+              + '② 在 Chrome 裡登入後，點「⋮ → 加到主畫面」把它裝起來。\n'
+              + '③ 從桌面的圖示開啟，再按一次「啟用通知」。\n\n'
+              + '裝起來以後通知才會像一般 App 一樣跳出來，也不用每次從 LINE 進來。',
+      };
+    }
+    return {
+      short: '瀏覽器連不上推播服務，尚未啟用（可再按一次重試）',
+      detail: '無法啟用瀏覽器通知：這台裝置的瀏覽器連不上推播服務。\n\n'
+            + '這是瀏覽器／系統層的限制，跟你的帳號無關，可以依序試：\n'
+            + '① 用 Chrome 的一般分頁開啟（不要用無痕、也不要用 App 裡的內建瀏覽器）。\n'
+            + '② Android：確認「Google Play 服務」已啟用且為最新版，並關掉省電模式後重開機再試。\n'
+            + '③ 電腦：確認作業系統通知沒關（Windows：設定 → 系統 → 通知）。\n'
+            + '④ 公司網路、VPN 或會擋廣告的 DNS 會擋掉推播服務，換個網路再試。\n'
+            + '⑤ 用「⋮ → 加到主畫面」把本站裝成 App 後再開啟通知，成功率最高。\n\n'
+            + '在通知啟用之前，所有提醒還是會寫進 App 的「通知」分頁，不會漏掉，只是不會主動跳出來。',
+    };
+  }
+  return { short: `錯誤：${msg}` };
+}
+
 async function togglePushSubscription() {
   const btn  = document.getElementById('push-notify-btn');
   const txt  = document.getElementById('push-status-text');
@@ -6496,11 +6882,10 @@ async function togglePushSubscription() {
     _pushSubscribed = true;
     await initPushUI();
   } catch (e) {
-    // iOS 在 Safari 分頁（未加入主畫面）訂閱一定失敗，訊息要講清楚怎麼辦
-    txt.textContent = (_isIOS && !_pwaIsStandalone)
-      ? '請先用「分享 → 加入主畫面」安裝後，再開啟通知'
-      : `錯誤：${e.message}`;
-    console.error('[Push]', e);
+    console.error('[Push]', e.name, e.message, navigator.userAgent);
+    const hint = _pushFailureHint(e);
+    txt.textContent = hint.short;
+    if (hint.detail) alert(hint.detail);
   } finally {
     btn.disabled = false;
   }
@@ -6554,6 +6939,7 @@ window.addEventListener('appinstalled', () => {
   const banner = document.getElementById('ios-install-banner');
   if (banner) banner.style.display = 'none';
   _showInstallSuccessToast();
+  _onboardInstalled();   // 安裝精靈進行中：換成「安裝成功」畫面
 });
 
 let _installBtnOrigHTML = null;
