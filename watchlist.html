@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="72">
+  <meta name="app-version" content="73">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=72" rel="stylesheet">
+  <link href="watchlist.css?v=73" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -6845,6 +6845,8 @@ let _deferredInstallPrompt = null;
 let _installIntentPending  = false;   // user clicked Install before prompt was ready
 let _installIntentTimer    = null;
 let _installFromMobileGate = false;
+let _mobileInstallCompletionTimer = null;
+let _mobileInstallCompletionHandled = false;
 
 // Show button whenever not already in standalone mode
 if (!_pwaIsStandalone) {
@@ -6877,25 +6879,32 @@ window.addEventListener('appinstalled', () => {
   const banner = document.getElementById('ios-install-banner');
   if (banner) banner.style.display = 'none';
   if (openLoginAfterInstall) {
-    _setInstallButtonsComplete();
-    setTimeout(() => {
-      _openInstalledApp(true);
-      // Android/Chrome 可阻擋非使用者手勢觸發的新視窗；仍留在本頁時提供一次點擊的 fallback。
-      setTimeout(() => {
-        if (document.hidden) return;
-        const actions = document.getElementById('mobile-install-actions');
-        if (actions) {
-          actions.innerHTML = '<button type="button" class="btn btn-sm btn-primary" onclick="_openInstalledApp()">開啟 App</button>';
-          actions.style.display = '';
-        }
-      }, 1200);
-    }, 500);
-  } else {
+    _completeMobileInstall();
+  } else if (!_mobileInstallCompletionHandled) {
     _showInstallSuccessToast();
   }
-  _installFromMobileGate = false;
   _onboardInstalled();   // 安裝精靈進行中：換成「安裝成功」畫面
 });
+
+function _completeMobileInstall() {
+  if (_mobileInstallCompletionHandled) return;
+  _mobileInstallCompletionHandled = true;
+  clearTimeout(_mobileInstallCompletionTimer);
+  _setInstallButtonsComplete();
+  setTimeout(() => {
+    _openInstalledApp(true);
+    // 自動喚起 PWA 不是 Web 標準保證的能力；Chrome 阻擋時保留明確的一鍵入口。
+    setTimeout(() => {
+      if (document.hidden) return;
+      const actions = document.getElementById('mobile-install-actions');
+      if (actions) {
+        actions.innerHTML = '<button type="button" class="btn btn-sm btn-primary" onclick="_openInstalledApp()">開啟 App</button>';
+        actions.style.display = '';
+      }
+    }, 1200);
+  }, 500);
+  _installFromMobileGate = false;
+}
 
 function _installButtons() {
   return document.querySelectorAll('#pwa-install-btn, #mobile-install-btn, #ob-install-btn');
@@ -6925,6 +6934,7 @@ function _restoreInstallButtons() {
 
 function installPwa(source = '') {
   _installFromMobileGate = source === 'mobile-gate';
+  if (_installFromMobileGate) _mobileInstallCompletionHandled = false;
   _setInstallButtonsWaiting();
   if (_deferredInstallPrompt) {
     // Chrome / Edge / Android: use the native install prompt
@@ -6953,18 +6963,24 @@ function _triggerNativeInstallPrompt() {
       _deferredInstallPrompt = null;
       const btn = document.getElementById('pwa-install-btn');
       if (btn) btn.style.display = 'none';
-      // appinstalled event will fire shortly and show the toast.
-      // Add a fallback in case appinstalled is slow or doesn't fire.
-      setTimeout(() => {
-        const toast = document.getElementById('pwa-success-toast');
-        if (!toast) _showInstallSuccessToast();
-      }, 1500);
+      if (_installFromMobileGate && _isAndroid) {
+        // 部分 Android Chrome / WebAPK 組合不送 appinstalled；userChoice accepted 後留一點安裝時間再收尾。
+        _mobileInstallCompletionTimer = setTimeout(_completeMobileInstall, 2500);
+      } else {
+        // 非 mobile gate 保留原本的成功提示；appinstalled 若有送會先處理。
+        setTimeout(() => {
+          const toast = document.getElementById('pwa-success-toast');
+          if (!toast) _showInstallSuccessToast();
+        }, 1500);
+      }
     } else {
       _installFromMobileGate = false;
+      clearTimeout(_mobileInstallCompletionTimer);
       _restoreInstallButtons();
     }
   }).catch(() => {
     _installFromMobileGate = false;
+    clearTimeout(_mobileInstallCompletionTimer);
     _restoreInstallButtons();
   });
 }
