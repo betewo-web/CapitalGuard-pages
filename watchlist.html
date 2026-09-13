@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="82">
+  <meta name="app-version" content="83">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=82" rel="stylesheet">
+  <link href="watchlist.css?v=83" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2197,28 +2197,48 @@ async function renderOnboarding() {
       <p class="ob-note">從桌面圖示打開 App，就會接著完成最後一步：開啟通知。</p>`;
     actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_openInstalledApp()">開啟 App</button>`;
   } else if (s.stage === "push") {
-    // 按過「不允許」之後瀏覽器就不再跳出詢問，只留一行「請再試一次」等於把人卡死在這一步：
-    // 改成講清楚「為什麼非開不可」＋ 這台裝置解除封鎖的步驟，按鈕照樣留著讓他弄好再按。
+    // 系統的權限詢問「一個裝置只有一次」，按了不允許就只能進系統設定改回來。
+    // 所以先在自己的 UI 裡問：說明 → 想清楚了 → 才真的呼叫 requestPermission()。
+    // 猶豫的人走「先了解為什麼需要」，那一次詢問不會被花掉（每日提醒之後還能再問）。
     _obPushBlockedShown = _pushPromptUnavailable();
     icon.textContent = _obPushBlockedShown ? "🔕" : "🔔";
     title.textContent = _obPushBlockedShown
       ? "通知目前是關閉的"
       : (_pwaIsStandalone ? "最後一步：開啟通知" : "開啟通知");
     const blockedCopy = _obPushBlockedShown ? _pushBlockedCopy() : null;
-    body.innerHTML = _obPushBlockedShown
-      ? `<p>${blockedCopy.lead}<b>通知就是這個服務的核心</b>：自訂規則成立、盤後報告完成、自選股有新事件，全都靠通知送到你手上；關著的話，這些提醒只能等你自己想到打開 App 才看得到。</p>
+    if (_obPushBlockedShown) {
+      body.innerHTML = `<p>${blockedCopy.lead}<b>通知就是這個服務的核心</b>：自訂規則成立、盤後報告完成、自選股有新事件，全都靠通知送到你手上；關著的話，這些提醒只能等你自己想到打開 App 才看得到。</p>
          <p>${blockedCopy.how}</p>
          <ol class="ob-ol">${_pushUnblockSteps().map(t => `<li>${t}</li>`).join("")}</ol>
-         <div id="ob-push-msg" class="ob-note" role="status" aria-live="polite"></div>`
-      : `<p>自訂規則成立、盤後報告完成、自選股有新事件時，通知會直接送到這台裝置。</p>
          <div id="ob-push-msg" class="ob-note" role="status" aria-live="polite"></div>`;
+    } else if (_obPushView === "why") {
+      body.innerHTML = `<p><b>沒有通知，等於只剩一半的服務。</b></p>
+         <ul class="ob-ol">
+           <li>自訂規則成立的當下就告訴你——事後才打開 App 是補不回來的</li>
+           <li>盤後報告產出、自選股有新事件時提醒你去看</li>
+           <li>不開啟的話，這些只會留在 App 的「通知」分頁，要你自己想到才看得到</li>
+         </ul>
+         <p class="ob-note">按「好，開啟通知」之後，<b>瀏覽器會問你一次</b>，請選「允許」。</p>
+         <div id="ob-push-msg" class="ob-note" role="status" aria-live="polite"></div>`;
+    } else {
+      body.innerHTML = `<p>自訂規則成立、盤後報告完成、自選股有新事件時，通知會直接送到這台裝置。</p>
+         <p class="ob-note">按下去之後，<b>瀏覽器會問你一次</b>，請選「允許」。這個詢問一台裝置只會出現一次，選了「不允許」就得進系統設定才改得回來。</p>
+         <div id="ob-push-msg" class="ob-note" role="status" aria-live="polite"></div>`;
+    }
     // 進度存在 localStorage，而 Android 刪掉 App 不會清掉 Chrome 的儲存：
     // 人在瀏覽器分頁裡卻停在「已裝好、只差通知」時，要給他回到第一步的路。
     if (!_pwaIsStandalone) {
       body.innerHTML += `<p class="ob-note">現在是在瀏覽器分頁裡，不是桌面上的 App。
         <a href="#" onclick="onboardBackToInstall(); return false;">App 已經不在桌面上了？回到第一步重新安裝</a></p>`;
     }
-    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" id="ob-push-btn" onclick="onboardEnablePush()">啟用通知</button>`;
+    // 第二個選項刻意不是「略過」：先給「為什麼需要」，看完了才出現「暫時不開啟」。
+    // 猶豫的人因此不會被推去按系統的「不允許」——那一按是回不來的。
+    actions.innerHTML =
+      `<button type="button" class="btn btn-sm btn-primary" id="ob-push-btn" onclick="onboardEnablePush()">`
+      + `${_obPushBlockedShown ? "啟用通知" : "好，開啟通知"}</button>`
+      + (_obPushBlockedShown || _obPushView === "why"
+        ? `<button type="button" class="ob-skip" onclick="onboardSkipPush()">暫時不開啟，先進去看看</button>`
+        : `<button type="button" class="btn btn-sm btn-outline-light" onclick="onboardShowPushWhy()">先了解為什麼需要</button>`);
   } else if (s.stage === "finish") {
     icon.textContent = "🎉";
     title.textContent = "全部完成";
@@ -2299,6 +2319,8 @@ function _attemptOpenInstalledApp(automatic) {
 // Chrome 被忽略幾次後也會「暫時不再詢問」（權限仍是 default）。兩種都要改走手動開啟的說明。
 let _obPushBlockedShown = false;
 let _obPushPromptSuppressed = false;
+// 通知步驟的兩個畫面："ask"（說明＋預告系統會問一次）→ "why"（完整理由，才出現「暫時不開啟」）
+let _obPushView = "ask";
 function _pushPermission() {
   return typeof Notification !== "undefined" ? Notification.permission : "unsupported";
 }
@@ -2396,8 +2418,23 @@ document.addEventListener("visibilitychange", _onboardRecheckPushPermission);
 // iOS 從背景還原走 bfcache，不一定會觸發 visibilitychange
 window.addEventListener("pageshow", e => { if (e.persisted) _onboardRecheckPushPermission(); });
 
-function finishOnboarding() {
-  _obSave({ stage: "done", at: Date.now() });
+// 「先了解為什麼需要」：只換畫面，不碰任何權限 API
+function onboardShowPushWhy() {
+  _obPushView = "why";
+  renderOnboarding();
+}
+
+// 看完說明還是不要：讓他進去用，但**絕不**去呼叫 requestPermission()——
+// 那一次詢問要留著。今天不再跳提醒（剛拒絕完又問很煩），明天起由每日的
+// 「開啟推播通知」接手；首頁的通知列也一直留著入口。
+function onboardSkipPush() {
+  notePushNudgeShown();
+  finishOnboarding({ pushDeclined: true });
+}
+
+function finishOnboarding(extra) {
+  _obSave({ stage: "done", at: Date.now(), ...extra });
+  _obPushView = "ask";
   document.getElementById("onboard-gate").style.display = "none";
   initPushUI();
 }
@@ -2788,6 +2825,8 @@ function _onAppResume() {
   _autoRefreshOnce().catch(() => {});
   loadPlanState().catch(() => {});   // 回前景無條件重問方案，不等通知的節奏
   refreshReportIfStale();            // 報告是昨天的就重抓（只在回前景，不進輪詢）
+  initPushUI();                      // 剛去系統設定改完通知回來：這條列要跟著變
+
   _scheduleAutoRefresh();
 }
 
@@ -6774,8 +6813,14 @@ async function initPushUI() {
     return;
   }
 
+  // 被封鎖時每日提醒不會跳（跳了也沒用），首頁這條就是他唯一的入口：
+  // 與其只丟一句「請到瀏覽器設定」，不如給這台裝置的實際步驟。
   if (Notification.permission === 'denied') {
-    showHint('🔇', '通知已被封鎖，請在瀏覽器設定中允許此網站發送通知');
+    showHint('🔇', '通知已被封鎖，要到系統設定才能開回來');
+    btn.style.display = '';
+    btn.className     = 'btn btn-sm btn-outline-light';
+    btn.innerHTML     = '如何開啟';
+    btn.onclick       = _showPushUnblockHelp;
     return;
   }
 
@@ -6784,6 +6829,7 @@ async function initPushUI() {
     const sub = reg && await reg.pushManager.getSubscription();
     _pushSubscribed = !!sub;
     btn.style.display = '';
+    btn.onclick = togglePushSubscription;   // 封鎖狀態換過 handler，這裡換回來
     if (sub) {
       placeBar(inboxHead);
       icon.textContent  = '🔔';
@@ -6803,6 +6849,13 @@ async function initPushUI() {
   } catch (e) {
     txt.textContent = '推播狀態未知';
   }
+}
+
+// 首頁通知列在權限被封鎖時要給得出步驟；精靈裡那份說明用的是同一個 _pushUnblockSteps()
+function _showPushUnblockHelp() {
+  alert('這台裝置把本站的通知關掉了，瀏覽器不會再跳出詢問，請手動打開：\n\n'
+    + _pushUnblockSteps().slice(0, -1).map((t, i) => `${i + 1}. ${t.replace(/<[^>]+>/g, '')}`).join('\n')
+    + '\n\n打開之後回到這裡，按「啟用通知」。');
 }
 
 // 存 / 刪 Supabase 的訂閱紀錄。pushsubscriptionchange 也共用 _savePushSubscription。

@@ -2832,6 +2832,8 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .ob-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-top: 0.9rem; }
 .ob-actions .btn { min-width: 8.5rem; }
 .ob-skip { display: block; margin: 0.6rem auto 0; color: var(--text-2, #8da1c6); font-size: 0.78rem; text-decoration: none; }
+/* 次要選項自己一行，不跟主按鈕並排搶注意力 */
+.ob-actions .ob-skip { flex: 0 0 100%; background: none; border: 0; padding: 0; }
 .ob-steps { list-style: none; padding: 0; margin: 0.6rem 0 0.9rem; display: flex; gap: 0.4rem; justify-content: center; }
 .ob-steps li {
 	flex: 1;
