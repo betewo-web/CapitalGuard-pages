@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="85">
+  <meta name="app-version" content="86">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=85" rel="stylesheet">
+  <link href="watchlist.css?v=86" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -6816,11 +6816,17 @@ async function initPushUI() {
     }
   }
 
-  function showHint(emoji, message) {
+  // 通知是關著的每一種狀態，都要留一條「接下來我該做什麼」——只丟一句說明就是死路。
+  // 唯一沒有按鈕的情況是這個瀏覽器真的不支援推播，那確實無事可做。
+  function showHint(emoji, message, hasHelp = true) {
     placeBar(homeHead);
     icon.textContent = emoji;
     txt.textContent  = message;
-    btn.style.display = 'none';
+    btn.style.display = hasHelp ? '' : 'none';
+    if (!hasHelp) return;
+    btn.className = 'btn btn-sm btn-outline-light';
+    btn.innerHTML = '<span class="d-none d-sm-inline">如何啟用通知</span><span class="d-sm-none">如何啟用</span>';
+    btn.onclick   = _showPushEnableHelp;
   }
 
   // iPhone 在 Safari 分頁裡不可能訂閱成功。以前這裡直接 return、整條 bar 消失，
@@ -6834,7 +6840,7 @@ async function initPushUI() {
     // WebView 有的連 PushManager 都沒有，訊息一樣要指向「用 Chrome 開」
     showHint('🔇', _inAppBrowser
       ? `${_inAppBrowser} 內建瀏覽器不支援推播通知，請用「以其他瀏覽器開啟」改用 Chrome`
-      : '此瀏覽器不支援推播通知');
+      : '此瀏覽器不支援推播通知', !!_inAppBrowser);
     return;
   }
 
@@ -6842,10 +6848,6 @@ async function initPushUI() {
   // 與其只丟一句「請到瀏覽器設定」，不如給這台裝置的實際步驟。
   if (Notification.permission === 'denied') {
     showHint('🔇', '通知已被封鎖，要到系統設定才能開回來');
-    btn.style.display = '';
-    btn.className     = 'btn btn-sm btn-outline-light';
-    btn.innerHTML     = '如何開啟';
-    btn.onclick       = _showPushUnblockHelp;
     return;
   }
 
@@ -6874,6 +6876,20 @@ async function initPushUI() {
   } catch (e) {
     txt.textContent = '推播狀態未知';
   }
+}
+
+// 首頁通知列的「如何啟用通知」：關著的原因不只一種，處理方式也不一樣，一個入口分流
+function _showPushEnableHelp() {
+  if (_isIOS && !_pwaIsStandalone) { _showPwaInstructionsModal(); return; }
+  if (_inAppBrowser) {
+    alert(`你現在是在 ${_inAppBrowser} 的內建瀏覽器裡，這種瀏覽器收不到推播通知。\n\n`
+      + '① 點右上角的「⋮」或「⋯」→「以其他瀏覽器開啟」（或複製網址貼到 Chrome）。\n'
+      + '② 在 Chrome 裡用「⋮ → 加到主畫面」把它裝起來。\n'
+      + '③ 從桌面的圖示開啟，再按一次「啟用通知」。');
+    return;
+  }
+  if (_pushPermissionBlocked()) { _showPushUnblockHelp(); return; }
+  alert('這台裝置可以接收通知，按「啟用通知」就會開始接收。');
 }
 
 // 首頁通知列在權限被封鎖時要給得出步驟；精靈裡那份說明用的是同一個 _pushUnblockSteps()
