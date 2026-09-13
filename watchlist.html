@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="57">
+  <meta name="app-version" content="61">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=57" rel="stylesheet">
+  <link href="watchlist.css?v=61" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -368,6 +368,24 @@
   </div>
 </div>
 
+<!-- 每日提醒開啟推播：沒訂閱的人每個台北日曆日跳一次，內容由 renderPushNudgePopup() 畫。
+     「啟用通知」直接呼叫 togglePushSubscription()（權限請求必須在手勢的同一個 tick 內）。 -->
+<div class="modal fade sheet-modal" id="pushNudgeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">🔔 開啟推播通知</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body p-3" id="push-nudge-popup-body"></div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">今天先不要</button>
+        <button type="button" class="btn btn-sm btn-success btn-accent-sm" id="push-nudge-enable-btn" onclick="enablePushFromNudge()">啟用通知</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade sheet-modal" id="rulesModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
     <div class="modal-content kline-modal-content">
@@ -693,9 +711,6 @@
       </div>
       <div class="modal-body p-2">
         <div id="kline-signals" class="kline-signals" style="display:none;"></div>
-        <div id="kline-dim-detail-panel" style="display:none;" class="mb-2">
-          <div id="kline-dim-detail-content" class="p-2 rounded kline-dim-detail-box"></div>
-        </div>
         <div class="d-flex align-items-center flex-wrap gap-2 mb-2 kline-toolbar-row">
           <div class="kline-select-group">
             <label class="kline-select-label" for="kline-period-select">週期</label>
@@ -715,8 +730,9 @@
               <option value="hide">隱藏</option>
             </select>
           </div>
+          <span id="kline-chips-note" class="small text-secondary" style="display:none;"></span>
         </div>
-        <div id="kline-chart" style="width:100%;height:460px;border:1px solid #2f3f66;border-radius:8px;"></div>
+        <div id="kline-chart" style="width:100%;"></div>
         <div class="row g-2 mt-2" id="kline-levels">
           <div class="col-md-6">
             <div class="p-2 rounded kline-level-card resistance">
@@ -731,9 +747,10 @@
             </div>
           </div>
         </div>
-        <div class="mt-2" id="kline-score-block">
-          <div class="row g-1 mb-2" id="kline-score-bars" style="display:none"></div>
-          <button type="button" id="kline-score-toggle" class="kline-score-toggle w-100" onclick="toggleKLineScoreSummary()">7大面向分析 展開 ▼</button>
+        <!-- 評分明細：同一份 investment_scores（13 子項、變化原因）對所有評分股都有；
+             原本這裡是「7 大面向分析」，只有進榜的 ~32 檔有資料，其他自選股 7 格有 4 格永遠是「—」 -->
+        <div class="d-flex justify-content-end mt-2">
+          <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="kline-score-detail-btn" onclick="openScoreDetailFromKLine()">評分明細 →</button>
         </div>
       </div>
     </div>
@@ -842,7 +859,6 @@ let sharedDataLoadingPromise = null;
 let klineChart = null;
 let currentKLineSid = null;
 let currentChipsView = "foreign";
-let klineScoreSummaryOpen = false;
 let klineMobileTooltipLocked = false;
 let klineLongPressTimer = null;
 let klineTouchMoved = false;
@@ -850,8 +866,6 @@ let klineTouchStartPoint = null;
 let klineTouchDomEl = null;
 let klineTouchDomHandlers = null;
 let klineTouchGlobalHandlers = null;
-let klineZoomSyncing = false;
-let klineLastZoomRange = null;
 let watchlistRows = [];
 let intradayQuoteMap = {};
 let intradayQuotesLoadingPromise = null;
@@ -949,34 +963,46 @@ function isTodayEvent(ev) {
   return isNewToday(ev) || ev.event_date === _localDateIso();
 }
 
+// 一次查全部自選股會撞到 limit：500 筆是所有股票共用，事件多的自選清單會把較早的事件
+// 整批截掉、某些股票看起來「沒事件」。分批查、每批各自帶上限；窗口也加上界（財報日／除息日
+// 最多排到 90 天後），不然遠期日程永遠排在最上面。
+const EVENTS_QUERY_CHUNK = 25;
+const EVENTS_QUERY_LIMIT = 1000;
+
 async function loadStockEvents(sids) {
   if (!sids || sids.length === 0) return;
   try {
     const today = _localDateIso();
     const historyStart = _localDateIso(new Date(Date.now() - 90 * 864e5));
-    const buildUrl = rich => {
+    const historyEnd = _localDateIso(new Date(Date.now() + 90 * 864e5));
+    const buildUrl = (rich, chunk) => {
       const url = new URL(`${SUPABASE_URL}/rest/v1/stock_events`);
       const legacy = "stock_id,event_date,event_type,title,content,source_url,importance,ai_analysis";
-      const scored = `${legacy},event_code,direction,event_score,score_breakdown,metrics,source,created_at,observed_at`;
+      const scored = `${legacy},event_code,direction,event_score,score_breakdown,metrics,source,created_at,observed_at,dedupe_key`;
       url.searchParams.set("select", rich ? scored : legacy);
-      url.searchParams.set("event_date", `gte.${rich ? historyStart : today}`);
-      url.searchParams.set("stock_id", `in.(${sids.join(",")})`);
+      url.searchParams.append("event_date", `gte.${rich ? historyStart : today}`);
+      if (rich) url.searchParams.append("event_date", `lte.${historyEnd}`);
+      url.searchParams.set("stock_id", `in.(${chunk.join(",")})`);
       url.searchParams.set("order", rich ? "event_date.desc,event_score.desc.nullslast" : "importance.asc,event_date.desc");
-      url.searchParams.set("limit", rich ? "500" : "300");
+      url.searchParams.set("limit", rich ? String(EVENTS_QUERY_LIMIT) : "300");
       return url;
     };
+    const chunks = [];
+    for (let i = 0; i < sids.length; i += EVENTS_QUERY_CHUNK) chunks.push(sids.slice(i, i + EVENTS_QUERY_CHUNK));
     // 帶 token：stock_events 改成登入後才能讀（migrate_private_reports.sql），
     // 沒帶的話 RLS 會回空陣列而不是錯誤，畫面只會安靜地沒有事件
-    let r = await fetch(buildUrl(true), { headers: sbHeaders(state.accessToken) });
-    if (!r.ok && [400, 404].includes(r.status)) {
+    const fetchAll = rich => Promise.all(chunks.map(chunk => fetch(buildUrl(rich, chunk), { headers: sbHeaders(state.accessToken) })));
+    let responses = await fetchAll(true);
+    if (responses.some(r => !r.ok && [400, 404].includes(r.status))) {
       console.info("[Events] Event Engine migration 尚未套用，使用舊欄位載入");
-      r = await fetch(buildUrl(false), { headers: sbHeaders(state.accessToken) });
+      responses = await fetchAll(false);
     }
-    if (!r.ok) {
-      console.warn("[Events] 載入失敗：", r.status);
+    const failed = responses.find(r => !r.ok);
+    if (failed) {
+      console.warn("[Events] 載入失敗：", failed.status);
       return;
     }
-    const rows = await r.json();
+    const rows = (await Promise.all(responses.map(r => r.json()))).flat();
     stockEvents = {};
     for (const row of rows) {
       if (!stockEvents[row.stock_id]) stockEvents[row.stock_id] = [];
@@ -1014,9 +1040,13 @@ const _EVENT_TYPE_LABEL = {
   volume:       "📶 成交量",
   signal:       "⚡ 複合訊號",
   valuation:    "⚖️ 估值",
-  market:       "🌐 市場異常",
+  market:       "🌐 市場波動",
   fundamental:  "📑 基本面",
+  price:        "💹 價格",       // price.new_high_52w / new_low_52w
+  score:        "🧮 評分變化",   // score.overall_improving / deteriorating
 };
+// test_pwa_tabs.EventCardTests 會比對：後端 data/events.py 寫出的每種 event_type 都要有標籤，
+// 否則卡片上會出現英文原字（曾經漏掉 price、score）
 const _EVENT_IMPORTANCE_CLASS = {
   high: "event-high",
   normal: "event-normal",
@@ -1050,16 +1080,70 @@ function renderEventBreakdown(ev) {
   const breakdown = ev?.score_breakdown;
   if (!breakdown || typeof breakdown !== "object" || !Object.keys(breakdown).length) return "";
   const fields = [
-    ["base", "基礎"], ["abnormality", "異常"], ["rarity", "罕見"],
+    ["base", "基礎"], ["abnormality", "不尋常度"], ["rarity", "罕見"],
     ["fundamental_impact", "基本面"], ["price_reaction", "股價反應"],
     ["synergy", "多事件"], ["contradiction", "矛盾"],
   ];
+  // Signal Engine 沒跑過的事件 breakdown 是預設的全 0：列一排「+0」沒有資訊，不顯示
+  if (!fields.slice(1).some(([key]) => Number(breakdown[key] || 0))) return "";
   const chips = fields.map(([key, label]) => {
     const value = Number(breakdown[key] || 0);
     const shown = key === "base" ? value : `${key === "contradiction" ? "−" : "+"}${value}`;
     return `<span class="event-score-part${key === "contradiction" && value ? " is-negative" : ""}">${label} ${shown}</span>`;
   }).join("");
   return `<details class="event-score-details"><summary>顯著度明細</summary><div class="event-score-parts">${chips}</div></details>`;
+}
+
+// 事件 metrics 的顯示白名單：鍵 → [標籤, 格式]。只描述數字，不下判斷（COMPLIANCE.md）。
+// 後端每個事件都把用到的數字放進 metrics，以前前端完全沒渲染，使用者只看得到標題。
+const _EVENT_METRIC_LABELS = {
+  yoy_pct: ["年增", "pct"], mom_pct: ["月增", "pct"], cum_yoy_pct: ["累計年增", "pct"],
+  change_pct: ["變化", "pct"], change_pp: ["變化", "pp"], return_pct: ["漲跌幅", "pct"],
+  price_change_pct: ["股價變化", "pct"], margin_change_pct: ["融資變化", "pct"],
+  net_total: ["淨買超", "lots"], institutional_net: ["法人淨買超", "lots"],
+  current: ["本期", "amount"], previous: ["前期", "amount"], baseline: ["比較基準", "amount"],
+  days: ["天數", "int"], close: ["收盤", "num"], prior_high: ["前高", "num"], prior_low: ["前低", "num"],
+  ma: ["均線", "num"], volume_ratio: ["量比", "x"], cash_dividend: ["現金股利", "num"],
+  ex_date: ["除息日", "text"], earnings_date: ["財報日", "text"], conference_date: ["法說會", "text"],
+  quarter: ["季度", "text"], revenue_month: ["資料月份", "text"],
+};
+const _EVENT_METRIC_MAX = 5;
+
+function fmtEventMetric(kind, value) {
+  if (kind === "text") return String(value);
+  const v = Number(value);
+  if (!Number.isFinite(v)) return "";
+  const sign = v > 0 ? "+" : "";
+  switch (kind) {
+    case "pct": return `${sign}${v.toFixed(1)}%`;
+    case "pp": return `${sign}${v.toFixed(1)} 個百分點`;
+    case "lots": return `${Math.round(v).toLocaleString()} 張`;
+    case "int": return String(Math.round(v));
+    case "x": return `${v.toFixed(1)} 倍`;
+    case "amount": {   // 元 → 億／兆（季營收、營業利益）；EPS 這種小數直接顯示
+      const a = Math.abs(v);
+      if (a >= 1e12) return `${(v / 1e12).toFixed(2)} 兆`;
+      if (a >= 1e8) return `${(v / 1e8).toFixed(1)} 億`;
+      return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
+    }
+    default: return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
+  }
+}
+
+function renderEventMetrics(ev) {
+  const metrics = ev?.metrics;
+  if (!metrics || typeof metrics !== "object") return "";
+  const parts = [];
+  for (const [key, spec] of Object.entries(_EVENT_METRIC_LABELS)) {
+    if (!(key in metrics)) continue;
+    const value = metrics[key];
+    if (value === null || value === undefined || typeof value === "boolean") continue;
+    const text = fmtEventMetric(spec[1], value);
+    if (!text) continue;
+    parts.push(`<span class="event-metric">${escapeHtml(spec[0])} <b>${escapeHtml(text)}</b></span>`);
+    if (parts.length >= _EVENT_METRIC_MAX) break;
+  }
+  return parts.length ? `<div class="event-metrics">${parts.join("")}</div>` : "";
 }
 
 function renderEventCard(sid, ev, options = {}) {
@@ -1071,13 +1155,22 @@ function renderEventCard(sid, ev, options = {}) {
   const linkHtml = ev.source_url
     ? `<a href="${escapeHtml(ev.source_url)}" target="_blank" rel="noopener" class="event-source-link">來源</a>`
     : "";
+  // AI 按鈕用 data 屬性帶事件身分（dedupe_key），不把標題塞進 inline onclick：標題含引號會炸
   const actionHtml = options.todayMode
     ? (options.grouped ? "" : `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>`)
     : (ev.ai_analysis
       ? `<div class="event-ai-text">${escapeHtml(ev.ai_analysis)}</div>`
-      : `<button class="btn btn-xs btn-outline-info" onclick="requestAiAnalysis('${escapeHtml(sid)}','${escapeHtml(ev.title)}',this)">AI 說明資料</button>`);
+      : `<button class="btn btn-xs btn-outline-info" data-ev-key="${escapeHtml(ev.dedupe_key || "")}" data-ev-title="${escapeHtml(ev.title || "")}" onclick="requestAiAnalysis('${escapeHtml(sid)}', this)">AI 說明資料</button>`);
   const newBadge = isNewToday(ev) ? `<span class="event-new-badge">新</span>` : "";
-  const dateChip = ev.event_date ? `<span class="event-date-chip">${escapeHtml(ev.event_date)}</span>` : "";
+  // 事件日＝資料本身的日期（季報是季底、籌碼是前一交易日、除息是未來日）；
+  // 與系統記錄的觀察日不同時兩個都標，不然「今天出現的 2026-06-30」看起來像資料錯了
+  const observedKey = taipeiDateKey(ev.observed_at || ev.created_at);
+  const dateChip = ev.event_date
+    ? `<span class="event-date-chip" title="事件日：資料本身的日期">${escapeHtml(ev.event_date)}</span>`
+      + (observedKey && observedKey !== ev.event_date
+        ? `<span class="event-date-chip event-date-observed" title="觀察日：系統記錄這筆資料的日期">觀察 ${escapeHtml(observedKey)}</span>`
+        : "")
+    : "";
   return `
     <article class="event-item ${eventImportanceClass(ev)}">
       <div class="event-meta-row">
@@ -1089,6 +1182,7 @@ function renderEventCard(sid, ev, options = {}) {
       </div>
       <div class="event-title">${titlePrefix}${escapeHtml(ev.title || "")}</div>
       ${ev.content ? `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>` : ""}
+      ${renderEventMetrics(ev)}
       ${renderEventBreakdown(ev)}
       <div class="event-actions">${linkHtml}${actionHtml}</div>
     </article>`;
@@ -1184,19 +1278,31 @@ async function refreshEvents(sid) {
 // Feature 3: AI 解讀
 const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 
-async function requestAiAnalysis(sid, eventTitle, btnEl) {
+async function requestAiAnalysis(sid, btnEl) {
   if (!state.accessToken) {
     alert("請先登入");
     return;
   }
   if (!aiAllowed()) { openPlanModal("ai"); return; }
+  // 事件身分從按鈕的 data 屬性拿：dedupe_key 是後端的唯一鍵，Edge Function 靠它讀寫快取。
+  // 以前只送標題、快取用「今天」當 event_date 去查，季報／籌碼／除息的日期都不是今天，永遠查不到也寫不回。
+  const evKey = btnEl?.dataset?.evKey || "";
+  const evTitle = btnEl?.dataset?.evTitle || "";
+  const ev = (stockEvents[sid] || []).find(e => evKey ? e.dedupe_key === evKey : e.title === evTitle) || { title: evTitle };
+  const eventTitle = ev.title || evTitle;
   btnEl.textContent = "⏳ AI 分析中…";
   btnEl.disabled = true;
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/interpret-event`, {
       method: "POST",
       headers: billingHeaders(),
-      body: JSON.stringify({ stock_id: sid, event_title: eventTitle }),
+      body: JSON.stringify({
+        stock_id: sid,
+        event_title: eventTitle,
+        event_type: ev.event_type || null,
+        event_date: ev.event_date || null,
+        dedupe_key: ev.dedupe_key || null,
+      }),
     });
     const data = await resp.json().catch(() => ({}));
     if (handleUpdateRequired(data)) return;
@@ -1215,11 +1321,7 @@ async function requestAiAnalysis(sid, eventTitle, btnEl) {
     div.className = "event-ai-text";
     div.textContent = analysis;
     container.replaceChild(div, btnEl);
-    // 更新快取
-    if (stockEvents[sid]) {
-      const ev = stockEvents[sid].find(e => e.title === eventTitle);
-      if (ev) ev.ai_analysis = analysis;
-    }
+    ev.ai_analysis = analysis;   // 重新渲染時直接顯示，不再出現按鈕
   } catch (e) {
     btnEl.textContent = "✨ AI 解讀";
     btnEl.disabled = false;
@@ -1663,16 +1765,9 @@ async function cancelSubscription() {
 }
 
 const KLINE_TOUCH_MOVE_THRESHOLD = 12;
-
-const KLINE_DIM_LABELS = {
-  fundamental: "基本面",
-  valuation: "估值面",
-  industry: "產業面",
-  chips: "籌碼面",
-  technical: "技術面",
-  risk: "風險面",
-  capital: "資金面",
-};
+// 手機長按多久顯示 OHLC tooltip。以前這個常數沒定義：每次 touchstart 都 ReferenceError，
+// 而行動版 tooltip 的 triggerOn 是 "none"，等於手機完全看不到任何一根 K 棒的數字。
+const KLINE_LONG_PRESS_MS = 350;
 
 function normalizeStockInput(v) {
   return String(v || "").trim().replace(/\s+/g, " ");
@@ -2064,7 +2159,10 @@ async function showMain() {
   loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
   // 延後再跳：免責聲明閘、強制更新閘、金流導回的方案面板都在這之前處理，
   // 直接跳會疊在它們上面（_screenIsBusy 會擋，但那樣這次就白白錯過了）
-  setTimeout(maybeShowRuleNudgePopup, 1800);
+  // 一次開機只跳一個視窗：推播提醒優先，跳了就略過這次的規則推薦
+  setTimeout(async () => {
+    if (!(await maybeShowPushNudgePopup())) maybeShowRuleNudgePopup();
+  }, 1800);
   _lastRefreshAt = Date.now();
   _lastInboxRefreshAt = Date.now();
   _scheduleAutoRefresh();
@@ -2814,6 +2912,82 @@ function openRulesFromPopup() {
 function openRuleEditorFromNudge() {
   openRulesModal();
   openRuleEditor(null);
+}
+
+// ── 每日提醒開啟推播 ──
+// 推播是規則觸發、盤後報告唯一的主動送達管道；沒開的人每天開 App 提醒一次
+// （台北日曆日），刻意不做靜音——只記「上次提醒的日期」這一把 key。
+// 與規則推薦彈窗共用同一個開機時間點，一次只跳一個：這個優先，跳了就略過規則推薦。
+const PUSH_NUDGE_KEY = "cg-push-nudge";
+
+function pushNudgeState() {
+  try { return JSON.parse(localStorage.getItem(PUSH_NUDGE_KEY) || "{}") || {}; } catch { return {}; }
+}
+
+function notePushNudgeShown() {
+  try { localStorage.setItem(PUSH_NUDGE_KEY, JSON.stringify({ last: taipeiDateKey(new Date()) })); } catch {}
+}
+
+// iPhone 在 Safari 分頁裡訂閱一定失敗，要先加入主畫面；這種情況提醒的內容換成安裝步驟
+function pushNudgeNeedsInstall() {
+  return _isIOS && !_pwaIsStandalone;
+}
+
+function pushNudgeShouldPrompt() {
+  if (pushNudgeState().last === taipeiDateKey(new Date())) return false;
+  if (pushNudgeNeedsInstall()) return true;
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+  if (typeof Notification === "undefined" || Notification.permission === "denied") return false;
+  if (!VAPID_PUBLIC_KEY || _pushSubscribed) return false;
+  return true;
+}
+
+async function maybeShowPushNudgePopup() {
+  // initPushUI() 查訂閱狀態是非同步且沒被 await；這裡再查一次，避免搶在它前面把已訂閱誤判成未訂閱
+  if (!pushNudgeNeedsInstall() && "serviceWorker" in navigator && "PushManager" in window) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      _pushSubscribed = !!(await reg.pushManager.getSubscription());
+    } catch { return false; }
+  }
+  if (!pushNudgeShouldPrompt()) return false;
+  if (_screenIsBusy()) return false;
+  renderPushNudgePopup();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("pushNudgeModal")).show();
+  notePushNudgeShown();
+  return true;
+}
+
+function hidePushNudgePopup() {
+  const el = document.getElementById("pushNudgeModal");
+  const inst = el && bootstrap.Modal.getInstance(el);
+  if (inst) inst.hide();
+}
+
+// 先同步呼叫 togglePushSubscription()：它在第一個 await 之前發出 requestPermission，
+// Safari 要求這件事在使用者手勢的同一個 tick；關窗放在後面。
+function enablePushFromNudge() {
+  const pending = togglePushSubscription();
+  hidePushNudgePopup();
+  return pending;
+}
+
+function renderPushNudgePopup() {
+  const body = document.getElementById("push-nudge-popup-body");
+  const btn = document.getElementById("push-nudge-enable-btn");
+  if (!body) return;
+  const install = pushNudgeNeedsInstall();
+  if (btn) btn.style.display = install ? "none" : "";
+  body.innerHTML = install
+    ? `<div class="rule-nudge-lead">iPhone 需先用 Safari 的「分享 → 加入主畫面」安裝，才能開啟推播通知。</div>
+       <div class="small text-secondary">安裝後從主畫面開啟，再到首頁按「啟用通知」。</div>`
+    : `<div class="rule-nudge-lead">你尚未開啟推播通知。</div>
+       <ul class="small ps-3 mb-2">
+         <li>自訂規則的條件成立時，通知會直接送到這台裝置</li>
+         <li>盤後報告完成、自選股有新事件時也會提醒</li>
+         <li>未開啟時，這些資訊只能打開 App 才看得到</li>
+       </ul>
+       <div class="small text-secondary">每天提醒一次；開啟後不再出現。</div>`;
 }
 
 function renderRuleNudgePopup() {
@@ -5030,15 +5204,12 @@ async function openKLineFromWatchlist(sid) {
   const modalEl = document.getElementById("klineModal");
   const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
 
-  setKLineScoreSummaryOpen(false);
   document.getElementById("kline-code").textContent = sidKey;
   document.getElementById("kline-name").textContent = "載入中...";
   document.getElementById("kline-industry").textContent = universe[sidKey]?.i || "";
   document.getElementById("kline-price").textContent = _klinePriceText(sidKey, null);
   renderKLineSignals(sidKey);   // 盤中狀態與今天的通知都在記憶體，不用等報告檔
   setKLineMaInfo("讀取共用報表資料中...");
-  document.getElementById("kline-score-bars").innerHTML = "";
-  closeKLineDimDetail();
   renderKLineLevels({ support: [], resistance: [] });
   document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">讀取 K 線資料中...</div>';
 
@@ -5062,7 +5233,6 @@ async function openKLineFromWatchlist(sid) {
         ? "共享檔未提供 K 線細節，現在改用 FinMind 即時抓取中..."
         : "找不到共享資料，現在改用 FinMind 即時抓取中...");
       document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">即時抓取 K 線資料中...</div>';
-      closeKLineDimDetail();
 
       const liveStock = await fetchWatchlistFinMindStock(sidKey, displayName, displayIndustry);
       if (!liveStock) {
@@ -5079,7 +5249,6 @@ async function openKLineFromWatchlist(sid) {
       data.stock_data[sidKey] = liveStock;
       sharedReportData = data;
 
-      renderKLineScoreBars(liveStock);
       document.getElementById("kline-price").textContent = _klinePriceText(sidKey, liveStock.levels);
       setKLineMaInfo(formatKLineMaText(liveStock.levels?.ma || {}));
       renderKLineLevels(liveStock.levels || {});
@@ -5098,7 +5267,6 @@ async function openKLineFromWatchlist(sid) {
     const ma = levels.ma || {};
     setKLineMaInfo(formatKLineMaText(ma));
     renderKLineLevels(levels);
-    renderKLineScoreBars(stock);
 
     document.getElementById("kline-period-select").value = "daily";
     currentChipsView = "foreign";
@@ -5108,7 +5276,6 @@ async function openKLineFromWatchlist(sid) {
     document.getElementById("kline-name").textContent = universe[sidKey]?.n || "未命名";
     setKLineMaInfo("讀取共用資料失敗");
     document.getElementById("kline-chart").innerHTML = `<div class="kline-empty">K線資料讀取失敗：${escapeHtml(e.message || "unknown")}<br><span style="font-size:.75rem;opacity:.8;">請確認目前瀏覽的站點已部署 report_data_latest.json</span></div>`;
-    closeKLineDimDetail();
   }
 }
 
@@ -5210,108 +5377,14 @@ function renderKLineLevels(levels) {
   resistanceEl.innerHTML = formatKLineLevelBadges(levels?.resistance, "resistance", levels?.resistance_strengths);
 }
 
-function renderKLineScoreBars(stock) {
-  const scores = stock?.scores || {};
-  const dims = [
-    ["fundamental", "基本面"],
-    ["valuation", "估值面"],
-    ["industry", "產業面"],
-    ["chips", "籌碼面"],
-    ["technical", "技術面"],
-    ["risk", "風險面"],
-    ["capital", "資金面"],
-  ];
-
-  const html = dims.map(([key, label]) => {
-    const raw = scores?.[key];
-    const v = (raw === undefined || raw === null || raw === "") ? null : Math.round(Number(raw));
-    const clickAttr = `onclick="showKLineDimDetail('${key}')"`;
-    if (v === null || Number.isNaN(v)) {
-      return `<div class="col text-center kline-score-item kline-score-clickable" ${clickAttr}><div class="kline-score-label">${label}</div><div class="kline-score-bar"><div class="kline-score-fill na" style="width:50%"></div></div><div class="kline-score-val na">—</div><div class="kline-score-tip">▼</div></div>`;
-    }
-    const color = v >= 65 ? "#2e7d32" : v >= 45 ? "#f57f17" : "#c62828";
-    return `<div class="col text-center kline-score-item kline-score-clickable" ${clickAttr}><div class="kline-score-label">${label}</div><div class="kline-score-bar"><div class="kline-score-fill" style="width:${v}%;background:${color}"></div></div><div class="kline-score-val" style="color:${color}">${v}</div><div class="kline-score-tip">▼</div></div>`;
-  }).join("");
-
-  document.getElementById("kline-score-bars").innerHTML = html;
-}
-
-function setKLineScoreSummaryOpen(open) {
-  klineScoreSummaryOpen = !!open;
-  const toggleBtn = document.getElementById("kline-score-toggle");
-  const bars = document.getElementById("kline-score-bars");
-  if (!toggleBtn || !bars) return;
-  toggleBtn.textContent = klineScoreSummaryOpen ? "7大面向分析 收合 ▲" : "7大面向分析 展開 ▼";
-  bars.style.display = klineScoreSummaryOpen ? "flex" : "none";
-  if (!klineScoreSummaryOpen) closeKLineDimDetail();
-}
-
-function toggleKLineScoreSummary() {
-  setKLineScoreSummaryOpen(!klineScoreSummaryOpen);
-}
-
-function showKLineDimDetail(dim) {
-  const panel = document.getElementById("kline-dim-detail-panel");
-  const content = document.getElementById("kline-dim-detail-content");
-  if (!currentKLineSid || !sharedReportData?.stock_data?.[currentKLineSid]) return;
-
-  if (panel.dataset.dim === dim && panel.style.display !== "none") {
-    closeKLineDimDetail();
-    return;
-  }
-
-  const stock = sharedReportData.stock_data[currentKLineSid];
-  const details = stock?.dim_details?.[dim];
-  const label = KLINE_DIM_LABELS[dim] || dim;
-  const score = stock?.scores?.[dim];
-  const scoreText = (score === undefined || score === null || Number.isNaN(Number(score))) ? "—" : Math.round(Number(score));
-
-  let html = `<div class="d-flex justify-content-between align-items-center mb-2"><span class="fw-bold" style="font-size:.88rem;">${label} 細節（${scoreText}分）</span><button class="btn btn-sm py-0 px-1 btn-outline-secondary" style="font-size:.7rem;" onclick="closeKLineDimDetail()">關閉</button></div>`;
-
-  if (!details || !details.items || !details.items.length) {
-    html += `<div class="text-muted" style="font-size:.8rem;">此股票目前無 ${label} 細節資料。</div>`;
-    content.innerHTML = html;
-    panel.dataset.dim = dim;
-    panel.style.display = "block";
-    return;
-  }
-
-  html += '<div class="row g-0">';
-  details.items.forEach(item => {
-    const sv = Math.round(item?.score ?? 50);
-    const c = sv >= 65 ? "#2e7d32" : sv >= 45 ? "#f57f17" : "#c62828";
-    const noData = !item?.value || item.value === "—";
-    const valueHtml = noData
-      ? '<span class="kline-detail-no-data">無資料</span>'
-      : `<span class="kline-detail-value">${escapeHtml(String(item.value))}</span>`;
-    html += '<div class="col-12 col-sm-6 py-1 px-1"><div class="kline-detail-row">'
-      + `<span class="kline-detail-label">${escapeHtml(String(item?.label || ""))}</span>`
-      + (noData
-          ? '<div class="kline-detail-bar bg"><div class="kline-detail-fill" style="width:50%;opacity:.35"></div></div><span class="kline-detail-score na">—</span>'
-          : `<div class="kline-detail-bar"><div class="kline-detail-fill" style="width:${sv}%;background:${c}"></div></div><span class="kline-detail-score" style="color:${c}">${sv}</span>`)
-      + valueHtml
-      + '</div></div>';
-  });
-  html += '</div>';
-
-  if (details.signals && details.signals.length) {
-    html += '<div class="mt-1"><span class="text-muted" style="font-size:.75rem;">技術訊號：</span>'
-      + details.signals.map(s => `<span class="badge bg-info text-dark me-1" style="font-size:.68rem;">${escapeHtml(String(s))}</span>`).join("")
-      + '</div>';
-  }
-
-  content.innerHTML = html;
-  panel.dataset.dim = dim;
-  panel.style.display = "block";
-}
-
-function closeKLineDimDetail() {
-  const panel = document.getElementById("kline-dim-detail-panel");
-  const content = document.getElementById("kline-dim-detail-content");
-  if (!panel || !content) return;
-  panel.style.display = "none";
-  panel.dataset.dim = "";
-  content.innerHTML = "";
+// K 線 → 評分明細：同一份 investment_scores（13 子項、變化原因、對照前期）對所有評分股都有，
+// 取代原本只有進榜 ~32 檔才有資料的「7 大面向分析」面板。
+function openScoreDetailFromKLine() {
+  const sid = currentKLineSid;
+  if (!sid) return;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("klineModal")).hide();
+  // 等前一個 modal 的淡出跑完再開下一個，否則 Bootstrap 會把 body 的捲動鎖留著（同 openRulesFromPopup）
+  setTimeout(() => openScoreDetail(sid), 220);
 }
 
 function switchKLinePeriod(period) {
@@ -5361,69 +5434,37 @@ function renderKLineChart(sid, period) {
   const chips = stock.chips || {};
 
   const el = document.getElementById("kline-chart");
-  detachKLineTouchInteraction();
-  if (klineChart) {
-    klineChart.dispose();
-    klineChart = null;
-  }
-  el.innerHTML = "";
   klineMobileTooltipLocked = false;
   clearKLineLongPressTimer();
-  klineLastZoomRange = null;
-  klineChart = echarts.init(el, null, { renderer: "canvas" });
-  klineChart.setOption(buildKLineOption(periodData, chips, levels, period), true);
-  bindKLineTouchInteraction();
-  bindKLineZoomBehavior();
-}
-
-function getKLineDataZoomRange(payload) {
-  const src = payload?.batch?.[0] || payload || {};
-  if (Number.isFinite(src.start) && Number.isFinite(src.end)) {
-    return { start: src.start, end: src.end };
+  // 同一個實例換 option 就好：每次切週期／籌碼都 dispose 再 init 會整張閃一下、觸控監聽也要重綁。
+  // 只有實例不存在、已 dispose、或容器被「載入中」placeholder 覆蓋過（canvas 不見了）才重建。
+  if (!klineChart || klineChart.isDisposed() || klineChart.getDom() !== el || !el.querySelector("canvas")) {
+    detachKLineTouchInteraction();
+    if (klineChart && !klineChart.isDisposed()) klineChart.dispose();
+    el.innerHTML = "";
+    klineChart = echarts.init(el, null, { renderer: "canvas" });
+    bindKLineTouchInteraction();
   }
-  return null;
+  klineChart.setOption(buildKLineOption(periodData, chips, levels, period), { notMerge: true });
+  updateKLineChipsNote(chips, period);
 }
 
-function bindKLineZoomBehavior() {
-  if (!klineChart) return;
-  klineChart.off("datazoom");
-  klineChart.on("datazoom", evt => {
-    if (!klineChart || klineZoomSyncing) return;
-    const range = getKLineDataZoomRange(evt);
-    if (!range) return;
-
-    const currentSpan = Math.max(0.0001, range.end - range.start);
-    const prev = klineLastZoomRange || range;
-    const prevSpan = Math.max(0.0001, prev.end - prev.start);
-
-    // 只放慢放大（span 變小）；縮小（span 變大）維持原速度。
-    if (currentSpan < prevSpan) {
-      const damping = 0.15; // 越小越慢
-      const targetSpan = prevSpan - ((prevSpan - currentSpan) * damping);
-      const center = (range.start + range.end) / 2;
-      const nextStart = Math.max(0, center - (targetSpan / 2));
-      const nextEnd = Math.min(100, center + (targetSpan / 2));
-
-      klineZoomSyncing = true;
-      klineChart.dispatchAction({
-        type: "dataZoom",
-        dataZoomIndex: 0,
-        start: nextStart,
-        end: nextEnd,
-      });
-      klineChart.dispatchAction({
-        type: "dataZoom",
-        dataZoomIndex: 1,
-        start: nextStart,
-        end: nextEnd,
-      });
-      klineZoomSyncing = false;
-      klineLastZoomRange = { start: nextStart, end: nextEnd };
-      return;
-    }
-
-    klineLastZoomRange = range;
-  });
+// 籌碼下拉旁的說明：目前檢視沒有資料（例如報告沒這檔的法人資料、FinMind 備援也拿不到）
+// 就講清楚，不要讓使用者對著一片空白猜
+function updateKLineChipsNote(chips, period) {
+  const note = document.getElementById("kline-chips-note");
+  if (!note) return;
+  const view = currentChipsView;
+  const series = Array.isArray(chips?.[view]) ? chips[view] : [];
+  const hasData = Array.isArray(chips?.dates) && chips.dates.length > 0
+    && series.some(v => v !== null && v !== undefined && !Number.isNaN(Number(v)));
+  let text = "";
+  if (view !== "hide") {
+    if (period !== "daily") text = "籌碼副圖只在日K顯示";
+    else if (!hasData) text = "此檢視無籌碼資料";
+  }
+  note.textContent = text;
+  note.style.display = text ? "" : "none";
 }
 
 function isKLineMobileMode() {
@@ -5502,7 +5543,6 @@ function detachKLineTouchInteraction() {
 
   if (klineTouchGlobalHandlers) {
     document.removeEventListener("touchstart", klineTouchGlobalHandlers.start, { capture: true });
-    document.removeEventListener("touchmove", klineTouchGlobalHandlers.move, { capture: true });
     klineTouchGlobalHandlers = null;
   }
 }
@@ -5519,13 +5559,11 @@ function bindKLineTouchInteraction() {
     end: () => onKLineTouchEnd(),
   };
 
+  // 只留「點圖外關 tooltip」：以前還掛了 document 層的 touchmove，整個 K 線存活期間每一格捲動都跑
   const globalHandlers = {
     start: evt => {
       if (!klineMobileTooltipLocked || !klineTouchDomEl) return;
       if (!klineTouchDomEl.contains(evt.target)) hideKLineMobileTooltip();
-    },
-    move: () => {
-      if (klineMobileTooltipLocked) hideKLineMobileTooltip();
     },
   };
 
@@ -5534,7 +5572,6 @@ function bindKLineTouchInteraction() {
   dom.addEventListener("touchend", handlers.end, { passive: true });
   dom.addEventListener("touchcancel", handlers.end, { passive: true });
   document.addEventListener("touchstart", globalHandlers.start, { passive: true, capture: true });
-  document.addEventListener("touchmove", globalHandlers.move, { passive: true, capture: true });
 
   klineTouchDomEl = dom;
   klineTouchDomHandlers = handlers;
@@ -5547,7 +5584,11 @@ async function fetchWatchlistFinMindStock(sid, name, industry) {
     start.setDate(start.getDate() - 820);
     const startDate = start.toISOString().slice(0, 10);
     const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice&data_id=${encodeURIComponent(sid)}&start_date=${startDate}`;
-    const resp = await fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(20000) : undefined });
+    // 價格與三大法人並行抓；法人失敗只會讓籌碼副圖顯示「無資料」，不影響 K 線
+    const [resp, chips] = await Promise.all([
+      fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(20000) : undefined }),
+      fetchWatchlistFinMindChips(sid),
+    ]);
     if (!resp.ok) return null;
     const json = await resp.json();
     if (json.status !== 200 || !json.data || !json.data.length) return null;
@@ -5559,14 +5600,52 @@ async function fetchWatchlistFinMindStock(sid, name, industry) {
       close: d.close,
       volume: d.Trading_Volume,
     }));
-    return processWatchlistFinMindRaw(raw, sid, name, industry);
+    return processWatchlistFinMindRaw(raw, sid, name, industry, chips);
   } catch (e) {
     console.warn("[Watchlist FinMind]", sid, e.message);
     return null;
   }
 }
 
-function processWatchlistFinMindRaw(raw, sid, name, industry) {
+// 未進榜的自選股報告裡沒有籌碼時序：直接向 FinMind 拿近 60 日三大法人買賣超，
+// 欄位對齊報告的 chips（dates / foreign / trust / dealer / total，單位張）。
+// 外資＝Foreign_Investor（不含外資自營，與 T86 的口徑一致）；三大合計含外資自營商。
+async function fetchWatchlistFinMindChips(sid) {
+  try {
+    const start = new Date();
+    start.setDate(start.getDate() - 60);
+    const startDate = start.toISOString().slice(0, 10);
+    const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInstitutionalInvestorsBuySell&data_id=${encodeURIComponent(sid)}&start_date=${startDate}`;
+    const resp = await fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(20000) : undefined });
+    if (!resp.ok) return {};
+    const json = await resp.json();
+    if (json.status !== 200 || !Array.isArray(json.data) || !json.data.length) return {};
+    const byDate = {};
+    for (const row of json.data) {
+      const net = (Number(row.buy) - Number(row.sell)) / 1000;   // 股 → 張
+      if (!row.date || Number.isNaN(net)) continue;
+      const d = byDate[row.date] || (byDate[row.date] = { foreign: 0, foreignDealer: 0, trust: 0, dealer: 0 });
+      if (row.name === "Foreign_Investor") d.foreign += net;
+      else if (row.name === "Foreign_Dealer_Self") d.foreignDealer += net;
+      else if (row.name === "Investment_Trust") d.trust += net;
+      else if (row.name === "Dealer_self" || row.name === "Dealer_Hedging") d.dealer += net;
+    }
+    const dates = Object.keys(byDate).sort();
+    if (!dates.length) return {};
+    return {
+      dates,
+      foreign: dates.map(d => Math.round(byDate[d].foreign)),
+      trust: dates.map(d => Math.round(byDate[d].trust)),
+      dealer: dates.map(d => Math.round(byDate[d].dealer)),
+      total: dates.map(d => Math.round(byDate[d].foreign + byDate[d].foreignDealer + byDate[d].trust + byDate[d].dealer)),
+    };
+  } catch (e) {
+    console.warn("[Watchlist FinMind chips]", sid, e.message);
+    return {};
+  }
+}
+
+function processWatchlistFinMindRaw(raw, sid, name, industry, chips) {
   const dates = raw.map(d => d.date);
   const ohlcv = raw.map(d => [d.open, d.high, d.low, d.close, d.volume]);
   const closes = raw.map(d => d.close);
@@ -5590,21 +5669,13 @@ function processWatchlistFinMindRaw(raw, sid, name, industry) {
   monthlyAgg.ma20 = maWatchlist(monthlyCloses, 20);
   monthlyAgg.ma60 = maWatchlist(monthlyCloses, 60);
 
-  const dimDetails = computeWatchlistDimDetails(daily);
-  const scores = {};
-  if (dimDetails.technical) scores.technical = dimDetails.technical.score;
-  if (dimDetails.risk) scores.risk = dimDetails.risk.score;
-  if (dimDetails.capital) scores.capital = dimDetails.capital.score;
-
   return {
     name: name || sid,
     industry: industry || "",
-    scores,
-    dim_details: dimDetails,
     daily,
     weekly: weeklyAgg,
     monthly: monthlyAgg,
-    chips: {},
+    chips: (chips && typeof chips === "object") ? chips : {},
     levels: computeWatchlistLevels(raw, ma5, ma10, ma20, ma60),
   };
 }
@@ -5705,206 +5776,45 @@ function computeWatchlistLevels(raw, ma5, ma10, ma20, ma60) {
   };
 }
 
-function computeWatchlistDimDetails(daily) {
-  if (!daily || !daily.ohlcv || daily.ohlcv.length < 20) return {};
-  const n = daily.ohlcv.length;
-  const closes = daily.ohlcv.map(d => d[3]);
-  const volumes = daily.ohlcv.map(d => d[4]);
-  const ma5v = daily.ma5 && daily.ma5[n - 1];
-  const ma10v = daily.ma10 && daily.ma10[n - 1];
-  const ma20v = daily.ma20 && daily.ma20[n - 1];
-
-  const maAlign = ((ma5v && ma10v && ma5v > ma10v) ? 1 : 0) + ((ma10v && ma20v && ma10v > ma20v) ? 1 : 0) + ((ma5v && closes[n - 1] > ma5v) ? 1 : 0);
-  const maAS = maAlign * 33.3;
-  const rsiV = rsiWatchlist(closes, 14);
-  const rsiSc = (rsiV >= 45 && rsiV <= 65) ? 78 : ((rsiV > 80 || rsiV < 20) ? 18 : 42);
-  const macdR = macdWatchlist(closes);
-  const macdSc = Math.min(85, Math.max(15, 50 + macdR.hist * 100));
-  const volMA = volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
-  const volR = volMA > 0 ? volumes[n - 1] / volMA : 1;
-  const volSc = volR >= 2 ? 90 : volR >= 1.5 ? 75 : volR >= 1.2 ? 60 : 45;
-  const techSc = Math.round(maAS * 0.25 + rsiSc * 0.2 + macdSc * 0.25 + volSc * 0.15 + 50 * 0.15);
-  const signals = [];
-  if (ma5v && ma20v && daily.ma5[n - 6] < daily.ma20[n - 6] && ma5v > ma20v) signals.push("MA5黃金交叉");
-  if (ma20v && closes[n - 1] > ma20v && closes[n - 6] < (daily.ma20[n - 6] || closes[n - 1])) signals.push("突破MA20");
-  if (macdR.crossUp) signals.push("MACD黃金交叉");
-  if (volR >= 1.5) signals.push(`量能放大${volR.toFixed(1)}x`);
-
-  const rets = closes.slice(1).map((c, i) => (c - closes[i]) / closes[i]);
-  const r20 = rets.slice(-20);
-  const m20 = r20.reduce((a, b) => a + b, 0) / r20.length;
-  const std20 = Math.sqrt(r20.reduce((s, r) => s + Math.pow(r - m20, 2), 0) / r20.length);
-  const annVol = std20 * Math.sqrt(252) * 100;
-  let peak = closes[0];
-  let maxDd = 0;
-  closes.forEach(c => {
-    peak = Math.max(peak, c);
-    maxDd = Math.min(maxDd, ((c - peak) / peak) * 100);
-  });
-  const vsc = Math.min(100, Math.max(0, 100 - annVol * 3));
-  const dsc = Math.min(100, Math.max(0, 100 + maxDd * 2));
-  const riskSc = Math.round(vsc * 0.4 + dsc * 0.4 + 50 * 0.2);
-
-  const rf = 0.02 / 252;
-  const exc = rets.map(r => r - rf);
-  const mEx = exc.reduce((a, b) => a + b, 0) / exc.length;
-  const sEx = Math.sqrt(exc.reduce((s, r) => s + Math.pow(r - mEx, 2), 0) / exc.length);
-  const sharpe = sEx > 0 ? mEx / sEx * Math.sqrt(252) : 0;
-  const neg = exc.filter(r => r < 0);
-  const dSt = neg.length ? Math.sqrt(neg.reduce((s, r) => s + r * r, 0) / neg.length) : 0.001;
-  const sortino = dSt > 0 ? mEx / dSt * Math.sqrt(252) : 0;
-  const shSc = Math.min(100, Math.max(0, 50 + sharpe * 20));
-  const capSc = Math.round(shSc * 0.5 + Math.min(100, Math.max(0, 50 + sortino * 15)) * 0.5);
-
-  return {
-    technical: {
-      score: techSc,
-      items: [
-        { label: "均線多頭排列", value: `${maAlign}/3`, score: Math.round(maAS) },
-        { label: "RSI(14)", value: rsiV.toFixed(1), score: Math.round(rsiSc) },
-        { label: "MACD 柱狀", value: macdR.hist.toFixed(4), score: Math.round(macdSc) },
-        { label: "量能比", value: `${volR.toFixed(2)}x`, score: Math.round(volSc) },
-      ],
-      signals,
-    },
-    risk: {
-      score: riskSc,
-      items: [
-        { label: "年化波動率", value: `${annVol.toFixed(1)}%`, score: Math.round(vsc) },
-        { label: "最大回撤", value: `${maxDd.toFixed(1)}%`, score: Math.round(dsc) },
-      ],
-    },
-    capital: {
-      score: capSc,
-      items: [
-        { label: "Sharpe 比率", value: sharpe.toFixed(2), score: Math.round(shSc) },
-        { label: "Sortino 比率", value: sortino.toFixed(2), score: Math.round(Math.min(100, Math.max(0, 50 + sortino * 15))) },
-      ],
-    },
-  };
-}
-
-function rsiWatchlist(closes, period) {
-  if (closes.length < period + 1) return 50;
-  let gain = 0;
-  let loss = 0;
-  for (let i = closes.length - period; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff > 0) gain += diff;
-    else loss -= diff;
-  }
-  return 100 - 100 / (1 + (gain / (loss || 0.0001)));
-}
-
-function macdWatchlist(closes) {
-  function ema(data, period) {
-    const k = 2 / (period + 1);
-    const result = [data[0]];
-    for (let i = 1; i < data.length; i++) result.push(data[i] * k + result[i - 1] * (1 - k));
-    return result;
-  }
-  const e12 = ema(closes, 12);
-  const e26 = ema(closes, 26);
-  const mac = e12.map((v, i) => v - e26[i]);
-  const sig = ema(mac, 9);
-  const n = closes.length;
-  return {
-    hist: mac[n - 1] - sig[n - 1],
-    crossUp: n >= 4 && mac[n - 1] > sig[n - 1] && mac[n - 4] < sig[n - 4],
-  };
-}
-
 function buildKLineOption(pd, chips, levels, period) {
   const dates = pd.dates || [];
   const ohlcv = pd.ohlcv || [];
   const n = dates.length;
+  const mobile = isKLineMobileMode();
   const kData = ohlcv.map(d => [d[0], d[3], d[2], d[1]]);
-  const priceCandidates = [
-    ...ohlcv.flatMap(d => [Number(d[1]), Number(d[2])]),
-  ].filter(v => Number.isFinite(v) && v > 0);
-  const rawMin = priceCandidates.length ? Math.min(...priceCandidates) : null;
-  const rawMax = priceCandidates.length ? Math.max(...priceCandidates) : null;
-  const priceRange = rawMin !== null && rawMax !== null ? Math.max(rawMax - rawMin, rawMax * 0.01, 0.5) : null;
-  const pricePadding = priceRange !== null ? priceRange * 0.02 : null;
-  const priceAxisMin = rawMin !== null ? Math.max(0, rawMin - pricePadding) : null;
-  const priceAxisMax = rawMax !== null ? rawMax + pricePadding : null;
   const volData = ohlcv.map((d, i) => {
     const prevClose = i > 0 ? ohlcv[i - 1][3] : d[0];
     const c = d[3] > prevClose ? "rgba(239,83,80,0.75)" : d[3] < prevClose ? "rgba(38,166,154,0.75)" : "rgba(255,235,59,0.85)";
     return { value: d[4], itemStyle: { color: c } };
   });
 
-  const markLines = [];
+  // 關卡線只畫最近的一支撐、一壓力（各帶標籤）：以前 5–6 條虛線疊在 4 條均線上，手機上分不出誰是誰；
+  // 完整清單在圖下方的關卡徽章。generator 的 _calc_support_resistance 已把支撐由高到低、
+  // 壓力由低到高排好，index 0 就是離現價最近的那一條。
   const supportLevels = (levels.support || []).map(v => Number(v)).filter(v => Number.isFinite(v));
   const resistanceLevels = (levels.resistance || []).map(v => Number(v)).filter(v => Number.isFinite(v));
-  const supportHighlight = supportLevels.length ? supportLevels[0] : null;
-  const resistanceHighlight = resistanceLevels.length ? resistanceLevels[0] : null;
-
-  (levels.support || []).forEach((v, idx) => {
-    const nv = Number(v);
-    const str = ((levels.support_strengths || [])[idx] || 1.0);
-    const lineW = str >= 2.0 ? 2.5 : str >= 1.5 ? 1.8 : 1.2;
-    const alpha = Math.min(0.9, 0.35 + str * 0.13).toFixed(2);
-    const col = `rgba(38,166,154,${alpha})`;
-    const showLabel = supportHighlight !== null && nv === supportHighlight;
-    markLines.push([
-      { coord: [dates[0], v], lineStyle: { color: col, type: "dashed", width: lineW } },
-      {
-        coord: [dates[n - 1], v],
-        label: showLabel
-          ? {
-            show: true,
-            formatter: `支 ${nv.toFixed(2)}`,
-            position: "insideEndTop",
-            distance: 4,
-            fontSize: 10,
-            color: "#d3fff6",
-            backgroundColor: "rgba(38,166,154,0.22)",
-            borderColor: "rgba(38,166,154,0.45)",
-            borderWidth: 1,
-            borderRadius: 3,
-            padding: [1, 4],
-          }
-          : { show: false },
-      },
-    ]);
+  // 用 yAxis 形式的水平線，不綁 x 座標：以前用 dates[0]→dates[n-1] 兩點畫，預設視窗縮到最近 80 根後
+  // dates[0] 不在可見範圍，整條線會被 ECharts 丟掉
+  const levelLine = (nv, rgb, text, position) => ({
+    yAxis: nv,
+    lineStyle: { color: `rgba(${rgb},0.85)`, type: "dashed", width: 1.4 },
+    label: {
+      show: true, formatter: text, position, distance: 4, fontSize: 10, color: "#eef3ff",
+      backgroundColor: `rgba(${rgb},0.28)`, borderColor: `rgba(${rgb},0.5)`, borderWidth: 1, borderRadius: 3, padding: [1, 4],
+    },
   });
-  (levels.resistance || []).forEach((v, idx) => {
-    const nv = Number(v);
-    const str = ((levels.resistance_strengths || [])[idx] || 1.0);
-    const lineW = str >= 2.0 ? 2.5 : str >= 1.5 ? 1.8 : 1.2;
-    const alpha = Math.min(0.9, 0.35 + str * 0.13).toFixed(2);
-    const col = `rgba(239,83,80,${alpha})`;
-    const showLabel = resistanceHighlight !== null && nv === resistanceHighlight;
-    markLines.push([
-      { coord: [dates[0], v], lineStyle: { color: col, type: "dashed", width: lineW } },
-      {
-        coord: [dates[n - 1], v],
-        label: showLabel
-          ? {
-            show: true,
-            formatter: `壓 ${nv.toFixed(2)}`,
-            position: "insideEndBottom",
-            distance: 4,
-            fontSize: 10,
-            color: "#ffd6df",
-            backgroundColor: "rgba(239,83,80,0.22)",
-            borderColor: "rgba(239,83,80,0.45)",
-            borderWidth: 1,
-            borderRadius: 3,
-            padding: [1, 4],
-          }
-          : { show: false },
-      },
-    ]);
-  });
+  const markLines = [];
+  if (n > 0 && supportLevels.length) markLines.push(levelLine(supportLevels[0], "38,166,154", `支 ${supportLevels[0].toFixed(2)}`, "insideEndTop"));
+  if (n > 0 && resistanceLevels.length) markLines.push(levelLine(resistanceLevels[0], "239,83,80", `壓 ${resistanceLevels[0].toFixed(2)}`, "insideEndBottom"));
 
-  const defaultBars = period === "monthly" ? 5760 : period === "weekly" ? 720 : 90;
-  const dzStart = period === "daily"
-    ? 0
-    : Math.max(0, Math.round(100 - (100 * defaultBars / Math.max(n, 1))));
-  const minVisibleBars = period === "daily" ? 40 : period === "weekly" ? 24 : 12;
+  // 預設視窗：日 80／週 52／月 36 根，三種週期同一公式。以前日K 的 dzStart 硬寫 0 → 一次畫出全部
+  // ~729 根（手機上一根不到 0.5px 就是「擁擠、看不清」）；週／月的常數 720／5760 又大於資料量，一樣退化成 0。
+  const defaultBars = period === "monthly" ? 36 : period === "weekly" ? 52 : 80;
+  const dzStart = Math.max(0, Math.round(100 - (100 * defaultBars / Math.max(n, 1))));
+  const minVisibleBars = period === "daily" ? 20 : period === "weekly" ? 16 : 8;
+  const maxVisibleBars = period === "daily" ? 260 : period === "weekly" ? 156 : 60;
   const minValueSpan = Math.min(Math.max(2, n), minVisibleBars);
+  const maxValueSpan = Math.max(minValueSpan, Math.min(Math.max(2, n), maxVisibleBars));   // 再怎麼縮也不讓 K 棒變成髮絲
 
   const chipDates = chips?.dates || [];
   const chipMapByView = {
@@ -5917,7 +5827,9 @@ function buildKLineOption(pd, chips, levels, period) {
   const chipValueByDate = {};
   chipDates.forEach((d, i) => {
     const val = chipSrc?.[i];
-    chipValueByDate[d] = (val === undefined || val === null || Number.isNaN(Number(val))) ? 0 : Number(val);
+    // 缺值保留 null、不補 0：外資欄一度整批缺值，補 0 會畫出 20 根高度 0 的長條，
+    // 看起來像「外資都沒變化」；全缺就不畫副圖，改由 #kline-chips-note 說明
+    chipValueByDate[d] = (val === undefined || val === null || Number.isNaN(Number(val))) ? null : Number(val);
   });
   const chipsSeriesData = dates.map(d => {
     const v = chipValueByDate[d];
@@ -5929,35 +5841,50 @@ function buildKLineOption(pd, chips, levels, period) {
   });
   const hasChips = period === "daily" && currentChipsView !== "hide" && dates.length > 0 && chipsSeriesData.some(v => v !== null);
 
+  // 圖例改成單列可捲動（type:"scroll"），主圖 top 固定 30 就不會被換行的圖例壓到
   const grids = hasChips
     ? [
-      { left: 38, right: 18, top: 38, height: "52%" },
-      { left: 38, right: 18, top: "64%", height: "10%" },
-      { left: 38, right: 18, top: "78%", height: "10%" },
+      { left: 46, right: 18, top: 30, height: "50%" },
+      { left: 46, right: 18, top: "63%", height: "11%" },
+      { left: 46, right: 18, top: "79%", height: "11%" },
     ]
     : [
-      { left: 38, right: 18, top: 38, height: "68%" },
-      { left: 38, right: 18, top: "79%", height: "9%" },
+      { left: 46, right: 18, top: 30, height: "66%" },
+      { left: 46, right: 18, top: "77%", height: "13%" },
     ];
+  // 副圖 y 軸：成交量原始值是「股」，六位數在 46px 內放不下、也跟圖例的「(張)」對不上；
+  // 統一換算成張、超過一萬張用「萬」，籌碼（本來就是張）同一個格式
+  const fmtLots = lots => {
+    const a = Math.abs(lots);
+    if (a >= 10000) return `${(lots / 10000).toFixed(a >= 100000 ? 0 : 1)}萬`;
+    return String(Math.round(lots));
+  };
 
   const gridIndexes = hasChips ? [0, 1, 2] : [0, 1];
+  const lastGrid = gridIndexes[gridIndexes.length - 1];
 
+  // 日期只標在最下面那個 grid：以前成交量與籌碼兩排都標，同一組日期出現兩次
   const xAxis = gridIndexes.map(i => ({
     type: "category",
     gridIndex: i,
     data: dates,
-    axisLabel: { show: i !== 0, fontSize: 10, color: "#a6badf" },
+    axisLabel: {
+      show: i === lastGrid, fontSize: 10, color: "#a6badf", hideOverlap: true,
+      formatter: v => (period === "monthly" ? String(v).slice(0, 7) : String(v).slice(5, 10)),
+    },
+    axisTick: { show: i === lastGrid },
     axisLine: { onZero: false },
     splitLine: { show: false },
   }));
 
   const yAxis = gridIndexes.map(i => {
     if (i === 0) {
+      // 不固定 min/max：以前釘成整段歷史的最低最高（如 17.69–49.10），縮到最近 80 根後
+      // K 棒只占上面三分之二；讓軸跟著 dataZoom 的可見區間自動縮放，刻度也會是整數
       return {
         scale: true,
         gridIndex: i,
-        min: priceAxisMin !== null ? priceAxisMin : undefined,
-        max: priceAxisMax !== null ? priceAxisMax : undefined,
+        boundaryGap: ["4%", "4%"],
         splitNumber: 4,
         axisLabel: { fontSize: 10, color: "#a6badf" },
         splitLine: { lineStyle: { color: "rgba(148,171,220,0.18)" } },
@@ -5970,7 +5897,11 @@ function buildKLineOption(pd, chips, levels, period) {
       scale: false,
       gridIndex: i,
       splitNumber: 2,
-      axisLabel: { fontSize: 10, color: "#a6badf" },
+      // 最上面那個刻度不標：副圖之間只有 4–5% 的間隔，上一格的 0 與下一格的最大值會疊在一起
+      axisLabel: {
+        fontSize: 10, color: "#a6badf", showMaxLabel: false,
+        formatter: v => fmtLots(i === 1 ? v / 1000 : v),
+      },
       splitLine: { lineStyle: { color: "rgba(148,171,220,0.18)" } },
     };
   });
@@ -5996,11 +5927,11 @@ function buildKLineOption(pd, chips, levels, period) {
       itemStyle: { color: "#ef5350", color0: "#26a69a", borderColor: "#ef5350", borderColor0: "#26a69a" },
       markLine: { silent: true, symbol: "none", data: markLines, animation: false },
     },
-    { name: "MA5", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma5 || [], symbol: "none", lineStyle: { width: 1.2, color: "#ff9800" } },
-    { name: "MA10", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma10 || [], symbol: "none", lineStyle: { width: 1.2, color: "#2196f3" } },
-    { name: "MA20", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma20 || [], symbol: "none", lineStyle: { width: 1.5, color: "#9c27b0" } },
-    ...(hasMa60 ? [{ name: "MA60", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma60, symbol: "none", lineStyle: { width: 1.8, color: "#6d4cff" } }] : []),
-    { name: "成交量(張)", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volData, barMaxWidth: 8 },
+    { name: "MA5", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma5 || [], symbol: "none", lineStyle: { width: 1, color: "#ff9800" } },
+    { name: "MA10", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma10 || [], symbol: "none", lineStyle: { width: 1, color: "#2196f3" } },
+    { name: "MA20", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma20 || [], symbol: "none", lineStyle: { width: 1.3, color: "#9c27b0" } },
+    ...(hasMa60 ? [{ name: "MA60", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma60, symbol: "none", lineStyle: { width: 1.5, color: "#6d4cff" } }] : []),
+    { name: "成交量(張)", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volData, barMaxWidth: 6, barMinWidth: 1 },
   ];
 
   if (hasChips) {
@@ -6011,7 +5942,8 @@ function buildKLineOption(pd, chips, levels, period) {
       xAxisIndex: 2,
       yAxisIndex: 2,
       data: chipsSeriesData,
-      barMaxWidth: 8,
+      barMaxWidth: 6,
+      barMinWidth: 1,
     });
   }
 
@@ -6020,7 +5952,7 @@ function buildKLineOption(pd, chips, levels, period) {
     backgroundColor: "transparent",
     tooltip: {
       trigger: "axis",
-      triggerOn: isKLineMobileMode() ? "none" : "mousemove|click",
+      triggerOn: mobile ? "none" : "mousemove|click",   // 手機靠長按（onKLineTouchStart）顯示
       confine: true,
       axisPointer: { type: "cross" },
       position: (point, params, dom, rect, size) => {
@@ -6057,7 +5989,12 @@ function buildKLineOption(pd, chips, levels, period) {
         return `${h}</div>`;
       },
     },
-    legend: { data: legendData, top: 5, itemWidth: 14, textStyle: { fontSize: 11, color: "#dce7ff" } },
+    legend: {
+      type: "scroll", data: legendData, top: 4, left: 46, right: 18, itemWidth: 12, itemGap: 8,
+      textStyle: { fontSize: 10, color: "#dce7ff" }, pageIconSize: 9, pageTextStyle: { color: "#a6badf" },
+      // 手機預設只畫 MA20／MA60：四條均線疊在 K 棒上太滿，點圖例可以再開
+      selected: mobile ? { MA5: false, MA10: false } : {},
+    },
     grid: grids,
     xAxis,
     yAxis,
@@ -6067,20 +6004,27 @@ function buildKLineOption(pd, chips, levels, period) {
         xAxisIndex: gridIndexes,
         start: dzStart,
         end: 100,
-        throttle: 320,
-        realtime: false,
+        throttle: 50,
+        realtime: true,
         minValueSpan,
-        // 手機：手指放在圖上往上下滑要能捲動 modal。預設會對 touchmove preventDefault，
-        // 整張 canvas 把捲動吃掉，副圖在螢幕下方就永遠滑不到。
+        maxValueSpan,
+        // 桌機滾輪留給 modal 捲動（以前一碰滾輪就縮放圖表、頁面動不了）；拖曳仍可平移
+        zoomOnMouseWheel: false,
+        moveOnMouseWheel: false,
+        moveOnMouseMove: true,
+        // 手機：垂直滑動交給瀏覽器捲 modal（CSS #kline-chart touch-action: pan-y），
+        // 水平拖曳與雙指縮放交給 ECharts；這裡不 preventDefault 才不會把捲動吃掉
         preventDefaultMouseMove: false,
       },
       {
         type: "slider",
         xAxisIndex: gridIndexes,
-        bottom: 4,
-        height: 14,
-        realtime: false,
+        bottom: 2,
+        height: 12,
+        realtime: true,
+        showDetail: false,
         minValueSpan,
+        maxValueSpan,
       },
     ],
     series,
@@ -6096,8 +6040,6 @@ document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => 
   clearKLineLongPressTimer();
   klineMobileTooltipLocked = false;
   klineTouchStartPoint = null;
-  setKLineScoreSummaryOpen(false);
-  closeKLineDimDetail();
   currentKLineSid = null;
 });
 

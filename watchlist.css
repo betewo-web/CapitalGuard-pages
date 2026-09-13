@@ -1301,29 +1301,6 @@ body.has-bottom-nav .qa-panel {
 	background-color: rgba(8, 13, 26, 0.82);
 }
 
-#kline-score-block {
-	margin-top: 0.5rem;
-}
-
-.kline-score-toggle {
-	border: 1px solid rgba(121, 157, 255, 0.35);
-	border-radius: 10px;
-	background: rgba(17, 28, 54, 0.72);
-	color: #dce7ff;
-	font-size: 0.78rem;
-	font-weight: 700;
-	padding: 0.4rem 0.72rem;
-	box-shadow: 0 6px 18px rgba(8, 18, 40, 0.2);
-	transition: transform 0.2s ease, filter 0.2s ease, border-color 0.2s ease;
-	white-space: nowrap;
-}
-
-.kline-score-toggle:hover {
-	transform: translateY(-1px);
-	filter: brightness(1.05);
-	border-color: rgba(86, 168, 255, 0.58);
-}
-
 .wl-period-btn.active {
 	background: linear-gradient(145deg, #2b6de5, #56a8ff) !important;
 	border-color: #56a8ff !important;
@@ -1343,124 +1320,14 @@ body.has-bottom-nav .qa-panel {
 	color: #dce9ff !important;
 }
 
-.kline-score-item {
-	min-width: 88px;
-}
-
-.kline-score-clickable {
-	cursor: pointer;
-	padding-bottom: 2px;
-}
-
-.kline-score-clickable:hover .kline-score-label {
-	color: #c5d9ff;
-}
-
-.kline-score-label {
-	font-size: 0.65rem;
-	color: #9bb0d5;
-	margin-bottom: 2px;
-}
-
-.kline-score-bar {
-	height: 5px;
-	border-radius: 3px;
-	background: rgba(148, 171, 220, 0.26);
-	margin: 2px 0;
-	overflow: hidden;
-}
-
-.kline-score-fill {
-	height: 100%;
-	border-radius: 3px;
-}
-
-.kline-score-fill.na {
-	background: #9baecf;
-	opacity: 0.45;
-}
-
-.kline-score-val {
-	font-size: 0.68rem;
-	font-weight: 700;
-}
-
-.kline-score-val.na {
-	color: #9baecf;
-	font-weight: 500;
-}
-
-.kline-score-tip {
-	font-size: 0.52rem;
-	color: #7f96bf;
-	line-height: 1;
-}
-
-.kline-dim-detail-box {
-	background: rgba(26, 43, 82, 0.42);
-	border: 1px solid rgba(121, 157, 255, 0.32);
-	font-size: 0.82rem;
-}
-
-.kline-detail-row {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-}
-
-.kline-detail-label {
-	min-width: 90px;
-	color: #b8c9e8;
-	font-size: 0.78rem;
-}
-
-.kline-detail-bar {
-	flex: 1;
-	min-width: 40px;
-	height: 6px;
-	border-radius: 3px;
-	background: rgba(148, 171, 220, 0.24);
-	overflow: hidden;
-}
-
-.kline-detail-bar.bg {
-	background: rgba(148, 171, 220, 0.18);
-}
-
-.kline-detail-fill {
-	height: 100%;
-	border-radius: 3px;
-	background: #9fb4d9;
-}
-
-.kline-detail-score {
-	min-width: 26px;
-	text-align: right;
-	font-weight: 700;
-	font-size: 0.78rem;
-}
-
-.kline-detail-score.na {
-	color: #9baecf;
-	font-weight: 500;
-}
-
-.kline-detail-value {
-	min-width: 60px;
-	white-space: nowrap;
-	color: #dbe8ff;
-	font-size: 0.76rem;
-	font-weight: 500;
-}
-
-.kline-detail-no-data {
-	display: inline-block;
-	color: #a8bbdd;
-	font-size: 0.72rem;
-	background: rgba(148, 171, 220, 0.14);
-	border: 1px solid rgba(148, 171, 220, 0.24);
-	border-radius: 3px;
-	padding: 0 6px;
+/* K 線容器：高度隨視窗（以前固定 460px，手機上三個 grid 擠在一起）；
+   touch-action: pan-y 讓瀏覽器接管垂直捲動、水平拖曳與雙指縮放仍交給 ECharts，
+   手指上下滑就不會同時捲 modal 又平移圖表 */
+#kline-chart {
+	height: clamp(300px, 62vh, 560px);
+	border: 1px solid #2f3f66;
+	border-radius: 8px;
+	touch-action: pan-y;
 }
 
 .kline-level-card {
@@ -1615,12 +1482,8 @@ body.has-bottom-nav .qa-panel {
 
 
 @media (max-width: 860px) {
-	.kline-source-note {
-		flex-basis: 100%;
-	}
-
-	.kline-score-toggle {
-		margin-left: 0 !important;
+	#kline-chart {
+		height: clamp(280px, 55vh, 460px);
 	}
 
 	.kline-select-group {
@@ -2919,3 +2782,15 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	--bs-btn-active-bg: var(--accent);
 	--bs-btn-active-border-color: var(--accent);
 }
+
+/* 事件卡 metrics（後端每筆事件用到的數字；只描述、不判斷）與觀察日標籤 */
+.event-metrics {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.15rem 0.7rem;
+	margin: 0.2rem 0 0.1rem;
+	font-size: 0.74rem;
+	color: var(--text-muted, #9aa6c4);
+}
+.event-metric b { font-weight: 600; color: var(--text, #e6ecff); }
+.event-date-chip.event-date-observed { opacity: 0.75; }
