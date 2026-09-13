@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="83">
+  <meta name="app-version" content="84">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=83" rel="stylesheet">
+  <link href="watchlist.css?v=84" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2077,12 +2077,23 @@ async function copyInviteLink() {
   }
 }
 
+function _hasSavedSession() {
+  try { return !!localStorage.getItem("sma_session"); } catch { return false; }
+}
+
 function showMobileInstallGate() {
   const title = document.getElementById("mobile-install-title");
   const steps = document.getElementById("mobile-install-steps");
   const actions = document.getElementById("mobile-install-actions");
   const launchStatus = document.getElementById("mobile-install-launch-status");
   if (launchStatus) launchStatus.textContent = "";
+  // Android 的 WebAPK 與 Chrome 共用同一份儲存空間：這台裝置登入過的話，從桌面開啟
+  // 就已經是登入狀態，叫他回 LINE 拿碼只會讓他以為自己漏做了一步。
+  // iPhone 不適用——主畫面 App 的儲存空間與 Safari 是分開的，一定要輸碼。
+  const autoLogin = !_isIOS && _hasSavedSession();
+  const lastStep = autoLogin
+    ? `<li>已登入過，從桌面開啟 App 會自動登入</li>`
+    : `<li>回 LINE 點「複製登入碼」，再到 App 按貼上圖示</li>`;
   if (_isIOS) {
     title.textContent = "iPhone 請先安裝，再登入";
     steps.innerHTML = `<li>點 Safari 下方的
@@ -2090,14 +2101,14 @@ function showMobileInstallGate() {
         <path d="M12 15V3m0 0L8 7m4-4 4 4"/><path d="M7 10H5.5A1.5 1.5 0 0 0 4 11.5v7A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H17"/>
       </svg>「分享」，選「<b>加入主畫面</b>」（不是「加入書籤」）</li>
       <li>若未自動開啟，回到手機主畫面點「台股監控」圖示</li>
-      <li>回 LINE 點「複製登入碼」，再到 App 按貼上圖示</li>`;
+      ${lastStep}`;
     actions.innerHTML = "";
     actions.style.display = "none";
   } else {
-    title.textContent = "Android 請先安裝，再登入";
+    title.textContent = autoLogin ? "Android 請先把 App 裝到桌面" : "Android 請先安裝，再登入";
     steps.innerHTML = `<li>將「台股監控」安裝到主畫面</li>
       <li>若未自動開啟，回到手機主畫面點「台股監控」圖示</li>
-      <li>回 LINE 點「複製登入碼」，再到 App 按貼上圖示</li>`;
+      ${lastStep}`;
     actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" id="mobile-install-btn" onclick="installPwa('mobile-gate')">安裝 App</button>`;
     actions.style.display = "";
   }
