@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="70">
+  <meta name="app-version" content="71">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=70" rel="stylesheet">
+  <link href="watchlist.css?v=71" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -88,7 +88,7 @@
       </ol>
     </div>
     <div class="ob-actions" id="mobile-install-actions">
-      <button type="button" class="btn btn-sm btn-primary" onclick="installPwa()">安裝 App</button>
+      <button type="button" class="btn btn-sm btn-primary" id="mobile-install-btn" onclick="installPwa()">安裝 App</button>
     </div>
   </div>
 </div>
@@ -2083,7 +2083,7 @@ function showMobileInstallGate() {
     actions.style.display = "none";
   } else {
     title.textContent = "Android 請先安裝，再登入";
-    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="installPwa()">安裝 App</button>`;
+    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" id="mobile-install-btn" onclick="installPwa()">安裝 App</button>`;
     actions.style.display = "";
   }
   document.getElementById("mobile-install-gate").style.display = "flex";
@@ -6861,7 +6861,6 @@ window.addEventListener('beforeinstallprompt', e => {
   if (_installIntentPending) {
     clearTimeout(_installIntentTimer);
     _installIntentPending = false;
-    _restoreInstallBtn();
     _triggerNativeInstallPrompt();
   }
 });
@@ -6878,22 +6877,27 @@ window.addEventListener('appinstalled', () => {
   _onboardInstalled();   // 安裝精靈進行中：換成「安裝成功」畫面
 });
 
-let _installBtnOrigHTML = null;
-function _setInstallBtnWaiting() {
-  const btn = document.getElementById('pwa-install-btn');
-  if (!btn) return;
-  _installBtnOrigHTML = btn.innerHTML;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" style="width:.85rem;height:.85rem;vertical-align:-1px"></span>等待中…';
-  btn.disabled = true;
+function _installButtons() {
+  return document.querySelectorAll('#pwa-install-btn, #mobile-install-btn, #ob-install-btn');
 }
-function _restoreInstallBtn() {
-  const btn = document.getElementById('pwa-install-btn');
-  if (!btn) return;
-  if (_installBtnOrigHTML) btn.innerHTML = _installBtnOrigHTML;
-  btn.disabled = false;
+function _setInstallButtonsWaiting() {
+  _installButtons().forEach(btn => {
+    if (!btn.dataset.installLabel) btn.dataset.installLabel = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" style="width:.85rem;height:.85rem;vertical-align:-1px"></span>安裝中…';
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+  });
+}
+function _restoreInstallButtons() {
+  _installButtons().forEach(btn => {
+    if (btn.dataset.installLabel) btn.innerHTML = btn.dataset.installLabel;
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+  });
 }
 
 function installPwa() {
+  _setInstallButtonsWaiting();
   if (_deferredInstallPrompt) {
     // Chrome / Edge / Android: use the native install prompt
     _triggerNativeInstallPrompt();
@@ -6904,10 +6908,9 @@ function installPwa() {
     // or never on iOS / Firefox).
     // Wait up to 2.5 s for beforeinstallprompt, then show instructions.
     _installIntentPending = true;
-    _setInstallBtnWaiting();
     _installIntentTimer = setTimeout(() => {
       _installIntentPending = false;
-      _restoreInstallBtn();
+      _restoreInstallButtons();
       _showPwaInstructionsModal(true /* afterWait */);
     }, 2500);
   }
@@ -6927,8 +6930,10 @@ function _triggerNativeInstallPrompt() {
         const toast = document.getElementById('pwa-success-toast');
         if (!toast) _showInstallSuccessToast();
       }, 1500);
+    } else {
+      _restoreInstallButtons();
     }
-  });
+  }).catch(() => _restoreInstallButtons());
 }
 
 function _showInstallSuccessToast() {
