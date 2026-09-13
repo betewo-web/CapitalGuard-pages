@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="93">
+  <meta name="app-version" content="94">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=93" rel="stylesheet">
+  <link href="watchlist.css?v=94" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -148,6 +148,9 @@
       <!-- 使用者 chip 兼方案入口：點開「方案與用量」面板（BILLING.md） -->
       <button id="nav-user" class="user-chip" type="button" onclick="openPlanModal()"
               title="方案與用量" aria-label="方案與用量"></button>
+      <!-- 管理儀表板（ADMIN_DASHBOARD.md）：users.is_admin 才顯示；權限在伺服器端 admin_stats() 判定 -->
+      <a id="nav-admin" class="btn btn-sm btn-outline-warning" href="admin.html" style="display:none"
+         title="管理儀表板" aria-label="管理儀表板">📊<span class="d-none d-sm-inline ms-1">儀表板</span></a>
       <button id="nav-logout" class="btn btn-sm btn-outline-light" style="display:none" onclick="logout()">登出</button>
     </div>
   </div>
@@ -897,6 +900,56 @@ async function sbRpc(fn, params, accessToken) {
   return r.json();
 }
 
+// ── 使用行為紀錄（管理儀表板的日活／月活／操作統計來源；ADMIN_DASHBOARD.md）──
+// 動作名稱是與 admin.html 的 ACTION_LABELS 對照的目錄（test_admin_dashboard 雙向比對）。
+// 排隊 15 秒再一次送出，切到背景時立刻送（keepalive 讓請求在頁面凍結後仍完成）。
+// 任何失敗都靜默：紀錄不到不該影響使用者；RPC 不存在（migration 未跑）就這次開頁不再送。
+const ACTIVITY_FLUSH_MS  = 15000;
+const ACTIVITY_MAX_BATCH = 40;
+let _activityQueue = [];
+let _activityTimer = null;
+let _activityDisabled = false;
+
+function _activityPlatform() {
+  const ua = navigator.userAgent || "";
+  const os = /iPhone|iPad|iPod/.test(ua) ? "ios" : /Android/.test(ua) ? "android" : "desktop";
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  return `${os}-${standalone ? "standalone" : "browser"}`;
+}
+
+function trackActivity(action, meta) {
+  if (_activityDisabled || !state.accessToken) return;
+  _activityQueue.push({ action, meta: meta || {} });
+  if (_activityQueue.length >= ACTIVITY_MAX_BATCH) flushActivity();
+  else if (!_activityTimer) _activityTimer = setTimeout(flushActivity, ACTIVITY_FLUSH_MS);
+}
+
+async function flushActivity() {
+  clearTimeout(_activityTimer);
+  _activityTimer = null;
+  if (_activityDisabled || !_activityQueue.length || !state.accessToken) return;
+  const items = _activityQueue.splice(0, ACTIVITY_MAX_BATCH);
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/log_activity`, {
+      method: "POST", headers: sbHeaders(state.accessToken), keepalive: true,
+      body: JSON.stringify({ p_items: items, p_platform: _activityPlatform() }),
+    });
+    if (r.status === 404) _activityDisabled = true;
+  } catch { /* 離線或被擋：這批就算了，不重送 */ }
+  if (_activityQueue.length) _activityTimer = setTimeout(flushActivity, ACTIVITY_FLUSH_MS);
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) flushActivity(); });
+
+// 管理者旗標：只決定要不要顯示儀表板入口；能不能看由伺服器端 admin_stats() 判定
+async function loadAdminFlag() {
+  const link = document.getElementById("nav-admin");
+  if (!link || !state.accessToken) return;
+  try {
+    const rows = await sbGet("users", { select: "is_admin" }, state.accessToken);
+    link.style.display = rows && rows[0] && rows[0].is_admin ? "inline-flex" : "none";
+  } catch { link.style.display = "none"; }   // 欄位不存在（migration 未跑）就不顯示
+}
+
 // ── 全域狀態 ────────────────────────────────────────────────────
 let state = { userId: null, accessToken: null, displayName: "" };
 let universe = {};   // sid → { n: name, i: industry }
@@ -1396,6 +1449,7 @@ async function requestAiAnalysis(sid, btnEl) {
   const eventTitle = ev.title || evTitle;
   btnEl.textContent = "⏳ AI 分析中…";
   btnEl.disabled = true;
+  trackActivity("ai_interpret", { stock: sid });
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/interpret-event`, {
       method: "POST",
@@ -1460,6 +1514,7 @@ async function sendQaQuestion() {
   const input = document.getElementById("qa-input");
   const question = input.value.trim();
   if (!question) return;
+  trackActivity("ai_qa");
 
   const messages = document.getElementById("qa-messages");
   // 新增用戶訊息
@@ -1637,6 +1692,7 @@ function renderQaLock() {
 let planPayments = null;   // payments 列（開面板時懶載入）
 
 function openPlanModal(focus) {
+  trackActivity("plan_open", { focus: focus || "" });
   // 從規則面板點「查看方案」過來：先把規則面板收掉，Bootstrap 疊兩層 modal 會亂
   const rulesEl = document.getElementById("rulesModal");
   const rulesInst = rulesEl && bootstrap.Modal.getInstance(rulesEl);
@@ -1821,6 +1877,7 @@ async function startCheckout(code) {
     return;
   }
   setPlanMsg("建立訂單中…");
+  trackActivity("checkout_start", { plan: code });
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/create-order`, {
       method: "POST", headers: billingHeaders(), body: JSON.stringify({ plan_code: code }),
@@ -2043,6 +2100,7 @@ async function lineLogin(body) {
 function finishLogin(row) {
   state = { userId: row.user_id, accessToken: row.access_token, displayName: row.display_name };
   localStorage.setItem("sma_session", JSON.stringify(state));
+  trackActivity("login");
   return showMain();
 }
 
@@ -2692,6 +2750,7 @@ function showDisclaimerGate() {
 }
 function acceptDisclaimer() {
   try { localStorage.setItem(DISCLAIMER_KEY, DISCLAIMER_VERSION); } catch {}
+  trackActivity("disclaimer_accept");
   const gate = document.getElementById("disclaimer-gate");
   if (gate) gate.style.display = "none";
   resumeOnboarding();   // 安裝精靈排在免責同意之後（renderOnboarding 在未同意前不顯示）
@@ -2710,6 +2769,8 @@ async function showMain() {
 
   const hashTab = (location.hash || "").replace("#", "");
   switchTab(APP_TABS.includes(hashTab) ? hashTab : "home", true);
+  trackActivity("app_open", { tab: currentTab });
+  loadAdminFlag();
 
   await loadWatchlist();
   // 從金流結帳頁導回（OrderResultURL）：只顯示狀態，開通與否以 webhook 為準
@@ -2734,6 +2795,8 @@ async function showMain() {
 }
 
 function logout() {
+  trackActivity("logout");
+  flushActivity();   // keepalive：重載後仍會送達
   localStorage.removeItem("sma_session");
   location.reload();
 }
@@ -2930,6 +2993,7 @@ window.addEventListener("pageshow", e => { if (e.persisted) _onAppResume(); });
 // 有 6MB，整頁重載在手機網路上要等很久，而且會把捲動位置一起丟掉。
 async function manualRefresh() {
   if (!state.userId) return;
+  trackActivity("refresh_manual", { tab: currentTab });
   const btn = document.getElementById("nav-refresh-btn");
   if (btn) { btn.classList.add("is-busy"); btn.disabled = true; }
   try {
@@ -2948,6 +3012,7 @@ async function manualRefresh() {
 function switchTab(tab, silent = false) {
   if (!APP_TABS.includes(tab)) tab = "home";
   const changed = currentTab !== tab;
+  if (changed && currentTab) trackActivity("tab_view", { tab });   // 開頁第一格算 app_open，不重複計
   currentTab = tab;
   APP_TABS.forEach(t => {
     const el = document.getElementById(`view-${t}`);
@@ -4054,6 +4119,7 @@ function openInboxDetail(rowId) {
   const row = inboxRows.find(r => String(r.id) === String(rowId));
   if (!row) return;
   detailRow = row;
+  trackActivity("inbox_open", { source: row.source || "" });
 
   // 標記已讀（fire-and-forget）
   if (inboxSupportsRead && !row.read_at) {
@@ -4150,6 +4216,7 @@ async function markAllRead() {
     await sbPatch("alert_history",
       { "user_id": `eq.${state.userId}`, "read_at": "is.null" },
       { read_at: now }, state.accessToken);
+    trackActivity("inbox_read_all");
     inboxRows.forEach(r => { if (!r.read_at) r.read_at = now; });
     updateInboxBadge();
     renderInbox();
@@ -4159,6 +4226,7 @@ async function markAllRead() {
 }
 
 function openDailyReportFromHistory() {
+  trackActivity("report_open");
   const url = new URL("report.html", window.location.href);
   if (state?.accessToken) {
     url.searchParams.set("token", state.accessToken);
@@ -5074,6 +5142,7 @@ function stockNameOf(sid) {
 async function toggleRule(id, enabled) {
   try {
     await sbPatch("alert_rules", { id: `eq.${id}` }, { enabled }, state.accessToken);
+    trackActivity("rule_toggle", { enabled: !!enabled });
     const r = alertRules.find(x => String(x.id) === String(id));
     if (r) r.enabled = enabled;
     setRulesMsg(enabled ? "已啟用" : "已停用");
@@ -5086,6 +5155,7 @@ async function deleteRule(id) {
   if (!confirm(`確定刪除規則「${(r && r.name) || ""}」？`)) return;
   try {
     await sbDelete("alert_rules", { id: `eq.${id}` }, state.accessToken);
+    trackActivity("rule_delete");
     setRulesMsg("已刪除");
     refreshRules();
   } catch (e) { setRulesMsg(`刪除失敗：${e.message || e}`, true); }
@@ -5257,6 +5327,8 @@ async function saveRule() {
     } else {
       await sbPost("alert_rules", { ...body, user_id: state.userId }, state.accessToken, true);
     }
+    trackActivity("rule_save", { mode: editingRuleId ? "edit" : "new", n: editorConditions.length,
+                                 types: editorConditions.map(c => c.type).join(",") });
     const saved = editingRuleId ? "已更新" : "已新增";
     showRulesPane("list");   // 這裡面會重新拉一次清單
     setRulesMsg(saved);
@@ -5796,6 +5868,7 @@ async function loadSharedReportData(force = false) {
 
 async function openKLineFromWatchlist(sid) {
   const sidKey = String(sid || "").trim();
+  trackActivity("kline_open", { stock: sidKey });
   const modalEl = document.getElementById("klineModal");
   const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
 
@@ -6755,6 +6828,7 @@ async function updateAlert(rowId, field, value, notifyOnError = true) {
 async function removeStock(rowId, notifyOnError = true) {
   try {
     await sbDelete("watchlist", { "id": `eq.${rowId}` }, state.accessToken);
+    trackActivity("watch_remove");
     await loadWatchlist();
   } catch (e) {
     if (notifyOnError) alert(`刪除失敗：${e.message}`);
@@ -6836,6 +6910,7 @@ async function addStock() {
       alert_margin_up:        false,
       alert_margin_down:      true,
     }, state.accessToken);
+    trackActivity("watch_add", { stock: sid });
     inp.value = "";
     selectedSid = null;
     document.getElementById("autocomplete-list").style.display = "none";
@@ -7289,6 +7364,7 @@ async function togglePushSubscription() {
     await _savePushSubscription(sub);
     await _rememberVapidKeyForSw();
     _pushSubscribed = true;
+    trackActivity("push_enable");
     await initPushUI();
   } catch (e) {
     console.error('[Push]', e.name, e.message, navigator.userAgent);
