@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="71">
+  <meta name="app-version" content="72">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=71" rel="stylesheet">
+  <link href="watchlist.css?v=72" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -88,7 +88,7 @@
       </ol>
     </div>
     <div class="ob-actions" id="mobile-install-actions">
-      <button type="button" class="btn btn-sm btn-primary" id="mobile-install-btn" onclick="installPwa()">安裝 App</button>
+      <button type="button" class="btn btn-sm btn-primary" id="mobile-install-btn" onclick="installPwa('mobile-gate')">安裝 App</button>
     </div>
   </div>
 </div>
@@ -2083,7 +2083,7 @@ function showMobileInstallGate() {
     actions.style.display = "none";
   } else {
     title.textContent = "Android 請先安裝，再登入";
-    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" id="mobile-install-btn" onclick="installPwa()">安裝 App</button>`;
+    actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" id="mobile-install-btn" onclick="installPwa('mobile-gate')">安裝 App</button>`;
     actions.style.display = "";
   }
   document.getElementById("mobile-install-gate").style.display = "flex";
@@ -2197,10 +2197,11 @@ function _onboardInstalled() {
   renderOnboarding();
 }
 
-function _openInstalledApp() {
+function _openInstalledApp(automatic = false) {
   const startUrl = new URL("./watchlist.html", document.baseURI).href;
   const opened = window.open(startUrl, "_blank");
-  if (!opened) location.href = startUrl;
+  if (!opened && !automatic) location.href = startUrl;
+  return !!opened;
 }
 
 async function onboardEnablePush() {
@@ -6843,6 +6844,7 @@ if ('serviceWorker' in navigator) {
 let _deferredInstallPrompt = null;
 let _installIntentPending  = false;   // user clicked Install before prompt was ready
 let _installIntentTimer    = null;
+let _installFromMobileGate = false;
 
 // Show button whenever not already in standalone mode
 if (!_pwaIsStandalone) {
@@ -6866,6 +6868,7 @@ window.addEventListener('beforeinstallprompt', e => {
 });
 
 window.addEventListener('appinstalled', () => {
+  const openLoginAfterInstall = _installFromMobileGate && _isAndroid;
   _deferredInstallPrompt = null;
   _installIntentPending  = false;
   clearTimeout(_installIntentTimer);
@@ -6873,7 +6876,24 @@ window.addEventListener('appinstalled', () => {
   if (btn) btn.style.display = 'none';
   const banner = document.getElementById('ios-install-banner');
   if (banner) banner.style.display = 'none';
-  _showInstallSuccessToast();
+  if (openLoginAfterInstall) {
+    _setInstallButtonsComplete();
+    setTimeout(() => {
+      _openInstalledApp(true);
+      // Android/Chrome 可阻擋非使用者手勢觸發的新視窗；仍留在本頁時提供一次點擊的 fallback。
+      setTimeout(() => {
+        if (document.hidden) return;
+        const actions = document.getElementById('mobile-install-actions');
+        if (actions) {
+          actions.innerHTML = '<button type="button" class="btn btn-sm btn-primary" onclick="_openInstalledApp()">開啟 App</button>';
+          actions.style.display = '';
+        }
+      }, 1200);
+    }, 500);
+  } else {
+    _showInstallSuccessToast();
+  }
+  _installFromMobileGate = false;
   _onboardInstalled();   // 安裝精靈進行中：換成「安裝成功」畫面
 });
 
@@ -6888,6 +6908,13 @@ function _setInstallButtonsWaiting() {
     btn.setAttribute('aria-busy', 'true');
   });
 }
+function _setInstallButtonsComplete() {
+  _installButtons().forEach(btn => {
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" style="width:.85rem;height:.85rem;vertical-align:-1px"></span>安裝完成，正在開啟…';
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+  });
+}
 function _restoreInstallButtons() {
   _installButtons().forEach(btn => {
     if (btn.dataset.installLabel) btn.innerHTML = btn.dataset.installLabel;
@@ -6896,7 +6923,8 @@ function _restoreInstallButtons() {
   });
 }
 
-function installPwa() {
+function installPwa(source = '') {
+  _installFromMobileGate = source === 'mobile-gate';
   _setInstallButtonsWaiting();
   if (_deferredInstallPrompt) {
     // Chrome / Edge / Android: use the native install prompt
@@ -6910,6 +6938,7 @@ function installPwa() {
     _installIntentPending = true;
     _installIntentTimer = setTimeout(() => {
       _installIntentPending = false;
+      _installFromMobileGate = false;
       _restoreInstallButtons();
       _showPwaInstructionsModal(true /* afterWait */);
     }, 2500);
@@ -6931,9 +6960,13 @@ function _triggerNativeInstallPrompt() {
         if (!toast) _showInstallSuccessToast();
       }, 1500);
     } else {
+      _installFromMobileGate = false;
       _restoreInstallButtons();
     }
-  }).catch(() => _restoreInstallButtons());
+  }).catch(() => {
+    _installFromMobileGate = false;
+    _restoreInstallButtons();
+  });
 }
 
 function _showInstallSuccessToast() {
