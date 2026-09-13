@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="73">
+  <meta name="app-version" content="74">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=73" rel="stylesheet">
+  <link href="watchlist.css?v=74" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -90,6 +90,7 @@
     <div class="ob-actions" id="mobile-install-actions">
       <button type="button" class="btn btn-sm btn-primary" id="mobile-install-btn" onclick="installPwa('mobile-gate')">安裝 App</button>
     </div>
+    <div class="ob-note mt-2" id="mobile-install-launch-status" role="status" aria-live="polite"></div>
   </div>
 </div>
 
@@ -2071,6 +2072,8 @@ function showMobileInstallGate() {
   const title = document.getElementById("mobile-install-title");
   const steps = document.getElementById("mobile-install-steps");
   const actions = document.getElementById("mobile-install-actions");
+  const launchStatus = document.getElementById("mobile-install-launch-status");
+  if (launchStatus) launchStatus.textContent = "";
   if (_isIOS) {
     title.textContent = "iPhone 請先安裝，再登入";
     steps.innerHTML = `<li>點 Safari 下方的
@@ -2202,6 +2205,43 @@ function _openInstalledApp(automatic = false) {
   const opened = window.open(startUrl, "_blank");
   if (!opened && !automatic) location.href = startUrl;
   return !!opened;
+}
+
+let _pwaLaunchWatchTimer = null;
+function _showPwaLaunchFallback(message) {
+  clearTimeout(_pwaLaunchWatchTimer);
+  const status = document.getElementById('mobile-install-launch-status');
+  const actions = document.getElementById('mobile-install-actions');
+  if (status) status.textContent = message || '未能自動開啟 App，請點下方按鈕。';
+  if (actions) {
+    actions.innerHTML = '<button type="button" class="btn btn-sm btn-primary" onclick="_attemptOpenInstalledApp(false)">開啟 App</button>';
+    actions.style.display = '';
+  }
+}
+
+function _attemptOpenInstalledApp(automatic) {
+  clearTimeout(_pwaLaunchWatchTimer);
+  const status = document.getElementById('mobile-install-launch-status');
+  const actions = document.getElementById('mobile-install-actions');
+  if (status) status.textContent = automatic ? '正在自動開啟 App…' : '正在開啟 App…';
+  if (!automatic && actions) {
+    actions.innerHTML = '<button type="button" class="btn btn-sm btn-primary" disabled aria-busy="true"><span class="spinner-border spinner-border-sm me-1"></span>開啟中…</button>';
+  }
+
+  const opened = _openInstalledApp(true);
+  if (!opened) {
+    _showPwaLaunchFallback(automatic
+      ? '瀏覽器阻擋了自動開啟，請點下方按鈕開啟 App。'
+      : '仍無法開啟，請回到手機主畫面點「台股監控」圖示。');
+    return;
+  }
+  _pwaLaunchWatchTimer = setTimeout(() => {
+    if (!document.hidden) {
+      _showPwaLaunchFallback(automatic
+        ? '未能確認 App 已開啟，請點下方按鈕再試一次。'
+        : '如果 App 沒有開啟，請回到手機主畫面點「台股監控」圖示。');
+    }
+  }, 1500);
 }
 
 async function onboardEnablePush() {
@@ -6892,16 +6932,7 @@ function _completeMobileInstall() {
   clearTimeout(_mobileInstallCompletionTimer);
   _setInstallButtonsComplete();
   setTimeout(() => {
-    _openInstalledApp(true);
-    // 自動喚起 PWA 不是 Web 標準保證的能力；Chrome 阻擋時保留明確的一鍵入口。
-    setTimeout(() => {
-      if (document.hidden) return;
-      const actions = document.getElementById('mobile-install-actions');
-      if (actions) {
-        actions.innerHTML = '<button type="button" class="btn btn-sm btn-primary" onclick="_openInstalledApp()">開啟 App</button>';
-        actions.style.display = '';
-      }
-    }, 1200);
+    _attemptOpenInstalledApp(true);
   }, 500);
   _installFromMobileGate = false;
 }
