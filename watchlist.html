@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="86">
+  <meta name="app-version" content="87">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=86" rel="stylesheet">
+  <link href="watchlist.css?v=87" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2374,8 +2374,10 @@ function _pushUnblockSteps() {
   // Chrome 裡的，系統那邊看起來是開的、網站仍然被擋，所以第二條路一定要給。
   if (_isAndroid && _pwaIsStandalone) return [
     "長按桌面的「台股監控」圖示 →「應用程式資訊」→「通知」，確認通知是開著的",
-    `還是不行的話，打開 Chrome →「⋮ → 設定 → 網站設定 → 通知」，找到 <b>${location.hostname}</b> 改成「允許」`,
-    "回到這個畫面，按下方的「啟用通知」",
+    `打開 <b>Chrome</b> →「⋮ → 設定 → 網站設定 → 通知」，在<b>「已封鎖」清單</b>裡找到 `
+      + `<b>${location.hostname}</b>，點進去改成「允許」（有「重設權限」就按它）`,
+    "把這個 App 從多工列滑掉、完全關閉再開啟——設定改了不會自動傳進已經開著的 App",
+    "重新開啟後，按下方的「啟用通知」",
   ];
   return [
     "點網址列左邊的鎖頭（或 <b>ⓘ</b>）圖示",
@@ -6878,6 +6880,16 @@ async function initPushUI() {
   }
 }
 
+// 在系統設定改了權限再切回來：Permissions API 會通知我們，畫面就不必等重開 App。
+// （部分 Android WebAPK 不會送這個事件，所以解除步驟裡仍然保留「完全關閉再開」。）
+(async () => {
+  try {
+    if (!navigator.permissions || !navigator.permissions.query) return;
+    const st = await navigator.permissions.query({ name: 'notifications' });
+    st.onchange = () => { initPushUI(); _onboardRecheckPushPermission(); };
+  } catch { /* Safari 舊版查不到 notifications，忽略 */ }
+})();
+
 // 首頁通知列的「如何啟用通知」：關著的原因不只一種，處理方式也不一樣，一個入口分流
 function _showPushEnableHelp() {
   if (_isIOS && !_pwaIsStandalone) { _showPwaInstructionsModal(); return; }
@@ -6896,7 +6908,16 @@ function _showPushEnableHelp() {
 function _showPushUnblockHelp() {
   alert('這台裝置把本站的通知關掉了，瀏覽器不會再跳出詢問，請手動打開：\n\n'
     + _pushUnblockSteps().slice(0, -1).map((t, i) => `${i + 1}. ${t.replace(/<[^>]+>/g, '')}`).join('\n')
-    + '\n\n打開之後回到這裡，按「啟用通知」。');
+    + '\n\n打開之後回到這裡，按「啟用通知」。\n\n' + _pushDiagnosticLine());
+}
+
+// 「設定裡明明開了，App 還是說關著」時唯一能分辨的東西：App 自己讀到什麼。
+// Android 的權限有兩層（WebAPK 的系統通知開關 ＋ Chrome 的網站設定），只開一層仍然是 denied。
+function _pushDiagnosticLine() {
+  return `App 目前讀到：權限=${_pushPermission()}`
+    + `、執行於=${_pwaIsStandalone ? '已安裝的 App' : '瀏覽器分頁'}`
+    + `、訂閱=${_pushSubscribed ? '有' : '無'}`
+    + `、來源=${location.origin}`;
 }
 
 // 存 / 刪 Supabase 的訂閱紀錄。pushsubscriptionchange 也共用 _savePushSubscription。
