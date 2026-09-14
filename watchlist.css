@@ -787,16 +787,9 @@ body.has-bottom-nav .page-shell {
 	background: rgba(48, 82, 145, 0.7);
 	color: #e6f0ff;
 }
-.wl-events-btn.has-high {
-	border-color: rgba(255, 175, 45, 0.5);
-	background: rgba(74, 48, 10, 0.6);
-	color: #ffca5c;
-}
-.wl-events-btn.has-high:hover {
-	border-color: rgba(255, 175, 45, 0.75);
-	background: rgba(96, 62, 12, 0.75);
-	color: #ffdb8e;
-}
+/* 圖示不再變色。以前有「少見事件」時整顆變成金色，但一顆變色的圖示無法自我解釋——
+   使用者看得到它跟別檔不一樣，卻無從知道差在哪。強調改成同一列標籤區的一句文字
+   （.wl-tag-standout），用讀的就懂；圖示只負責顯示件數與「這裡可以點」。 */
 /* 沒有事件時是純粹的資訊狀態，淡到不搶眼但仍看得出可以按 */
 .wl-events-btn.wl-events-empty {
 	border-color: rgba(140, 168, 220, 0.14);
@@ -854,9 +847,52 @@ body.has-bottom-nav .page-shell {
 	background: rgba(14, 22, 42, 0.75);
 	border-left: 3px solid rgba(128, 154, 212, 0.4);
 }
-.event-item.event-high   { border-left-color: #ffd060; }
-.event-item.event-normal { border-left-color: #8b7cff; }
-.event-item.event-low    { border-left-color: rgba(128, 154, 212, 0.3); }
+/* 事件只分兩階，而且顏色只做強調、不承載意義——意義由分組標題與「少見」文字標籤講。
+   以前三階用金／紫／淡藍：紫色同時是品牌色（按鈕、連結、載入中），使用者看到紫色邊條
+   會解讀成「可以點」而不是「這件普通」；而且首頁同一組門檻卻用橘／藍／灰另一套色，
+   同一件事在兩個畫面長得不一樣。現在強調色統一吃 --sig-orange（全站「最高優先」那一個），
+   其餘一律中性。 */
+.event-item.event-high   { border-left-color: var(--sig-orange); }
+.event-item.event-normal,
+.event-item.event-low    { border-left-color: rgba(128, 154, 212, 0.28); }
+/* 分階改用「標題」而不是「顏色」：清單本來就照顯著度排好，直接下標題，
+   使用者用讀的就知道分組依據，不必先學會一套顏色對照表。 */
+.event-section + .event-section {
+	margin-top: 0.9rem;
+}
+.event-section-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.35rem;
+	margin-bottom: 0.4rem;
+	font-size: 0.74rem;
+	font-weight: 700;
+	color: var(--text-1);
+}
+.event-section-head .es-count {
+	font-weight: 500;
+	color: var(--text-muted);
+}
+.event-section-head .es-hint {
+	font-weight: 400;
+	font-size: 0.68rem;
+	color: var(--text-muted);
+}
+.event-section.is-standout .event-section-head { color: var(--sig-orange); }
+
+/* 事件彈窗頂部的一行圖例。以前整個彈窗沒有任何一句話解釋顏色或分組是什麼意思。 */
+.event-legend {
+	font-size: 0.68rem;
+	color: var(--text-muted);
+	line-height: 1.5;
+	padding: 0.4rem 0.5rem;
+	margin-bottom: 0.6rem;
+	border-radius: 6px;
+	background: rgba(255, 255, 255, 0.03);
+	border: 1px solid rgba(146, 146, 163, 0.18);
+}
+.event-legend b { color: var(--text-1); font-weight: 700; }
+
 .today-event-group + .today-event-group {
 	margin-top: 1rem;
 	padding-top: 0.85rem;
@@ -906,14 +942,16 @@ body.has-bottom-nav .page-shell {
 	font-weight: 600;
 	color: rgba(160, 190, 240, 0.7);
 }
+/* 「新」＝今天第一次入庫，跟顯著度無關，所以不能跟強調色同一個顏色。
+   以前它是金色，跟「重要事件」的金色一模一樣，使用者只會以為新＝重要。改成資訊藍。 */
 .event-new-badge {
 	font-size: 0.66rem;
 	font-weight: 800;
 	padding: 0.08rem 0.3rem;
 	border-radius: 4px;
-	color: #ffd060;
-	background: rgba(255, 208, 96, 0.14);
-	border: 1px solid rgba(255, 208, 96, 0.45);
+	color: var(--sig-blue);
+	background: rgba(86, 168, 255, 0.12);
+	border: 1px solid rgba(86, 168, 255, 0.42);
 }
 .event-date-chip {
 	font-size: 0.66rem;
@@ -935,19 +973,23 @@ body.has-bottom-nav .page-shell {
 	border-radius: 4px;
 }
 .event-calendar { color: #8fc5ff; border-color: rgba(143, 197, 255, 0.4); }
-.event-score-badge {
+/* 取代原本那顆「顯著度數字」徽章。舊的不論 22 分還是 91 分都是金色，顏色不帶任何資訊，
+   卻剛好用了代表「重要」的顏色，等於主動誤導；而且 0–100 的原始分數是內部機制，
+   使用者無從判斷 62 算高還算低。現在只有進入「較少見」那一階的事件才掛這個文字標籤，
+   原始分數移進「顯著度明細」摺疊區。 */
+.event-standout {
 	margin-left: auto;
-	width: 2rem;
-	height: 1.35rem;
 	display: inline-flex;
 	align-items: center;
-	justify-content: center;
+	height: 1.35rem;
+	padding: 0 0.4rem;
 	border-radius: 4px;
-	background: rgba(255, 208, 96, 0.12);
-	border: 1px solid rgba(255, 208, 96, 0.35);
-	color: #ffd060;
-	font-size: 0.72rem;
-	font-weight: 800;
+	background: rgba(255, 159, 67, 0.12);
+	border: 1px solid rgba(255, 159, 67, 0.42);
+	color: var(--sig-orange);
+	font-size: 0.68rem;
+	font-weight: 700;
+	white-space: nowrap;
 }
 .event-title {
 	font-size: 0.84rem;
@@ -996,14 +1038,36 @@ body.has-bottom-nav .page-shell {
 	color: #ff9aa0;
 	border-color: rgba(255, 139, 145, 0.28);
 }
+/* AI 說明以前是綠字綠底。台股紅漲綠跌，一個綠底的框第一眼會被讀成「跌」——
+   但它只是文字說明，跟漲跌無關。紅綠只留給漲跌幅，這裡改中性底，用前綴標明是誰講的。 */
 .event-ai-text {
 	font-size: 0.78rem;
-	color: #a0e4c0;
-	background: rgba(0,60,40,0.35);
+	color: var(--text-1);
+	background: rgba(255, 255, 255, 0.045);
+	border: 1px solid rgba(146, 146, 163, 0.22);
 	border-radius: 6px;
-	padding: 0.3rem 0.5rem;
+	padding: 0.35rem 0.5rem;
 	margin-top: 0.25rem;
 	white-space: pre-wrap;
+}
+.event-ai-text .event-ai-tag {
+	display: block;
+	font-size: 0.66rem;
+	font-weight: 700;
+	color: var(--text-muted);
+	margin-bottom: 0.15rem;
+}
+/* 顯著度明細展開後的第一行：把「這個數字是什麼」寫在手指點得到的地方。
+   以前只寫在分數徽章的 title 屬性裡，而這是 PWA，title 在觸控裝置上永遠不會浮出來。 */
+.event-sig-note {
+	font-size: 0.68rem;
+	color: var(--text-muted);
+	line-height: 1.45;
+	margin-bottom: 0.25rem;
+}
+.event-sig-note b {
+	color: var(--text-1);
+	font-weight: 700;
 }
 .btn-xs {
 	padding: 0.1rem 0.45rem;
@@ -2406,10 +2470,21 @@ body.has-bottom-nav .qa-panel {
 	height: 6px;
 }
 
+/* 持股是「狀態」不是「等級」：底色以前用品牌紫、字用青綠，這兩個顏色在同一列裡都另有意思
+   （紫＝可點的品牌色、青綠＝沒有別處在用的第三色）。狀態類標籤一律中性，靠文字本身說明。 */
 .wl-tag-holding {
-	border-color: rgba(139, 124, 255, 0.3);
-	background: rgba(139, 124, 255, 0.1);
-	color: #8fece0;
+	border-color: rgba(146, 146, 163, 0.3);
+	background: rgba(255, 255, 255, 0.05);
+	color: var(--text-1);
+}
+
+/* 這一列的事件強調：與事件卡的「少見」共用 --sig-orange。
+   全站「需要注意」只留這一個顏色，其餘狀態一律中性。 */
+.wl-tag-standout {
+	border-color: rgba(255, 159, 67, 0.5);
+	background: rgba(255, 159, 67, 0.1);
+	color: #ffb86b;
+	font-weight: 600;
 }
 
 /* 距自訂下跌價位 3% 內：橘框提醒（等級色，不是漲跌色） */
@@ -2797,15 +2872,18 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
    只把內容降一階，通知設定與移除鈕維持全亮——使用者要能刪掉別的來讓它回到方案內 */
 .wl-row.is-inactive .wl-ident,
 .wl-row.is-inactive .wl-quote { opacity: 0.5; }
+/* 超出方案是「狀態」不是「警告」：以前用橘色，跟「接近價位」「少見事件」同色，
+   同一列可能同時出現三個橘色標籤講三件不相干的事。改中性，🔒 本身已經夠清楚。 */
 .wl-tag-locked,
 .plan-lock-tag {
-	color: var(--sig-orange);
-	border-color: rgba(255, 159, 67, 0.45);
-	background: rgba(255, 159, 67, 0.1);
+	color: var(--text-muted);
+	border-color: rgba(146, 146, 163, 0.32);
+	background: rgba(255, 255, 255, 0.04);
 }
 .rule-card.is-inactive .rule-card-name,
 .rule-card.is-inactive .rule-conds { opacity: 0.55; }
-.count-badge.is-full { background: var(--sig-orange); color: #2b1600; }
+/* 自選已滿是方案上限的狀態，不是個股需要注意——跟 .wl-tag-locked 同一類，一起讓出橘色。 */
+.count-badge.is-full { background: linear-gradient(145deg, #8a8a9b, #b8b8c6); color: #1b1b26; }
 .qa-float-btn.is-locked { filter: grayscale(1); opacity: 0.55; }
 
 /* 統計頁：分數明細 modal（點一列）。數字用等寬對齊，前期分數降一階 */

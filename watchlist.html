@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="103">
+  <meta name="app-version" content="104">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=103" rel="stylesheet">
+  <link href="watchlist.css?v=104" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -268,7 +268,7 @@
 
       <div class="card panel-card mb-3">
         <div class="card-body p-3">
-          <div class="home-sec-title">📰 今日重要資訊</div>
+          <div class="home-sec-title">📰 今日較少見的資料</div>
           <div id="home-news"></div>
         </div>
       </div>
@@ -1147,11 +1147,8 @@ const _EVENT_TYPE_LABEL = {
 };
 // test_pwa_tabs.EventCardTests 會比對：後端 data/events.py 寫出的每種 event_type 都要有標籤，
 // 否則卡片上會出現英文原字（曾經漏掉 price、score）
-const _EVENT_IMPORTANCE_CLASS = {
-  high: "event-high",
-  normal: "event-normal",
-  low: "event-low",
-};
+// （原本這裡有一份 importance → event-high/normal/low 的對照表，全檔沒有任何地方用它，
+//   而且留著會讓人以為三階還在。分階現在只認 eventImportanceClass 一個來源。）
 
 // 事件不再顯示多空方向標籤（那是對個股的判斷，不是資料）；
 // 只有日程類事件保留一個「日程」標籤（COMPLIANCE.md）。
@@ -1171,27 +1168,45 @@ function _compareEvents(a, b) {
   return new Date(b?.event_date || 0).getTime() - new Date(a?.event_date || 0).getTime();
 }
 
-function eventImportanceClass(ev) {
-  const score = eventScoreOf(ev);
-  return score >= 70 ? "event-high" : score >= 40 ? "event-normal" : "event-low";
+// 顯著度只分兩階，門檻 70。以前是三階（70／40），但「一般」與「低」對使用者的行動
+// 完全一樣——都是「有空再看」——分不出行動差異的分級不該存在，只會多一個要背的顏色。
+const EVENT_STANDOUT_SCORE = 70;
+
+function isStandoutEvent(ev) {
+  return eventScoreOf(ev) >= EVENT_STANDOUT_SCORE;
 }
 
-function renderEventBreakdown(ev) {
+function eventImportanceClass(ev) {
+  return isStandoutEvent(ev) ? "event-high" : "event-normal";
+}
+
+// 顯著度明細。原始分數從卡片正面移到這裡：0–100 是內部機制，使用者無從判斷 62 算高還算低，
+// 而正面那顆徽章不論幾分都是金色，顏色不帶資訊卻佔用了「重要」那個顏色。
+// 這個摺疊區永遠會出現（就算 Signal Engine 沒跑過），因為它現在也是「顯著度是什麼」唯一
+// 講得清楚的地方——以前只寫在徽章的 title 屬性裡，而 title 在觸控裝置上永遠不會浮出來。
+function renderEventSignificance(ev) {
+  const score = eventScoreOf(ev);
+  const note = `<div class="event-sig-note">顯著度 <b>${score}</b> / 100：這筆資料跟它自己的過往比有多少見，不是對股票的多空判斷。`
+    + `${score >= EVENT_STANDOUT_SCORE ? "達 70 以上歸到「較少見」。" : "未達 70，歸到「其他」。"}</div>`;
   const breakdown = ev?.score_breakdown;
-  if (!breakdown || typeof breakdown !== "object" || !Object.keys(breakdown).length) return "";
-  const fields = [
-    ["base", "基礎"], ["abnormality", "不尋常度"], ["rarity", "罕見"],
-    ["fundamental_impact", "基本面"], ["price_reaction", "股價反應"],
-    ["synergy", "多事件"], ["contradiction", "矛盾"],
-  ];
-  // Signal Engine 沒跑過的事件 breakdown 是預設的全 0：列一排「+0」沒有資訊，不顯示
-  if (!fields.slice(1).some(([key]) => Number(breakdown[key] || 0))) return "";
-  const chips = fields.map(([key, label]) => {
-    const value = Number(breakdown[key] || 0);
-    const shown = key === "base" ? value : `${key === "contradiction" ? "−" : "+"}${value}`;
-    return `<span class="event-score-part${key === "contradiction" && value ? " is-negative" : ""}">${label} ${shown}</span>`;
-  }).join("");
-  return `<details class="event-score-details"><summary>顯著度明細</summary><div class="event-score-parts">${chips}</div></details>`;
+  let parts = "";
+  if (breakdown && typeof breakdown === "object" && Object.keys(breakdown).length) {
+    const fields = [
+      ["base", "基礎"], ["abnormality", "不尋常度"], ["rarity", "罕見"],
+      ["fundamental_impact", "基本面"], ["price_reaction", "股價反應"],
+      ["synergy", "多事件"], ["contradiction", "矛盾"],
+    ];
+    // Signal Engine 沒跑過的事件 breakdown 是預設的全 0：列一排「+0」沒有資訊，不顯示
+    if (fields.slice(1).some(([key]) => Number(breakdown[key] || 0))) {
+      const chips = fields.map(([key, label]) => {
+        const value = Number(breakdown[key] || 0);
+        const shown = key === "base" ? value : `${key === "contradiction" ? "−" : "+"}${value}`;
+        return `<span class="event-score-part${key === "contradiction" && value ? " is-negative" : ""}">${label} ${shown}</span>`;
+      }).join("");
+      parts = `<div class="event-score-parts">${chips}</div>`;
+    }
+  }
+  return `<details class="event-score-details"><summary>顯著度明細</summary>${note}${parts}</details>`;
 }
 
 // 事件 metrics 的顯示白名單：鍵 → [標籤, 格式]。只描述數字，不下判斷（COMPLIANCE.md）。
@@ -1300,7 +1315,6 @@ function eventSourceHtml(sid, ev) {
 
 function renderEventCard(sid, ev, options = {}) {
   const typeLabel = _EVENT_TYPE_LABEL[ev.event_type] || ev.event_type || "事件";
-  const score = eventScoreOf(ev);
   const direction = _EVENT_DIRECTION_META[ev.direction] || null;
   const sidName = universe[sid]?.n || sid;
   const titlePrefix = options.showStock ? `${escapeHtml(sid)} ${escapeHtml(sidName)} · ` : "";
@@ -1309,7 +1323,7 @@ function renderEventCard(sid, ev, options = {}) {
   const actionHtml = options.todayMode
     ? (options.grouped ? "" : `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>`)
     : (ev.ai_analysis
-      ? `<div class="event-ai-text">${escapeHtml(ev.ai_analysis)}</div>`
+      ? `<div class="event-ai-text"><span class="event-ai-tag">🤖 AI 說明</span>${escapeHtml(ev.ai_analysis)}</div>`
       : `<button class="btn btn-xs btn-outline-info" data-ev-key="${escapeHtml(ev.dedupe_key || "")}" data-ev-title="${escapeHtml(ev.title || "")}" onclick="requestAiAnalysis('${escapeHtml(sid)}', this)">AI 說明資料</button>`);
   const newToday = isNewToday(ev);
   const newBadge = newToday ? `<span class="event-new-badge">新</span>` : "";
@@ -1332,12 +1346,12 @@ function renderEventCard(sid, ev, options = {}) {
         <span class="event-type-badge">${escapeHtml(typeLabel)}</span>
         ${direction ? `<span class="event-direction ${direction.className}">${direction.label}</span>` : ""}
         ${dateChip}
-        <span class="event-score-badge" title="顯著度：這筆資料有多不尋常，不是多空判斷">${score}</span>
+        ${isStandoutEvent(ev) ? `<span class="event-standout">少見</span>` : ""}
       </div>
       <div class="event-title">${titlePrefix}${escapeHtml(ev.title || "")}</div>
       ${ev.content ? `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>` : ""}
       ${renderEventMetrics(ev)}
-      ${renderEventBreakdown(ev)}
+      ${renderEventSignificance(ev)}
       <div class="event-actions">${linkHtml}${actionHtml}</div>
     </article>`;
 }
@@ -1369,10 +1383,48 @@ function openEventsPanel(sid) {
       </div>
     `;
   } else {
-    body.innerHTML = events.map(ev => renderEventCard(sid, ev)).join("");
+    body.innerHTML = eventLegendHtml("", events.some(isStandoutEvent))
+      + renderEventSections(sid, events);
   }
   const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal"));
   modal.show();
+}
+
+// 彈窗頂部的圖例。以前整個事件彈窗沒有任何一句話說明分組或顏色是什麼意思，
+// 唯一的解釋躲在分數徽章的 title 屬性裡——而這是 PWA，title 在觸控裝置上不會浮出來。
+// 一個框講完，不要疊兩個框。
+// hasStandout=false 時不提「較少見」：一份完全沒有標記的清單還寫「較少見排在最前面」，
+// 使用者只會回頭找哪一則被標了。沒有就只講這裡在算什麼。
+function eventLegendHtml(extra = "", hasStandout = true) {
+  return `<div class="event-legend">`
+    + (hasStandout
+      ? `<b>較少見</b>＝這筆資料跟它自己的過往比落差比較大（顯著度 70 以上），排在最前面。`
+      : `這裡的排序看「顯著度」：這筆資料跟它自己的過往比有多少見。這批都未達 70，沒有特別少見的。`)
+    + `這是對<b>資料</b>的描述，不是對股票的判斷，也不是買賣建議。`
+    + (extra ? `<br>${extra}` : "")
+    + `</div>`;
+}
+
+// 分階用標題講，不用顏色講。清單本來就照顯著度排好，直接切兩段下標題，
+// 使用者用讀的就知道分組依據，不必先學會一套顏色對照表。
+// 只有一段有東西時不下標題——單一清單再加分組反而是多餘的結構。
+function renderEventSections(sid, events, options = {}) {
+  const standout = events.filter(isStandoutEvent);
+  const rest = events.filter(ev => !isStandoutEvent(ev));
+  const section = (cls, title, hint, list) => list.length
+    ? `<section class="event-section ${cls}">
+         <div class="event-section-head">
+           <span>${title}</span><span class="es-count">${list.length} 件</span>
+           ${hint ? `<span class="es-hint">${hint}</span>` : ""}
+         </div>
+         ${list.map(ev => renderEventCard(sid, ev, options)).join("")}
+       </section>`
+    : "";
+  if (!standout.length || !rest.length) {
+    return events.map(ev => renderEventCard(sid, ev, options)).join("");
+  }
+  return section("is-standout", "較少見", "落差比較大的資料", standout)
+    + section("", "其他", "", rest);
 }
 
 function openTodayEventsPanel() {
@@ -1388,8 +1440,12 @@ function openTodayEventsPanel() {
   }
   const titleEl = document.getElementById("events-modal-title");
   const bodyEl = document.getElementById("events-modal-body");
+  // 「今日 N 件」與「新」徽章數的不是同一件事：件數含「事件日就是今天」的舊資料，
+  // 「新」只認今天第一次入庫。兩個數字擺在同一畫面卻沒說明，使用者就會問
+  // 「明明有新事件為什麼數字沒變」。這裡把兩個數字一起講明白。
+  const newCount = rows.filter(({ ev }) => isNewToday(ev)).length;
   titleEl.textContent = rows.length > 0
-    ? `📋 今日事件彙整（${groups.length} 檔 · ${rows.length} 件）`
+    ? `📋 今日事件彙整（${groups.length} 檔 · ${rows.length} 件，新增 ${newCount} 件）`
     : "📋 今日事件";
 
   if (!rows.length) {
@@ -1401,7 +1457,11 @@ function openTodayEventsPanel() {
       </div>
     `;
   } else {
-    bodyEl.innerHTML = groups.map(({ sid, events }) => {
+    const legend = eventLegendHtml(
+      `「今日」＝今天第一次抓到，或資料日期就是今天；`
+      + `標「<b>新</b>」的是今天第一次抓到的那 ${newCount} 件。`,
+      rows.some(({ ev }) => isStandoutEvent(ev)));
+    bodyEl.innerHTML = legend + groups.map(({ sid, events }) => {
       const sidName = getPreferredStockName(sid, universe[sid]?.n) || sid;
       return `
         <section class="today-event-group">
@@ -3861,13 +3921,13 @@ function alertTypeLabel(row) {
 
     const topRows = newsRows.slice(0, 3).map(({ sid, ev }) => {
       const name = universe[sid]?.n || "";
-      return `${sid}${name ? ` ${name}` : ""}：${ev.title || "重要資訊"}`;
+      return `${sid}${name ? ` ${name}` : ""}：${ev.title || "無標題"}`;
     });
 
     try {
       const reg = await _swReadyOrNull();
       if (!reg) return;
-      await reg.showNotification(`今日重要資訊：${newsRows.length} 則`, {
+      await reg.showNotification(`今日較少見的資料：${newsRows.length} 則`, {
         body: topRows.join("\n"),
         icon: NOTIFICATION_ICON,
         badge: NOTIFICATION_BADGE,
@@ -3876,7 +3936,7 @@ function alertTypeLabel(row) {
       });
       localStorage.setItem(key, "1");
     } catch (e) {
-      console.warn("[Notification] 無法發送今日重要資訊通知:", e);
+      console.warn("[Notification] 無法發送今日較少見資料通知:", e);
     }
   }
 
@@ -4357,9 +4417,11 @@ function renderHome() {
   // 今日事件摘要——只數「今天首次入庫」或「事件日就是今天」的列，
   // 早已知道、每天重新確認的舊事件不灌水
   const evAll = Object.values(stockEvents).flat().filter(isTodayEvent);
-  const high = evAll.filter(e => eventScoreOf(e) >= 70).length;
-  const normal = evAll.filter(e => eventScoreOf(e) >= 40 && eventScoreOf(e) < 70).length;
-  const other = evAll.length - high - normal;
+  // 兩格不是三格：這裡以前是 🟠重要／🔵注意／⚪一般，用的是橘藍灰，但同一組門檻在事件卡上
+  // 卻是金／紫／淡藍——同一件事在兩個畫面長得不一樣。而且「注意」與「一般」對使用者的
+  // 行動沒有差別。現在首頁與事件卡共用 isStandoutEvent 這一個門檻，措辭也跟彈窗一致。
+  const standout = evAll.filter(isStandoutEvent).length;
+  const others = evAll.length - standout;
   const headlineEl = document.getElementById("home-events-headline");
   const statsEl = document.getElementById("home-events-stats");
   const hasEvents = evAll.length > 0;
@@ -4371,9 +4433,8 @@ function renderHome() {
   }
   if (statsEl) {
     statsEl.innerHTML = hasEvents ? `
-    <div class="home-stat"><div class="hs-num sev-orange">${high}</div><div class="hs-label">🟠 重要</div></div>
-    <div class="home-stat"><div class="hs-num sev-blue">${normal}</div><div class="hs-label">🔵 注意</div></div>
-    <div class="home-stat"><div class="hs-num sev-info">${other}</div><div class="hs-label">⚪ 一般</div></div>
+    <div class="home-stat"><div class="hs-num sev-orange">${standout}</div><div class="hs-label">較少見</div></div>
+    <div class="home-stat"><div class="hs-num sev-info">${others}</div><div class="hs-label">其他</div></div>
   ` : `<div class="view-empty py-2" style="padding:0.5rem">今日尚無彙整事件<br><span style="font-size:.72rem;opacity:.75">每日盤後執行 python main.py --fetch-events 更新</span></div>`;
     statsEl.onclick = hasEvents ? openTodayEventsPanel : null;
   }
@@ -4424,12 +4485,14 @@ function renderHome() {
     document.getElementById("home-watchlist").innerHTML = wlHtml;
   }
 
-  // 今日重要資訊（high importance 事件）——僅限今天首次入庫或事件日為
-  // 今天的列；先前就已知、每天重新確認的舊事件不再重新上榜（也不重推播）
+  // 今日較少見（跟上面三格、與事件彈窗共用 isStandoutEvent 同一個門檻）——
+  // 僅限今天首次入庫或事件日為今天的列；先前就已知、每天重新確認的舊事件
+  // 不再重新上榜（也不重推播）。標題不再叫「重要資訊」：同一階在全站只能有一個名字，
+  // 不然同一張畫面上面寫「較少見」、下面寫「重要」，使用者會以為是兩群不同的資料。
   const newsRows = [];
   for (const [sid, evs] of Object.entries(stockEvents)) {
     for (const ev of evs) {
-      if (isTodayEvent(ev) && eventScoreOf(ev) >= 70) newsRows.push({ sid, ev });
+      if (isTodayEvent(ev) && isStandoutEvent(ev)) newsRows.push({ sid, ev });
     }
   }
   newsRows.sort((a, b) => _compareEvents(a.ev, b.ev));
@@ -4439,7 +4502,7 @@ function renderHome() {
           <span class="badge-sid" style="font-size:.68rem">${escapeHtml(stockNameOf(sid) || sid)}</span>
           <span class="hr-name">${escapeHtml(ev.title || "")}</span>
         </div>`).join("")
-    : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無重要資訊</div>';
+    : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無較少見的資料</div>';
   
     sendTodayImportantInfoNotification(newsRows);
 }
@@ -5571,14 +5634,15 @@ function renderWatchlist(rows) {
     const fallbackName = universe[sid]?.n || "";
     const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
     const events = todayEventsOf(sid);
-    const highEvents = events.filter(e => eventScoreOf(e) >= 70);
-    // 事件按鈕永遠顯示：有事件就接一個數字，沒有就只剩一個淡掉的圖示
+    const standoutEvents = events.filter(isStandoutEvent);
+    // 事件按鈕永遠顯示：有事件就接一個數字，沒有就只剩一個淡掉的圖示。
+    // 圖示不再因為「有少見事件」而變色——一顆變色的圖示無法自我解釋，使用者看得出它跟
+    // 別檔不一樣，卻無從知道差在哪（這正是有人來問「為什麼有的亮黃色」的原因）。
+    // 強調改走下面標籤區的一句文字，用讀的就懂。
     const evtLabel = events.length > 0
       ? `${ICON_EVENTS}<span class="wl-ic-count">${events.length}</span>`
       : ICON_EVENTS;
-    const evtClass = events.length > 0
-      ? `wl-events-btn${highEvents.length > 0 ? " has-high" : ""}`
-      : "wl-events-btn wl-events-empty";
+    const evtClass = events.length > 0 ? "wl-events-btn" : "wl-events-btn wl-events-empty";
 
     // 報價靠右自成一欄，標籤另起一行——名稱因此拿得到整行寬度，不必截斷
     const q = getQuote(sid);
@@ -5589,6 +5653,10 @@ function renderWatchlist(rows) {
 
     // 標籤用等級圓點而不是 emoji：同一個等級在全站都是同一顆顏色
     const tags = [];
+    // 事件強調排第一個：一句話講完「有幾件、為什麼值得先看」，不必去猜圖示的顏色
+    if (standoutEvents.length > 0) {
+      tags.push(`<span class="wl-signal-badge wl-tag-standout">今日 ${standoutEvents.length} 件較少見</span>`);
+    }
     if (sig) {
       const sev = inferSeverity(sig);
       tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${sev}"></i>${escapeHtml(alertTypeLabel(sig))}</span>`);
