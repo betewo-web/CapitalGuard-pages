@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="96">
+  <meta name="app-version" content="97">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=96" rel="stylesheet">
+  <link href="watchlist.css?v=97" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1348,7 +1348,7 @@ function renderEventCard(sid, ev, options = {}) {
 function openEventsPanel(sid) {
   const events = stockEvents[sid] || [];
   const sidName = universe[sid]?.n || sid;
-  document.getElementById("events-modal-title").textContent = `📋 ${sid} ${sidName} 事件彙整（近 90 天）`;
+  document.getElementById("events-modal-title").textContent = `📋 ${sidName} 事件彙整（近 90 天）`;
 
   const body = document.getElementById("events-modal-body");
   if (events.length === 0) {
@@ -1411,7 +1411,6 @@ function openTodayEventsPanel() {
           <div class="today-event-group-head">
             <div class="today-event-stock">
               <strong>${escapeHtml(sidName)}</strong>
-              <span class="badge-sid">${escapeHtml(sid)}</span>
               <span class="today-event-count">${events.length} 件</span>
             </div>
             <button class="today-event-stock-link" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股 →</button>
@@ -1503,7 +1502,7 @@ function toggleQaPanel(sid) {
   }
   qaCurrentSid = sid || null;
   document.getElementById("qa-stock-hint").textContent =
-    sid ? `詢問：${sid} ${universe[sid]?.n || ""}` : "詢問自選股相關問題";
+    sid ? `詢問：${universe[sid]?.n || sid}` : "詢問自選股相關問題";
   panel.style.display = "flex";
   qaVisible = true;
   document.getElementById("qa-input").focus();
@@ -4013,6 +4012,14 @@ function latestSignalOf(sid) {
 }
 
 // ── PWA v2: 通知 Inbox ───────────────────────────────────────────
+// 後端把通知標題組成「{代號} {名稱} …」（realtime.py 的 label）。列表與詳情只從名稱起顯示：
+// 2026-09-14 使用者要求代號只留在自選頁。推播本身的標題仍由後端決定，這裡只管 App 內的呈現。
+function _titleWithoutSid(title, sid) {
+  const t = String(title || "");
+  const code = String(sid || "").trim();
+  return code && t.startsWith(code + " ") ? t.slice(code.length + 1) : t;
+}
+
 async function refreshInbox(force = true) {
   if (!state.userId) return;
   if (!force && Date.now() - inboxLoadedAt < 60000) return;   // 60 秒內不重抓
@@ -4097,14 +4104,13 @@ function renderInbox() {
     const sev = inferSeverity(r);
     const unread = inboxSupportsRead && !r.read_at;
     const sid = String(r.stock_id || "").trim();
-    const sidBadge = sid ? `<span class="badge-sid" style="font-size:.66rem">${escapeHtml(sid)}</span>` : "";
     html += `
       <div class="inbox-item${unread ? " unread" : ""}" data-sev="${sev}" role="button" tabindex="0"
            onclick="openInboxDetail('${escapeHtml(String(r.id))}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetail('${escapeHtml(String(r.id))}');}">
         ${signalIconSvg(r, 30)}
         <div class="ib-main">
-          <div class="ib-title">${escapeHtml(r.title || "")} ${sidBadge}</div>
+          <div class="ib-title">${escapeHtml(_titleWithoutSid(r.title, sid))}</div>
           <div class="ib-body">${escapeHtml(r.body || "")}</div>
         </div>
         <span class="ib-time">${fmtTime(r.sent_at, dayLabelOf(r.sent_at) !== "今天")}</span>
@@ -4131,7 +4137,7 @@ function openInboxDetail(rowId) {
   }
 
   const source = String(row.source || "monitor");
-  document.getElementById("alert-history-detail-title").textContent = row.title || "通知詳情";
+  document.getElementById("alert-history-detail-title").textContent = _titleWithoutSid(row.title, row.stock_id) || "通知詳情";
   document.getElementById("alert-history-detail-body").textContent = row.body || "（無內容）";
   document.getElementById("alert-history-detail-time").textContent = fmtTime(row.sent_at, true);
   document.getElementById("alert-history-detail-source").textContent = source;
@@ -4318,8 +4324,7 @@ function renderHome() {
     return `
       <div class="home-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
         <span class="hr-name">${escapeHtml(name)}</span>
-        <span class="badge-sid" style="font-size:.68rem">${escapeHtml(sid)}</span>
-        <span class="hr-meta">${q ? fmtLevel(q.price) : ""}</span>
+        <span class="hr-meta">${q ? fmtPrice(q.price) : ""}</span>
         ${q ? fmtChgHtml(q.changePct) : ""}
         ${sigDot}
       </div>`;
@@ -4339,7 +4344,7 @@ function renderHome() {
   document.getElementById("home-news").innerHTML = newsRows.length
     ? newsRows.slice(0, 6).map(({ sid, ev }) => `
         <div class="home-row" onclick="openEventsPanel('${escapeHtml(sid)}')">
-          <span class="badge-sid" style="font-size:.68rem">${escapeHtml(sid)}</span>
+          <span class="badge-sid" style="font-size:.68rem">${escapeHtml(stockNameOf(sid) || sid)}</span>
           <span class="hr-name">${escapeHtml(ev.title || "")}</span>
         </div>`).join("")
     : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無重要資訊</div>';
@@ -4365,14 +4370,13 @@ function holdingBySid() {
 //   2. 每日報告 stock_data[sid].levels —— 6MB 才到，而且只涵蓋進榜的股票；K 線圖畫的是這組
 // 以前只有 2：訊號都已經顯示「跌破支撐」了，關卡那行還在等報告檔、沒進榜的更是永遠沒有。
 const RADAR_NEAR_PCT = 1.0;   // 距關卡 1% 內算「逼近」，與後端 MONITOR_NEAR_PCT 預設一致
-// 訊號自帶的 level 是「關卡價」的只有支撐／壓力類（爆量的 level 是成交量、漲跌停是板價）
-const RADAR_LEVEL_KINDS = ["break_sup", "near_sup", "reclaim_sup", "break_res", "near_res"];
 
-// 列表列的價位一律不顯示小數：關卡、均線、現價並排時，小數點吃掉的寬度比它帶來的
-// 資訊多。要精確到分請看 K 線視窗——那裡仍是兩位小數。
-function fmtLevel(v) {
+// 價位忠實呈現：資料有幾位小數就顯示幾位（最多兩位，台股最細檔位 0.01），不補零也不
+// 四捨五入成整數。2026-09-14 使用者要求：以前列表列一律整數，105.5 顯示成 106，與券商
+// App 對不上。所有顯示股價的地方（現價、關卡、均線、訊號價位、K 線標題）都走這一個函式。
+function fmtPrice(v) {
   const n = Number(v);
-  return Number.isFinite(n) ? Math.round(n).toLocaleString() : "—";
+  return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—";
 }
 
 // 距離百分比：一位小數，尾數 .0 去掉（2.6%、8.7%、1%）
@@ -4424,12 +4428,12 @@ function nearestLevels(sid, price) {
 function levelLinesOf(sid, price) {
   const lv = nearestLevels(sid, price);
   const dist = [];
-  if (lv.resPct != null) dist.push(`壓(${fmtLevel(lv.resistance)}) 距離${fmtPct(lv.resPct)}%`);
-  if (lv.supPct != null) dist.push(`撐(${fmtLevel(lv.support)}) 距離${fmtPct(lv.supPct)}%`);
+  if (lv.resPct != null) dist.push(`壓(${fmtPrice(lv.resistance)}) 距離${fmtPct(lv.resPct)}%`);
+  if (lv.supPct != null) dist.push(`撐(${fmtPrice(lv.support)}) 距離${fmtPct(lv.supPct)}%`);
   const MA_SHORT = { 20: "月", 60: "季" };
   const ma = maPositions(sid, price);
   const maLine = ma.filter(m => MA_SHORT[m.n])
-    .map(m => `${MA_SHORT[m.n]}(${fmtLevel(m.value)}) ${m.pct >= 0 ? "之上" : "之下"}${fmtPct(m.pct)}%`)
+    .map(m => `${MA_SHORT[m.n]}(${fmtPrice(m.value)}) ${m.pct >= 0 ? "之上" : "之下"}${fmtPct(m.pct)}%`)
     .join(" · ");
   return { lv, ma, dist, distLine: dist.join(" · "), maLine };
 }
@@ -4579,12 +4583,12 @@ function scoreRowHtml(sid, s, opts = {}) {
   return `
     <div class="holding-row score-row" onclick="openScoreDetail('${escapeHtml(sid)}')">
       <div class="hr-left">
-        <div class="hr-title">${escapeHtml(name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(sid)}</span>${addBtn}</div>
+        <div class="hr-title">${escapeHtml(name)}${addBtn}</div>
         <div class="hr-sid">${sub || "&nbsp;"}</div>
       </div>
       <div class="hr-right">
         <div class="hr-price">${total != null ? `${total.toFixed(0)}<span class="score-unit">分</span>` : "—"} ${chgHtml}</div>
-        <div class="hr-sub">${q ? `${fmtLevel(q.price)} ${fmtChgHtml(q.changePct)}` : ""}</div>
+        <div class="hr-sub">${q ? `${fmtPrice(q.price)} ${fmtChgHtml(q.changePct)}` : ""}</div>
       </div>
     </div>`;
 }
@@ -4678,11 +4682,11 @@ function maExplainHtml(sid, s) {
   const mas = maPositions(sid, price);
   if (!mas.length) return "";
   const items = mas.map(m =>
-    `<span class="sd-ma-item">${escapeHtml(m.label)} <b>${fmtLevel(m.value)}</b>`
+    `<span class="sd-ma-item">${escapeHtml(m.label)} <b>${fmtPrice(m.value)}</b>`
     + `<span class="${m.pct >= 0 ? "chg-up" : "chg-down"}">`
     + `${m.pct >= 0 ? "+" : "−"}${Math.abs(m.pct).toFixed(1)}%</span></span>`).join("");
   return `<div class="sd-ma">
-    <div class="sd-ma-head">趨勢分的原料　現價 ${fmtLevel(price)}</div>
+    <div class="sd-ma-head">趨勢分的原料　現價 ${fmtPrice(price)}</div>
     <div class="sd-ma-list">${items}</div>
     <div class="sd-ma-note">百分比是現價相對該均線的距離。趨勢分數取「現價是否在各均線之上」、
       「各均線是否高於 20 天前」與「四條是否由短到長遞減排列」三組條件的平均。</div>
@@ -4694,7 +4698,7 @@ function openScoreDetail(sid) {
   const s = sharedReportData?.investment_scores?.[sidKey];
   const name = getPreferredStockName(sidKey, s?.stock_name) || sidKey;
   document.getElementById("score-detail-title").innerHTML =
-    `${escapeHtml(name)} <span class="badge-sid" style="font-size:.7rem">${escapeHtml(sidKey)}</span>`;
+    escapeHtml(name);
   const body = document.getElementById("score-detail-body");
   const klineBtn = document.getElementById("score-detail-kline");
   klineBtn.onclick = () => {
@@ -4840,32 +4844,13 @@ function _signalLabel(sig) {
   return SIGNAL_LABEL_MAP[sig] || sig || "訊號";
 }
 
-function _signalKindFromAlert(row) {
-  const direct = String(row?.signal || "");
-  if (SIGNAL_LABEL_MAP[direct]) return direct;
-  const eventKind = String(row?.event_key || "").split(":")[1] || "";
-  if (SIGNAL_LABEL_MAP[eventKind]) return eventKind;
-  const title = String(row?.title || "");
-  const titleKinds = [
-    [/跌破支撐/, "break_sup"], [/逼近支撐/, "near_sup"], [/收復支撐/, "reclaim_sup"],
-    [/突破壓力/, "break_res"], [/逼近壓力/, "near_res"], [/漲停/, "limit_up"],
-    [/跌停/, "limit_down"], [/爆量/, "volume_spike"],
-    [/上漲價位/, "target_high"], [/下跌價位/, "target_low"],
-  ];
-  return titleKinds.find(([pattern]) => pattern.test(title))?.[1] || "";
-}
 
-function _signalLevelFromAlert(row) {
-  const parts = String(row?.event_key || "").split(":");
-  const level = parts.length >= 4 ? Number(parts[2]) : NaN;
-  return Number.isFinite(level) ? level : null;
-}
 
-// compact=true 給列表列用（整數）；K 線視窗維持兩位小數，那裡是看精確數字的地方
+// 價位一律 fmtPrice（忠實小數）；compact 參數保留給既有呼叫端，現在兩種情境格式相同
 function _signalLevelLabel(signal, level, compact = false) {
   if (level == null || !Number.isFinite(Number(level))) return "";
   const value = Number(level);
-  const p = compact ? fmtLevel(value) : value.toFixed(2);
+  const p = fmtPrice(value);
   if (signal === "volume_spike") return `成交量 ${Math.round(value).toLocaleString()} 張`;
   if (["break_sup", "near_sup", "reclaim_sup"].includes(signal)) return `支撐 ${p}`;
   if (["break_res", "near_res"].includes(signal)) return `壓力 ${p}`;
@@ -4891,14 +4876,15 @@ function renderLive() {
     const iq = intradayQuoteMap[sid] || null;
     const q = getQuote(sid);
     const price = q ? q.price : null;
-    const lines = levelLinesOf(sid, price);
-    const lv = lines.lv;
+    // 關卡只拿來算「逼近關卡」與排序，不再顯示成文字（2026-09-14 使用者要求：
+    // 支撐／壓力／月線／季線只留在自選列，雷達列只看訊號與報價）
+    const lv = nearestLevels(sid, price);
     const active = (iq && iq.signal && iq.signal !== "none") ? iq : null;
     const today = todaySignalsOf(sid);
     const nearPct = Math.min(lv.supPct != null ? lv.supPct : Infinity,
                              lv.resPct != null ? lv.resPct : Infinity);
     return {
-      sid, q, iq, lv, lines, active, today, nearPct,
+      sid, q, iq, lv, active, today, nearPct,
       sev: active ? inferSeverity(active) : null,
       name: getPreferredStockName(sid, r.stock_name) || sid,
       holding: holdings.get(sid) || null,
@@ -4939,39 +4925,22 @@ function renderLive() {
   listEl.innerHTML = `<div class="card panel-card"><div class="card-body p-0">` + rows.map(x => {
     const tags = [];
     if (x.active) {
-      const lvl = x.iq.level != null ? ` ${fmtLevel(x.iq.level)}` : "";
+      const lvl = x.iq.level != null ? ` ${fmtPrice(x.iq.level)}` : "";
       tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${x.sev}"></i>${escapeHtml(alertTypeLabel(x.active))}${lvl}</span>`);
     }
     if (x.holding) tags.push(`<span class="wl-signal-badge wl-tag-holding">持</span>`);
-    // 兩行文字的格式在 levelLinesOf（與自選列共用）；要看全部四條均線，分數明細裡有。
-    const dist = x.lines.dist;
-    const maLine = x.lines.maLine;
     const nearCls = (!x.active && x.nearPct <= RADAR_NEAR_PCT) ? " radar-near" : "";
-    // 沒有關卡時分三種：訊號本身帶關卡就先顯示它（不會再出現「跌破支撐」旁邊寫「無關卡資料」）、
-    // 報告檔還在路上就說載入中、兩個來源都沒有才是真的沒有
-    let distHtml = x.lines.distLine;
-    const levelKind = x.active && RADAR_LEVEL_KINDS.includes(x.active.signal) && x.iq.level != null;
-    // 現在沒有進行中的訊號，但今天發過支撐／壓力類通知（event_key 帶關卡價）：先用那個價位。
-    // 典型情境：下面那行寫著「今日 1 則 · 突破壓力 11:05」，上面卻是「無關卡資料」
-    const todayLv = x.today.map(r => [_signalKindFromAlert(r), _signalLevelFromAlert(r)])
-      .find(([k, l]) => RADAR_LEVEL_KINDS.includes(k) && l != null);
-    if (!dist.length && levelKind) distHtml = `${escapeHtml(_signalLevelLabel(x.active.signal, x.iq.level, true))}（訊號關卡）`;
-    else if (!dist.length && todayLv) distHtml = `${escapeHtml(_signalLevelLabel(todayLv[0], todayLv[1], true))}（今日訊號）`;
-    else if (!dist.length && !sharedReportData && !x.iq?.levels) distHtml = "關卡載入中…";
-    else if (!dist.length) distHtml = "無關卡資料";
     const todayHtml = x.today.length
       ? `今日 ${x.today.length} 則 · ${escapeHtml(alertTypeLabel(x.today[0]))} ${fmtTime(x.today[0].sent_at)}`
       : "今日無訊號";
     return `
       <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${escapeHtml(x.sid)}')">
         <div class="hr-left">
-          <div class="hr-title">${escapeHtml(x.name)} <span class="badge-sid" style="font-size:.66rem">${escapeHtml(x.sid)}</span> ${tags.join(" ")}</div>
-          <div class="hr-sid">${distHtml}</div>
-          ${maLine ? `<div class="hr-sid">${maLine}</div>` : ""}
+          <div class="hr-title">${escapeHtml(x.name)} ${tags.join(" ")}</div>
           <div class="hr-sid">${todayHtml}</div>
         </div>
         <div class="hr-right">
-          <div class="hr-price">${x.q ? fmtLevel(x.q.price) : "—"}</div>
+          <div class="hr-price">${x.q ? fmtPrice(x.q.price) : "—"}</div>
           <div class="hr-sub">${x.q ? fmtChgHtml(x.q.changePct) : "無報價"}</div>
         </div>
       </div>`;
@@ -5519,7 +5488,7 @@ function renderWatchlist(rows) {
     const q = getQuote(sid);
     const sig = latestSignalOf(sid);
     const quoteLine = q
-      ? `<div class="wl-quote"><span class="wq-price">${fmtLevel(q.price)}</span>${fmtChgHtml(q.changePct)}</div>`
+      ? `<div class="wl-quote"><span class="wq-price">${fmtPrice(q.price)}</span>${fmtChgHtml(q.changePct)}</div>`
       : `<div class="wl-quote wl-quote-idle">—</div>`;
 
     // 標籤用等級圓點而不是 emoji：同一個等級在全站都是同一顆顏色
@@ -5982,9 +5951,9 @@ function fallbackKLineLevels(sid) {
 // 標題列的「現價」：有盤中報價就用它（報告檔的 levels.current 是昨收，盤中會差一截）
 function _klinePriceText(sid, levels) {
   const q = getQuote(sid);
-  if (q && Number.isFinite(q.price)) return q.price.toFixed(2);
+  if (q && Number.isFinite(q.price)) return fmtPrice(q.price);
   const cur = Number(levels?.current);
-  return Number.isFinite(cur) && cur > 0 ? cur.toFixed(2) : "—";
+  return Number.isFinite(cur) && cur > 0 ? fmtPrice(cur) : "—";
 }
 
 // K 線視窗頂端的「今日訊號」：現在的盤中狀態（intraday_state）＋今天發過的通知
@@ -6063,7 +6032,7 @@ function formatKLineLevelBadges(values, type, strengths) {
     const str = Number(strList[i]) || 1.0;
     const opacity = Math.min(1.0, 0.5 + str * 0.12).toFixed(2);
     const weight = str >= 2.0 ? "700" : "500";
-    return `<span class="kline-level-badge ${type}" style="opacity:${opacity};font-weight:${weight};" title="強度 ${str.toFixed(1)}">${nv.toFixed(2)}</span>`;
+    return `<span class="kline-level-badge ${type}" style="opacity:${opacity};font-weight:${weight};" title="強度 ${str.toFixed(1)}">${fmtPrice(nv)}</span>`;
   }).filter(Boolean);
   return parts.length ? parts.join("") : '<span class="kline-level-empty">—</span>';
 }
@@ -6515,8 +6484,8 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
     },
   });
   const markLines = [];
-  if (n > 0 && supportLevels.length) markLines.push(levelLine(supportLevels[0], "38,166,154", `支 ${supportLevels[0].toFixed(2)}`, "insideEndTop"));
-  if (n > 0 && resistanceLevels.length) markLines.push(levelLine(resistanceLevels[0], "239,83,80", `壓 ${resistanceLevels[0].toFixed(2)}`, "insideEndBottom"));
+  if (n > 0 && supportLevels.length) markLines.push(levelLine(supportLevels[0], "38,166,154", `支 ${fmtPrice(supportLevels[0])}`, "insideEndTop"));
+  if (n > 0 && resistanceLevels.length) markLines.push(levelLine(resistanceLevels[0], "239,83,80", `壓 ${fmtPrice(resistanceLevels[0])}`, "insideEndBottom"));
 
   // 預設視窗：日 80／週 52／月 36 根，三種週期同一公式。以前日K 的 dzStart 硬寫 0 → 一次畫出全部
   // ~729 根（手機上一根不到 0.5px 就是「擁擠、看不清」）；週／月的常數 720／5760 又大於資料量，一樣退化成 0。
