@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="99">
+  <meta name="app-version" content="101">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=99" rel="stylesheet">
+  <link href="watchlist.css?v=101" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -786,6 +786,7 @@
           <span id="kline-chips-note" class="small text-secondary" style="display:none;"></span>
         </div>
         <div id="kline-chart" style="width:100%;"></div>
+        <div class="kline-hint" aria-hidden="true">長按顯示數值，按住左右滑動可逐根查看；拖曳平移、雙指縮放</div>
         <div class="row g-2 mt-2" id="kline-levels">
           <div class="col-md-6">
             <div class="p-2 rounded kline-level-card resistance">
@@ -969,6 +970,10 @@ let klineTouchDomEl = null;
 let klineTouchDomHandlers = null;
 let klineTouchGlobalHandlers = null;
 let klineLastBuildArgs = null;   // 轉向／視窗變高時要用同一份資料重排版面（高度是像素算的）
+let klineLegendSelected = null;  // 使用者點過圖例後的開關狀態；切週期／籌碼重建圖表時帶回去，不要每次都重設
+let klineMaChipState = null;     // 表頭 MA 數字（{ ma, suffix }）：圖例切換時要重畫成同色＋淡化
+let klineSignalsExpanded = false;   // 今日訊號的通知清單預設收合，圖表才在第一屏
+let klineTouchStartedLocked = false; // 這次觸控開始時十字線已鎖定：不動就放開＝解除，滑動＝移動十字線
 let watchlistRows = [];
 let intradayQuoteMap = {};
 let intradayQuotesLoadingPromise = null;
@@ -5932,6 +5937,8 @@ async function openKLineFromWatchlist(sid) {
   document.getElementById("kline-name").textContent = "載入中...";
   document.getElementById("kline-industry").textContent = universe[sidKey]?.i || "";
   document.getElementById("kline-price").textContent = _klinePriceText(sidKey, null);
+  klineLegendSelected = null;      // 每檔股票從預設圖例開始
+  klineSignalsExpanded = false;
   renderKLineSignals(sidKey);   // 盤中狀態與今天的通知都在記憶體，不用等報告檔
   setKLineMaInfo("讀取共用報表資料中...");
   renderKLineLevels({ support: [], resistance: [] });
@@ -5960,20 +5967,18 @@ async function openKLineFromWatchlist(sid) {
       const fallback = fallbackKLineLevels(sidKey);
       const hasFallbackMa = Object.keys(fallback.ma).length > 0;
       renderKLineLevels(fallback);
-      setKLineMaInfo(hasFallbackMa
-        ? `${formatKLineMaText(fallback.ma)} · 讀取完整 K 線中...`
-        : (inUniverse
+      if (hasFallbackMa) renderKLineMaChip(fallback.ma, "讀取完整 K 線中...");
+      else setKLineMaInfo(inUniverse
           ? "共享檔未提供 K 線細節，現在改用 FinMind 即時抓取中..."
-          : "找不到共享資料，現在改用 FinMind 即時抓取中..."));
+          : "找不到共享資料，現在改用 FinMind 即時抓取中...");
       document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">即時抓取 K 線資料中...</div>';
 
       const liveStock = await fetchWatchlistFinMindStock(sidKey, displayName, displayIndustry);
       if (!liveStock) {
-        setKLineMaInfo(hasFallbackMa
-          ? `${formatKLineMaText(fallback.ma)}（K 線抓取失敗，請稍後再試）`
-          : (inUniverse
+        if (hasFallbackMa) renderKLineMaChip(fallback.ma, "K 線抓取失敗，請稍後再試");
+        else setKLineMaInfo(inUniverse
             ? "FinMind 即時抓取失敗，請稍後再試"
-            : "FinMind 即時抓取失敗，請確認代號是否正確"));
+            : "FinMind 即時抓取失敗，請確認代號是否正確");
         document.getElementById("kline-chart").innerHTML = inUniverse
           ? `<div class="kline-empty">${escapeHtml(sidKey)} 尚未在共享檔內，且 FinMind 即時抓取失敗。</div>`
           : `<div class="kline-empty">無法即時抓取 ${escapeHtml(sidKey)} 的 K 線資料。</div>`;
@@ -5985,7 +5990,7 @@ async function openKLineFromWatchlist(sid) {
       sharedReportData = data;
 
       document.getElementById("kline-price").textContent = _klinePriceText(sidKey, liveStock.levels);
-      setKLineMaInfo(formatKLineMaText(liveStock.levels?.ma || {}));
+      renderKLineMaChip(liveStock.levels?.ma || {});
       renderKLineLevels(liveStock.levels || {});
       document.getElementById("kline-industry").textContent = normalizeIndustry(liveStock.industry || displayIndustry || "");
       currentChipsView = "foreign";
@@ -6000,7 +6005,7 @@ async function openKLineFromWatchlist(sid) {
     document.getElementById("kline-price").textContent = _klinePriceText(sidKey, levels);
 
     const ma = levels.ma || {};
-    setKLineMaInfo(formatKLineMaText(ma));
+    renderKLineMaChip(ma);
     renderKLineLevels(levels);
 
     document.getElementById("kline-period-select").value = "daily";
@@ -6016,7 +6021,7 @@ async function openKLineFromWatchlist(sid) {
 
 // 未進榜自選股的關卡與均線備援：關卡讀 intraday_state.levels（監控對每檔自選股都算，
 // 雷達列用的同一組）、均線讀報告 investment_scores 的 ma20/ma60（評分股都有；不在前端重算）。
-// 回傳形狀與報告的 stock.levels 相同，renderKLineLevels／formatKLineMaText 直接吃。
+// 回傳形狀與報告的 stock.levels 相同，renderKLineLevels／renderKLineMaChip 直接吃。
 function fallbackKLineLevels(sid) {
   const lv = intradayQuoteMap?.[sid]?.levels || null;
   const s = sharedReportData?.investment_scores?.[sid];
@@ -6077,10 +6082,27 @@ function renderKLineSignals(sid) {
       </div>`;
   }).join("");
 
+  // 通知清單預設收合：這一塊在圖表上方，通知一多就把 K 線推出第一屏，
+  // 開 K 線卻要先捲過通知。表頭留「目前狀態＋通知 N 則」，點了再展開。
+  const toggle = items
+    ? `<button type="button" class="ks-toggle${klineSignalsExpanded ? " is-open" : ""}" onclick="toggleKLineSignals()"
+         aria-expanded="${klineSignalsExpanded}" aria-controls="kline-signal-items">通知 ${today.length} 則<span class="ks-chev">▾</span></button>`
+    : `<span class="ks-empty">今天還沒有通知</span>`;
   el.innerHTML = `
-    <div class="ks-head"><span class="ks-title">今日訊號</span>${now ? `<span class="ks-now">${now}</span>` : ""}</div>
-    ${items || `<div class="ks-empty">今天還沒有通知</div>`}`;
+    <div class="ks-head"><span class="ks-title">今日訊號</span>${now ? `<span class="ks-now">${now}</span>` : ""}${toggle}</div>
+    ${items ? `<div class="ks-items" id="kline-signal-items"${klineSignalsExpanded ? "" : ' style="display:none;"'}>${items}</div>` : ""}`;
   el.style.display = "";
+}
+
+function toggleKLineSignals() {
+  klineSignalsExpanded = !klineSignalsExpanded;
+  const list = document.getElementById("kline-signal-items");
+  const btn = document.querySelector("#kline-signals .ks-toggle");
+  if (list) list.style.display = klineSignalsExpanded ? "" : "none";
+  if (btn) {
+    btn.classList.toggle("is-open", klineSignalsExpanded);
+    btn.setAttribute("aria-expanded", String(klineSignalsExpanded));
+  }
 }
 
 // 兩個 modal 疊在一起會搶 backdrop，先關 K 線再開通知詳情（詳情裡的「查看個股」會再開回來）
@@ -6089,16 +6111,27 @@ function openInboxDetailFromKLine(rowId) {
   openInboxDetail(rowId);
 }
 
-function formatKLineMaText(maObj) {
+// 表頭的均線數字：每個數字前一個與圖上同色的圓點（KLINE_MA_STYLE），圖例關掉的線淡化，
+// 一眼就對得上「哪個數字是哪條線」。suffix 是狀態文字（讀取中／抓取失敗）。
+function renderKLineMaChip(maObj, suffix) {
   const ma = maObj || {};
-  const order = ["MA5", "MA10", "MA20", "MA60"];
-  const segments = order
+  klineMaChipState = { ma, suffix: suffix || "" };
+  const el = document.getElementById("kline-ma");
+  if (!el) return;
+  const selected = klineLegendSelected || defaultKLineLegendSelected(isKLineMobileMode());
+  const segments = ["MA5", "MA10", "MA20", "MA60"]
     .filter(k => ma[k] !== undefined && ma[k] !== null && ma[k] !== "")
-    .map(k => `${k}:${ma[k]}`);
-  return segments.join(" · ") || "MA —";
+    .map(k => {
+      const hidden = selected[k] === false;
+      return `<span class="kline-ma-seg${hidden ? " is-hidden" : ""}" title="${hidden ? "圖上未顯示，點圖例可開" : ""}">` +
+             `<i class="kline-ma-dot" style="background:${KLINE_MA_STYLE[k].color};"></i>${k} ${escapeHtml(String(ma[k]))}</span>`;
+    });
+  el.innerHTML = `📊 ${segments.length ? segments.join('<span class="kline-ma-sep">·</span>') : "MA —"}` +
+    (suffix ? `<span class="kline-ma-suffix">${escapeHtml(suffix)}</span>` : "");
 }
 
 function setKLineMaInfo(text) {
+  klineMaChipState = null;
   const el = document.getElementById("kline-ma");
   if (!el) return;
   const safeText = String(text || "").trim() || "MA —";
@@ -6194,6 +6227,10 @@ function renderKLineChart(sid, period) {
     if (klineChart && !klineChart.isDisposed()) klineChart.dispose();
     el.innerHTML = "";
     klineChart = echarts.init(el, null, { renderer: "canvas" });
+    klineChart.on("legendselectchanged", e => {
+      klineLegendSelected = { ...(e.selected || {}) };
+      if (klineMaChipState) renderKLineMaChip(klineMaChipState.ma, klineMaChipState.suffix);
+    });
     bindKLineTouchInteraction();
   }
   // 版面（主圖／副圖／縮放條的高度）是按容器像素分的，所以要把實際高度傳進去
@@ -6252,25 +6289,38 @@ function hideKLineMobileTooltip() {
   if (!klineChart) return;
   klineChart.dispatchAction({ type: "hideTip" });
   klineChart.dispatchAction({ type: "updateAxisPointer", currTrigger: "leave" });
-  klineMobileTooltipLocked = false;
+  setKLineMobileTooltipLocked(false);
 }
 
+// 十字線鎖定時把 inside dataZoom 的拖曳平移關掉：不然手指沿著 K 棒滑，圖也跟著跑
+function setKLineMobileTooltipLocked(locked) {
+  if (klineMobileTooltipLocked === locked) return;
+  klineMobileTooltipLocked = locked;
+  if (klineChart && !klineChart.isDisposed()) {
+    klineChart.setOption({ dataZoom: [{ type: "inside", moveOnMouseMove: !locked }] });
+  }
+}
+
+function showKLineMobileTooltipAt(point) {
+  if (!klineChart || !point) return;
+  klineChart.dispatchAction({ type: "showTip", x: point.x, y: point.y });
+}
+
+// 手機的十字線：長按出現並鎖定；鎖定後按住滑動＝逐根移動（台股 App 的慣例），
+// 原地點一下放開＝解除；點圖外也解除（bindKLineTouchInteraction 的 document 監聽）。
 function onKLineTouchStart(evt) {
   if (!klineChart || !isKLineMobileMode()) return;
   if (!evt?.touches || evt.touches.length !== 1) return;
-  if (klineMobileTooltipLocked) hideKLineMobileTooltip();
   klineTouchMoved = false;
+  klineTouchStartedLocked = klineMobileTooltipLocked;
   klineTouchStartPoint = getKLineTouchPoint(evt);
   clearKLineLongPressTimer();
+  if (klineMobileTooltipLocked) return;   // 已鎖定：等 move（移動）或 end（解除），不用再計時
 
   klineLongPressTimer = setTimeout(() => {
     if (!klineChart || klineTouchMoved || !klineTouchStartPoint) return;
-    klineChart.dispatchAction({
-      type: "showTip",
-      x: klineTouchStartPoint.x,
-      y: klineTouchStartPoint.y,
-    });
-    klineMobileTooltipLocked = true;
+    setKLineMobileTooltipLocked(true);
+    showKLineMobileTooltipAt(klineTouchStartPoint);
   }, KLINE_LONG_PRESS_MS);
 }
 
@@ -6278,17 +6328,25 @@ function onKLineTouchMove(evt) {
   if (!klineTouchStartPoint) return;
   const p = getKLineTouchPoint(evt);
   if (!p) return;
+  if (klineMobileTooltipLocked) {
+    // 鎖定中：手指到哪十字線到哪
+    klineTouchMoved = true;
+    showKLineMobileTooltipAt(p);
+    return;
+  }
   const dx = Math.abs(p.x - klineTouchStartPoint.x);
   const dy = Math.abs(p.y - klineTouchStartPoint.y);
   if (dx > KLINE_TOUCH_MOVE_THRESHOLD || dy > KLINE_TOUCH_MOVE_THRESHOLD) {
     klineTouchMoved = true;
     clearKLineLongPressTimer();
-    if (klineMobileTooltipLocked) hideKLineMobileTooltip();
   }
 }
 
 function onKLineTouchEnd() {
   clearKLineLongPressTimer();
+  // 鎖定狀態下原地點一下就放開＝解除；有滑動的話留著（使用者剛把十字線移到想看的那根）
+  if (klineTouchStartedLocked && !klineTouchMoved) hideKLineMobileTooltip();
+  klineTouchStartedLocked = false;
   klineTouchStartPoint = null;
 }
 
@@ -6538,6 +6596,18 @@ function computeWatchlistLevels(raw, ma5, ma10, ma20, ma60) {
   };
 }
 
+// 均線顏色的單一來源：圖表 series、圖例、tooltip 圓點、表頭的 MA 數字都讀這裡
+const KLINE_MA_STYLE = {
+  MA5:  { color: "#ffca28", width: 1 },     // 金（品牌色）：最短、最貼 K 棒的那條
+  MA10: { color: "#4fc3f7", width: 1 },     // 天藍
+  MA20: { color: "#e879f9", width: 1.3 },   // 洋紅：月線是評分用的主要均線，粗一點
+  MA60: { color: "#d7dff2", width: 1.3 },   // 淡白：季線最長、最平，深色底上最清楚；不用純白，免得壓過 K 棒
+};
+
+function defaultKLineLegendSelected(mobile) {
+  return mobile ? { MA5: false, MA10: false } : {};
+}
+
 function buildKLineOption(pd, chips, levels, period, chartHeight) {
   const dates = pd.dates || [];
   const ohlcv = pd.ohlcv || [];
@@ -6680,13 +6750,18 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   // 月K 幾乎不會有 60 根，ma60 整條是 null——沒有值就不進圖例，
   // 免得出現一個永遠空白的項目
   const hasMa60 = Array.isArray(pd.ma60) && pd.ma60.some(v => v !== null && v !== undefined);
+  // 圖例只放 K 線與均線：成交量／籌碼不是拿來開關的（籌碼有自己的下拉），以前也塞進圖例，
+  // 390px 寬就被擠到第 2 頁，使用者看不出第三個副圖是什麼。副圖改在左上角直接寫名字。
   const legendData = hasMa60
-    ? ["K線", "MA5", "MA10", "MA20", "MA60", "成交量(張)"]
-    : ["K線", "MA5", "MA10", "MA20", "成交量(張)"];
-  if (hasChips) {
-    const chipLabel = currentChipsView === "foreign" ? "外資" : currentChipsView === "trust" ? "投信" : currentChipsView === "dealer" ? "自營商" : "三大合計";
-    legendData.push(`${chipLabel}淨買超`);
-  }
+    ? ["K線", "MA5", "MA10", "MA20", "MA60"]
+    : ["K線", "MA5", "MA10", "MA20"];
+  const chipLabel = currentChipsView === "foreign" ? "外資" : currentChipsView === "trust" ? "投信" : currentChipsView === "dealer" ? "自營商" : "三大合計";
+  const subTitle = (gridIdx, text) => ({
+    type: "text", left: gridBox.left + 4, top: grids[gridIdx].top + 2, silent: true, z: 10,
+    style: { text, fill: "#a6badf", fontSize: 10 },
+  });
+  const graphic = [subTitle(1, "成交量(張)")];
+  if (hasChips) graphic.push(subTitle(2, `${chipLabel}淨買超(張)`));
 
   const series = [
     {
@@ -6698,15 +6773,19 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
       itemStyle: { color: "#ef5350", color0: "#26a69a", borderColor: "#ef5350", borderColor0: "#26a69a" },
       markLine: { silent: true, symbol: "none", data: markLines, animation: false },
     },
-    { name: "MA5", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma5 || [], symbol: "none", lineStyle: { width: 1, color: "#ff9800" } },
-    { name: "MA10", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma10 || [], symbol: "none", lineStyle: { width: 1, color: "#2196f3" } },
-    { name: "MA20", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma20 || [], symbol: "none", lineStyle: { width: 1.3, color: "#9c27b0" } },
-    ...(hasMa60 ? [{ name: "MA60", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma60, symbol: "none", lineStyle: { width: 1.5, color: "#6d4cff" } }] : []),
-    { name: "成交量(張)", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volData, barMaxWidth: 6, barMinWidth: 1 },
+    // 顏色一定要放在 series 層級的 color：圖例色塊與 tooltip 的圓點都是讀這裡，
+    // 以前只寫在 lineStyle.color，線是橘／藍／紫，圖例卻拿到 ECharts 預設調色盤（藍／綠／黃／紅），
+    // 兩邊對不起來。四條的色相刻意拉開（金／天藍／洋紅／白），深色底上不會有三條都是藍紫。
+    { name: "MA5", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma5 || [], symbol: "none", color: KLINE_MA_STYLE.MA5.color, lineStyle: { width: KLINE_MA_STYLE.MA5.width } },
+    { name: "MA10", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma10 || [], symbol: "none", color: KLINE_MA_STYLE.MA10.color, lineStyle: { width: KLINE_MA_STYLE.MA10.width } },
+    { name: "MA20", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma20 || [], symbol: "none", color: KLINE_MA_STYLE.MA20.color, lineStyle: { width: KLINE_MA_STYLE.MA20.width } },
+    ...(hasMa60 ? [{ name: "MA60", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: pd.ma60, symbol: "none", color: KLINE_MA_STYLE.MA60.color, lineStyle: { width: KLINE_MA_STYLE.MA60.width } }] : []),
+    // 長條逐根依漲跌著色，series 的 color 只給圖例色塊用：成交量給中性灰藍（不偏紅也不偏綠），
+    // 籌碼給買超紫；不設的話兩個圖例會拿到調色盤的藍與綠，跟長條顏色對不上
+    { name: "成交量(張)", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volData, barMaxWidth: 6, barMinWidth: 1, color: "rgba(166,186,223,0.7)" },
   ];
 
   if (hasChips) {
-    const chipLabel = currentChipsView === "foreign" ? "外資" : currentChipsView === "trust" ? "投信" : currentChipsView === "dealer" ? "自營商" : "三大合計";
     series.push({
       name: `${chipLabel}淨買超`,
       type: "bar",
@@ -6715,6 +6794,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
       data: chipsSeriesData,
       barMaxWidth: 6,
       barMinWidth: 1,
+      color: "rgba(139, 124, 255, 0.85)",
     });
   }
 
@@ -6754,7 +6834,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
             const v = p.data?.value ?? p.data;
             h += `成交量:<b>${Math.round(v / 1000).toLocaleString()}</b>張<br/>`;
           } else if (p.data !== null && !Array.isArray(p.data)) {
-            h += `${p.seriesName}:<b>${p.data}</b><br/>`;
+            h += `${p.marker || ""}${p.seriesName}:<b>${p.data}</b><br/>`;
           }
         });
         return `${h}</div>`;
@@ -6763,9 +6843,11 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
     legend: {
       type: "scroll", data: legendData, top: 4, left: 46, right: 18, itemWidth: 12, itemGap: 8,
       textStyle: { fontSize: 10, color: "#dce7ff" }, pageIconSize: 9, pageTextStyle: { color: "#a6badf" },
-      // 手機預設只畫 MA20／MA60：四條均線疊在 K 棒上太滿，點圖例可以再開
-      selected: mobile ? { MA5: false, MA10: false } : {},
+      // 手機預設只畫 MA20／MA60：四條均線疊在 K 棒上太滿，點圖例可以再開；
+      // 開過之後切週期／籌碼不重設（klineLegendSelected）
+      selected: klineLegendSelected || defaultKLineLegendSelected(mobile),
     },
+    graphic,
     grid: grids,
     xAxis,
     yAxis,
@@ -6833,6 +6915,8 @@ document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => 
   klineMobileTooltipLocked = false;
   klineTouchStartPoint = null;
   klineLastBuildArgs = null;
+  klineLegendSelected = null;
+  klineMaChipState = null;
   currentKLineSid = null;
 });
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="99">
+  <meta name="app-version" content="101">
 <title>台股每日分析報告</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -721,7 +721,7 @@ function _buildOption(pd, levels, period) {
         p.forEach(x=>{
           if(x.seriesName==='日K'&&Array.isArray(x.data)) h+='開:<b>'+x.data[1]+'</b> 高:<b>'+x.data[4]+'</b> 低:<b>'+x.data[3]+'</b> 收:<b>'+x.data[2]+'</b><br/>';
           else if(x.seriesName==='成交量(張)'){ const v=x.data&&x.data.value!==undefined?x.data.value:x.data; h+='成交量:<b>'+Math.round(v/1000).toLocaleString()+'</b>張<br/>'; }
-          else if(x.data!==null&&!Array.isArray(x.data)) h+=x.seriesName+':<b>'+x.data+'</b><br/>';
+          else if(x.data!==null&&!Array.isArray(x.data)) h+=(x.marker||'')+x.seriesName+':<b>'+x.data+'</b><br/>';
         }); return h;
       }
     },
@@ -734,11 +734,12 @@ function _buildOption(pd, levels, period) {
       {name:'日K',type:'candlestick',xAxisIndex:0,yAxisIndex:0,data:kData,
        itemStyle:{color:'#ef5350',color0:'#26a69a',borderColor:'#ef5350',borderColor0:'#26a69a'},
        markLine:{silent:true,symbol:'none',data:ml,animation:false}},
-      {name:'MA5', type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma5 ||[],symbol:'none',lineStyle:{width:1.2,color:'#ff9800'}},
-      {name:'MA10',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma10||[],symbol:'none',lineStyle:{width:1.2,color:'#2196f3'}},
-      {name:'MA20',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma20||[],symbol:'none',lineStyle:{width:1.5,color:'#9c27b0'}},
-      ...(hasMa60?[{name:'MA60',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma60,symbol:'none',lineStyle:{width:1.8,color:'#6d4cff'}}]:[]),
-      {name:'成交量(張)',type:'bar',xAxisIndex:1,yAxisIndex:1,data:volData,barMaxWidth:8}
+      // 顏色放 series 層級的 color：圖例色塊讀的是這個，只寫 lineStyle.color 圖例會拿到預設調色盤、跟線對不上
+      {name:'MA5', type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma5 ||[],symbol:'none',color:'#ff9800',lineStyle:{width:1.2}},
+      {name:'MA10',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma10||[],symbol:'none',color:'#2196f3',lineStyle:{width:1.2}},
+      {name:'MA20',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma20||[],symbol:'none',color:'#9c27b0',lineStyle:{width:1.5}},
+      ...(hasMa60?[{name:'MA60',type:'line',xAxisIndex:0,yAxisIndex:0,data:pd.ma60,symbol:'none',color:'#6d4cff',lineStyle:{width:1.8}}]:[]),
+      {name:'成交量(張)',type:'bar',xAxisIndex:1,yAxisIndex:1,data:volData,barMaxWidth:8,color:'#9aa8c4'}
     ]
   };
 }
