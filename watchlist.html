@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="97">
+  <meta name="app-version" content="98">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=97" rel="stylesheet">
+  <link href="watchlist.css?v=98" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1033,6 +1033,10 @@ let inboxRows = [];             // alert_history rows（sent_at desc）
 let inboxLoadedAt = 0;
 let inboxSupportsRead = true;   // migrate_pwa_v2.sql 未執行時自動降級
 let intradaySupportsLevels = true;   // migrate_intraday_levels.sql 未執行時自動降級（PostgREST 對不存在的欄位回 400）
+// intraday_state 的選配欄位（各自有 migration，舊到新）：levels（migrate_intraday_levels.sql）、
+// quote_at（migrate_intraday_quote_at.sql：報價有效時刻＝MIS 快照 sysTime 或富果抓取時間，
+// 雷達狀態列顯示「報價 HH:MM:SS」）。查詢 400 時由新到舊逐個拿掉，intradaySupportsLevels 跟著降級。
+let intradayOptionalCols = ["levels", "quote_at"];
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
 let watchFilter = "all";        // all / signal / up / down / holding
@@ -3076,7 +3080,7 @@ async function loadIntradayQuotes(force = false) {
     try {
       const cols = "stock_id,stock_name,price,prev_close,change_pct,volume,signal,severity,level,signal_at,updated_at";
       const query = () => ({
-        select: intradaySupportsLevels ? `${cols},levels` : cols,
+        select: [cols, ...intradayOptionalCols].join(","),
         stock_id: `in.(${sids.join(",")})`,
         limit: String(Math.max(30, sids.length * 2)),
       });
@@ -3084,9 +3088,14 @@ async function loadIntradayQuotes(force = false) {
       try {
         rows = await sbGet("intraday_state", query(), state.accessToken);
       } catch (e) {
-        if (!intradaySupportsLevels) throw e;
-        intradaySupportsLevels = false;   // 欄位還沒建：改不帶 levels 再試一次，之後都不帶
-        rows = await sbGet("intraday_state", query(), state.accessToken);
+        // 選配欄位還沒建（400）：由新到舊逐個拿掉重試，之後都不帶
+        if (!intradayOptionalCols.length) throw e;
+        for (;;) {
+          intradayOptionalCols = intradayOptionalCols.slice(0, -1);
+          try { rows = await sbGet("intraday_state", query(), state.accessToken); break; }
+          catch (e2) { if (!intradayOptionalCols.length) throw e2; }
+        }
+        intradaySupportsLevels = intradayOptionalCols.includes("levels");
       }
       const map = {};
       for (const row of rows || []) {
@@ -3114,6 +3123,7 @@ async function loadIntradayQuotes(force = false) {
           signal_at:  row.signal_at || null,
           stock_name: row.stock_name || "",
           updated_at: row.updated_at || null,
+          quote_at:   row.quote_at || null,
           levels:     _intradayLevels(row.levels),
         };
       }
@@ -3879,6 +3889,15 @@ function fmtTime(ts, withDate = false) {
   if (!withDate) return hm;
   const [, month, day] = taipeiDateKey(d).split("-");
   return `${Number(month)}/${Number(day)} ${hm}`;
+}
+
+// 到秒的台北時間（雷達狀態列的「報價 13:14:03」：快照節奏是幾十秒，分鐘看不出來）
+const _TPE_HMS_FMT = new Intl.DateTimeFormat("zh-TW", {
+  timeZone: "Asia/Taipei", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
+function fmtClock(ts) {
+  const d = new Date(ts);
+  return isNaN(d) ? "" : _TPE_HMS_FMT.format(d);
 }
 
 function isToday(ts) {
@@ -4893,12 +4912,16 @@ function renderLive() {
 
   const latestAt = rows.reduce((m, x) =>
     (x.iq?.updated_at && (!m || x.iq.updated_at > m)) ? x.iq.updated_at : m, null);
+  // 報價時間＝這份報價有效的時刻（intraday_state.quote_at：MIS 快照 sysTime 或富果抓取時間）。
+  // 它與寫入時間的差就是「來源本身的延遲」；盤中顯示到秒，快照多久沒換一眼看得出。
+  const latestQuoteAt = rows.reduce((m, x) =>
+    (x.iq?.quote_at && (!m || x.iq.quote_at > m)) ? x.iq.quote_at : m, null);
   const nSignal = rows.filter(x => x.active).length;
   const nNear = rows.filter(x => !x.active && x.nearPct <= RADAR_NEAR_PCT).length;
   const nQuiet = rows.length - nSignal - nNear;
   statusEl.textContent = isOpen
-    ? `🟢 盤中（09:00–13:35）· 自選 ${rows.length} 檔`
-    : `⚪ 已收盤${latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${rows.length} 檔`;
+    ? `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : ""} · 自選 ${rows.length} 檔`
+    : `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${rows.length} 檔`;
   // 三格數的是「自選股的狀態」，跟首頁三格數「事件」不同，標籤刻意不用同一組字
   document.getElementById("live-stats").innerHTML = `
     <div class="home-stat"><div class="hs-num sev-orange">${nSignal}</div><div class="hs-label">⚡ 有訊號</div></div>
