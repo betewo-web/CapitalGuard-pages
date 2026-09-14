@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="101">
+  <meta name="app-version" content="102">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=101" rel="stylesheet">
+  <link href="watchlist.css?v=102" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -757,7 +757,7 @@
             <span class="fw-semibold" id="kline-name"></span>
             <span class="badge bg-secondary" id="kline-industry" style="font-size:0.72rem;"></span>
             <span class="ms-auto" style="font-size:0.85rem;">現價 <strong id="kline-price"></strong></span>
-            <span id="kline-ma" class="kline-ma-chip">📊 MA —</span>
+            <span id="kline-ma" class="kline-ma-chip">MA —</span>
           </div>
         </div>
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
@@ -784,28 +784,14 @@
             </select>
           </div>
           <span id="kline-chips-note" class="small text-secondary" style="display:none;"></span>
+          <!-- 評分明細：同一份 investment_scores（13 子項、變化原因）對所有評分股都有；
+               原本是圖下方的「7 大面向分析」，只有進榜的 ~32 檔有資料。放進工具列，圖下方不再佔一排。 -->
+          <button type="button" class="btn btn-sm btn-outline-light btn-ghost ms-auto" id="kline-score-detail-btn" onclick="openScoreDetailFromKLine()">評分明細 →</button>
         </div>
+        <!-- 圖下方以前還有壓力／支撐區間兩張卡片（完整關卡清單），2026-09-14 拿掉：圖上已畫最近一支撐一壓力，
+             空間留給 K 線本身（#kline-chart 的高度同時加大） -->
         <div id="kline-chart" style="width:100%;"></div>
         <div class="kline-hint" aria-hidden="true">長按顯示數值，按住左右滑動可逐根查看；拖曳平移、雙指縮放</div>
-        <div class="row g-2 mt-2" id="kline-levels">
-          <div class="col-md-6">
-            <div class="p-2 rounded kline-level-card resistance">
-              <div class="fw-semibold mb-1" style="font-size:0.8rem;">▲ 壓力區間</div>
-              <div id="kline-resistance" class="kline-level-values"></div>
-            </div>
-          </div>
-          <div class="col-md-6">
-            <div class="p-2 rounded kline-level-card support">
-              <div class="fw-semibold mb-1" style="font-size:0.8rem;">▼ 支撐區間</div>
-              <div id="kline-support" class="kline-level-values"></div>
-            </div>
-          </div>
-        </div>
-        <!-- 評分明細：同一份 investment_scores（13 子項、變化原因）對所有評分股都有；
-             原本這裡是「7 大面向分析」，只有進榜的 ~32 檔有資料，其他自選股 7 格有 4 格永遠是「—」 -->
-        <div class="d-flex justify-content-end mt-2">
-          <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="kline-score-detail-btn" onclick="openScoreDetailFromKLine()">評分明細 →</button>
-        </div>
       </div>
     </div>
   </div>
@@ -5021,7 +5007,7 @@ function renderLive() {
       ? `今日 ${x.today.length} 則 · ${escapeHtml(alertTypeLabel(x.today[0]))} ${fmtTime(x.today[0].sent_at)}`
       : "今日無訊號";
     return `
-      <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${escapeHtml(x.sid)}')">
+      <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${escapeHtml(x.sid)}', { signalsExpanded: true })">
         <div class="hr-left">
           <div class="hr-title">${escapeHtml(x.name)} ${tags.join(" ")}</div>
           <div class="hr-sid">${todayHtml}</div>
@@ -5927,7 +5913,8 @@ async function loadSharedReportData(force = false) {
   }
 }
 
-async function openKLineFromWatchlist(sid) {
+// opts.signalsExpanded：盤中雷達點進來就是為了看訊號，通知清單直接展開；其他入口預設收合
+async function openKLineFromWatchlist(sid, opts = {}) {
   const sidKey = String(sid || "").trim();
   trackActivity("kline_open", { stock: sidKey });
   const modalEl = document.getElementById("klineModal");
@@ -5938,10 +5925,9 @@ async function openKLineFromWatchlist(sid) {
   document.getElementById("kline-industry").textContent = universe[sidKey]?.i || "";
   document.getElementById("kline-price").textContent = _klinePriceText(sidKey, null);
   klineLegendSelected = null;      // 每檔股票從預設圖例開始
-  klineSignalsExpanded = false;
+  klineSignalsExpanded = !!opts.signalsExpanded;
   renderKLineSignals(sidKey);   // 盤中狀態與今天的通知都在記憶體，不用等報告檔
   setKLineMaInfo("讀取共用報表資料中...");
-  renderKLineLevels({ support: [], resistance: [] });
   document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">讀取 K 線資料中...</div>';
 
   modal.show();
@@ -5966,7 +5952,6 @@ async function openKLineFromWatchlist(sid) {
       // FinMind 成功再換成完整的 MA5/10/20/60。
       const fallback = fallbackKLineLevels(sidKey);
       const hasFallbackMa = Object.keys(fallback.ma).length > 0;
-      renderKLineLevels(fallback);
       if (hasFallbackMa) renderKLineMaChip(fallback.ma, "讀取完整 K 線中...");
       else setKLineMaInfo(inUniverse
           ? "共享檔未提供 K 線細節，現在改用 FinMind 即時抓取中..."
@@ -5991,7 +5976,6 @@ async function openKLineFromWatchlist(sid) {
 
       document.getElementById("kline-price").textContent = _klinePriceText(sidKey, liveStock.levels);
       renderKLineMaChip(liveStock.levels?.ma || {});
-      renderKLineLevels(liveStock.levels || {});
       document.getElementById("kline-industry").textContent = normalizeIndustry(liveStock.industry || displayIndustry || "");
       currentChipsView = "foreign";
       document.getElementById("kline-chips-select").value = "foreign";
@@ -6006,7 +5990,6 @@ async function openKLineFromWatchlist(sid) {
 
     const ma = levels.ma || {};
     renderKLineMaChip(ma);
-    renderKLineLevels(levels);
 
     document.getElementById("kline-period-select").value = "daily";
     currentChipsView = "foreign";
@@ -6021,7 +6004,7 @@ async function openKLineFromWatchlist(sid) {
 
 // 未進榜自選股的關卡與均線備援：關卡讀 intraday_state.levels（監控對每檔自選股都算，
 // 雷達列用的同一組）、均線讀報告 investment_scores 的 ma20/ma60（評分股都有；不在前端重算）。
-// 回傳形狀與報告的 stock.levels 相同，renderKLineLevels／renderKLineMaChip 直接吃。
+// 回傳形狀與報告的 stock.levels 相同，renderKLineMaChip 與圖上的關卡線直接吃。
 function fallbackKLineLevels(sid) {
   const lv = intradayQuoteMap?.[sid]?.levels || null;
   const s = sharedReportData?.investment_scores?.[sid];
@@ -6126,7 +6109,7 @@ function renderKLineMaChip(maObj, suffix) {
       return `<span class="kline-ma-seg${hidden ? " is-hidden" : ""}" title="${hidden ? "圖上未顯示，點圖例可開" : ""}">` +
              `<i class="kline-ma-dot" style="background:${KLINE_MA_STYLE[k].color};"></i>${k} ${escapeHtml(String(ma[k]))}</span>`;
     });
-  el.innerHTML = `📊 ${segments.length ? segments.join('<span class="kline-ma-sep">·</span>') : "MA —"}` +
+  el.innerHTML = `${segments.length ? segments.join('<span class="kline-ma-sep">·</span>') : "MA —"}` +
     (suffix ? `<span class="kline-ma-suffix">${escapeHtml(suffix)}</span>` : "");
 }
 
@@ -6134,31 +6117,7 @@ function setKLineMaInfo(text) {
   klineMaChipState = null;
   const el = document.getElementById("kline-ma");
   if (!el) return;
-  const safeText = String(text || "").trim() || "MA —";
-  el.textContent = safeText.startsWith("📊") ? safeText : `📊 ${safeText}`;
-}
-
-function formatKLineLevelBadges(values, type, strengths) {
-  const list = Array.isArray(values) ? values : [];
-  const strList = Array.isArray(strengths) ? strengths : [];
-  const parts = list.map((v, i) => {
-    const nv = Number(v);
-    if (!Number.isFinite(nv)) return null;
-    const str = Number(strList[i]) || 1.0;
-    const opacity = Math.min(1.0, 0.5 + str * 0.12).toFixed(2);
-    const weight = str >= 2.0 ? "700" : "500";
-    return `<span class="kline-level-badge ${type}" style="opacity:${opacity};font-weight:${weight};" title="強度 ${str.toFixed(1)}">${fmtPrice(nv)}</span>`;
-  }).filter(Boolean);
-  return parts.length ? parts.join("") : '<span class="kline-level-empty">—</span>';
-}
-
-function renderKLineLevels(levels) {
-  const supportEl = document.getElementById("kline-support");
-  const resistanceEl = document.getElementById("kline-resistance");
-  if (!supportEl || !resistanceEl) return;
-
-  supportEl.innerHTML = formatKLineLevelBadges(levels?.support, "support", levels?.support_strengths);
-  resistanceEl.innerHTML = formatKLineLevelBadges(levels?.resistance, "resistance", levels?.resistance_strengths);
+  el.textContent = String(text || "").trim() || "MA —";
 }
 
 // K 線 → 評分明細：同一份 investment_scores（13 子項、變化原因、對照前期）對所有評分股都有，
@@ -6620,8 +6579,8 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
     return { value: d[4], itemStyle: { color: c } };
   });
 
-  // 關卡線只畫最近的一支撐、一壓力（各帶標籤）：以前 5–6 條虛線疊在 4 條均線上，手機上分不出誰是誰；
-  // 完整清單在圖下方的關卡徽章。generator 的 _calc_support_resistance 已把支撐由高到低、
+  // 關卡線只畫最近的一支撐、一壓力（各帶標籤）：以前 5–6 條虛線疊在 4 條均線上，手機上分不出誰是誰。
+  // generator 的 _calc_support_resistance 已把支撐由高到低、
   // 壓力由低到高排好，index 0 就是離現價最近的那一條。
   const supportLevels = (levels.support || []).map(v => Number(v)).filter(v => Number.isFinite(v));
   const resistanceLevels = (levels.resistance || []).map(v => Number(v)).filter(v => Number.isFinite(v));
