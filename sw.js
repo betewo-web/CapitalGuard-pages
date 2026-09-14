@@ -10,12 +10,13 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v102';
+const CACHE_VERSION = 'tw-stock-v103';
 
 // 訂閱輪換用的 Cache：不隨版本清掉，否則升級 SW 就把待同步的訂閱弄丟了。
 const PUSH_SYNC_CACHE = 'push-sync';
 const PUSH_SYNC_URL   = './__push_sync__';   // 假 URL，只當 Cache 的 key 用
 const PUSH_KEY_URL    = './__push_key__';    // 頁面訂閱時寫入的 VAPID 公鑰
+const PENDING_ALERT_URL = './__pending_alert__'; // 點通知後要跳去的位置（冷啟動備援）
 
 // Static assets cached for offline CSS/icon support.
 // watchlist.html is NOT listed here — it is handled by network-first navigation.
@@ -206,8 +207,18 @@ self.addEventListener('pushsubscriptionchange', event => {
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const target = event.notification.data?.url || './watchlist.html';
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+  event.waitUntil((async () => {
+    // 冷啟動備援：iOS 從通知啟動主畫面 App 時常忽略 openWindow 的網址，
+    // 直接開 manifest 的 start_url，?alert= 就這樣掉了。先把目標寫進 Cache，
+    // 頁面開機時若網址上沒有參數就來這裡拿（只認 60 秒內的，用完即刪）。
+    try {
+      const cache = await caches.open(PUSH_SYNC_CACHE);
+      await cache.put(PENDING_ALERT_URL, new Response(
+        JSON.stringify({ url: target, at: Date.now() }),
+        { headers: { 'Content-Type': 'application/json' } }));
+    } catch { /* 沒有 Cache 也還有網址那條路 */ }
+
+    return clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
       // Focus existing PWA window if open
       for (const c of list) {
         if (c.url.includes('watchlist') && 'focus' in c) {
@@ -217,7 +228,7 @@ self.addEventListener('notificationclick', event => {
       }
       // Otherwise open a new window
       if (clients.openWindow) return clients.openWindow(target);
-    })
-  );
+    });
+  })());
 });
 

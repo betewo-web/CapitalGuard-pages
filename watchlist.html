@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="102">
+  <meta name="app-version" content="103">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=102" rel="stylesheet">
+  <link href="watchlist.css?v=103" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2775,8 +2775,12 @@ async function showMain() {
     history.replaceState(null, "", location.pathname + (q ? `?${q}` : "") + (location.hash || "#inbox"));
   }
   const hashTab = (location.hash || "").replace("#", "");
-  switchTab(APP_TABS.includes(hashTab) ? hashTab : "home", true);
+  // 有要定位的通知就一定去通知頁：hash 被系統吃掉時（iOS 從主畫面啟動）
+  // 只看 hash 會停在首頁，pendingAlertFocus 就永遠等不到它的分頁
+  switchTab(bootAlert ? "inbox" : (APP_TABS.includes(hashTab) ? hashTab : "home"), true);
   trackActivity("app_open", { tab: currentTab });
+  // 網址上沒有參數：可能是 iOS 忽略了 openWindow 的網址，改問 SW 留在 Cache 的目標
+  if (!bootAlert) _consumePendingAlertFromCache();
   loadAdminFlag();
 
   await loadWatchlist();
@@ -4099,8 +4103,27 @@ function _applyPendingAlertFocus() {
   setTimeout(() => el.classList.remove("is-target"), 3000);
 }
 
+// 冷啟動備援：SW 在 notificationclick 時把目標寫進 Cache，這裡取用並清掉。
+// 只認 60 秒內的，否則「上週點過通知」會在今天開 App 時莫名其妙跳一次。
+async function _consumePendingAlertFromCache() {
+  try {
+    const cache = await caches.open("push-sync");
+    const res = await cache.match("./__pending_alert__");
+    if (!res) return;
+    await cache.delete("./__pending_alert__");
+    const { url, at } = await res.json();
+    if (!url || !at || Date.now() - at > 60000) return;
+    _handleNotificationClickUrl(url);
+  } catch { /* 沒有 Cache API 或讀取失敗就算了，不影響一般開啟 */ }
+}
+
+function _clearPendingAlertCache() {
+  caches.open("push-sync").then(c => c.delete("./__pending_alert__")).catch(() => {});
+}
+
 // SW 在視窗已開時把通知的網址丟過來（notificationclick → postMessage）
 function _handleNotificationClickUrl(url) {
+  _clearPendingAlertCache();   // 這條路已經處理掉了，別讓備援再跳一次
   let u;
   try { u = new URL(String(url || ""), location.href); } catch { return; }
   const key = u.searchParams.get("alert");
@@ -7362,6 +7385,9 @@ if ('serviceWorker' in navigator) {
       _handleNotificationClickUrl(e.data.url);
     }
   });
+  // addEventListener（而非 onmessage）不會隱式啟動訊息佇列，SW 送的訊息會一直排隊，
+  // 點通知時視窗已開的那條路就整個沒反應。
+  if (navigator.serviceWorker.startMessages) navigator.serviceWorker.startMessages();
 }
 
 // pushManager.subscribe() 失敗的原因幾乎都在瀏覽器／作業系統，不在我們的後端——
