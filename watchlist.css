@@ -1001,7 +1001,9 @@ body.has-bottom-nav .page-shell {
    rgba(33,37,41,.75)——近黑字印在深色卡片上，等於看不見（對比 1.1:1）。這裡明確給亮度。 */
 .event-content { font-size: 0.76rem; color: var(--text-1) !important; line-height: 1.45; }
 .event-source { font-size: 0.7rem; color: var(--text-muted); }
-.event-source-link { font-size: 0.72rem; color: #7eb0f8; white-space: nowrap; }
+/* 整段「來源：⋯ ↗」現在是同一個連結，長度比原本那截目的地文字長，
+   窄螢幕要讓它換行（↗ 用 &nbsp; 黏住最後一個字，不會自己掉到下一行）。 */
+.event-source-link { font-size: 0.72rem; color: #7eb0f8; }
 .event-actions {
 	display: flex;
 	align-items: center;

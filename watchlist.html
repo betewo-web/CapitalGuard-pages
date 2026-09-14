@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="104">
+  <meta name="app-version" content="105">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=104" rel="stylesheet">
+  <link href="watchlist.css?v=105" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1289,28 +1289,35 @@ const _EVENT_SOURCE_PAGES = [
     page: null, pageLabel: "原始資料 (JSON)" },
 ];
 
+// 「來源」本身就是連結，不再另外掛一段可見的目的地文字。
+// 以前一張卡要排兩段：「來源：證交所 OpenAPI 月營收」＋「Yahoo 股市 營收 ↗」，
+// 在 390px 上經常折成兩行，而後面那段對使用者沒有新資訊——他要的是「點得進去看」。
+// 標籤仍照 source_url 說資料從哪來，目的地頁面放進 title（桌機游標停著看得到）。
+// 唯一的例外是連到 JSON 的證交所公告：那個提醒有資訊，不能只留在手機看不到的 title，
+// 所以照樣顯示在文字裡——省掉的是重複的東西，不是警語。
 function eventSourceHtml(sid, ev) {
   const url = String(ev?.source_url || "");
-  let label = "", href = "", linkText = "";
   if (!url) {
     // 訊號引擎／評分變化這類是系統從既有資料算出來的，沒有外部來源
-    label = "系統計算";
-  } else {
-    const spec = _EVENT_SOURCE_PAGES.find(s => url.includes(s.match));
-    if (spec) {
-      label = spec.label;
-      href = spec.page ? (spec.page(sid, ev) || url) : url;
-      linkText = typeof spec.pageLabel === "function" ? spec.pageLabel(sid, ev) : spec.pageLabel;
-    } else {
-      try { label = new URL(url).hostname.replace(/^www\./, ""); } catch { label = "外部來源"; }
-      href = url;
-      linkText = "開啟";
-    }
+    const label = "系統計算";
+    return `<span class="event-source" title="這筆資料的來源">來源：${escapeHtml(label)}</span>`;
   }
-  const link = href
-    ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" class="event-source-link">${escapeHtml(linkText)} ↗</a>`
-    : "";
-  return `<span class="event-source" title="這筆資料的來源">來源：${escapeHtml(label)}</span>${link}`;
+  const spec = _EVENT_SOURCE_PAGES.find(s => url.includes(s.match));
+  let label, href, dest = "", note = "";
+  if (spec) {
+    label = spec.label;
+    href = spec.page ? (spec.page(sid, ev) || url) : url;
+    dest = typeof spec.pageLabel === "function" ? spec.pageLabel(sid, ev) : spec.pageLabel;
+    // spec.page 是 null＝沒有網頁版，點下去是一頁 JSON，先講。
+    // pageLabel 自己帶括號（「原始資料 (JSON)」），再包一層會變成巢狀括號，先拆掉。
+    if (!spec.page) { note = `（${dest.replace(/[()（）]/g, "").trim()}）`; dest = ""; }
+  } else {
+    try { label = new URL(url).hostname.replace(/^www\./, ""); } catch { label = "外部來源"; }
+    href = url;   // 目的地就是標籤講的那個網域，title 不必再講一次
+  }
+  const title = dest ? `開啟 ${dest}` : "開啟來源頁面";
+  return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" class="event-source-link"`
+    + ` title="${escapeHtml(title)}">來源：${escapeHtml(label + note)}&nbsp;↗</a>`;
 }
 
 function renderEventCard(sid, ev, options = {}) {
