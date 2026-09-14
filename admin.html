@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="105">
+  <meta name="app-version" content="106">
   <title>管理儀表板 — 台股監控</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -118,6 +118,32 @@
     .badge.basic { border-color: rgba(139,124,255,.5); color: #c4b5fd; }
     .badge.admin { border-color: rgba(12,163,12,.5); color: #6fdc6f; }
 
+    /* ── 第零層：待辦 ── */
+    .todo-wrap { display: grid; gap: .5rem; margin-bottom: .4rem; }
+    .todo { display: flex; gap: .7rem; align-items: flex-start; background: var(--surface);
+            border: 1px solid var(--border); border-left: 3px solid var(--sev); border-radius: 12px; padding: .6rem .8rem; }
+    .todo[data-level="high"]   { --sev: var(--bad); }
+    .todo[data-level="medium"] { --sev: var(--warn); }
+    .todo[data-level="low"]    { --sev: var(--text-muted); }
+    .todo .ic { font-size: 1.05rem; line-height: 1.4; }
+    .todo .bd { min-width: 0; }
+    .todo .t { font-weight: 700; font-size: .92rem; }
+    .todo .d { color: var(--text-1); font-size: .8rem; margin-top: .1rem; }
+    .todo .who { margin-top: .3rem; display: flex; gap: .3rem; flex-wrap: wrap; }
+    .todo .who span { font-size: .74rem; border: 1px solid var(--border); border-radius: 999px; padding: .05rem .5rem; color: var(--text-1); }
+    .todo-ok { color: var(--good); font-size: .85rem; background: var(--surface); border: 1px solid var(--border);
+               border-left: 3px solid var(--good); border-radius: 12px; padding: .6rem .8rem; }
+
+    /* ── 第一層：漏斗 ── */
+    .fn { display: grid; gap: .35rem; margin-top: .2rem; }
+    .fn-row { display: grid; grid-template-columns: 7.5rem 1fr 5.5rem; gap: .6rem; align-items: center; font-size: .82rem; }
+    .fn-name { color: var(--text-1); }
+    .fn-track { position: relative; height: 22px; background: rgba(255,255,255,.05); border-radius: 4px; overflow: hidden; }
+    .fn-fill { position: absolute; inset: 0 auto 0 0; background: var(--series-1); border-radius: 4px 0 0 4px; }
+    .fn-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-0); }
+    .fn-num i { font-style: normal; color: var(--text-muted); font-size: .74rem; margin-left: .35rem; }
+    .fn-drop { color: var(--bad); font-size: .74rem; }
+
     /* ── 閘門（未登入／非管理者／未部署） ── */
     .gate { max-width: 460px; margin: 12vh auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.6rem 1.4rem; text-align: center; }
     .gate h1 { font-size: 1.1rem; margin: .4rem 0 .6rem; }
@@ -155,6 +181,19 @@
 </div>
 
 <main id="dash" class="wrap" style="display:none">
+  <!-- 第零層：要我做什麼。單人經營者每天只會看這一段。 -->
+  <h2 class="sec">今日待辦 <small>需要你處理的事，沒有事就是空的</small></h2>
+  <div class="todo-wrap" id="todo"></div>
+
+  <!-- 第一層：一個北極星 + 啟用漏斗。全部排除管理者帳號。 -->
+  <h2 class="sec">產品是否被使用 <small>以下數字一律不含管理者本人</small></h2>
+  <div class="grid">
+    <div class="card span-4" id="c-northstar"></div>
+    <div class="card span-8" id="c-funnel"></div>
+    <div class="card span-12" id="c-roster"></div>
+  </div>
+
+  <h2 class="sec">存量與營運 <small>目前累積的規模</small></h2>
   <div class="tiles" id="kpis"></div>
 
   <h2 class="sec">使用者 <small>註冊、活躍與名單</small></h2>
@@ -170,9 +209,8 @@
     <div class="card span-4" id="c-events-day"></div>
     <div class="card span-6" id="c-actions"></div>
     <div class="card span-6" id="c-tabs"></div>
-    <div class="card span-4" id="c-hours"></div>
-    <div class="card span-4" id="c-weekday"></div>
-    <div class="card span-4" id="c-platform"></div>
+    <div class="card span-6" id="c-hours"></div>
+    <div class="card span-6" id="c-platform"></div>
     <div class="card span-6" id="c-topusers"></div>
     <div class="card span-6" id="c-version"></div>
   </div>
@@ -189,8 +227,7 @@
   <div class="grid">
     <div class="card span-6" id="c-topstocks"></div>
     <div class="card span-6" id="c-watchflags"></div>
-    <div class="card span-6" id="c-watchsize"></div>
-    <div class="card span-6" id="c-watchadds"></div>
+    <div class="card span-12" id="c-watchadds"></div>
   </div>
 
   <h2 class="sec">自訂規則 <small>條件型別、層別與使用者分布</small></h2>
@@ -216,7 +253,6 @@
   <div class="grid">
     <div class="card span-6" id="c-events"></div>
     <div class="card span-6" id="c-system"></div>
-    <div class="card span-12" id="c-tables"></div>
   </div>
 </main>
 
@@ -385,7 +421,22 @@ const PLATFORM_LABELS = {
   "ios-standalone": "iPhone App", "ios-browser": "iPhone 瀏覽器", "android-standalone": "Android App",
   "android-browser": "Android 瀏覽器", "desktop-standalone": "桌面 App", "desktop-browser": "桌面瀏覽器", unknown: "未知",
 };
-const WEEKDAY = ["", "一", "二", "三", "四", "五", "六", "日"];
+// 啟用漏斗七關（與 admin_stats 的 funnel.stages 同順序，測試釘住）
+const FUNNEL_LABELS = {
+  register: "註冊",       open: "開啟過 App", push: "開啟推播", watch: "加自選股",
+  got:      "收到通知",   read: "打開通知",   active: "近 7 日活躍",
+};
+const FUNNEL_HINT = {
+  register: "完成 LINE 綁定、帳號已建立",
+  open:     "曾經真的打開過 App（讀過通知或有活動紀錄）",
+  push:     "已授權通知並註冊推播裝置；沒有這關就收不到任何主動提醒",
+  watch:    "至少加了一檔自選股，系統才會為他計算訊號",
+  got:      "系統已經為他產生過通知",
+  read:     "真的打開看了——這一關才叫產品有發揮作用",
+  active:   "近 7 日仍在讀通知或開 App",
+};
+const TODO_ICON = { no_push: "🔕", never_opened: "💤", dormant: "🌙", sub_expiring: "⏳",
+                    push_failing: "⚠️", no_watchlist: "📭", pipeline_stale: "🛠️" };
 const label = (map, k) => map[k] || k || "—";
 
 // ═══════════════════════════════════════════════════════════════
@@ -486,6 +537,90 @@ function tile(lbl, val, delta, cls) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 第零層與第一層：待辦、北極星、漏斗、點名冊
+// ═══════════════════════════════════════════════════════════════
+
+// 待辦：每一列指向一個人或一件事。沒有事就明講沒有事，不留空白讓人懷疑壞了。
+function renderTodo(items) {
+  const el = document.getElementById("todo");
+  if (!items || !items.length) {
+    el.innerHTML = `<div class="todo-ok">✓ 目前沒有需要處理的事</div>`;
+    return;
+  }
+  el.innerHTML = items.map(t => `
+    <div class="todo" data-level="${escapeHtml(t.level)}">
+      <span class="ic" aria-hidden="true">${escapeHtml(TODO_ICON[t.kind] || "•")}</span>
+      <div class="bd">
+        <div class="t">${escapeHtml(t.title)}</div>
+        <div class="d">${escapeHtml(t.detail)}</div>
+        ${(t.names || []).length
+          ? `<div class="who">${t.names.map(n => `<span>${escapeHtml(n)}</span>`).join("")}</div>` : ""}
+      </div>
+    </div>`).join("");
+}
+
+// 北極星：一個視圖只有一個主數字（dataviz 的 hero figure）
+function renderNorthStar(ns) {
+  const el = document.getElementById("c-northstar");
+  if (!el || !ns) return;
+  const v = Number(ns.value || 0), p = Number(ns.prev || 0), base = Number(ns.base || 0);
+  const d = v - p;
+  const arrow = d > 0 ? "▲" : d < 0 ? "▼" : "—";
+  const cls = d > 0 ? "up" : d < 0 ? "bad" : "";
+  el.dataset.mode = "table";
+  el.innerHTML = `
+    <div class="card-head"><div class="card-title">${escapeHtml(ns.label)}
+      <small>${escapeHtml(ns.hint)}</small></div></div>
+    <div style="padding:.2rem 0">
+      <div style="font-size:3rem;font-weight:600;line-height:1.1">${escapeHtml(fmtInt(v))}</div>
+      <div class="delta ${cls}" style="font-size:.8rem">${arrow} 較前一週 ${d >= 0 ? "+" : ""}${escapeHtml(String(d))}
+        　·　共 ${escapeHtml(fmtInt(base))} 位真實使用者</div>
+    </div>
+    <div style="color:var(--text-muted);font-size:.78rem;margin-top:.6rem;line-height:1.5">
+      這個數字同時涵蓋偵測、送達、打開三件事。任何一環失效它都會掉，所以它比註冊數誠實。</div>`;
+}
+
+// 漏斗：一色實心＝留存、底色＝流失。七階色階在深色面上擠不出足夠的明度差，
+// 而且顏色本來就不該重複編碼長度已經表達的東西。
+function renderFunnel(f) {
+  const el = document.getElementById("c-funnel");
+  if (!el || !f) return;
+  const stages = f.stages || [];
+  const top = Number((stages[0] || {}).n || 0) || 1;
+  const rows = stages.map((st, i) => {
+    const n = Number(st.n || 0);
+    const prev = i ? Number(stages[i - 1].n || 0) : null;
+    return { k: st.k, n, conv: prev ? Math.round(n * 100 / prev) : null,
+             lost: prev === null ? 0 : prev - n, pct: n * 100 / top };
+  });
+  el.dataset.mode = "table";
+  el.innerHTML = `
+    <div class="card-head"><div class="card-title">啟用漏斗
+      <small>逐關累進：每一關都要通過前面所有關，所以一定遞減</small></div></div>
+    <div class="fn">${rows.map(r => `
+      <div class="fn-row" title="${escapeHtml(FUNNEL_HINT[r.k] || "")}">
+        <span class="fn-name">${escapeHtml(FUNNEL_LABELS[r.k] || r.k)}</span>
+        <span class="fn-track"><i class="fn-fill" style="width:${r.pct.toFixed(1)}%"></i></span>
+        <span class="fn-num">${escapeHtml(fmtInt(r.n))}${r.conv !== null ? `<i>${r.conv}%</i>` : ""}</span>
+      </div>${r.lost > 0 ? `
+      <div class="fn-row"><span></span><span class="fn-drop">↳ 這一關流失 ${r.lost} 人</span><span></span></div>` : ""}
+    `).join("")}</div>`;
+}
+
+// 點名冊：n=7 的時候，長條圖會放大雜訊、藏住個體，一份名單才看得出誰卡在哪
+function renderRoster(f) {
+  const keys = ["open", "push", "watch", "got", "read", "active"];
+  const rows = ((f && f.roster) || []).map(r => `<tr>
+    <td>${escapeHtml(r.name)}</td>
+    ${keys.map(k => `<td class="num">${r[k] ? "✓" : "—"}</td>`).join("")}
+    <td class="num">${escapeHtml(r.stuck ? FUNNEL_LABELS[r.stuck] || r.stuck : "全部完成")}</td>
+    <td class="num">${escapeHtml(fmtDay(r.created_at))}</td></tr>`);
+  tableCard("c-roster", "使用者點名冊", "不含管理者。七個人的時候，點名冊比長條圖誠實",
+    ["使用者", "開過 App", "推播", "自選", "收到", "打開", "近 7 日", "卡在", "註冊"],
+    rows, "目前沒有非管理者使用者");
+}
+
+// ═══════════════════════════════════════════════════════════════
 // 各區塊渲染
 // ═══════════════════════════════════════════════════════════════
 let stats = null;
@@ -495,22 +630,29 @@ function renderAll(s) {
   const S = SERIES();
   const from = s.from, today = s.today, days = s.days;
   const u = s.users, a = s.activity, p = s.plans, w = s.watchlist, r = s.rules, al = s.alerts, ev = s.events, sys = s.system;
+  const ns = s.north_star || { base: 0 };
 
   document.getElementById("meta").textContent =
     `${from} ～ ${today}（${days} 天）· 產生於 ${fmtDate(s.generated_at)}`;
+
+  // 第零層與第一層。這兩段不受期間篩選影響——待辦講的是現在，漏斗講的是累積至今。
+  renderTodo(s.todo);
+  renderNorthStar(s.north_star);
+  renderFunnel(s.funnel);
+  renderRoster(s.funnel);
 
   // ── KPI ──
   const paid = (p.subscriptions.by_provider || []).filter(x => x.provider !== "manual").reduce((t, x) => t + Number(x.n), 0);
   const manual = (p.subscriptions.by_provider || []).filter(x => x.provider === "manual").reduce((t, x) => t + Number(x.n), 0);
   document.getElementById("kpis").innerHTML = [
     tile("註冊人數", fmtInt(u.total), { text: `期間新增 ${fmtInt(u.new_range)} · 今日 ${fmtInt(u.new_today)}`, cls: u.new_range ? "up" : "" }, "hero"),
-    tile("今日活躍（DAU）", fmtInt(a.dau_today), { text: `占註冊 ${fmtPct(a.dau_today, u.total)}` }),
-    tile("週活躍（WAU）", fmtInt(a.wau), { text: `占註冊 ${fmtPct(a.wau, u.total)} · 回訪 ${fmtInt(a.returning_7d)}` }),
-    tile("月活躍（MAU）", fmtInt(a.mau), { text: a.mau ? `黏著度 DAU/MAU ${fmtPct(a.dau_today, a.mau)}` : "尚無回報" }),
+    tile("今日活躍（DAU）", fmtInt(a.dau_today_real), { text: "不含管理者" }),
+    tile("週活躍（WAU）", fmtInt(a.wau_real), { text: `不含管理者 · 共 ${fmtInt(ns.base)} 位` }),
+    tile("月活躍（MAU）", fmtInt(a.mau_real), { text: a.mau_real ? `黏著度 DAU/MAU ${fmtPct(a.dau_today_real, a.mau_real)}` : "不含管理者" }),
     tile("付費訂閱", fmtInt(paid), { text: `手動指派 ${fmtInt(manual)} · 7 日內到期 ${fmtInt(p.subscriptions.expiring_7d)}`, cls: p.subscriptions.expiring_7d ? "warn" : "" }),
     tile("月經常收入 MRR", fmtMoney(p.mrr_twd), { text: `手動指派等值 ${fmtMoney(p.mrr_manual_twd)}` }),
     tile("自選股（筆）", fmtInt(w.total), { text: `${fmtInt(w.distinct_stocks)} 檔 · 每人 ${w.avg_per_user ?? 0}` }),
-    tile("自訂規則", fmtInt(r.total), { text: `啟用 ${fmtInt(r.enabled)} · ${fmtInt(r.users)} 人有規則` }),
+    tile("自訂規則", fmtInt(r.total), { text: `其中真實使用者 ${fmtInt(r.total_real)} 條 · ${fmtInt(r.users_real)} 人` }),
     tile("推播裝置", fmtInt(al.push_subscriptions.total), { text: `${fmtInt(al.push_subscriptions.users)} 人已開通知（${fmtPct(al.push_subscriptions.users, u.total)}）`, cls: al.push_subscriptions.users < u.total ? "warn" : "up" }),
   ].join("");
 
@@ -566,11 +708,6 @@ function renderAll(s) {
     mountChart("c-hours", { ...baseOption(), xAxis: axisCat(hours.map(x => x[0]), { axisLabel: { interval: 2 } }), yAxis: axisVal(),
       series: [barSeries("操作數", hours.map(x => x[1]), S[0])] });
   } else if (noAct) card("c-hours", "使用時段", "各小時的操作數（台北時間）", { empty: "尚無回報資料" });
-  const wd = [1, 2, 3, 4, 5, 6, 7].map(d => { const x = (a.by_weekday || []).find(y => Number(y.dow) === d) || {}; return [`週${WEEKDAY[d]}`, Number(x.n || 0), Number(x.users || 0)]; });
-  if (card("c-weekday", "星期分布", "操作數與活躍人數", { head: ["星期", "操作數", "人數"], rows: wd, empty: "尚無回報資料" }) && !noAct) {
-    mountChart("c-weekday", { ...baseOption(), xAxis: axisCat(wd.map(x => x[0])), yAxis: axisVal(),
-      series: [barSeries("操作數", wd.map(x => x[1]), S[0])] });
-  } else if (noAct) card("c-weekday", "星期分布", "操作數與活躍人數", { empty: "尚無回報資料" });
   const plat = (a.by_platform || []).map(x => [label(PLATFORM_LABELS, x.platform), Number(x.users), Number(x.n)]);
   if (card("c-platform", "平台", "使用人數（同一人多平台會重複計）", { head: ["平台", "人數", "操作數"], rows: plat, empty: "尚無回報資料" })) {
     mountChart("c-platform", { ...baseOption(), grid: { left: 8, right: 40, top: 8, bottom: 4, containLabel: true },
@@ -627,11 +764,6 @@ function renderAll(s) {
       xAxis: axisVal({ max: 100, splitLine: { show: false }, axisLabel: { show: false } }), yAxis: axisCat(flags.map(x => x[0]), { inverse: true }),
       series: [hbarSeries("比例", flags.map(x => x[2]), S[0], { label: { show: true, position: "right", color: css("--text-1"), fontSize: 11, formatter: p => `${p.value}%` } })] }, "tall");
   }
-  const sz = (w.size_buckets || []).map(x => [x.bucket + " 檔", Number(x.users)]);
-  if (card("c-watchsize", "每人自選股數分布", "人數", { head: ["自選股數", "人數"], rows: sz })) {
-    mountChart("c-watchsize", { ...baseOption(), xAxis: axisCat(sz.map(x => x[0])), yAxis: axisVal(),
-      series: [barSeries("人數", sz.map(x => x[1]), S[0], { label: { show: true, position: "top", color: css("--text-1"), fontSize: 11 } })] });
-  }
   const wa = fillDays(from, today, w.added_by_day, "d", ["n"]);
   if (card("c-watchadds", "自選股新增趨勢", "依加入日期", { head: ["日期", "新增"], rows: wa.map(x => [x.d, x.n]) })) {
     mountChart("c-watchadds", { ...baseOption(), xAxis: axisCat(wa.map(x => mdLabel(x.d))), yAxis: axisVal(),
@@ -648,14 +780,15 @@ function renderAll(s) {
     tile("超出方案", fmtInt(r.over_limit), { text: "保留資料、暫停評估", cls: r.over_limit ? "warn" : "" }),
   ].join("");
   const tierOrder = ["intraday", "technical", "chips", "fundamental"];
-  const types = (r.by_type || []).map(x => {
+  const types = (r.by_type_real || []).map(x => {
     const info = RULE_TYPE_INFO[x.type] || ["", x.type];
     return { type: x.type, tier: info[0], name: info[1], n: Number(x.n), rules: Number(x.rules), users: Number(x.users) };
   }).sort((x, y) => (tierOrder.indexOf(x.tier) - tierOrder.indexOf(y.tier)) || (y.n - x.n));
   const tierTotals = tierOrder.map(t => [TIER_LABELS[t], types.filter(x => x.tier === t).reduce((s, x) => s + x.n, 0)]);
-  if (card("c-ruletypes", "條件型別", "每種條件在規則中出現的次數，顏色＝評估層別",
+  if (card("c-ruletypes", "條件型別", "不含管理者。每種條件出現的次數，顏色＝評估層別",
       { head: ["條件", "層別", "次數", "規則數", "人數"], rows: types.map(x => [x.name, TIER_LABELS[x.tier] || x.tier, x.n, x.rules, x.users]),
-        legend: tierOrder.map((t, i) => ({ name: `${TIER_LABELS[t]}（${tierTotals[i][1]}）`, color: S[i] })), tall: types.length > 8 })) {
+        legend: tierOrder.map((t, i) => ({ name: `${TIER_LABELS[t]}（${tierTotals[i][1]}）`, color: S[i] })),
+        empty: "真實使用者目前沒有任何自訂規則", tall: types.length > 8 })) {
     mountChart("c-ruletypes", { ...baseOption(), grid: { left: 8, right: 40, top: 8, bottom: 4, containLabel: true },
       tooltip: { ...baseOption().tooltip, formatter: ps => ps.map(p => { const t = types[p.dataIndex]; return `${p.marker}${escapeHtml(t.name)}（${TIER_LABELS[t.tier] || ""}）　<b>${fmtInt(t.n)}</b> 次 · ${fmtInt(t.rules)} 條規則 · ${fmtInt(t.users)} 人`; }).join("<br>") },
       xAxis: axisVal({ splitLine: { show: false }, axisLabel: { show: false } }), yAxis: axisCat(types.map(x => x.name), { inverse: true }),
@@ -740,8 +873,6 @@ function renderAll(s) {
   ];
   tableCard("c-system", "系統狀態", "管線是否還活著，看這裡", ["項目", "值"],
     sysRows.map(x => `<tr><td>${escapeHtml(x[0])}</td><td class="num">${escapeHtml(x[1])}</td></tr>`));
-  tableCard("c-tables", "資料表", "列數為統計估計值（-1＝尚未分析）", ["資料表", "列數", "大小"],
-    (sys.tables || []).map(x => `<tr><td>${escapeHtml(x.table)}</td><td class="num">${fmtInt(x.rows)}</td><td class="num">${escapeHtml(fmtBytes(x.bytes))}</td></tr>`));
 }
 
 // ═══════════════════════════════════════════════════════════════
