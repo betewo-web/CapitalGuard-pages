@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="94">
+  <meta name="app-version" content="95">
   <title>管理儀表板 — 台股監控</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -786,9 +786,9 @@ async function loadStats(force) {
     if (e.code === "update_required" || e.status === 426) {
       showGate(`<div style="font-size:2rem">⬆️</div><h1>App 需要更新</h1><p>${escapeHtml(e.message)}</p><button class="btn primary" onclick="location.reload()">重新載入</button>`);
     } else if (e.status === 403 || e.status === 401 || /admin only|permission/i.test(e.message || "")) {
-      showGate(`<div style="font-size:2rem">🚫</div><h1>此帳號沒有管理權限</h1><p>目前登入：<b>${escapeHtml(sessionName() || "未知")}</b>。管理者由伺服器端指定：<br><code>python admin_stats.py admin &lt;使用者&gt; on</code></p><a class="btn" href="watchlist.html">回 App</a>`);
+      showGate(`<div style="font-size:2rem">🚫</div><h1>此頁僅供管理者使用</h1><p>目前登入：<b>${escapeHtml(sessionName() || "未知")}</b></p><a class="btn" href="watchlist.html">回 App</a>`);
     } else if (e.status === 404) {
-      showGate(`<div style="font-size:2rem">🛠️</div><h1>儀表板尚未部署</h1><p>資料庫還沒有 <code>admin_stats()</code>。請先執行：<br><code>python supabase_admin.py sql migrate_admin_dashboard.sql</code></p>`);
+      showGate(`<div style="font-size:2rem">🛠️</div><h1>儀表板尚未啟用</h1><p>資料庫尚未完成設定。</p><a class="btn" href="watchlist.html">回 App</a>`);
     } else {
       showGate(`<div style="font-size:2rem">⚠️</div><h1>載入失敗</h1><p>${escapeHtml(e.message || e)}</p><button class="btn primary" onclick="loadStats(true)">再試一次</button>`);
     }
