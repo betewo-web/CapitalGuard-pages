@@ -10,7 +10,7 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v98';
+const CACHE_VERSION = 'tw-stock-v99';
 
 // 訂閱輪換用的 Cache：不隨版本清掉，否則升級 SW 就把待同步的訂閱弄丟了。
 const PUSH_SYNC_CACHE = 'push-sync';
@@ -200,6 +200,9 @@ self.addEventListener('pushsubscriptionchange', event => {
 });
 
 // ── Web Push: notification click → open/focus PWA ─
+// 後端把 event_key 放進網址（?alert=…#inbox）。視窗沒開：直接用這個網址開，
+// 頁面開機時讀到參數就切到通知頁並把該則置中。視窗已開：只 focus 的話畫面
+// 會停在使用者上次離開的地方，所以再 postMessage 把網址交給頁面，由頁面自己跳。
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const target = event.notification.data?.url || './watchlist.html';
@@ -207,7 +210,10 @@ self.addEventListener('notificationclick', event => {
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
       // Focus existing PWA window if open
       for (const c of list) {
-        if (c.url.includes('watchlist') && 'focus' in c) return c.focus();
+        if (c.url.includes('watchlist') && 'focus' in c) {
+          c.postMessage({ type: 'notification-click', url: target });   // 先送再 focus：focus 失敗也不影響跳轉
+          return c.focus();
+        }
       }
       // Otherwise open a new window
       if (clients.openWindow) return clients.openWindow(target);

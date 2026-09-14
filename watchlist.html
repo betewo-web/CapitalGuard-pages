@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="98">
+  <meta name="app-version" content="99">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=98" rel="stylesheet">
+  <link href="watchlist.css?v=99" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1030,6 +1030,8 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
 const APP_TABS = ["home", "scores", "live", "inbox", "watch"];
 let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc）
+let pendingAlertFocus = null;   // 從手機通知點進來要置中的那則（event_key）
+let _alertFocusRetries = 0;
 let inboxLoadedAt = 0;
 let inboxSupportsRead = true;   // migrate_pwa_v2.sql 未執行時自動降級
 let intradaySupportsLevels = true;   // migrate_intraday_levels.sql 未執行時自動降級（PostgREST 對不存在的欄位回 400）
@@ -2770,6 +2772,17 @@ async function showMain() {
   document.body.classList.add("has-bottom-nav");
   document.getElementById("bottom-nav").style.display = "flex";
 
+  // 從手機通知點進來（視窗原本沒開）：網址帶 ?alert=<event_key>#inbox。
+  // 先記下要定位的那則，等 refreshInbox 抓回列表再置中；參數用完就從網址拿掉
+  const bootAlert = new URLSearchParams(location.search).get("alert");
+  if (bootAlert) {
+    pendingAlertFocus = bootAlert;
+    _alertFocusRetries = 0;
+    const rest = new URLSearchParams(location.search);
+    rest.delete("alert");
+    const q = rest.toString();
+    history.replaceState(null, "", location.pathname + (q ? `?${q}` : "") + (location.hash || "#inbox"));
+  }
   const hashTab = (location.hash || "").replace("#", "");
   switchTab(APP_TABS.includes(hashTab) ? hashTab : "home", true);
   trackActivity("app_open", { tab: currentTab });
@@ -4053,10 +4066,56 @@ async function refreshInbox(force = true) {
     inboxLoadError = null;
     updateInboxBadge();
     renderCurrentTab();
+    _applyPendingAlertFocus();
   } catch (e) {
     inboxLoadError = e.message || "載入失敗";
     if (currentTab === "inbox") renderInbox();
   }
+}
+
+// ── 從通知點進來：切到通知頁，把那一則捲到畫面中央 ─────────────────
+// 推播的 tag、alert_history 的 event_key、網址的 ?alert= 三者同值。
+// 通知歷史是「先推播、再寫入」，手指比資料庫快的話第一次抓不到，隔幾秒再抓一次。
+function focusInboxAlert(eventKey) {
+  const key = String(eventKey || "").trim();
+  if (!key || !state.userId) return;
+  pendingAlertFocus = key;
+  _alertFocusRetries = 0;
+  if (currentTab !== "inbox") switchTab("inbox", true);
+  refreshInbox(true);   // 視窗一直開著的話列表可能還是舊的，先抓最新再定位
+}
+
+function _applyPendingAlertFocus() {
+  if (!pendingAlertFocus) return;
+  if (currentTab !== "inbox") return;
+  const row = inboxRows.find(r => String(r.event_key || "") === pendingAlertFocus);
+  if (!row) {
+    if (_alertFocusRetries < 2) {
+      _alertFocusRetries++;
+      setTimeout(() => refreshInbox(true), 3000);
+    } else {
+      pendingAlertFocus = null;
+    }
+    return;
+  }
+  // 目前的篩選（未讀／重要／持股）沒把它列出來就切回「全部」
+  if (!filteredInboxRows().includes(row)) setInboxFilter("all");
+  const el = document.querySelector(`#inbox-list .inbox-item[data-rowid="${String(row.id)}"]`);
+  pendingAlertFocus = null;
+  if (!el) return;
+  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  el.classList.add("is-target");
+  setTimeout(() => el.classList.remove("is-target"), 3000);
+}
+
+// SW 在視窗已開時把通知的網址丟過來（notificationclick → postMessage）
+function _handleNotificationClickUrl(url) {
+  let u;
+  try { u = new URL(String(url || ""), location.href); } catch { return; }
+  const key = u.searchParams.get("alert");
+  const tab = (u.hash || "").replace("#", "");
+  if (key) { focusInboxAlert(key); return; }
+  if (APP_TABS.includes(tab) && state.userId) switchTab(tab);
 }
 
 function updateInboxBadge() {
@@ -4124,7 +4183,7 @@ function renderInbox() {
     const unread = inboxSupportsRead && !r.read_at;
     const sid = String(r.stock_id || "").trim();
     html += `
-      <div class="inbox-item${unread ? " unread" : ""}" data-sev="${sev}" role="button" tabindex="0"
+      <div class="inbox-item${unread ? " unread" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
            onclick="openInboxDetail('${escapeHtml(String(r.id))}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetail('${escapeHtml(String(r.id))}');}">
         ${signalIconSvg(r, 30)}
@@ -7254,6 +7313,10 @@ if ('serviceWorker' in navigator) {
     // 頁面開著時輪換：SW 通知我們立刻補寫，不用等下次啟動
     if (e.data && e.data.type === 'push-subscription-changed') {
       _syncRotatedPushSubscription().catch(() => {});
+    }
+    // 視窗已開時點了手機通知：SW 只能 focus，跳到哪一則由頁面自己處理
+    if (e.data && e.data.type === 'notification-click') {
+      _handleNotificationClickUrl(e.data.url);
     }
   });
 }

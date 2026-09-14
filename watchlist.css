@@ -1712,6 +1712,16 @@ body.has-bottom-nav .qa-panel {
 
 .inbox-item.unread .ib-title { font-weight: 700; }
 
+/* 從手機通知點進來、被捲到畫面中央的那一則：亮一下再淡掉，讓人知道是哪則 */
+.inbox-item.is-target {
+	animation: inbox-target-flash 3s ease-out;
+}
+@keyframes inbox-target-flash {
+	0%   { box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.85); border-color: rgba(139, 124, 255, 0.9); }
+	60%  { box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.45); }
+	100% { box-shadow: 0 0 0 0 rgba(139, 124, 255, 0); }
+}
+
 /* SVG 是 flex item：width 屬性不是最小寬度，標題或內文一長就會被擠扁成一條。
    釘死尺寸並禁止收縮，長短文字的列圖示才會一樣大。 */
 .inbox-item > .sig-ico {
