@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="106">
+  <meta name="app-version" content="107">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=106" rel="stylesheet">
+  <link href="watchlist.css?v=107" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1328,10 +1328,10 @@ function renderEventCard(sid, ev, options = {}) {
   const linkHtml = eventSourceHtml(sid, ev);
   // AI 按鈕用 data 屬性帶事件身分（dedupe_key），不把標題塞進 inline onclick：標題含引號會炸
   const actionHtml = options.todayMode
-    ? (options.grouped ? "" : `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股事件</button>`)
+    ? (options.grouped ? "" : `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${jsAttr(sid)}')">查看此股事件</button>`)
     : (ev.ai_analysis
       ? `<div class="event-ai-text"><span class="event-ai-tag">🤖 AI 說明</span>${escapeHtml(ev.ai_analysis)}</div>`
-      : `<button class="btn btn-xs btn-outline-info" data-ev-key="${escapeHtml(ev.dedupe_key || "")}" data-ev-title="${escapeHtml(ev.title || "")}" onclick="requestAiAnalysis('${escapeHtml(sid)}', this)">AI 說明資料</button>`);
+      : `<button class="btn btn-xs btn-outline-info" data-ev-key="${escapeHtml(ev.dedupe_key || "")}" data-ev-title="${escapeHtml(ev.title || "")}" onclick="requestAiAnalysis('${jsAttr(sid)}', this)">AI 說明資料</button>`);
   const newToday = isNewToday(ev);
   const newBadge = newToday ? `<span class="event-new-badge">新</span>` : "";
   // 事件日＝資料本身的日期（季報是季底、籌碼是前一交易日、除息是未來日）；
@@ -1385,7 +1385,7 @@ function openEventsPanel(sid) {
           watchlist 頁面將自動顯示事件 badge。
         </div>
         <div class="mt-2">
-          <button class="btn btn-sm btn-outline-secondary" onclick="refreshEvents('${escapeHtml(sid)}')">&#x21bb; 重新載入</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="refreshEvents('${jsAttr(sid)}')">&#x21bb; 重新載入</button>
         </div>
       </div>
     `;
@@ -1477,7 +1477,7 @@ function openTodayEventsPanel() {
               <strong>${escapeHtml(sidName)}</strong>
               <span class="today-event-count">${events.length} 件</span>
             </div>
-            <button class="today-event-stock-link" onclick="openEventsPanel('${escapeHtml(sid)}')">查看此股 →</button>
+            <button class="today-event-stock-link" onclick="openEventsPanel('${jsAttr(sid)}')">查看此股 →</button>
           </div>
           <div class="today-event-group-list">
             ${events.map(ev => renderEventCard(sid, ev, { todayMode: true, grouped: true })).join("")}
@@ -1711,7 +1711,7 @@ function limitPromptHtml(kind, err) {
     text = m || `已達${what}上限。`;
   }
   return `<span class="text-warning">⚠️ ${escapeHtml(text)}</span>
-    <button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${kind}')">查看方案 →</button>`;
+    <button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${jsAttr(kind)}')">查看方案 →</button>`;
 }
 
 function renderWatchCount(n) {
@@ -1886,7 +1886,7 @@ function renderPlanModal(focus) {
     } else {
       const up = x.price_twd > p.price_twd;
       cta = `<button type="button" class="btn btn-sm ${up ? "btn-success btn-accent-sm" : "btn-outline-light"} w-100 justify-content-center"
-               onclick="startCheckout('${escapeHtml(x.code)}')">${up ? "升級到" : "改為"}${escapeHtml(x.name)}</button>`;
+               onclick="startCheckout('${jsAttr(x.code)}')">${up ? "升級到" : "改為"}${escapeHtml(x.name)}</button>`;
     }
     return `
       <div class="plan-card plan-card-${escapeHtml(x.code)}${isCurrent ? " is-current" : ""}">
@@ -3761,7 +3761,7 @@ function ruleTemplateChipsHtml(tpls, ctx) {
           <span class="rule-tier tier-${tier}">${RULE_TIERS[tier].label}</span>
         </div>
         <button type="button" class="btn btn-sm btn-outline-light btn-ghost rule-tpl-add"
-                onclick="addRuleTemplate(${idx}, '${ctx}', this)">＋ 加入</button>
+                onclick="addRuleTemplate(${idx}, '${jsAttr(ctx)}', this)">＋ 加入</button>
       </div>`;
   }).join("");
 }
@@ -4265,8 +4265,8 @@ function renderInbox() {
     const sid = String(r.stock_id || "").trim();
     html += `
       <div class="inbox-item${unread ? " unread" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
-           onclick="openInboxDetail('${escapeHtml(String(r.id))}')"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetail('${escapeHtml(String(r.id))}');}">
+           onclick="openInboxDetail('${jsAttr(String(r.id))}')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetail('${jsAttr(String(r.id))}');}">
         ${signalIconSvg(r, 30)}
         <div class="ib-main">
           <div class="ib-title">${escapeHtml(_titleWithoutSid(r.title, sid))}</div>
@@ -4454,7 +4454,7 @@ function renderHome() {
         const sev = inferSeverity(r);
         const sid = String(r.stock_id || "").trim();
         return `
-          <div class="home-row" onclick="openInboxDetail('${escapeHtml(String(r.id))}')">
+          <div class="home-row" onclick="openInboxDetail('${jsAttr(String(r.id))}')">
             <span class="sev-dot sev-${sev}"></span>
             <span class="hr-name">${escapeHtml(sid ? stockLabelOf(sid) : "")} ${escapeHtml(alertTypeLabel(r))}</span>
             <span class="hr-meta">${fmtTime(r.sent_at)}</span>
@@ -4482,7 +4482,7 @@ function renderHome() {
     const sig = latestSignalOf(sid);
     const sigDot = sig ? `<span class="sev-dot sev-${inferSeverity(sig)}"></span>` : '<span class="hr-meta">─</span>';
     return `
-      <div class="home-row" onclick="openKLineFromWatchlist('${escapeHtml(sid)}')">
+      <div class="home-row" onclick="openKLineFromWatchlist('${jsAttr(sid)}')">
         <span class="hr-name">${escapeHtml(name)}</span>
         <span class="hr-meta">${q ? fmtPrice(q.price) : ""}</span>
         ${q ? fmtChgHtml(q.changePct) : ""}
@@ -4505,7 +4505,7 @@ function renderHome() {
   newsRows.sort((a, b) => _compareEvents(a.ev, b.ev));
   document.getElementById("home-news").innerHTML = newsRows.length
     ? newsRows.slice(0, 6).map(({ sid, ev }) => `
-        <div class="home-row" onclick="openEventsPanel('${escapeHtml(sid)}')">
+        <div class="home-row" onclick="openEventsPanel('${jsAttr(sid)}')">
           <span class="badge-sid" style="font-size:.68rem">${escapeHtml(stockNameOf(sid) || sid)}</span>
           <span class="hr-name">${escapeHtml(ev.title || "")}</span>
         </div>`).join("")
@@ -4740,10 +4740,10 @@ function scoreRowHtml(sid, s, opts = {}) {
   const sub = [s?.industry_category, opts.note].filter(Boolean).map(escapeHtml).join(" · ");
   const inWatch = watchlistRows.some(r => String(r.stock_id || "").trim() === sid);
   const addBtn = (!inWatch && opts.allowAdd)
-    ? `<button class="btn btn-sm btn-outline-light btn-ghost ms-1" onclick="event.stopPropagation();addStockFromScores('${escapeHtml(sid)}')">＋自選</button>`
+    ? `<button class="btn btn-sm btn-outline-light btn-ghost ms-1" onclick="event.stopPropagation();addStockFromScores('${jsAttr(sid)}')">＋自選</button>`
     : "";
   return `
-    <div class="holding-row score-row" onclick="openScoreDetail('${escapeHtml(sid)}')">
+    <div class="holding-row score-row" onclick="openScoreDetail('${jsAttr(sid)}')">
       <div class="hr-left">
         <div class="hr-title">${escapeHtml(name)}${addBtn}</div>
         <div class="hr-sid">${sub || "&nbsp;"}</div>
@@ -5100,7 +5100,7 @@ function renderLive() {
       ? `今日 ${x.today.length} 則 · ${escapeHtml(alertTypeLabel(x.today[0]))} ${fmtTime(x.today[0].sent_at)}`
       : "今日無訊號";
     return `
-      <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${escapeHtml(x.sid)}', { signalsExpanded: true })">
+      <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${jsAttr(x.sid)}', { signalsExpanded: true })">
         <div class="hr-left">
           <div class="hr-title">${escapeHtml(x.name)} ${tags.join(" ")}</div>
           <div class="hr-sid">${todayHtml}</div>
@@ -5217,7 +5217,7 @@ async function refreshRules() {
     const condChips = conds.length
       ? conds.map(c => `<li class="rule-cond-chip">${escapeHtml(describeCondition(c))}</li>`).join("")
       : `<li class="rule-cond-chip is-empty">尚未設定條件</li>`;
-    const id = escapeHtml(String(r.id));
+    const id = String(r.id);
     // 超出方案上限的規則：資料保留、後端不評估。標出來使用者才知道為什麼沒通知
     const active = isRuleActive(r);
     return `
@@ -5229,16 +5229,16 @@ async function refreshRules() {
           <span class="toggle-wrap form-check form-switch mb-0">
             <input class="form-check-input" type="checkbox" ${r.enabled ? "checked" : ""}
                    aria-label="啟用或停用這條規則"
-                   onchange="toggleRule('${id}', this.checked)">
+                   onchange="toggleRule('${jsAttr(id)}', this.checked)">
           </span>
         </div>
         <div class="rule-card-meta">
           <span class="rule-tier tier-${tier}">${RULE_TIERS[tier].label}</span>
           <span class="rule-scope">${scope}</span>
           <span class="rule-card-actions">
-            <button type="button" class="wl-icon-btn" onclick="openRuleEditor('${id}')"
+            <button type="button" class="wl-icon-btn" onclick="openRuleEditor('${jsAttr(id)}')"
                     title="編輯規則">${ICON_EDIT}<span>編輯</span></button>
-            <button type="button" class="wl-icon-btn wl-icon-danger" onclick="deleteRule('${id}')"
+            <button type="button" class="wl-icon-btn wl-icon-danger" onclick="deleteRule('${jsAttr(id)}')"
                     title="刪除規則">${ICON_TRASH}<span>刪除</span></button>
           </span>
         </div>
@@ -5389,7 +5389,7 @@ function renderRuleConditions() {
       const v = c[p.k] !== undefined ? c[p.k] : p.def;
       if (p.type === "select") {
         return `<label class="rule-param"><span>${p.label}</span>
-          <select class="rule-input" onchange="onConditionParamChange(${i}, '${p.k}', this.value)">
+          <select class="rule-input" onchange="onConditionParamChange(${i}, '${jsAttr(p.k)}', this.value)">
             ${(p.options || []).map(o =>
               `<option value="${o[0]}"${String(o[0]) === String(v) ? " selected" : ""}>${o[1]}</option>`).join("")}
           </select></label>`;
@@ -5399,7 +5399,7 @@ function renderRuleConditions() {
                ${p.min !== undefined ? `min="${p.min}"` : ""}
                ${p.max !== undefined ? `max="${p.max}"` : ""}
                step="${p.step || 1}"
-               oninput="onConditionParamChange(${i}, '${p.k}', this.value)"></label>`;
+               oninput="onConditionParamChange(${i}, '${jsAttr(p.k)}', this.value)"></label>`;
     }).join("");
 
     // 只剩一條時不給刪：刪掉會被補回預設條件，等於沒動，按鈕只會讓人困惑
@@ -5715,10 +5715,10 @@ function renderWatchlist(rows) {
       <div class="wl-row-foot">
         <div class="wl-tags">${tags.join("")}</div>
         <div class="wl-row-actions">
-          <button class="${evtClass}" title="今日事件" onclick="openEventsPanel('${escapeHtml(sid)}')">${evtLabel}</button>
-          <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(sid)}" onclick="openKLineFromWatchlist('${sid}')">${ICON_CHART}<span class="wl-ic-label">K線</span></button>
-          <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${row.id}')">${ICON_BELL}<span class="wl-ic-label">通知</span></button>
-          <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${row.id}')">${ICON_CLOSE}</button>
+          <button class="${evtClass}" title="今日事件" onclick="openEventsPanel('${jsAttr(sid)}')">${evtLabel}</button>
+          <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(sid)}" onclick="openKLineFromWatchlist('${jsAttr(sid)}')">${ICON_CHART}<span class="wl-ic-label">K線</span></button>
+          <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${jsAttr(row.id)}')">${ICON_BELL}<span class="wl-ic-label">通知</span></button>
+          <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}</button>
         </div>
       </div>
     `;
@@ -6149,11 +6149,11 @@ function renderKLineSignals(sid) {
 
   const items = today.map(r => {
     const sev = inferSeverity(r);
-    const id = escapeHtml(String(r.id));
+    const id = String(r.id);
     return `
       <div class="inbox-item ks-item" data-sev="${sev}" role="button" tabindex="0"
-           onclick="openInboxDetailFromKLine('${id}')"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetailFromKLine('${id}');}">
+           onclick="openInboxDetailFromKLine('${jsAttr(id)}')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetailFromKLine('${jsAttr(id)}');}">
         ${signalIconSvg(r, 26)}
         <div class="ib-main">
           <div class="ib-title">${escapeHtml(r.title || "")}</div>
@@ -7004,6 +7004,23 @@ window.addEventListener("resize", () => {
   }
 });
 
+function jsAttr(value) {
+  // 放進 onclick="fn('...')" 這種「HTML 屬性裡的 JS 字串」用。
+  // escapeHtml 在這裡不夠：瀏覽器先把屬性值 HTML 解碼、再把結果當 JS 解析，
+  // 所以 &#39; 會變回 ' 把字串跳掉。順序必須是「先 JS 逸出、再 HTML 逸出」，
+  // 解碼之後剩下的才是合法的 JS 字串字面量（2026-09-15 稽核）。
+  // 目前 stock_id 有 DB 的 CHECK 擋著、規則 id 是 UUID，所以這是縱深防禦；
+  // 一旦有自由文字流進這些 handler，沒有這層就是實打實的 XSS。
+  return escapeHtml(
+    String(value ?? "")
+      .replace(/\\/g, "\\\\")
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\r/g, "\\r")
+      .replace(/\n/g, "\\n"),
+  );
+}
+
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, "&amp;")
@@ -7157,7 +7174,7 @@ async function runStockAutocomplete() {
       const check = await validateStockCode(qRaw);
       if (check.found) {
         const name = check.name || qRaw;
-        list.innerHTML = `<div class="dropdown-item" onclick="selectStock('${qRaw}', '${String(name).replace(/'/g, "\\'")}')">${name}<span class="badge-sid ms-2">${qRaw}</span></div>`;
+        list.innerHTML = `<div class="dropdown-item" onclick="selectStock('${jsAttr(qRaw)}', '${jsAttr(name)}')">${escapeHtml(name)}<span class="badge-sid ms-2">${escapeHtml(qRaw)}</span></div>`;
         list.style.display = "block";
         return;
       }
@@ -7176,8 +7193,8 @@ async function runStockAutocomplete() {
   }
 
   list.innerHTML = matches.map(([sid, v]) =>
-    `<div class="dropdown-item" onclick="selectStock('${sid}', '${(v.n||"").replace(/'/g,"\\'")}')">
-       ${(v.n || "")}<span class="badge-sid ms-2">${sid}</span>
+    `<div class="dropdown-item" onclick="selectStock('${jsAttr(sid)}', '${jsAttr(v.n || "")}')">
+       ${escapeHtml(v.n || "")}<span class="badge-sid ms-2">${escapeHtml(sid)}</span>
      </div>`
   ).join("");
   list.style.display = "block";
