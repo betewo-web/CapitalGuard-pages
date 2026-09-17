@@ -2976,3 +2976,18 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .ob-steps li.is-done { border-color: rgba(46, 204, 113, 0.5); color: #7ee2a8; }
 .ob-code-input { font-family: "Space Grotesk", monospace; letter-spacing: 0.18em; text-transform: uppercase; text-align: center; }
 .ob-inapp { background: rgba(255, 159, 67, 0.12); border: 1px solid rgba(255, 159, 67, 0.4); color: #ffd7ad; }
+
+/* LINE 官方帳號的加好友按鈕：綠色是 LINE 的品牌色，不是本站的強調色，
+   只用在這一顆「去 LINE」的按鈕上，避免和漲跌的紅綠混淆。 */
+.btn-line { background:#06c755; border-color:#06c755; color:#fff; font-weight:600; }
+.btn-line:hover, .btn-line:focus { background:#05b34c; border-color:#05b34c; color:#fff; }
+
+/* 開放資料署名：政府資料開放授權條款要求「明顯處」標示，但它不是閱讀重點，
+   所以縮小、降低對比，放在免責說明的最後一段 */
+.dg-source {
+  font-size: .72rem;
+  opacity: .72;
+  line-height: 1.55;
+  margin-top: .6rem;
+}
+.dg-source a { color: inherit; text-decoration: underline; }

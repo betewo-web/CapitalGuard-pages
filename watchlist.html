@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="107">
+  <meta name="app-version" content="111">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=107" rel="stylesheet">
+  <link href="watchlist.css?v=111" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -49,6 +49,7 @@
     <div class="ug-msg dg-msg">
       <p>CapitalGuard 是公開市場資料的整理與統計工具。所有分數、訊號、事件、篩選結果與 AI 說明，都是資料計算的呈現，<b>不是投資建議</b>，也不對任何股票做買賣、持有或進出場的推介。</p>
       <p>本服務並非證券投資顧問事業，不提供個別化投資諮詢。資料可能延遲、缺漏或有誤，推播不保證即時送達。投資決策請自行判斷並承擔全部風險。</p>
+      <p class="dg-source">每日收盤價、法人買賣超、融資融券、除權息與公告等資料來源：<b>臺灣證券交易所、證券櫃檯買賣中心</b>，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供；本服務為衍生應用，資料正確性以來源機關公告為準。</p>
     </div>
     <label class="dg-check"><input type="checkbox" id="dg-agree" onchange="document.getElementById('dg-btn').disabled=!this.checked"> 我已閱讀並了解上述說明</label>
     <button type="button" id="dg-btn" class="btn btn-sm btn-outline-light mt-3" disabled onclick="acceptDisclaimer()">開始使用</button>
@@ -202,7 +203,8 @@
           還沒有登入碼？ ▸
         </button>
         <div class="collapse mt-3" id="manual-login-wrap">
-          <p class="text-muted small mb-2">加入 LINE 官方帳號好友，或在聊天室傳「登入」取得新碼：</p>
+          <p class="text-muted small mb-3">加 LINE 官方帳號好友，帳號會自動建立，登入連結與 8 碼登入碼隨訊息送到。已經是好友的話，在聊天室傳「登入」就會重發一組新的。</p>
+          <a class="btn btn-success btn-line btn-lg w-100 mb-3" href="https://line.me/R/ti/p/@408csebn" target="_blank" rel="noopener">加 LINE 好友，取得登入碼</a>
           <div class="row g-2 align-items-end text-start">
             <div class="col-md-8">
               <label class="form-label text-muted small">已有存取碼（Access Token）</label>
@@ -217,6 +219,10 @@
 
       </div>
     </div>
+    <p class="text-center small text-muted">
+      第一次來？先看 <a href="https://betewo-web.github.io/betewo-site/index.html" target="_blank" rel="noopener">功能說明</a>
+      與 <a href="https://betewo-web.github.io/betewo-site/pricing.html" target="_blank" rel="noopener">方案與價格</a>。
+    </p>
   </div>
 
   <!-- ── 主畫面（已登入時顯示） ── -->
@@ -283,7 +289,7 @@
         <h2 class="view-title">📊 統計整理</h2>
         <span class="view-sub" id="scores-date"></span>
       </div>
-      <div class="disclaimer-note">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
+      <div class="disclaimer-note">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。<br>資料來源：臺灣證券交易所、證券櫃檯買賣中心（政府資料開放授權條款第 1 版）。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
       <div class="chip-row" id="scores-filters">
         <button class="filter-chip active" data-f="mine" onclick="setScoresFilter('mine')">我的自選</button>
         <button class="filter-chip" data-f="screen" onclick="setScoresFilter('screen')">自訂篩選</button>
@@ -3501,8 +3507,6 @@ const RULE_CATALOG = [
     params: [{ k: "value", label: "YoY %", type: "number", def: 30, min: -100, max: 500 }] },
   { type: "revenue_mom", tier: "fundamental", name: "月營收 MoM",
     params: [{ k: "value", label: "MoM %（負數＝衰退門檻）", type: "number", def: -20, min: -100, max: 500 }] },
-  { type: "eps_yoy", tier: "fundamental", name: "EPS 成長高於",
-    params: [{ k: "value", label: "成長 %", type: "number", def: 50, min: -100, max: 1000 }] },
   { type: "margin_above", tier: "fundamental", name: "利潤率高於",
     params: [
       { k: "kind", label: "類型", type: "select", def: "gross",
@@ -3973,6 +3977,31 @@ const _TPE_HMS_FMT = new Intl.DateTimeFormat("zh-TW", {
 function fmtClock(ts) {
   const d = new Date(ts);
   return isNaN(d) ? "" : _TPE_HMS_FMT.format(d);
+}
+
+// ── 報價停更偵測 ──────────────────────────────────────────────────────────────
+// 取價跑在一台自家主機上，寫進 intraday_state 之後手機才讀得到。那台機器關機、
+// 睡眠、斷網或 Windows 更新重開，整條鏈路就停在最後一次寫入——而畫面上的價格
+// 看起來跟正常運作一模一樣，只是不再變。使用者會照著一個凍住的價做決定，
+// 這比整個壞掉還危險（壞掉至少看得出來）。有 watchdog 排程會拉起掛掉的程序，
+// 但救不了關機與斷網，所以前端要自己看得出來。
+//
+// 門檻 3 分鐘的理由：MIS 快照本身就會連續不換頁，2026-09-14 實測最久 122 秒，
+// 那是來源特性不是故障，門檻低於它就會在一切正常時誤報。另外這裡的「現在」
+// 來自手機時鐘，使用者的手機時間不準會影響判斷，門檻放寬也是為了吸收那個偏差。
+const QUOTE_STALE_MS = 180000;
+
+function quoteAgeMs(ts) {
+  const d = new Date(ts);
+  return isNaN(d) ? null : Date.now() - d.getTime();
+}
+
+// 停更時間只給粗略量級：使用者要的是「這個價能不能信」，不是精準秒數
+function fmtAgeRough(ms) {
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `約 ${Math.max(1, min)} 分鐘前`;
+  const hr = Math.floor(min / 60);
+  return `約 ${hr} 小時前`;
 }
 
 function isToday(ts) {
@@ -5062,9 +5091,16 @@ function renderLive() {
   const nSignal = rows.filter(x => x.active).length;
   const nNear = rows.filter(x => !x.active && x.nearPct <= RADAR_NEAR_PCT).length;
   const nQuiet = rows.length - nSignal - nNear;
-  statusEl.textContent = isOpen
-    ? `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : ""} · 自選 ${rows.length} 檔`
-    : `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${rows.length} 檔`;
+  // 新鮮度以 quote_at 為準，沒有那一欄（舊 DB 還沒跑 migration）就退回寫入時間——
+  // 主機停了兩個都會一起凍住，用哪個都偵測得到，但 quote_at 更貼近「報價多舊」。
+  const freshnessAt = latestQuoteAt || latestAt;
+  const quoteAge = freshnessAt ? quoteAgeMs(freshnessAt) : null;
+  const quoteStale = isOpen && quoteAge !== null && quoteAge >= QUOTE_STALE_MS;
+  statusEl.textContent = quoteStale
+    ? `🟠 報價已停止更新 · 最後 ${fmtClock(freshnessAt)}（${fmtAgeRough(quoteAge)}）· 自選 ${rows.length} 檔`
+    : isOpen
+      ? `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : ""} · 自選 ${rows.length} 檔`
+      : `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${rows.length} 檔`;
   // 三格數的是「自選股的狀態」，跟首頁三格數「事件」不同，標籤刻意不用同一組字
   document.getElementById("live-stats").innerHTML = `
     <div class="home-stat"><div class="hs-num sev-orange">${nSignal}</div><div class="hs-label">⚡ 有訊號</div></div>

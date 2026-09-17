@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="107">
+  <meta name="app-version" content="111">
   <title>管理儀表板 — 台股監控</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -117,6 +117,8 @@
     .badge.pro { border-color: rgba(245,197,66,.5); color: var(--accent-2); }
     .badge.basic { border-color: rgba(139,124,255,.5); color: #c4b5fd; }
     .badge.admin { border-color: rgba(12,163,12,.5); color: #6fdc6f; }
+    /* 示範帳號是官網截圖用的，不計入任何經營數字（migrate_demo_account.sql） */
+    .badge.demo { border-color: rgba(154,165,189,.5); color: var(--text-2); }
 
     /* ── 第零層：待辦 ── */
     .todo-wrap { display: grid; gap: .5rem; margin-bottom: .4rem; }
@@ -396,7 +398,6 @@ const RULE_TYPE_INFO = {
   net_buy_high:     ["chips", "買超創新高"],
   revenue_yoy:      ["fundamental", "月營收 YoY 高於"],
   revenue_mom:      ["fundamental", "月營收 MoM"],
-  eps_yoy:          ["fundamental", "EPS 成長高於"],
   margin_above:     ["fundamental", "利潤率高於"],
   roe_above:        ["fundamental", "ROE 高於"],
 };
@@ -670,7 +671,7 @@ function renderAll(s) {
   }
   tableCard("c-users", "使用者名單", `${fmtInt(u.list.length)} 人，依最近活動排序`,
     ["使用者", "方案", "自選股", "規則", "推播裝置", "期間操作數", "最近活動", "註冊"],
-    u.list.map(x => `<tr><td>${escapeHtml(x.name)}${x.is_admin ? ' <span class="badge admin">管理者</span>' : ""}</td>
+    u.list.map(x => `<tr><td>${escapeHtml(x.name)}${x.is_admin ? ' <span class="badge admin">管理者</span>' : ""}${x.is_demo ? ' <span class="badge demo">示範</span>' : ""}</td>
       <td class="num"><span class="badge ${escapeHtml(x.plan)}">${escapeHtml(x.plan)}</span></td>
       <td class="num">${fmtInt(x.watch)}</td><td class="num">${fmtInt(x.rules)}</td><td class="num">${fmtInt(x.push)}</td>
       <td class="num">${fmtInt(x.events_range)}</td><td class="num" title="${escapeHtml(fmtDate(x.last_seen_at))}">${escapeHtml(ago(x.last_seen_at))}</td>
