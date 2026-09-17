@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="111">
+  <meta name="app-version" content="112">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=111" rel="stylesheet">
+  <link href="watchlist.css?v=112" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -753,6 +753,30 @@
   </div>
 </div>
 
+<!-- ═══ 盤中時間軸（雷達列點進來）：09:00–13:30 的訊號序列，像在講當天盤中的故事 ═══ -->
+<div class="modal fade" id="radarTimelineModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable rtl-dialog">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <div class="w-100">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <h5 class="mb-0 fw-bold" id="rtl-name"></h5>
+            <span id="rtl-tags"></span>
+            <button type="button" class="btn btn-sm btn-outline-info ms-auto" onclick="openKLineFromRadarTimeline()">看 K 線</button>
+          </div>
+          <div class="rtl-sub" id="rtl-sub"></div>
+        </div>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <div id="rtl-chart-wrap"></div>
+        <div class="rtl-story-head">盤中發生了什麼</div>
+        <div id="rtl-story"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="klineModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:92vw;">
     <div class="modal-content kline-modal-content">
@@ -1034,8 +1058,9 @@ let inboxSupportsRead = true;   // migrate_pwa_v2.sql 未執行時自動降級
 let intradaySupportsLevels = true;   // migrate_intraday_levels.sql 未執行時自動降級（PostgREST 對不存在的欄位回 400）
 // intraday_state 的選配欄位（各自有 migration，舊到新）：levels（migrate_intraday_levels.sql）、
 // quote_at（migrate_intraday_quote_at.sql：報價有效時刻＝MIS 快照 sysTime 或富果抓取時間，
-// 雷達狀態列顯示「報價 HH:MM:SS」）。查詢 400 時由新到舊逐個拿掉，intradaySupportsLevels 跟著降級。
-let intradayOptionalCols = ["levels", "quote_at"];
+// 雷達狀態列顯示「報價 HH:MM:SS」）、signals_today（migrate_intraday_signals.sql：當日訊號序列，
+// 雷達列的縮寫與盤中時間軸）。查詢 400 時由新到舊逐個拿掉，intradaySupportsLevels 跟著降級。
+let intradayOptionalCols = ["levels", "quote_at", "signals_today"];
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
 let watchFilter = "all";        // all / signal / up / down / holding
@@ -2930,6 +2955,7 @@ async function _autoRefreshOnce() {
   await Promise.allSettled(tasks);
   _lastRefreshAt = Date.now();
   renderCurrentTab();
+  refreshRadarTimelineIfOpen();
 }
 
 // 用自我重排的 setTimeout 而非 setInterval：間隔會隨「盤中/收盤」與
@@ -3206,6 +3232,7 @@ async function loadIntradayQuotes(force = false) {
           updated_at: row.updated_at || null,
           quote_at:   row.quote_at || null,
           levels:     _intradayLevels(row.levels),
+          signals:    _intradaySignals(row.signals_today),
         };
       }
       intradayQuoteMap = map;
@@ -3228,6 +3255,21 @@ function _intradayLevels(raw) {
   const nums = arr => (Array.isArray(arr) ? arr : []).map(Number).filter(v => Number.isFinite(v) && v > 0);
   const support = nums(raw.support), resistance = nums(raw.resistance);
   return (support.length || resistance.length) ? { support, resistance } : null;
+}
+
+// intraday_state.signals_today：monitor 每輪寫的當日訊號序列（內建訊號＋自動偵測，每種只記第一次）。
+// 不是陣列（欄位還沒建、或 monitor 還沒升級到會寫它）就回 null——雷達據此退回通知紀錄。
+function _intradaySignals(raw) {
+  if (!Array.isArray(raw)) return null;
+  return raw.filter(e => e && typeof e === "object" && e.kind && e.at).map(e => ({
+    kind:  String(e.kind),
+    at:    String(e.at),
+    price: e.price == null ? null : Number(e.price),
+    level: e.level == null ? null : Number(e.level),
+    text:  String(e.text || ""),
+    src:   e.src === "builtin" ? "builtin" : "auto",
+    sev:   String(e.sev || ""),
+  }));
 }
 
 async function fetchFinMindQuote(sid) {
@@ -3340,27 +3382,104 @@ const SIGNAL_EMOJI = {
   target_low:   "🎯",
 };
 
-// 自製訊號圖示：虛線＝關卡、實線＝價格走勢、圓點＝現價，底色用等級色。
+// 自製訊號圖示：雷達列、通知匣、盤中時間軸共用同一套幾何語言（2026-09-18 改版，更粗的線＋箭頭）：
+//   虛線＝支撐／壓力關卡、實線＝前高／前低、雙線＝52 週；箭頭＝價格走勢（穿過線＝突破或跌破、
+//   停在線前＝逼近、折返＝收復）；直條＝成交量；兩條交叉曲線＝均線交叉；波浪線＝單條均線；
+//   同心圓＝自訂價位；儀表＝RSI；零軸柱狀＝MACD；紅／綠厚板＝漲跌停板。
+// 底色＝等級色；漲跌停維持深底＋紅漲綠跌的板線（紅綠畫在橘底上對比只有 1.3:1）。
 // 這是頁面內的 inline SVG，與推播圖示的平台限制無關，iOS 一樣正常顯示。
 //
 // Inbox 列與盤中雷達卡都用它，兩邊的等級都由左側彩色邊條表達。
 // 盤中雷達只顯示「當日」通知，非交易時段是空的，所以圖示若只放在那裡
 // 一週只有五個上午看得到——Inbox 才是天天會看的地方。
+const _ICO_W  = 'stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"';
+const _ICO_W2 = 'stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"';
+const _ICO_DASH = 'stroke-dasharray="4.5 4"';
+const _ICO_HEAD_UP = `<path d="M30 15 L36 9 L42 15" ${_ICO_W}/>`;
+const _ICO_HEAD_DN = `<path d="M30 33 L36 39 L42 33" ${_ICO_W}/>`;
+function _icoLevel(y, dash = true, op = ".95") {
+  return `<line x1="7" y1="${y}" x2="41" y2="${y}" ${_ICO_W2} ${dash ? _ICO_DASH : ""} opacity="${op}"/>`;
+}
+function _icoCrossUp(dash = true) { return _icoLevel(24, dash) + `<path d="M8 40 L18 34 L26 26 L36 10" ${_ICO_W}/>` + _ICO_HEAD_UP; }
+function _icoCrossDn(dash = true) { return _icoLevel(24, dash) + `<path d="M8 8 L18 14 L26 22 L36 38" ${_ICO_W}/>` + _ICO_HEAD_DN; }
+function _icoNearUp() { return _icoLevel(14) + `<path d="M8 40 L18 34 L26 28 L36 20" ${_ICO_W}/><path d="M30 25 L36 19 L42 25" ${_ICO_W}/>`; }
+function _icoNearDn() { return _icoLevel(34) + `<path d="M8 8 L18 14 L26 20 L36 28" ${_ICO_W}/><path d="M30 23 L36 29 L42 23" ${_ICO_W}/>`; }
+function _icoReclaim() { return _icoLevel(22) + `<path d="M7 12 L16 20 L23 34 L30 24 L37 13" ${_ICO_W}/><path d="M31 12 L37 12 L38 19" ${_ICO_W}/>`; }
+function _icoLimit(up) {
+  const color = up ? "var(--chg-up)" : "var(--chg-down)";
+  return up
+    ? `<line x1="7" y1="11" x2="41" y2="11" stroke="${color}" stroke-width="5" stroke-linecap="round"/><path d="M10 40 L19 27 L27 20 L38 17" ${_ICO_W}/><path d="M31 13 L38 17 L36 24" ${_ICO_W}/>`
+    : `<line x1="7" y1="37" x2="41" y2="37" stroke="${color}" stroke-width="5" stroke-linecap="round"/><path d="M10 8 L19 21 L27 28 L38 31" ${_ICO_W}/><path d="M31 35 L38 31 L36 24" ${_ICO_W}/>`;
+}
+function _icoBars(spike) {
+  return spike
+    ? '<g fill="#fff" opacity=".6"><rect x="7" y="30" width="6" height="11" rx="1.8"/><rect x="16" y="26" width="6" height="15" rx="1.8"/><rect x="25" y="31" width="6" height="10" rx="1.8"/></g><rect x="34" y="8" width="7" height="33" rx="2.2" fill="#fff"/>'
+    : '<g fill="#fff"><rect x="7" y="10" width="6" height="31" rx="1.8" opacity=".95"/><rect x="16" y="18" width="6" height="23" rx="1.8" opacity=".8"/><rect x="25" y="26" width="6" height="15" rx="1.8" opacity=".65"/><rect x="34" y="33" width="6" height="8" rx="1.8" opacity=".5"/></g>';
+}
+function _icoTarget(up) {
+  return up
+    ? `<circle cx="33" cy="15" r="8" ${_ICO_W2}/><circle cx="33" cy="15" r="2.6" fill="#fff"/><path d="M7 40 L15 33 L22 26 L27 21" ${_ICO_W}/>`
+    : `<circle cx="33" cy="33" r="8" ${_ICO_W2}/><circle cx="33" cy="33" r="2.6" fill="#fff"/><path d="M7 8 L15 15 L22 22 L27 27" ${_ICO_W}/>`;
+}
+function _ico52w(up) {
+  return up
+    ? _icoLevel(20, false) + _icoLevel(26, false, ".55") + `<path d="M8 41 L18 36 L26 30 L36 10" ${_ICO_W}/>` + _ICO_HEAD_UP
+    : _icoLevel(22, false, ".55") + _icoLevel(28, false) + `<path d="M8 7 L18 12 L26 18 L36 38" ${_ICO_W}/>` + _ICO_HEAD_DN;
+}
+function _icoPct(up) {
+  const g = `<g ${_ICO_W2}><circle cx="15" cy="16" r="4.5"/><circle cx="33" cy="32" r="4.5"/><line x1="34" y1="10" x2="14" y2="38"/></g>`;
+  return g + (up ? `<path d="M38 5 L44 5 L44 11" ${_ICO_W}/>` : `<path d="M4 43 L10 43 L4 37" ${_ICO_W}/>`);
+}
+function _icoMaCross(up) {
+  return up
+    ? `<path d="M6 16 C16 18, 26 28, 42 38" ${_ICO_W} opacity=".6"/><path d="M6 38 C16 36, 26 24, 42 10" ${_ICO_W}/>` + _ICO_HEAD_UP
+    : `<path d="M6 32 C16 30, 26 20, 42 10" ${_ICO_W} opacity=".6"/><path d="M6 10 C16 12, 26 24, 42 38" ${_ICO_W}/>` + _ICO_HEAD_DN;
+}
+function _icoPriceVsMa(up) {
+  const wave = `<path d="M6 25 C12 20, 18 20, 24 25 S36 30, 42 25" ${_ICO_W2} opacity=".65"/>`;
+  return wave + (up ? `<path d="M10 40 L20 34 L28 26 L36 12" ${_ICO_W}/>` + _ICO_HEAD_UP
+                    : `<path d="M10 8 L20 14 L28 22 L36 36" ${_ICO_W}/>` + _ICO_HEAD_DN);
+}
+function _icoRsi(high) {
+  const needle = high ? `<line x1="24" y1="34" x2="36" y2="18" ${_ICO_W}/>` : `<line x1="24" y1="34" x2="12" y2="18" ${_ICO_W}/>`;
+  return `<path d="M8 34 A16 16 0 0 1 40 34" ${_ICO_W2}/>` + needle + '<circle cx="24" cy="34" r="3" fill="#fff"/>';
+}
+function _icoMacd(up) {
+  const bars = up
+    ? '<g fill="#fff"><rect x="8" y="26" width="5" height="9" rx="1.5" opacity=".45"/><rect x="16" y="26" width="5" height="5" rx="1.5" opacity=".6"/><rect x="24" y="18" width="5" height="7" rx="1.5" opacity=".85"/><rect x="32" y="10" width="5" height="15" rx="1.5"/></g>'
+    : '<g fill="#fff"><rect x="8" y="12" width="5" height="13" rx="1.5" opacity=".45"/><rect x="16" y="19" width="5" height="6" rx="1.5" opacity=".6"/><rect x="24" y="26" width="5" height="6" rx="1.5" opacity=".85"/><rect x="32" y="26" width="5" height="13" rx="1.5"/></g>';
+  return `<line x1="6" y1="25.5" x2="42" y2="25.5" ${_ICO_W2} opacity=".7"/>` + bars;
+}
+
 const SIGNAL_ICON_ART = {
-  near_res:     { level: 15, dash: true,  path: "M9 38 L18 33 L27 27 L36 22", dot: [36, 22] },
-  break_res:    { level: 22, dash: true,  path: "M9 37 L18 33 L27 20 L37 11", dot: [37, 11] },
-  near_sup:     { level: 34, dash: true,  path: "M9 11 L18 16 L27 22 L36 27", dot: [36, 27] },
-  break_sup:    { level: 27, dash: true,  path: "M9 12 L18 16 L27 29 L37 38", dot: [37, 38] },
-  reclaim_sup:  { level: 26, dash: true,  path: "M9 18 L16 24 L23 35 L31 28 L38 17", dot: [38, 17] },
-  // 漲跌停：深色底 ＋ 紅漲綠跌的板線。價格走勢維持白線，
-  // 所以「白線是價格、紅綠線是漲跌停板」語意清楚。
-  limit_up:     { level: 13, dash: false, path: "M10 39 L20 25 L27 18 L38 18", dot: [38, 18],
-                  chip: "var(--sig-limit-bg)", line: "var(--chg-up)" },
-  limit_down:   { level: 35, dash: false, path: "M10 9 L20 23 L27 30 L38 30", dot: [38, 30],
-                  chip: "var(--sig-limit-bg)", line: "var(--chg-down)" },
-  volume_spike: { bars: true },
-  target_high:  { level: 17, dash: true,  path: "M9 38 L17 32 L25 25 L32 17", target: [32, 17] },
-  target_low:   { level: 31, dash: true,  path: "M9 10 L17 16 L25 23 L32 31", target: [32, 31] },
+  // ── 內建盤中訊號（detect_alerts 的 kind）──
+  near_res:     { inner: _icoNearUp() },
+  break_res:    { inner: _icoCrossUp() },
+  near_sup:     { inner: _icoNearDn() },
+  break_sup:    { inner: _icoCrossDn() },
+  reclaim_sup:  { inner: _icoReclaim() },
+  limit_up:     { inner: _icoLimit(true),  chip: "var(--sig-limit-bg)" },
+  limit_down:   { inner: _icoLimit(false), chip: "var(--sig-limit-bg)" },
+  volume_spike: { inner: _icoBars(true) },
+  target_high:  { inner: _icoTarget(true) },
+  target_low:   { inner: _icoTarget(false) },
+  // ── 自動偵測／自訂規則的條件（key 與 SIGNAL_ABBR、後端 AUTO_CATALOG 同一組）──
+  break_prior_high:     { inner: _icoCrossUp(false) },
+  break_prior_low:      { inner: _icoCrossDn(false) },
+  break_52w_high:       { inner: _ico52w(true) },
+  break_52w_low:        { inner: _ico52w(false) },
+  change_pct_above:     { inner: _icoPct(true) },
+  change_pct_below:     { inner: _icoPct(false) },
+  "volume_vs_ma:above": { inner: _icoBars(true) },
+  "volume_vs_ma:below": { inner: _icoBars(false) },
+  "ma_cross:up":        { inner: _icoMaCross(true) },
+  "ma_cross:down":      { inner: _icoMaCross(false) },
+  "price_vs_ma:up":     { inner: _icoPriceVsMa(true) },
+  "price_vs_ma:down":   { inner: _icoPriceVsMa(false) },
+  rsi_above:            { inner: _icoRsi(true) },
+  rsi_below:            { inner: _icoRsi(false) },
+  "macd_cross:up":      { inner: _icoMacd(true) },
+  "macd_cross:down":    { inner: _icoMacd(false) },
   // ── 非盤中來源：自己畫的路徑，不用現成圖庫。底色一樣依等級著色 ──
   // 自訂規則：三條可調滑桿，滑塊各在不同位置——「條件是使用者自己調的」
   rule: { inner:
@@ -3401,35 +3520,19 @@ function iconArtKeyOf(row) {
   return "generic";
 }
 
-function signalIconSvg(row, size = 18) {
+function signalIconSvg(row, size = 18, variant = "") {
   const art = SIGNAL_ICON_ART[iconArtKeyOf(row)];
   const sev = inferSeverity(row);
   const bg = art.chip || (sev === "orange" ? "var(--sig-orange)"
            : sev === "blue"   ? "var(--sig-blue)"
            : "var(--sig-info)");
-  const lineColor = art.line || "#fff";
-  let inner;
-  if (art.inner) {
-    inner = art.inner;
-  } else if (art.bars) {
-    inner = '<g fill="#fff" opacity=".72">'
-      + '<rect x="9" y="30" width="5" height="9" rx="1.6"/>'
-      + '<rect x="17" y="27" width="5" height="12" rx="1.6"/>'
-      + '<rect x="25" y="31" width="5" height="8" rx="1.6"/></g>'
-      + '<rect x="33" y="12" width="6" height="27" rx="2" fill="#fff"/>';
-  } else {
-    inner = `<line x1="9" y1="${art.level}" x2="39" y2="${art.level}" stroke="${lineColor}"`
-      + ` stroke-width="${art.dash ? 2 : 3.6}"${art.dash ? ' stroke-dasharray="4 3.5" opacity=".75"' : ""}`
-      + ' stroke-linecap="round"/>'
-      + `<path d="${art.path}" fill="none" stroke="#fff" stroke-width="3"`
-      + ' stroke-linecap="round" stroke-linejoin="round"/>'
-      + (art.target
-        ? `<circle cx="${art.target[0]}" cy="${art.target[1]}" r="6.4" fill="none" stroke="#fff" stroke-width="2.6"/>`
-          + `<circle cx="${art.target[0]}" cy="${art.target[1]}" r="2" fill="#fff"/>`
-        : `<circle cx="${art.dot[0]}" cy="${art.dot[1]}" r="3.6" fill="#fff"/>`);
-  }
-  return `<svg class="sig-ico" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">`
-    + `<rect width="48" height="48" rx="11" fill="${bg}"/>${inner}</svg>`;
+  // 與雷達列的縮寫籤同一套記號：自訂規則命中＝虛線外框；自動偵測（未推播）＝淡一點
+  const frame = variant === "rule"
+    ? '<rect x="2" y="2" width="44" height="44" rx="9.5" fill="none" stroke="rgba(255,255,255,.7)" stroke-width="2" stroke-dasharray="5 3.5"/>'
+    : "";
+  const cls = "sig-ico" + (variant === "auto" ? " sig-ico-auto" : "");
+  return `<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">`
+    + `<rect width="48" height="48" rx="11" fill="${bg}"/>${art.inner}${frame}</svg>`;
 }
 
 // ── 自訂通知規則 ────────────────────────────────────────────────
@@ -3865,6 +3968,54 @@ const SIGNAL_LABEL_MAP = {
   target_high: "觸及上漲目標",
   target_low:  "觸及下跌目標",
 };
+
+// ── 雷達縮寫表：訊號 key → 兩個字（RSI／MACD 例外）─────────────────────────
+// key 與後端同一組：內建訊號＝detect_alerts 的 kind，自動偵測＝monitor/auto_signals.py 的
+// AUTO_CATALOG（條件型別，有方向的加「:變體」），自訂規則命中則由規則條件經 conditionKey()
+// 對到同一張表；test_pwa_tabs 與 test_auto_signals 雙向比對。
+// 兩個字的理由：一列要塞得下 6–8 顆、由左到右一眼掃完當天的順序；全名留給時間軸的故事列。
+const SIGNAL_ABBR = {
+  near_res: "近壓", break_res: "破壓", near_sup: "近撐", break_sup: "破撐", reclaim_sup: "收撐",
+  limit_up: "漲停", limit_down: "跌停", volume_spike: "爆量", target_high: "達上", target_low: "達下",
+  break_prior_high: "破高", break_prior_low: "破低", break_52w_high: "年高", break_52w_low: "年低",
+  change_pct_above: "漲逾", change_pct_below: "跌逾",
+  "volume_vs_ma:above": "放量", "volume_vs_ma:below": "量縮",
+  "ma_cross:up": "金叉", "ma_cross:down": "死叉",
+  "price_vs_ma:up": "站月", "price_vs_ma:down": "破月",
+  rsi_above: "RSI高", rsi_below: "RSI低",
+  "macd_cross:up": "MACD↑", "macd_cross:down": "MACD↓",
+};
+// 自動偵測條件的全名（門檻是 AUTO_CATALOG 的預設值；內建訊號的全名在 SIGNAL_LABEL_MAP）
+const AUTO_SIGNAL_LABELS = {
+  break_prior_high: "突破 20 日高", break_prior_low: "跌破 20 日低",
+  break_52w_high: "突破 52 週高", break_52w_low: "跌破 52 週低",
+  change_pct_above: "漲幅超過 5%", change_pct_below: "跌幅超過 5%",
+  "volume_vs_ma:above": "量能高於 20 日均量 2 倍", "volume_vs_ma:below": "量能低於 20 日均量一半",
+  "ma_cross:up": "MA5 黃金交叉 MA20", "ma_cross:down": "MA5 死亡交叉 MA20",
+  "price_vs_ma:up": "站上月線", "price_vs_ma:down": "跌破月線",
+  rsi_above: "RSI 高於 70", rsi_below: "RSI 低於 30",
+  "macd_cross:up": "MACD 黃金交叉", "macd_cross:down": "MACD 死亡交叉",
+};
+// 有方向變體的條件型別 → [讀哪個參數, 預設值]（與後端 _VARIANT_PARAM 同一組）
+const SIGNAL_VARIANT_PARAM = {
+  volume_vs_ma: ["op", "above"], ma_cross: ["dir", "up"], macd_cross: ["dir", "up"], price_vs_ma: ["dir", "up"],
+};
+function conditionKey(cond) {
+  const type = String(cond?.type || "");
+  const v = SIGNAL_VARIANT_PARAM[type];
+  if (!v) return type;
+  return `${type}:${String(cond?.[v[0]] || v[1]).toLowerCase()}`;
+}
+// 均線口語字：站月／破季；週期不在表裡就叫「線」
+const MA_ABBR_CHAR = { 5: "週", 10: "十", 20: "月", 60: "季", 120: "半", 240: "年" };
+function signalAbbr(key, cond) {
+  const k = String(key || "");
+  if (k.startsWith("price_vs_ma:")) {
+    const ch = MA_ABBR_CHAR[Number(cond?.period ?? 20)] || "線";
+    return (k.endsWith(":down") ? "破" : "站") + ch;
+  }
+  return SIGNAL_ABBR[k] || "";
+}
 
 // event_key 形如 "2330:volume_spike:2026-08-30"，第二段就是訊號種類。
 // 比標題文字正則可靠——訊息文案改寫時不會失效。
@@ -5067,15 +5218,16 @@ function renderLive() {
     const iq = intradayQuoteMap[sid] || null;
     const q = getQuote(sid);
     const price = q ? q.price : null;
-    // 關卡只拿來算「逼近關卡」與排序，不再顯示成文字（2026-09-14 使用者要求：
-    // 支撐／壓力／月線／季線只留在自選列，雷達列只看訊號與報價）
+    // 關卡只拿來算「逼近關卡」與排序；價格與漲跌幅都不上畫面——雷達講的是「今天發生了什麼」
+    // （2026-09-18 改版），價格留給 K 線與自選列
     const lv = nearestLevels(sid, price);
     const active = (iq && iq.signal && iq.signal !== "none") ? iq : null;
-    const today = todaySignalsOf(sid);
+    const chips = radarStoryOf(sid).filter(e => e.src !== "post");   // 盤後提醒只在時間軸的故事列
     const nearPct = Math.min(lv.supPct != null ? lv.supPct : Infinity,
                              lv.resPct != null ? lv.resPct : Infinity);
     return {
-      sid, q, iq, lv, active, today, nearPct,
+      sid, iq, lv, active, chips, nearPct,
+      latestMs: chips.length ? chips[chips.length - 1].ms : 0,
       sev: active ? inferSeverity(active) : null,
       name: getPreferredStockName(sid, r.stock_name) || sid,
       holding: holdings.get(sid) || null,
@@ -5109,44 +5261,358 @@ function renderLive() {
   `;
   if (!rows.length) {
     listEl.innerHTML = `<div class="view-empty">尚未加入自選股<br>
-      <span style="font-size:.78rem;opacity:.8">雷達會顯示每檔自選股的現價、離關卡多遠與今日訊號</span><br>
+      <span style="font-size:.78rem;opacity:.8">雷達會依時間列出每檔自選股今天發生過的訊號，點進去是盤中時間軸</span><br>
       <button class="btn btn-sm btn-outline-info mt-3" onclick="switchTab('watch')">前往自選股 →</button></div>`;
     return;
   }
 
-  // 排序：強訊號 → 注意 → 距關卡最近 → 漲跌幅絕對值大
+  // 排序：進行中（強訊號 → 注意）→ 最新一則訊號的時間 → 距關卡最近
   const sevRank = { orange: 0, blue: 1 };
   rows.sort((a, b) => {
     const ra = a.active ? (sevRank[a.sev] ?? 2) : 3;
     const rb = b.active ? (sevRank[b.sev] ?? 2) : 3;
     if (ra !== rb) return ra - rb;
-    if (a.nearPct !== b.nearPct) return a.nearPct - b.nearPct;
-    return Math.abs(b.q?.changePct ?? 0) - Math.abs(a.q?.changePct ?? 0);
+    if (a.latestMs !== b.latestMs) return b.latestMs - a.latestMs;
+    return a.nearPct - b.nearPct;
   });
 
   listEl.innerHTML = `<div class="card panel-card"><div class="card-body p-0">` + rows.map(x => {
     const tags = [];
-    if (x.active) {
-      const lvl = x.iq.level != null ? ` ${fmtPrice(x.iq.level)}` : "";
-      tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${x.sev}"></i>${escapeHtml(alertTypeLabel(x.active))}${lvl}</span>`);
-    }
     if (x.holding) tags.push(`<span class="wl-signal-badge wl-tag-holding">持</span>`);
     const nearCls = (!x.active && x.nearPct <= RADAR_NEAR_PCT) ? " radar-near" : "";
-    const todayHtml = x.today.length
-      ? `今日 ${x.today.length} 則 · ${escapeHtml(alertTypeLabel(x.today[0]))} ${fmtTime(x.today[0].sent_at)}`
-      : "今日無訊號";
+    const liveCls = x.active ? ` radar-live-${x.sev}` : "";
+    // 縮寫由左到右＝時間順序；進行中的那一顆（intraday_state.signal）加白框
+    const activeKind = x.active ? String(x.iq.signal) : "";
+    let activeIdx = -1;
+    for (let i = x.chips.length - 1; i >= 0 && activeKind; i--) {
+      if (x.chips[i].key === activeKind) { activeIdx = i; break; }
+    }
+    const todayHtml = x.chips.length
+      ? `<div class="radar-chips">${x.chips.map((e, i) => radarChipHtml(e, i === activeIdx)).join("")}</div>`
+      : `<div class="radar-chips radar-chips-empty">今日尚無訊號</div>`;
+    const last = x.chips[x.chips.length - 1];
     return `
-      <div class="holding-row radar-row${nearCls}" onclick="openKLineFromWatchlist('${jsAttr(x.sid)}', { signalsExpanded: true })">
+      <div class="holding-row radar-row${nearCls}${liveCls}" onclick="openRadarTimeline('${jsAttr(x.sid)}')">
         <div class="hr-left">
           <div class="hr-title">${escapeHtml(x.name)} ${tags.join(" ")}</div>
-          <div class="hr-sid">${todayHtml}</div>
+          ${todayHtml}
         </div>
         <div class="hr-right">
-          <div class="hr-price">${x.q ? fmtPrice(x.q.price) : "—"}</div>
-          <div class="hr-sub">${x.q ? fmtChgHtml(x.q.changePct) : "無報價"}</div>
+          <div class="hr-price radar-count${x.chips.length ? "" : " is-zero"}">${x.chips.length}</div>
+          <div class="hr-sub">${last ? `最新 ${fmtTime(last.at)}` : "—"}</div>
         </div>
       </div>`;
-  }).join("") + `</div></div>`;
+  }).join("") + `</div></div>` + `
+    <div class="radar-legend">
+      <span><i class="sig-chip chip-blue">破壓</i>內建訊號</span>
+      <span><i class="sig-chip chip-blue chip-rule">破高</i>自訂規則命中</span>
+      <span><i class="sig-chip chip-auto">漲逾</i>自動偵測（未推播）</span>
+      <span><i class="sig-chip chip-blue chip-active">收撐</i>進行中</span>
+    </div>`;
+}
+
+// 雷達列的一顆縮寫籤：實底＝內建訊號、虛線框＝自訂規則命中（有推播）、透明框＝自動偵測（未推播）
+function radarChipHtml(e, active) {
+  const cls = ["sig-chip", `chip-${e.sev}`,
+    e.src === "rule" ? "chip-rule" : "", e.src === "auto" ? "chip-auto" : "", active ? "chip-active" : ""]
+    .filter(Boolean).join(" ");
+  return `<span class="${cls}">${escapeHtml(e.abbr || "?")}</span>`;
+}
+
+// ── 盤中雷達：當日故事（訊號序列）與時間軸 ─────────────────────────────────
+// 資料三來源都在記憶體，不需要動後端就能重繪：
+//   1. intraday_state.signals_today（monitor 每輪寫的當日序列：內建訊號＋自動偵測，每種只記第一次）
+//   2. alert_history 當日列：自訂規則命中（每位使用者自己的）、自訂價位（target_*）、盤後提醒；
+//      monitor 還沒升級（signals 為 null）時內建訊號也退回這裡
+//   3. intraday_state.signal（進行中）：日誌還沒收到它（突破要兩輪確認）時先補一顆
+// 「今天」以雷達的交易日為準：intraday_state 最後一次報價的台北日期。收盤後、週末看到的是
+// 最近一個交易日的故事，而不是一整個週末的空白頁；狀態列標的就是那個日期。
+function radarSessionDate() {
+  let latest = null;
+  for (const iq of Object.values(intradayQuoteMap || {})) {
+    const t = iq?.quote_at || iq?.updated_at;
+    if (t && (!latest || t > latest)) latest = t;
+  }
+  return (latest && taipeiDateKey(latest)) || taipeiDateKey(new Date());
+}
+
+// 自訂規則的條件：規則面板載入過的完整列優先，否則用開頁時為推薦卡抓的 id+conditions
+function ruleConditionsById(ruleId) {
+  if (!ruleId) return null;
+  for (const rows of [alertRules, ruleNudge.rules]) {
+    const r = (rows || []).find(x => String(x.id) === String(ruleId));
+    if (r && Array.isArray(r.conditions)) return r.conditions;
+  }
+  return null;
+}
+
+const RADAR_POST_SOURCES = ["post_market", "postmarket"];
+
+// 通知內文裡的數字：內建訊號與規則的推播文字固定寫「現價 1095.00」、「壓力 1090.00」、
+// 「目標 1100.00」（monitor/realtime.detect_alerts、rules.build_message）。alert_history 沒有
+// 價位欄位，時間軸的縱向位置只能從這裡拿；撈不到就回 null，呼叫端退回現價。
+function _numberAfter(text, label) {
+  const m = new RegExp(label + "\\s*([0-9][0-9,]*(?:\\.[0-9]+)?)").exec(String(text || ""));
+  if (!m) return null;
+  const v = Number(m[1].replace(/,/g, ""));
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+// 規則的內文寫「突破 20 日高 212.00」「跌破 52 週低 80.00」「站上月線（MA20 1380.00）」，一併認得
+const _LEVEL_WORDS = ["壓力", "支撐", "目標", "漲停板", "跌停板", "日高", "日低", "週高", "週低", "MA20", "MA60", "MA5", "MA10"];
+function _levelFromText(text) {
+  for (const w of _LEVEL_WORDS) {
+    const v = _numberAfter(text, w);
+    if (v != null) return v;
+  }
+  return null;
+}
+// 故事列的標題：通知標題是「代號 名稱 事件」，在個股自己的頁面裡代號與名稱都多餘
+function _titleWithoutStock(title, sid, name) {
+  let t = _titleWithoutSid(title, sid);
+  const n = String(name || "").trim();
+  if (n && t.startsWith(n + " ")) t = t.slice(n.length + 1);
+  return t;
+}
+
+function radarStoryOf(sid) {
+  const date = radarSessionDate();
+  const iq = intradayQuoteMap[sid] || null;
+  const wl = watchlistRows.find(w => String(w.stock_id || "").trim() === sid);
+  const stockName = getPreferredStockName(sid, wl ? wl.stock_name : "") || "";
+  const logged = iq && Array.isArray(iq.signals) ? iq.signals : null;   // null＝monitor 還沒寫這欄
+  const out = [];
+  const entry = o => out.push(Object.assign(
+    { ms: Date.parse(o.at) || 0, rowId: null, ruleName: "", condKeys: [], level: null, price: null }, o));
+
+  for (const e of (logged || [])) {
+    if (taipeiDateKey(e.at) !== date) continue;
+    const key = e.kind;
+    entry({ key, at: e.at, price: e.price, level: e.level, text: e.text,
+            src: e.src, sev: e.sev || inferSeverity({ signal: key }), abbr: signalAbbr(key),
+            title: SIGNAL_LABEL_MAP[key] || AUTO_SIGNAL_LABELS[key] || key, condKeys: [key] });
+  }
+
+  for (const r of inboxRows) {
+    if (String(r.stock_id || "").trim() !== sid || taipeiDateKey(r.sent_at) !== date) continue;
+    const source = String(r.source || "monitor");
+    if (!RADAR_TODAY_SOURCES.includes(source)) continue;
+    const sev = inferSeverity(r);
+    const title = _titleWithoutStock(r.title, sid, stockName);
+    const price = _numberAfter(r.body, "現價");
+    if (source === "rule") {
+      const conds = ruleConditionsById(ruleIdFromEventKey(r));
+      const keys = (conds || []).map(conditionKey).filter(Boolean);
+      const abbr = (conds || []).map(c => signalAbbr(conditionKey(c), c)).filter(Boolean).join("+");
+      entry({ key: keys[0] || "rule", at: r.sent_at, price, level: _levelFromText(r.body), text: r.body || "", src: "rule", sev,
+              abbr: abbr || "規則", title: title || "自訂規則", condKeys: keys,
+              rowId: String(r.id), ruleName: title });
+    } else if (RADAR_POST_SOURCES.includes(source)) {
+      entry({ key: "post_market", at: r.sent_at, text: r.body || "", src: "post", sev, abbr: "",
+              title: title || "盤後提醒", rowId: String(r.id) });
+    } else {
+      const kind = signalKindOf(r);
+      if (!kind) continue;
+      const isTarget = kind === "target_high" || kind === "target_low";
+      if (!isTarget && logged) continue;   // 內建訊號已在共用日誌裡，這裡只補每位使用者自己的價位
+      entry({ key: kind, at: r.sent_at, price, level: _levelFromText(r.body), text: r.body || "",
+              src: isTarget ? "target" : "builtin", sev,
+              abbr: signalAbbr(kind), title: SIGNAL_LABEL_MAP[kind] || alertTypeLabel(r),
+              condKeys: [kind], rowId: String(r.id) });
+    }
+  }
+
+  // 進行中的訊號一定要在故事裡：突破要兩輪確認才進日誌，這幾秒先用 intraday_state 補一顆
+  const activeKind = iq && iq.signal && iq.signal !== "none" ? String(iq.signal) : "";
+  const activeAt = iq ? (iq.signal_at || iq.updated_at) : null;
+  if (activeKind && SIGNAL_ABBR[activeKind] && activeAt && taipeiDateKey(activeAt) === date
+      && !out.some(e => e.key === activeKind)) {
+    entry({ key: activeKind, at: activeAt, price: iq.price, level: iq.level,
+            text: _signalLevelLabel(activeKind, iq.level), src: "builtin", sev: inferSeverity(iq),
+            abbr: signalAbbr(activeKind), title: SIGNAL_LABEL_MAP[activeKind] || activeKind,
+            condKeys: [activeKind] });
+  }
+
+  // 規則命中蓋掉同一條件的自動偵測：同一件事一顆就夠，規則那顆還帶使用者自己的門檻
+  const ruleKeys = new Set(out.filter(e => e.src === "rule").flatMap(e => e.condKeys));
+  const merged = out.filter(e => !(e.src === "auto" && ruleKeys.has(e.key)));
+  merged.sort((a, b) => a.ms - b.ms);
+  return merged;
+}
+
+// ── 盤中時間軸（雷達列點進來）───────────────────────────────────────────────
+// 橫軸 09:00–13:30、縱軸是價位：訊號依發生時間與當時的價位落在圖上，幾條參考橫線
+// （訊號自己講的關卡、月線、昨收、現價附近的壓力／支撐）讓人看得出相對位置。
+// 刻意不畫價格路徑：這一頁講的是「發生了什麼」，走勢留給 K 線。
+let radarTimelineSid = null;
+const RTL_SESSION_MIN = 270;   // 09:00 → 13:30
+const RTL_TICKS = [["09:00", 0], ["10:00", 60], ["11:00", 120], ["12:00", 180], ["", 240], ["13:30", 270]];
+// 參考橫線的名稱：訊號自己講的那條線
+const RTL_LEVEL_LABEL = {
+  near_res: "壓", break_res: "壓", near_sup: "撐", break_sup: "撐", reclaim_sup: "撐",
+  limit_up: "漲停", limit_down: "跌停", target_high: "目標", target_low: "目標",
+  break_prior_high: "前高", break_prior_low: "前低", break_52w_high: "年高", break_52w_low: "年低",
+  "price_vs_ma:up": "月", "price_vs_ma:down": "月", "ma_cross:up": "月", "ma_cross:down": "月",
+};
+
+// 台北時間距 09:00 的分鐘數（開盤前為負、收盤後 > 270）
+function _sessionMinutesOf(ts) {
+  const d = ts instanceof Date ? ts : new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Taipei", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(d);
+  const part = t => Number(parts.find(p => p.type === t)?.value);
+  return (part("hour") - 9) * 60 + part("minute");
+}
+
+function openRadarTimeline(sid) {
+  const sidKey = String(sid || "").trim();
+  if (!sidKey) return;
+  radarTimelineSid = sidKey;
+  trackActivity("radar_timeline_open", { stock: sidKey });
+  renderRadarTimeline(sidKey);   // 三個來源都在記憶體，畫面一開就有
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("radarTimelineModal")).show();
+}
+
+// 盤中每 5 秒拉一次 intraday_state：時間軸開著就跟著重畫
+function refreshRadarTimelineIfOpen() {
+  if (!radarTimelineSid) return;
+  const el = document.getElementById("radarTimelineModal");
+  if (el && el.classList.contains("show")) renderRadarTimeline(radarTimelineSid);
+}
+
+// 兩個 modal 疊在一起會搶 backdrop：先關時間軸再開 K 線／通知詳情
+function openKLineFromRadarTimeline() {
+  const sid = radarTimelineSid;
+  if (!sid) return;
+  bootstrap.Modal.getInstance(document.getElementById("radarTimelineModal"))?.hide();
+  openKLineFromWatchlist(sid, { signalsExpanded: true });
+}
+
+function openInboxDetailFromRadar(rowId) {
+  bootstrap.Modal.getInstance(document.getElementById("radarTimelineModal"))?.hide();
+  openInboxDetail(rowId);
+}
+
+// 點軸上的標記 → 捲到故事列裡那一則並亮一下
+function rtlFocusStory(i) {
+  const el = document.getElementById(`rtl-item-${i}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("is-target");
+  void el.offsetWidth;
+  el.classList.add("is-target");
+}
+
+function renderRadarTimeline(sid) {
+  const wl = watchlistRows.find(w => String(w.stock_id || "").trim() === sid);
+  const name = getPreferredStockName(sid, wl ? wl.stock_name : "") || sid;
+  const iq = intradayQuoteMap[sid] || null;
+  const story = radarStoryOf(sid);
+  const intraday = story.filter(e => e.src !== "post");
+  const holding = holdingBySid().get(sid);
+  const active = (iq && iq.signal && iq.signal !== "none") ? iq : null;
+  document.getElementById("rtl-name").textContent = name;
+  document.getElementById("rtl-tags").innerHTML = holding ? '<span class="wl-signal-badge wl-tag-holding">持</span>' : "";
+  const activeHtml = active
+    ? ` · 進行中 <span class="sig-chip chip-${inferSeverity(active)} chip-active">${escapeHtml(signalAbbr(String(active.signal)) || alertTypeLabel(active))}</span>`
+    : "";
+  document.getElementById("rtl-sub").innerHTML = `${escapeHtml(radarSessionDate())} · ${intraday.length} 則${activeHtml}`;
+  document.getElementById("rtl-chart-wrap").innerHTML = radarTimelineChartHtml(sid, intraday, iq);
+  document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story);
+}
+
+function radarTimelineChartHtml(sid, entries, iq) {
+  const priceRaw = Number(iq?.price ?? getQuote(sid)?.price);
+  const cur = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : null;
+  // 縱向位置：訊號當時的成交價（穿過線／停在線前的畫面自然出現）；沒有就用它講的關卡、再沒有就現價
+  const marks = entries.map(e => {
+    const p = Number(e.price), l = Number(e.level);
+    return { e, v: (Number.isFinite(p) && p > 0) ? p : (Number.isFinite(l) && l > 0) ? l : cur };
+  });
+  // 參考橫線候選：訊號自己的關卡 → 月線／昨收 → 現價最近的壓力／支撐；同一價位只畫一次
+  const refs = [];
+  const addRef = (label, value, cls) => {
+    const v = Number(value);
+    if (!(Number.isFinite(v) && v > 0)) return;
+    if (refs.some(r => Math.abs(r.value - v) / v < 0.002)) return;
+    refs.push({ label, value: v, cls });
+  };
+  for (const e of entries) if (RTL_LEVEL_LABEL[e.key]) addRef(RTL_LEVEL_LABEL[e.key], e.level, "sig");
+  const score = sharedReportData?.investment_scores?.[sid];
+  if (score) addRef("月", score.ma20, "ma");
+  if (iq?.prevClose) addRef("昨收", iq.prevClose, "prev");
+  const lv = nearestLevels(sid, cur);
+  addRef("壓", lv.resistance, "lvl");
+  addRef("撐", lv.support, "lvl");
+
+  // 縱軸範圍以訊號位置為主；離範圍 6% 以上的參考線不畫（否則把訊號擠成一排）
+  const core = marks.map(m => m.v).filter(v => Number.isFinite(v) && v > 0);
+  if (cur) core.push(cur);
+  let lo = core.length ? Math.min(...core) : 0, hi = core.length ? Math.max(...core) : 0;
+  const mid = (lo + hi) / 2 || 1;
+  if (hi - lo < mid * 0.015) { lo = mid * 0.9925; hi = mid * 1.0075; }
+  const keep = core.length
+    ? refs.filter(r => r.value >= lo - mid * 0.06 && r.value <= hi + mid * 0.06).slice(0, 5)
+    : [];
+  for (const r of keep) { lo = Math.min(lo, r.value); hi = Math.max(hi, r.value); }
+  const pad = (hi - lo) * 0.12 || mid * 0.01;
+  lo -= pad; hi += pad;
+  const yPct = v => (1 - (v - lo) / (hi - lo)) * 100;
+  const xPct = min => Math.min(95, Math.max(5, (min / RTL_SESSION_MIN) * 100));   // 標記 28px 寬，貼邊會被切
+
+  // 標記：時間 → 橫向、價位 → 縱向；擠在一起的往上疊一層
+  const placed = [];
+  const markHtml = marks.map((m, i) => {
+    const min = _sessionMinutesOf(m.e.at);
+    if (min == null) return "";
+    const x = xPct(min);
+    let y = Number.isFinite(m.v) && m.v > 0 ? yPct(m.v) : 50;
+    for (const p of placed) if (Math.abs(p.x - x) < 9 && Math.abs(p.y - y) < 18) y = p.y - 18;
+    y = Math.max(6, Math.min(94, y));
+    placed.push({ x, y });
+    const variant = m.e.src === "rule" ? "rule" : m.e.src === "auto" ? "auto" : "";
+    return `<div class="rtl-mark rtl-src-${m.e.src}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%" role="button" onclick="rtlFocusStory(${i})">`
+      + signalIconSvg({ signal: m.e.key, severity: m.e.sev, source: m.e.src === "rule" ? "rule" : "monitor" }, 28, variant)
+      + `<span class="rtl-abbr">${escapeHtml(m.e.abbr || "")}</span></div>`;
+  }).join("");
+  const lines = keep.map(r =>
+    `<div class="rtl-line rtl-line-${r.cls}" style="top:${yPct(r.value).toFixed(1)}%"><span>${escapeHtml(r.label)} ${fmtPrice(r.value)}</span></div>`).join("");
+  let nowHtml = "";
+  if (_isMarketOpenNow()) {
+    const nowMin = _sessionMinutesOf(new Date());
+    if (nowMin != null && nowMin >= 0 && nowMin <= RTL_SESSION_MIN) {
+      const x = xPct(nowMin).toFixed(1);
+      nowHtml = `<div class="rtl-future" style="left:${x}%"></div><div class="rtl-now" style="left:${x}%"><span>${fmtTime(new Date())}</span></div>`;
+    }
+  }
+  const ticks = RTL_TICKS.map(([label, min]) =>
+    `<i style="left:${(min / RTL_SESSION_MIN * 100).toFixed(1)}%"><b>${label}</b></i>`).join("");
+  return `<div class="rtl-chart"><div class="rtl-plot">${lines}${nowHtml}${markHtml}${marks.length ? "" : '<div class="rtl-empty">今天還沒有訊號</div>'}</div><div class="rtl-ticks">${ticks}</div></div>`;
+}
+
+function radarStoryListHtml(story) {
+  const intraday = story.filter(e => e.src !== "post");
+  const post = story.filter(e => e.src === "post");
+  const srcLabel = { builtin: "內建訊號", target: "自訂價位", auto: "自動偵測 · 未推播", rule: "📐 自訂規則", post: "盤後提醒" };
+  const item = (e, i) => {
+    const link = e.rowId ? ` role="button" tabindex="0" onclick="openInboxDetailFromRadar('${jsAttr(e.rowId)}')"` : "";
+    const lvl = (e.src === "builtin" || e.src === "target") ? _signalLevelLabel(e.key, e.level)
+              : (Number.isFinite(Number(e.level)) && e.level > 0 ? fmtPrice(e.level) : "");
+    const variant = e.src === "rule" ? "rule" : e.src === "auto" ? "auto" : "";
+    return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-sev="${e.sev}"${link}>
+      <div class="rtl-time">${fmtTime(e.at)}</div>
+      ${signalIconSvg({ signal: e.key, severity: e.sev, source: e.src === "rule" ? "rule" : e.src === "post" ? "post_market" : "monitor" }, 34, variant)}
+      <div class="rtl-text">
+        <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
+        ${e.text ? `<div class="rtl-desc">${escapeHtml(e.text)}</div>` : ""}
+        <span class="rtl-src rtl-src-${e.src}">${srcLabel[e.src] || ""}</span>
+      </div></div>`;
+  };
+  let html = intraday.map((e, i) => item(e, i)).join("");
+  if (!html) html = `<div class="rtl-none">今天還沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測的條件成立時，會依時間排在這裡</span></div>`;
+  if (post.length) html += `<div class="rtl-divider">收盤後</div>` + post.map((e, i) => item(e, intraday.length + i)).join("");
+  return html;
 }
 
 // 自訂規則通知的 event_key 形如 "2330:rule:{uuid}:2026-08-30"
@@ -6997,6 +7463,10 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
     series,
   };
 }
+
+document.getElementById("radarTimelineModal").addEventListener("hidden.bs.modal", () => {
+  radarTimelineSid = null;
+});
 
 document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => {
   detachKLineTouchInteraction();

@@ -2575,6 +2575,82 @@ body.has-bottom-nav .qa-panel {
 /* ── 雷達列：逼近關卡（±1% 內）的列左緣一條藍線 ── */
 .holding-row.radar-near { box-shadow: inset 3px 0 0 var(--sig-blue); }
 
+/* ── 雷達列（2026-09-18 改版）：不放股價與漲跌幅，第二行是當天的訊號縮寫，由左到右＝時間順序 ──
+   實底＝內建訊號、虛線框＝自訂規則命中（有推播）、透明框＝系統自動偵測（未推播）、白框＝進行中。
+   底色仍走等級色（橘＝需要注意、藍＝其餘），與通知匣的左邊條同一套；縮寫本身承載意義。 */
+.holding-row.radar-live-orange { box-shadow: inset 3px 0 0 var(--sig-orange); }
+.holding-row.radar-live-blue   { box-shadow: inset 3px 0 0 var(--sig-blue); }
+.holding-row .hr-price.radar-count { font-size: 1.15rem; color: var(--text-0); }
+.holding-row .hr-price.radar-count.is-zero { color: var(--text-muted); font-weight: 500; }
+.radar-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.radar-chips.radar-chips-empty { font-size: 0.74rem; color: var(--text-muted); }
+.sig-chip {
+	display: inline-block;
+	font-size: 0.72rem;
+	line-height: 1;
+	padding: 4px 7px;
+	border-radius: 7px;
+	font-weight: 600;
+	font-style: normal;
+	letter-spacing: 0.02em;
+	color: var(--text-0);
+	background: rgba(146, 146, 163, 0.16);
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+.sig-chip.chip-orange { color: var(--sig-orange); background: rgba(255, 159, 67, 0.14); }
+.sig-chip.chip-blue   { color: var(--sig-blue);   background: rgba(86, 168, 255, 0.13); }
+.sig-chip.chip-rule   { border-style: dashed; border-color: currentColor; }
+.sig-chip.chip-auto   { background: transparent; border-color: rgba(146, 146, 163, 0.4); color: var(--text-1); font-weight: 500; }
+.sig-chip.chip-active { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
+.radar-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 4px 0; font-size: 0.7rem; color: var(--text-muted); }
+.radar-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sig-ico.sig-ico-auto { opacity: 0.6; }
+
+/* ── 盤中時間軸：橫軸 09:00–13:30、縱軸價位；幾條參考橫線給相對位置，不畫價格路徑 ── */
+.rtl-dialog { max-width: 560px; }
+.rtl-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.rtl-chart { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px 12px 8px; }
+.rtl-plot { position: relative; height: 200px; margin: 0 62px 0 6px; }
+.rtl-line { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(201, 201, 212, 0.45); }
+.rtl-line span { position: absolute; right: -62px; top: -0.6em; width: 58px; font-size: 0.64rem; color: var(--text-muted); white-space: nowrap; }
+.rtl-line-prev { border-top-style: dotted; border-top-color: rgba(146, 146, 163, 0.35); }
+.rtl-line-ma   { border-top-color: rgba(232, 121, 249, 0.55); }
+.rtl-line-sig  { border-top-color: rgba(201, 201, 212, 0.7); }
+.rtl-line-sig span { color: var(--text-1); }
+.rtl-future { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(90deg, rgba(146, 146, 163, 0.07) 0 4px, transparent 4px 8px); }
+.rtl-now { position: absolute; top: 0; bottom: 0; border-left: 2px dashed var(--accent); }
+.rtl-now span { position: absolute; top: -15px; left: -17px; font-size: 0.62rem; color: var(--accent); font-weight: 600; white-space: nowrap; }
+.rtl-mark { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 1px; cursor: pointer; z-index: 1; }
+.rtl-mark .sig-ico { display: block; box-shadow: 0 0 0 2px var(--bg-1); border-radius: 8px; }
+.rtl-abbr { font-size: 0.64rem; font-weight: 700; line-height: 1; padding: 1px 3px; border-radius: 4px; background: rgba(15, 15, 26, 0.85); white-space: nowrap; }
+.rtl-mark.rtl-src-auto .rtl-abbr { color: var(--text-1); font-weight: 500; }
+.rtl-ticks { position: relative; height: 20px; margin: 6px 62px 0 6px; border-top: 3px solid rgba(146, 146, 163, 0.35); }
+.rtl-ticks i { position: absolute; top: -3px; width: 1px; height: 9px; background: rgba(146, 146, 163, 0.6); transform: translateX(-50%); }
+.rtl-ticks i b { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); font-size: 0.62rem; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+.rtl-ticks i:first-child b { transform: translateX(0); }
+.rtl-ticks i:last-child b { transform: translateX(-100%); }
+.rtl-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: var(--text-muted); }
+.rtl-story-head { font-size: 0.8rem; color: var(--text-muted); margin: 16px 0 8px; font-weight: 600; }
+.rtl-item { display: flex; align-items: flex-start; gap: 9px; padding: 8px 6px; border-radius: 12px; border-left: 3px solid transparent; }
+.rtl-item.is-link { cursor: pointer; }
+.rtl-item.is-link:hover { background: var(--surface); }
+.rtl-item[data-sev="orange"] { border-left-color: var(--sig-orange); }
+.rtl-item[data-sev="blue"]   { border-left-color: var(--sig-blue); }
+.rtl-item.is-target { animation: inbox-target-flash 3s ease-out; }
+.rtl-time { width: 40px; flex: 0 0 auto; font-size: 0.76rem; color: var(--text-1); font-variant-numeric: tabular-nums; padding-top: 9px; font-weight: 600; }
+.rtl-item > .sig-ico { flex: 0 0 auto; width: 34px; height: 34px; }
+.rtl-text { flex: 1 1 auto; min-width: 0; padding-top: 2px; }
+.rtl-title { font-weight: 700; font-size: 0.9rem; }
+.rtl-lvl { font-weight: 500; font-size: 0.78rem; color: var(--text-1); margin-left: 6px; }
+.rtl-desc { font-size: 0.78rem; color: var(--text-1); margin-top: 2px; line-height: 1.45; white-space: pre-wrap; }
+.rtl-src { display: inline-block; margin-top: 4px; font-size: 0.66rem; color: var(--text-muted); padding: 2px 6px; border-radius: 5px; background: rgba(146, 146, 163, 0.14); }
+.rtl-src-rule { border: 1px dashed rgba(146, 146, 163, 0.6); }
+.rtl-src-auto { background: transparent; border: 1px solid rgba(146, 146, 163, 0.35); }
+.rtl-divider { font-size: 0.72rem; color: var(--text-muted); margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+.rtl-none { padding: 14px 6px; font-size: 0.85rem; color: var(--text-1); }
+.rtl-none span { font-size: 0.74rem; color: var(--text-muted); }
+
 /* ── K 線視窗頂端「今日訊號」：盤中狀態＋今天的通知（雷達列點進來要看得到時間） ── */
 .kline-signals {
 	border: 1px solid rgba(86, 168, 255, 0.3);
