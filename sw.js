@@ -10,7 +10,7 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v114';
+const CACHE_VERSION = 'tw-stock-v115';
 
 // 訂閱輪換用的 Cache：不隨版本清掉，否則升級 SW 就把待同步的訂閱弄丟了。
 const PUSH_SYNC_CACHE = 'push-sync';
@@ -207,28 +207,34 @@ self.addEventListener('pushsubscriptionchange', event => {
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const target = event.notification.data?.url || './watchlist.html';
+  const at = Date.now();   // 這一次點擊的識別：頁面用它避免「訊息」與「Cache 備援」兩條路各跳一次
   event.waitUntil((async () => {
-    // 冷啟動備援：iOS 從通知啟動主畫面 App 時常忽略 openWindow 的網址，
-    // 直接開 manifest 的 start_url，?alert= 就這樣掉了。先把目標寫進 Cache，
-    // 頁面開機時若網址上沒有參數就來這裡拿（只認 60 秒內的，用完即刪）。
+    // 備援：iOS 從通知啟動主畫面 App 時常忽略 openWindow 的網址，直接開
+    // manifest 的 start_url，?alert= 就這樣掉了；視窗在背景被系統凍結時
+    // postMessage 也可能石沉大海。先把目標寫進 Cache，頁面開機或回前景時
+    // 若沒收到訊息就來這裡拿（只認 60 秒內的，用完即刪）。
     try {
       const cache = await caches.open(PUSH_SYNC_CACHE);
       await cache.put(PENDING_ALERT_URL, new Response(
-        JSON.stringify({ url: target, at: Date.now() }),
+        JSON.stringify({ url: target, at }),
         { headers: { 'Content-Type': 'application/json' } }));
     } catch { /* 沒有 Cache 也還有網址那條路 */ }
 
-    return clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-      // Focus existing PWA window if open
-      for (const c of list) {
-        if (c.url.includes('watchlist') && 'focus' in c) {
-          c.postMessage({ type: 'notification-click', url: target });   // 先送再 focus：focus 失敗也不影響跳轉
-          return c.focus();
-        }
+    const list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // 視窗已開：先送訊息再 focus。iOS 偶爾會留下已被系統回收的殭屍 client，
+    // focus 會失敗——那就改走開新視窗，別讓點擊沒有任何反應。
+    for (const c of list) {
+      if (c.url.includes('watchlist') && 'focus' in c) {
+        try { c.postMessage({ type: 'notification-click', url: target, at }); } catch { /* 頁面已不在 */ }
+        try {
+          await c.focus();
+          return;
+        } catch { /* 殭屍 client：往下開新視窗 */ }
       }
-      // Otherwise open a new window
-      if (clients.openWindow) return clients.openWindow(target);
-    });
+    }
+    if (clients.openWindow) {
+      try { await clients.openWindow(target); } catch { /* 開不了也還有 Cache 備援 */ }
+    }
   })());
 });
 

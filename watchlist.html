@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="114">
+  <meta name="app-version" content="115">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=114" rel="stylesheet">
+  <link href="watchlist.css?v=115" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1053,6 +1053,15 @@ let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc）
 let pendingAlertFocus = null;   // 從手機通知點進來要置中的那則（event_key）
 let _alertFocusRetries = 0;
+let _pendingAlertFocusAt = 0;   // 何時開始等：等太久（換了分頁）就放棄，別在下次進通知頁時突然跳
+let _lastAlertClickAt = 0;      // 最後處理的那次點擊（SW 給的時間戳）：訊息與 Cache 備援兩條路只認一次
+let _alertJumpedThisBoot = false; // 這次開機是點通知進來的：別再疊推播／規則推薦視窗上去
+// 閃爍改成「狀態」而不是掛在 DOM 上：列表在閃爍中途重畫（報告資料回來、回前景重抓）
+// 會把整段 innerHTML 換掉，掛在舊元素上的動畫就此消失——這是「有時候不閃」的原因。
+let _inboxTargetRowId = null;
+let _inboxTargetKey = null;     // 同一則的 event_key：更新重載時帶在網址上讓新頁面再跳一次
+let _inboxTargetAt = 0;
+const INBOX_TARGET_FLASH_MS = 4000;
 let inboxLoadedAt = 0;
 let inboxSupportsRead = true;   // migrate_pwa_v2.sql 未執行時自動降級
 let intradaySupportsLevels = true;   // migrate_intraday_levels.sql 未執行時自動降級（PostgREST 對不存在的欄位回 400）
@@ -2863,10 +2872,17 @@ async function showMain() {
 
   // 從手機通知點進來（視窗原本沒開）：網址帶 ?alert=<event_key>#inbox。
   // 先記下要定位的那則，等 refreshInbox 抓回列表再置中；參數用完就從網址拿掉
-  const bootAlert = new URLSearchParams(location.search).get("alert");
+  // 視窗開著但尚未登入（session 過期）時點了通知：focusInboxAlert 只能先把 key 留在
+  // pendingAlertFocus，登入完成走到這裡再接手，通知才不會白點一次。
+  const urlAlert = new URLSearchParams(location.search).get("alert");
+  const bootAlert = urlAlert || pendingAlertFocus;
   if (bootAlert) {
     pendingAlertFocus = bootAlert;
+    _pendingAlertFocusAt = Date.now();
     _alertFocusRetries = 0;
+    _alertJumpedThisBoot = true;
+  }
+  if (urlAlert) {
     const rest = new URLSearchParams(location.search);
     rest.delete("alert");
     const q = rest.toString();
@@ -2894,7 +2910,9 @@ async function showMain() {
   // 延後再跳：免責聲明閘、強制更新閘、金流導回的方案面板都在這之前處理，
   // 直接跳會疊在它們上面（_screenIsBusy 會擋，但那樣這次就白白錯過了）
   // 一次開機只跳一個視窗：推播提醒優先，跳了就略過這次的規則推薦
+  // 點通知進來的那次不跳：使用者要看的是剛閃爍的那則，推薦視窗會正好蓋在上面
   setTimeout(async () => {
+    if (_alertJumpedThisBoot) return;
     if (!(await maybeShowPushNudgePopup())) maybeShowRuleNudgePopup();
   }, 1800);
   _lastRefreshAt = Date.now();
@@ -3023,6 +3041,13 @@ function _maybeReload() {
     return;
   }
   _reloadPending = false;
+  // 剛從通知點回來（部署後第一次回前景常常正好裝了新 SW）：正在跳、或剛跳到的那則
+  // 帶在網址上，新頁面開機會自己再跳一次；否則重載就把這次點擊吞掉了。
+  const alertKey = pendingAlertFocus || _inboxTargetKey;
+  if (alertKey) {
+    location.replace(location.pathname + "?alert=" + encodeURIComponent(alertKey) + "#inbox");
+    return;
+  }
   location.reload();
 }
 
@@ -3088,6 +3113,9 @@ function _onAppResume() {
   loadPlanState().catch(() => {});   // 回前景無條件重問方案，不等通知的節奏
   refreshReportIfStale();            // 報告是昨天的就重抓（只在回前景，不進輪詢）
   initPushUI();                      // 剛去系統設定改完通知回來：這條列要跟著變
+  // 視窗在背景被系統凍結時點了通知：SW 的 postMessage 可能沒送到（iOS 常見），
+  // 但它在 focus 前已把目標寫進 Cache——回前景時補撿一次，訊息有到的話會被時間戳擋掉
+  _consumePendingAlertFromCache();
 
   _scheduleAutoRefresh();
 }
@@ -4324,16 +4352,55 @@ async function refreshInbox(force = true) {
 // 通知歷史是「先推播、再寫入」，手指比資料庫快的話第一次抓不到，隔幾秒再抓一次。
 function focusInboxAlert(eventKey) {
   const key = String(eventKey || "").trim();
-  if (!key || !state.userId) return;
+  if (!key) return;
   pendingAlertFocus = key;
+  _pendingAlertFocusAt = Date.now();
   _alertFocusRetries = 0;
-  if (currentTab !== "inbox") switchTab("inbox", true);
-  refreshInbox(true);   // 視窗一直開著的話列表可能還是舊的，先抓最新再定位
+  _alertJumpedThisBoot = true;
+  if (!state.userId) return;   // 還沒登入：留給 showMain 接手
+  // 上次離開時停在某張卡片（K 線、通知詳情、規則編輯…）：視窗被 focus 回來後
+  // 那張卡片還蓋在最上面，底下就算切到通知頁也看不到。先把它們收掉再跳。
+  _dismissOverlaysForAlertJump().then(() => {
+    if (pendingAlertFocus !== key) return;   // 等待期間又點了另一則
+    if (currentTab !== "inbox") switchTab("inbox", true);
+    refreshInbox(true);   // 視窗一直開著的話列表可能還是舊的，先抓最新再定位
+  });
+}
+
+// 收掉所有蓋在通知頁上面的東西，等它們真的消失後才 resolve（Bootstrap 的淡出約 300ms，
+// 期間 body 仍被鎖捲動，scrollIntoView 會被吃掉）。不動免責／更新／安裝精靈那幾道閘：
+// 那是必須先處理的事，_screenIsBusy 本來就擋在那裡。
+function _dismissOverlaysForAlertJump() {
+  const waits = [];
+  document.querySelectorAll(".modal.show").forEach(el => {
+    const inst = bootstrap.Modal.getInstance(el);
+    if (!inst) { el.classList.remove("show"); el.style.display = "none"; return; }
+    waits.push(new Promise(resolve => {
+      const done = () => { el.removeEventListener("hidden.bs.modal", done); resolve(); };
+      el.addEventListener("hidden.bs.modal", done);
+      setTimeout(done, 600);   // 動畫沒跑完事件也沒來：不要無限等
+      try { inst.hide(); } catch { done(); }
+    }));
+  });
+  if (typeof qaVisible !== "undefined" && qaVisible) toggleQaPanel(qaCurrentSid);   // AI 問答面板
+  return Promise.all(waits).then(() => {
+    // 兩層 modal 一起收時 Bootstrap 會把 body 的捲動鎖留著（方案面板踩過），這裡強制清乾淨
+    if (waits.length && !document.querySelector(".modal.show")) {
+      document.body.classList.remove("modal-open");
+      document.body.style.overflow = "";
+      document.body.style.paddingRight = "";
+      document.querySelectorAll(".modal-backdrop").forEach(b => b.remove());
+    }
+  });
 }
 
 function _applyPendingAlertFocus() {
   if (!pendingAlertFocus) return;
+  // 等太久（使用者早就換到別的分頁做別的事）就放棄，別在下次進通知頁時憑空跳一下
+  if (Date.now() - _pendingAlertFocusAt > 60000) { pendingAlertFocus = null; return; }
   if (currentTab !== "inbox") return;
+  // 還有卡片蓋在上面（正在淡出、或金流導回的方案面板）：先留著，收掉後的那次重抓再定位
+  if (document.querySelector(".modal.show")) return;
   const row = inboxRows.find(r => String(r.event_key || "") === pendingAlertFocus);
   if (!row) {
     if (_alertFocusRetries < 2) {
@@ -4344,27 +4411,48 @@ function _applyPendingAlertFocus() {
     }
     return;
   }
-  // 目前的篩選（未讀／重要／持股）沒把它列出來就切回「全部」
-  if (!filteredInboxRows().includes(row)) setInboxFilter("all");
-  const el = document.querySelector(`#inbox-list .inbox-item[data-rowid="${String(row.id)}"]`);
   pendingAlertFocus = null;
+  // 閃爍狀態先記下來，之後每次 renderInbox 都會把它畫回去（含動畫進度）
+  _inboxTargetRowId = String(row.id);
+  _inboxTargetKey = String(row.event_key || "") || null;
+  _inboxTargetAt = Date.now();
+  setTimeout(() => {
+    if (_inboxTargetRowId === String(row.id) && Date.now() - _inboxTargetAt >= INBOX_TARGET_FLASH_MS) {
+      _inboxTargetRowId = null;
+      _inboxTargetKey = null;
+      document.querySelectorAll("#inbox-list .inbox-item.is-target").forEach(el => el.classList.remove("is-target"));
+    }
+  }, INBOX_TARGET_FLASH_MS + 50);
+  // 目前的篩選（未讀／重要／持股）沒把它列出來就切回「全部」（會重畫）；否則自己重畫一次套上閃爍
+  if (!filteredInboxRows().includes(row)) setInboxFilter("all");
+  else renderInbox();
+  const el = document.querySelector(`#inbox-list .inbox-item[data-rowid="${String(row.id)}"]`);
   if (!el) return;
   el.scrollIntoView({ block: "center", behavior: "smooth" });
-  el.classList.add("is-target");
-  setTimeout(() => el.classList.remove("is-target"), 3000);
 }
 
-// 冷啟動備援：SW 在 notificationclick 時把目標寫進 Cache，這裡取用並清掉。
+// 把「正在閃爍的那則」畫回列表：列表重畫時元素會被換掉，動畫用負的 delay 接續原本的進度
+function _paintInboxTarget() {
+  if (!_inboxTargetRowId) return;
+  const elapsed = Date.now() - _inboxTargetAt;
+  if (elapsed >= INBOX_TARGET_FLASH_MS) { _inboxTargetRowId = null; _inboxTargetKey = null; return; }
+  const el = document.querySelector(`#inbox-list .inbox-item[data-rowid="${_inboxTargetRowId}"]`);
+  if (!el) return;
+  el.style.animationDelay = `-${elapsed}ms`;
+  el.classList.add("is-target");
+}
+
+// 冷啟動／回前景備援：SW 在 notificationclick 時把目標寫進 Cache，這裡取用並清掉。
 // 只認 60 秒內的，否則「上週點過通知」會在今天開 App 時莫名其妙跳一次。
 async function _consumePendingAlertFromCache() {
   try {
     const cache = await caches.open("push-sync");
     const res = await cache.match("./__pending_alert__");
     if (!res) return;
-    await cache.delete("./__pending_alert__");
     const { url, at } = await res.json();
-    if (!url || !at || Date.now() - at > 60000) return;
-    _handleNotificationClickUrl(url);
+    if (!url || !at || Date.now() - at > 60000) { await cache.delete("./__pending_alert__"); return; }
+    // 先處理再清（處理函式內部會清）：更新重載若搶在中間發生，目標已在記憶體裡、會被帶上網址
+    _handleNotificationClickUrl(url, at);
   } catch { /* 沒有 Cache API 或讀取失敗就算了，不影響一般開啟 */ }
 }
 
@@ -4372,8 +4460,11 @@ function _clearPendingAlertCache() {
   caches.open("push-sync").then(c => c.delete("./__pending_alert__")).catch(() => {});
 }
 
-// SW 在視窗已開時把通知的網址丟過來（notificationclick → postMessage）
-function _handleNotificationClickUrl(url) {
+// SW 在視窗已開時把通知的網址丟過來（notificationclick → postMessage），
+// 或回前景／開機時從 Cache 備援撿到。同一次點擊只處理一次（at 是 SW 蓋的時間戳）。
+function _handleNotificationClickUrl(url, at) {
+  if (at && at === _lastAlertClickAt) return;
+  if (at) _lastAlertClickAt = at;
   _clearPendingAlertCache();   // 這條路已經處理掉了，別讓備援再跳一次
   let u;
   try { u = new URL(String(url || ""), location.href); } catch { return; }
@@ -4460,6 +4551,7 @@ function renderInbox() {
       </div>`;
   }
   listEl.innerHTML = html;
+  _paintInboxTarget();
 }
 
 let detailRow = null;   // 目前開啟詳情的通知 row

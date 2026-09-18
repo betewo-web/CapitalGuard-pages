@@ -1770,11 +1770,12 @@ body.has-bottom-nav .qa-panel {
 
 /* 從手機通知點進來、被捲到畫面中央的那一則：亮一下再淡掉，讓人知道是哪則 */
 .inbox-item.is-target {
-	animation: inbox-target-flash 3s ease-out;
+	/* 4s 與 watchlist.html 的 INBOX_TARGET_FLASH_MS 同值；列表重畫時以負的 animation-delay 接續進度 */
+	animation: inbox-target-flash 4s ease-out;
 }
 @keyframes inbox-target-flash {
 	0%   { box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.85); border-color: rgba(139, 124, 255, 0.9); }
-	60%  { box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.45); }
+	70%  { box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.45); border-color: rgba(139, 124, 255, 0.6); }
 	100% { box-shadow: 0 0 0 0 rgba(139, 124, 255, 0); }
 }
 
