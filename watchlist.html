@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="112">
+  <meta name="app-version" content="113">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=112" rel="stylesheet">
+  <link href="watchlist.css?v=113" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -3393,8 +3393,8 @@ const SIGNAL_EMOJI = {
 // 盤中雷達只顯示「當日」通知，非交易時段是空的，所以圖示若只放在那裡
 // 一週只有五個上午看得到——Inbox 才是天天會看的地方。
 const _ICO_W  = 'stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"';
-const _ICO_W2 = 'stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"';
-const _ICO_DASH = 'stroke-dasharray="4.5 4"';
+const _ICO_W2 = 'stroke="#fff" stroke-width="2.8" stroke-linecap="round" fill="none"';
+const _ICO_DASH = 'stroke-dasharray="6.5 4.5"';
 const _ICO_HEAD_UP = `<path d="M30 15 L36 9 L42 15" ${_ICO_W}/>`;
 const _ICO_HEAD_DN = `<path d="M30 33 L36 39 L42 33" ${_ICO_W}/>`;
 function _icoLevel(y, dash = true, op = ".95") {
@@ -3520,19 +3520,16 @@ function iconArtKeyOf(row) {
   return "generic";
 }
 
-function signalIconSvg(row, size = 18, variant = "") {
+function signalIconSvg(row, size = 18) {
   const art = SIGNAL_ICON_ART[iconArtKeyOf(row)];
   const sev = inferSeverity(row);
   const bg = art.chip || (sev === "orange" ? "var(--sig-orange)"
            : sev === "blue"   ? "var(--sig-blue)"
            : "var(--sig-info)");
-  // 與雷達列的縮寫籤同一套記號：自訂規則命中＝虛線外框；自動偵測（未推播）＝淡一點
-  const frame = variant === "rule"
-    ? '<rect x="2" y="2" width="44" height="44" rx="9.5" fill="none" stroke="rgba(255,255,255,.7)" stroke-width="2" stroke-dasharray="5 3.5"/>'
-    : "";
-  const cls = "sig-ico" + (variant === "auto" ? " sig-ico-auto" : "");
-  return `<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">`
-    + `<rect width="48" height="48" rx="11" fill="${bg}"/>${art.inner}${frame}</svg>`;
+  // 圖示一律實色、不加外框：曾把自動偵測淡化 60%、規則命中疊虛線框，手機上看起來像糊掉的截圖。
+  // 來源（內建／規則／自動）由雷達列的縮寫籤樣式與故事列的來源標籤表達，圖示只管「這是什麼訊號」。
+  return `<svg class="sig-ico" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">`
+    + `<rect width="48" height="48" rx="11" fill="${bg}"/>${art.inner}</svg>`;
 }
 
 // ── 自訂通知規則 ────────────────────────────────────────────────
@@ -5559,36 +5556,51 @@ function radarTimelineChartHtml(sid, entries, iq) {
   const pad = (hi - lo) * 0.12 || mid * 0.01;
   lo -= pad; hi += pad;
   const yPct = v => (1 - (v - lo) / (hi - lo)) * 100;
-  const xPct = min => Math.min(95, Math.max(5, (min / RTL_SESSION_MIN) * 100));   // 標記 28px 寬，貼邊會被切
 
-  // 標記：時間 → 橫向、價位 → 縱向；擠在一起的往上疊一層
+  // 橫向：依發生順序等距排開，不照真實時間比例。台股訊號多半集中在開盤那半小時，
+  // 照比例畫會把三四顆擠在最左邊一團（Howard 2026-09-18：先顧閱讀體驗）；順序與
+  // 各自的時間仍看得到——時間標在每顆標記正下方的刻度上。
+  const n = marks.length;
+  const xOf = i => rtlSlotPct(i, n);
+  // 縱向：價位；相鄰標記價位太近就往上疊一層，免得圖示互相蓋住
   const placed = [];
   const markHtml = marks.map((m, i) => {
-    const min = _sessionMinutesOf(m.e.at);
-    if (min == null) return "";
-    const x = xPct(min);
+    const x = xOf(i);
     let y = Number.isFinite(m.v) && m.v > 0 ? yPct(m.v) : 50;
-    for (const p of placed) if (Math.abs(p.x - x) < 9 && Math.abs(p.y - y) < 18) y = p.y - 18;
-    y = Math.max(6, Math.min(94, y));
+    // 等距時相鄰兩顆只差 12%，圖示 32px 加縮寫比一格還寬：價位相近就錯開一層
+    for (const p of placed) {
+      if (Math.abs(p.x - x) < 13.5 && Math.abs(p.y - y) < 24) y = p.y < 50 ? p.y + 24 : p.y - 24;   // 往空的那邊錯
+    }
+    y = Math.max(8, Math.min(92, y));
     placed.push({ x, y });
-    const variant = m.e.src === "rule" ? "rule" : m.e.src === "auto" ? "auto" : "";
     return `<div class="rtl-mark rtl-src-${m.e.src}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%" role="button" onclick="rtlFocusStory(${i})">`
-      + signalIconSvg({ signal: m.e.key, severity: m.e.sev, source: m.e.src === "rule" ? "rule" : "monitor" }, 28, variant)
+      + signalIconSvg({ signal: m.e.key, severity: m.e.sev, source: m.e.src === "rule" ? "rule" : "monitor" }, 30)
       + `<span class="rtl-abbr">${escapeHtml(m.e.abbr || "")}</span></div>`;
   }).join("");
   const lines = keep.map(r =>
     `<div class="rtl-line rtl-line-${r.cls}" style="top:${yPct(r.value).toFixed(1)}%"><span>${escapeHtml(r.label)} ${fmtPrice(r.value)}</span></div>`).join("");
+  // 刻度＝每顆標記的時間；標記多到擠不下時隔一顆標一次（時間仍在故事列裡）
+  const every = n > 7 ? 2 : 1;
+  let ticks = marks.map((m, i) =>
+    `<i style="left:${xOf(i).toFixed(1)}%"><b>${i % every === 0 ? fmtTime(m.e.at) : ""}</b></i>`).join("");
   let nowHtml = "";
   if (_isMarketOpenNow()) {
-    const nowMin = _sessionMinutesOf(new Date());
-    if (nowMin != null && nowMin >= 0 && nowMin <= RTL_SESSION_MIN) {
-      const x = xPct(nowMin).toFixed(1);
-      nowHtml = `<div class="rtl-future" style="left:${x}%"></div><div class="rtl-now" style="left:${x}%"><span>${fmtTime(new Date())}</span></div>`;
-    }
+    // 盤中：最後一顆標記之後是「現在」，右邊那段是還沒發生的
+    const x = n ? Math.min(97, xOf(n - 1) + 10) : 50;
+    nowHtml = `<div class="rtl-future" style="left:${x.toFixed(1)}%"></div><div class="rtl-now" style="left:${x.toFixed(1)}%"><span>${fmtTime(new Date())}</span></div>`;
   }
-  const ticks = RTL_TICKS.map(([label, min]) =>
-    `<i style="left:${(min / RTL_SESSION_MIN * 100).toFixed(1)}%"><b>${label}</b></i>`).join("");
-  return `<div class="rtl-chart"><div class="rtl-plot">${lines}${nowHtml}${markHtml}${marks.length ? "" : '<div class="rtl-empty">今天還沒有訊號</div>'}</div><div class="rtl-ticks">${ticks}</div></div>`;
+  if (!n) {
+    ticks = RTL_TICKS.map(([label, min]) =>
+      `<i style="left:${(min / RTL_SESSION_MIN * 100).toFixed(1)}%"><b>${label}</b></i>`).join("");
+    nowHtml = "";
+  }
+  return `<div class="rtl-chart"><div class="rtl-plot">${lines}${nowHtml}${markHtml}${n ? "" : '<div class="rtl-empty">今天還沒有訊號</div>'}</div><div class="rtl-ticks">${ticks}</div></div>`;
+}
+
+// 第 i 顆（共 n 顆）標記的橫向位置（%）：等距、兩端留 8%，只有一顆就置中
+function rtlSlotPct(i, n) {
+  if (n <= 1) return 50;
+  return 8 + (i / (n - 1)) * 84;
 }
 
 function radarStoryListHtml(story) {
@@ -5599,10 +5611,9 @@ function radarStoryListHtml(story) {
     const link = e.rowId ? ` role="button" tabindex="0" onclick="openInboxDetailFromRadar('${jsAttr(e.rowId)}')"` : "";
     const lvl = (e.src === "builtin" || e.src === "target") ? _signalLevelLabel(e.key, e.level)
               : (Number.isFinite(Number(e.level)) && e.level > 0 ? fmtPrice(e.level) : "");
-    const variant = e.src === "rule" ? "rule" : e.src === "auto" ? "auto" : "";
     return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-sev="${e.sev}"${link}>
       <div class="rtl-time">${fmtTime(e.at)}</div>
-      ${signalIconSvg({ signal: e.key, severity: e.sev, source: e.src === "rule" ? "rule" : e.src === "post" ? "post_market" : "monitor" }, 34, variant)}
+      ${signalIconSvg({ signal: e.key, severity: e.sev, source: e.src === "rule" ? "rule" : e.src === "post" ? "post_market" : "monitor" }, 34)}
       <div class="rtl-text">
         <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
         ${e.text ? `<div class="rtl-desc">${escapeHtml(e.text)}</div>` : ""}
