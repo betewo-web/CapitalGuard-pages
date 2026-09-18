@@ -2610,26 +2610,28 @@ body.has-bottom-nav .qa-panel {
 .rtl-dialog { max-width: 560px; }
 .rtl-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .rtl-chart { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px 12px 8px; }
-.rtl-plot { position: relative; height: 236px; margin: 0 62px 0 6px; }
-.rtl-line { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(201, 201, 212, 0.45); }
-.rtl-line span { position: absolute; right: -62px; top: -0.6em; width: 58px; font-size: 0.64rem; color: var(--text-muted); white-space: nowrap; }
-.rtl-line-prev { border-top-style: dotted; border-top-color: rgba(146, 146, 163, 0.35); }
-.rtl-line-ma   { border-top-color: rgba(232, 121, 249, 0.55); }
-.rtl-line-sig  { border-top-color: rgba(201, 201, 212, 0.7); }
-.rtl-line-sig span { color: var(--text-1); }
-.rtl-future { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(90deg, rgba(146, 146, 163, 0.07) 0 4px, transparent 4px 8px); }
-.rtl-now { position: absolute; top: 0; bottom: 0; border-left: 2px dashed var(--accent); }
-.rtl-now span { position: absolute; top: -15px; left: -17px; font-size: 0.62rem; color: var(--accent); font-weight: 600; white-space: nowrap; }
-.rtl-mark { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 1px; cursor: pointer; z-index: 1; }
-.rtl-mark .sig-ico { display: block; box-shadow: 0 0 0 2px var(--bg-1); border-radius: 9px; }
-.rtl-abbr { font-size: 0.64rem; font-weight: 700; line-height: 1; padding: 1px 3px; border-radius: 4px; background: rgba(15, 15, 26, 0.85); white-space: nowrap; }
-.rtl-mark.rtl-src-auto .rtl-abbr { color: var(--text-1); font-weight: 500; }
-.rtl-ticks { position: relative; height: 20px; margin: 6px 62px 0 6px; border-top: 3px solid rgba(146, 146, 163, 0.35); }
-.rtl-ticks i { position: absolute; top: -3px; width: 1px; height: 9px; background: rgba(146, 146, 163, 0.6); transform: translateX(-50%); }
-.rtl-ticks i b { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); font-size: 0.6rem; font-weight: 500; color: var(--text-1); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.rtl-ticks i:first-child b { transform: translateX(0); }
-.rtl-ticks i:last-child b { transform: translateX(-100%); }
-.rtl-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: var(--text-muted); }
+/* 時間軸是一張 SVG（viewBox 360×272，寬度跟著容器）：線、刻度、標記全在向量座標裡，
+   不再是 HTML 疊圖——那樣在手機上會被光柵化成糊糊的「截圖」。文字用 CSS 上色，字體跟頁面同一套。 */
+.rtl-svg { display: block; width: 100%; height: auto; font-family: inherit; }
+.rtl-svg text { fill: var(--text-muted); font-size: 9px; }
+.rtl-line { stroke: rgba(201, 201, 212, 0.45); stroke-width: 1; stroke-dasharray: 4 3; }
+.rtl-line-prev { stroke: rgba(146, 146, 163, 0.4); stroke-dasharray: 1.5 3; }
+.rtl-line-ma   { stroke: rgba(232, 121, 249, 0.6); }
+.rtl-line-sig  { stroke: rgba(201, 201, 212, 0.7); }
+.rtl-svg text.rtl-line-sig { fill: var(--text-1); }
+.rtl-svg text.rtl-line-label { font-size: 8.5px; }
+.rtl-future { fill: rgba(146, 146, 163, 0.06); }
+.rtl-now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.rtl-svg text.rtl-now-label { fill: var(--accent); font-size: 8.5px; font-weight: 600; }
+.rtl-axis { stroke: rgba(146, 146, 163, 0.4); stroke-width: 2.5; stroke-linecap: round; }
+.rtl-tick { stroke: rgba(146, 146, 163, 0.65); stroke-width: 1; }
+.rtl-svg text.rtl-tick-label { fill: var(--text-1); font-size: 8.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.rtl-mark { cursor: pointer; }
+.rtl-mark-halo { fill: var(--bg-1); }
+.rtl-abbr-bg { fill: rgba(15, 15, 26, 0.88); }
+.rtl-svg text.rtl-abbr { fill: var(--text-0); font-size: 9.5px; font-weight: 700; }
+.rtl-svg .rtl-src-auto text.rtl-abbr { fill: var(--text-1); font-weight: 500; }
+.rtl-svg text.rtl-empty { font-size: 10.5px; }
 .rtl-story-head { font-size: 0.8rem; color: var(--text-muted); margin: 16px 0 8px; font-weight: 600; }
 .rtl-item { display: flex; align-items: flex-start; gap: 9px; padding: 8px 6px; border-radius: 12px; border-left: 3px solid transparent; }
 .rtl-item.is-link { cursor: pointer; }

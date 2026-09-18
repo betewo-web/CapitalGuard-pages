@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="113">
+  <meta name="app-version" content="114">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=113" rel="stylesheet">
+  <link href="watchlist.css?v=114" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -3520,16 +3520,23 @@ function iconArtKeyOf(row) {
   return "generic";
 }
 
-function signalIconSvg(row, size = 18) {
+// 圖示的兩個部分：底色（等級色，漲跌停深底）與 48×48 座標系裡的圖案。
+// 獨立 SVG（通知匣、故事列）與時間軸那張大 SVG 裡的 <g> 都用它，圖案只有一份。
+function signalIconParts(row) {
   const art = SIGNAL_ICON_ART[iconArtKeyOf(row)];
   const sev = inferSeverity(row);
   const bg = art.chip || (sev === "orange" ? "var(--sig-orange)"
            : sev === "blue"   ? "var(--sig-blue)"
            : "var(--sig-info)");
+  return { bg, inner: art.inner };
+}
+
+function signalIconSvg(row, size = 18) {
+  const { bg, inner } = signalIconParts(row);
   // 圖示一律實色、不加外框：曾把自動偵測淡化 60%、規則命中疊虛線框，手機上看起來像糊掉的截圖。
   // 來源（內建／規則／自動）由雷達列的縮寫籤樣式與故事列的來源標籤表達，圖示只管「這是什麼訊號」。
   return `<svg class="sig-ico" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">`
-    + `<rect width="48" height="48" rx="11" fill="${bg}"/>${art.inner}</svg>`;
+    + `<rect width="48" height="48" rx="11" fill="${bg}"/>${inner}</svg>`;
 }
 
 // ── 自訂通知規則 ────────────────────────────────────────────────
@@ -5555,52 +5562,98 @@ function radarTimelineChartHtml(sid, entries, iq) {
   for (const r of keep) { lo = Math.min(lo, r.value); hi = Math.max(hi, r.value); }
   const pad = (hi - lo) * 0.12 || mid * 0.01;
   lo -= pad; hi += pad;
-  const yPct = v => (1 - (v - lo) / (hi - lo)) * 100;
 
-  // 橫向：依發生順序等距排開，不照真實時間比例。台股訊號多半集中在開盤那半小時，
-  // 照比例畫會把三四顆擠在最左邊一團（Howard 2026-09-18：先顧閱讀體驗）；順序與
-  // 各自的時間仍看得到——時間標在每顆標記正下方的刻度上。
+  // 整張圖是一個 SVG（viewBox 固定、寬度跟著容器縮放）：標記以前是 HTML 疊在圖上、
+  // 用 transform 放在非整數像素，手機會把它光柵化得糊糊的，外圈陰影又跟圖示圓角對不齊，
+  // 看起來像粗糙的截圖（Howard 2026-09-18 兩次反映）。向量座標裡畫就沒有這些事。
+  const { x0, x1, y0, y1 } = RTL_PLOT;
+  const yOf = v => y0 + (1 - (v - lo) / (hi - lo)) * (y1 - y0);
   const n = marks.length;
-  const xOf = i => rtlSlotPct(i, n);
-  // 縱向：價位；相鄰標記價位太近就往上疊一層，免得圖示互相蓋住
+  // 橫向：依發生順序等距排開，不照真實時間比例。台股訊號多半集中在開盤那半小時，
+  // 照比例畫會把三四顆擠在最左邊一團（Howard：先顧閱讀體驗）；順序與各自的時間仍看得到
+  const xOf = i => x0 + rtlSlotPct(i, n) / 100 * (x1 - x0);
+  const midY = (y0 + y1) / 2;
   const placed = [];
-  const markHtml = marks.map((m, i) => {
+  let marksSvg = "";
+  marks.forEach((m, i) => {
     const x = xOf(i);
-    let y = Number.isFinite(m.v) && m.v > 0 ? yPct(m.v) : 50;
-    // 等距時相鄰兩顆只差 12%，圖示 32px 加縮寫比一格還寬：價位相近就錯開一層
-    for (const p of placed) {
-      if (Math.abs(p.x - x) < 13.5 && Math.abs(p.y - y) < 24) y = p.y < 50 ? p.y + 24 : p.y - 24;   // 往空的那邊錯
-    }
-    y = Math.max(8, Math.min(92, y));
+    let y = Number.isFinite(m.v) && m.v > 0 ? yOf(m.v) : midY;
+    // 等距時相鄰兩顆只差一格，圖示加縮寫比一格還寬：價位相近就往空的那邊錯開一層
+    for (const p of placed) if (Math.abs(p.x - x) < RTL_SLOT_MIN && Math.abs(p.y - y) < RTL_STACK) y = p.y < midY ? p.y + RTL_STACK : p.y - RTL_STACK;
+    y = Math.max(y0 + 18, Math.min(y1 - 24, y));
     placed.push({ x, y });
-    return `<div class="rtl-mark rtl-src-${m.e.src}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%" role="button" onclick="rtlFocusStory(${i})">`
-      + signalIconSvg({ signal: m.e.key, severity: m.e.sev, source: m.e.src === "rule" ? "rule" : "monitor" }, 30)
-      + `<span class="rtl-abbr">${escapeHtml(m.e.abbr || "")}</span></div>`;
+    marksSvg += rtlMarkerSvg(m.e, x, y, i);
+  });
+  const linesSvg = keep.map(r => {
+    const y = yOf(r.value).toFixed(1);
+    return `<line class="rtl-line rtl-line-${r.cls}" x1="${x0}" y1="${y}" x2="${x1}" y2="${y}"/>`
+      + `<text class="rtl-line-label rtl-line-${r.cls}" x="${x1 + 5}" y="${(Number(y) + 3.5).toFixed(1)}">${escapeHtml(r.label)} ${fmtPrice(r.value)}</text>`;
   }).join("");
-  const lines = keep.map(r =>
-    `<div class="rtl-line rtl-line-${r.cls}" style="top:${yPct(r.value).toFixed(1)}%"><span>${escapeHtml(r.label)} ${fmtPrice(r.value)}</span></div>`).join("");
   // 刻度＝每顆標記的時間；標記多到擠不下時隔一顆標一次（時間仍在故事列裡）
   const every = n > 7 ? 2 : 1;
-  let ticks = marks.map((m, i) =>
-    `<i style="left:${xOf(i).toFixed(1)}%"><b>${i % every === 0 ? fmtTime(m.e.at) : ""}</b></i>`).join("");
-  let nowHtml = "";
-  if (_isMarketOpenNow()) {
+  const axisY = y1 + 10;
+  let ticksSvg = marks.map((m, i) => {
+    const x = xOf(i).toFixed(1);
+    const label = i % every === 0 ? fmtTime(m.e.at) : "";
+    return `<line class="rtl-tick" x1="${x}" y1="${axisY - 3}" x2="${x}" y2="${axisY + 5}"/>`
+      + (label ? `<text class="rtl-tick-label" x="${x}" y="${axisY + 17}" text-anchor="middle">${label}</text>` : "");
+  }).join("");
+  let nowSvg = "";
+  if (_isMarketOpenNow() && n) {
     // 盤中：最後一顆標記之後是「現在」，右邊那段是還沒發生的
-    const x = n ? Math.min(97, xOf(n - 1) + 10) : 50;
-    nowHtml = `<div class="rtl-future" style="left:${x.toFixed(1)}%"></div><div class="rtl-now" style="left:${x.toFixed(1)}%"><span>${fmtTime(new Date())}</span></div>`;
+    const x = Math.min(x1, xOf(n - 1) + 30).toFixed(1);
+    nowSvg = `<rect class="rtl-future" x="${x}" y="${y0}" width="${(x1 - Number(x)).toFixed(1)}" height="${y1 - y0}"/>`
+      + `<line class="rtl-now" x1="${x}" y1="${y0 - 2}" x2="${x}" y2="${axisY}"/>`
+      + `<text class="rtl-now-label" x="${x}" y="${y0 - 6}" text-anchor="middle">${fmtTime(new Date())}</text>`;
   }
+  let emptySvg = "";
   if (!n) {
-    ticks = RTL_TICKS.map(([label, min]) =>
-      `<i style="left:${(min / RTL_SESSION_MIN * 100).toFixed(1)}%"><b>${label}</b></i>`).join("");
-    nowHtml = "";
+    ticksSvg = RTL_TICKS.map(([label, min]) => {
+      const x = (x0 + min / RTL_SESSION_MIN * (x1 - x0)).toFixed(1);
+      const anchor = min === 0 ? "start" : min === RTL_SESSION_MIN ? "end" : "middle";
+      return `<line class="rtl-tick" x1="${x}" y1="${axisY - 3}" x2="${x}" y2="${axisY + 5}"/>`
+        + (label ? `<text class="rtl-tick-label" x="${x}" y="${axisY + 17}" text-anchor="${anchor}">${label}</text>` : "");
+    }).join("");
+    emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">今天還沒有訊號</text>`;
   }
-  return `<div class="rtl-chart"><div class="rtl-plot">${lines}${nowHtml}${markHtml}${n ? "" : '<div class="rtl-empty">今天還沒有訊號</div>'}</div><div class="rtl-ticks">${ticks}</div></div>`;
+  return `<div class="rtl-chart"><svg class="rtl-svg" viewBox="0 0 ${RTL_VB_W} ${RTL_VB_H}" role="img" aria-label="盤中時間軸">`
+    + linesSvg + nowSvg + emptySvg
+    + `<line class="rtl-axis" x1="${x0}" y1="${axisY}" x2="${x1}" y2="${axisY}"/>` + ticksSvg + marksSvg
+    + `</svg></div>`;
 }
+
+// SVG 座標系（viewBox 單位）：右邊 70 留給參考線標籤、下面留給刻度時間
+const RTL_VB_W = 360, RTL_VB_H = 272;
+const RTL_PLOT = { x0: 10, x1: 288, y0: 18, y1: 232 };
+const RTL_ICON = 30;        // 標記圖示邊長
+const RTL_SLOT_MIN = 40;    // 兩顆標記橫向差距小於這個就算相鄰
+const RTL_STACK = 54;       // 相鄰且價位接近時錯開的距離（圖示＋縮寫的高度）
 
 // 第 i 顆（共 n 顆）標記的橫向位置（%）：等距、兩端留 8%，只有一顆就置中
 function rtlSlotPct(i, n) {
   if (n <= 1) return 50;
   return 8 + (i / (n - 1)) * 84;
+}
+
+// 一顆標記：底色框（與背景同色的暈邊把後面的參考線隔開）＋ 48 座標系的圖案縮放進來 ＋ 縮寫
+function rtlMarkerSvg(e, x, y, i) {
+  const half = RTL_ICON / 2, k = RTL_ICON / 48;
+  const { bg, inner } = signalIconParts({ signal: e.key, severity: e.sev, source: e.src === "rule" ? "rule" : "monitor" });
+  const abbr = String(e.abbr || "");
+  const w = rtlTextWidth(abbr, 9.5) + 8;
+  const ty = y + half + 12;
+  return `<g class="rtl-mark rtl-src-${e.src}" onclick="rtlFocusStory(${i})">`
+    + `<rect x="${(x - half - 2).toFixed(1)}" y="${(y - half - 2).toFixed(1)}" width="${RTL_ICON + 4}" height="${RTL_ICON + 4}" rx="${(11 * k + 2).toFixed(1)}" class="rtl-mark-halo"/>`
+    + `<g transform="translate(${(x - half).toFixed(1)} ${(y - half).toFixed(1)}) scale(${k.toFixed(4)})"><rect width="48" height="48" rx="11" fill="${bg}"/>${inner}</g>`
+    + `<rect class="rtl-abbr-bg" x="${(x - w / 2).toFixed(1)}" y="${(ty - 10).toFixed(1)}" width="${w.toFixed(1)}" height="13.5" rx="3.5"/>`
+    + `<text class="rtl-abbr" x="${x.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="middle">${escapeHtml(abbr)}</text></g>`;
+}
+
+// 估文字寬度（viewBox 單位）：中日韓字 ≈ 1 em、其餘 ≈ 0.6 em；縮寫最多五個字，估一下就夠畫底框
+function rtlTextWidth(text, fontSize) {
+  let w = 0;
+  for (const ch of String(text)) w += /[　-鿿＀-￯]/.test(ch) ? fontSize : fontSize * 0.6;
+  return w;
 }
 
 function radarStoryListHtml(story) {
