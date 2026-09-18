@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="115">
+  <meta name="app-version" content="116">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=115" rel="stylesheet">
+  <link href="watchlist.css?v=116" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -3213,7 +3213,10 @@ async function loadIntradayQuotes(force = false) {
 
   intradayQuotesLoadingPromise = (async () => {
     try {
-      const cols = "stock_id,stock_name,price,prev_close,change_pct,volume,signal,severity,level,signal_at,updated_at";
+      // 不取 volume：那是 MIS 的當日累計張數原值，量能偵測全在自家主機上跑完
+      // （monitor/realtime.py），前端只需要判定結果。以前取它是為了讓規則編輯器
+      // 的命中預覽能在本地算 volume_vs_ma——那條預覽已改為伺服器端評估。
+      const cols = "stock_id,stock_name,price,prev_close,change_pct,signal,severity,level,signal_at,updated_at";
       const query = () => ({
         select: [cols, ...intradayOptionalCols].join(","),
         stock_id: `in.(${sids.join(",")})`,
@@ -3251,7 +3254,6 @@ async function loadIntradayQuotes(force = false) {
           prevClose,
           changePct,
           tradeDate:  taipeiDateKey(row.updated_at),
-          volume:     row.volume ?? null,
           signal:     row.signal   || "none",
           severity:   row.severity || "none",
           level:      row.level    != null ? Number(row.level) : null,
@@ -3589,6 +3591,8 @@ const RULE_CATALOG = [
     params: [{ k: "value", label: "漲幅 %", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
   { type: "change_pct_below", tier: "intraday", name: "跌幅超過", preview: true,
     params: [{ k: "value", label: "跌幅 %（填正數）", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
+  // 可本地預覽：用日線的成交量比日線均量（都在 sharedReportData 裡），
+  // 不需要 MIS 的當日累計量——前端已不再取那個欄位（見 loadIntradayQuotes）。
   { type: "volume_vs_ma", tier: "intraday", name: "量能對比均量", preview: true,
     params: [
       { k: "window", label: "均量天數", type: "select", def: 20, options: [[5, "5 日"], [20, "20 日"]] },
@@ -5289,7 +5293,9 @@ function _signalLevelLabel(signal, level, compact = false) {
   if (level == null || !Number.isFinite(Number(level))) return "";
   const value = Number(level);
   const p = fmtPrice(value);
-  if (signal === "volume_spike") return `成交量 ${Math.round(value).toLocaleString()} 張`;
+  // 爆量的 level 是量能倍數（intraday_state.level），不是張數也不是價位：
+  // 張數是 MIS 原值，偵測跑在自家主機上就不必送出去（monitor/realtime.py 的說明）
+  if (signal === "volume_spike") return `量能 ${p} 倍`;
   if (["break_sup", "near_sup", "reclaim_sup"].includes(signal)) return `支撐 ${p}`;
   if (["break_res", "near_res"].includes(signal)) return `壓力 ${p}`;
   if (["target_high", "target_low"].includes(signal)) return `目標價 ${p}`;
@@ -6145,6 +6151,10 @@ async function saveRule() {
 // 只預覽盤中層條件，而且只用 max／min／平均這類直接運算。
 // RSI、MACD、均線交叉不在這裡重算——那會變成第二份指標實作，
 // 遲早跟後端算出不同結果（評分與通知就曾因此分歧過）。
+//
+// 基準是最近一根完整日 K，不是盤中即時價（見 previewCondition）。
+// 所以這裡一定要把基準日寫出來：使用者盤中看到的是昨天的收盤，
+// 不講清楚就會以為畫面上這個數字是「現在」。
 function renderRulePreview() {
   renderRuleSummary();
   const el = document.getElementById("rule-preview");
@@ -6159,9 +6169,12 @@ function renderRulePreview() {
   if (previewable.length && targets.length) {
     const hits = targets.filter(sid => previewable.every(c => previewCondition(sid, c)));
     const shown = hits.slice(0, 8).map(sid => `${sid} ${stockNameOf(sid)}`.trim());
+    const base = previewBaseDate();
     body += `<div class="rp-line"><b>${hits.length}</b> / ${targets.length} 檔符合可預覽的條件`
       + (shown.length ? `：${escapeHtml(shown.join("、"))}${hits.length > 8 ? " …" : ""}` : "")
-      + "</div>";
+      + "</div>"
+      + `<div class="rp-line rp-muted">依最近一個交易日${base ? `（${escapeHtml(base)}）` : ""}的收盤價與成交量試算；
+         規則實際評估時看的是盤中即時資料，結果會不一樣。</div>`;
   } else if (!previewable.length) {
     body += `<div class="rp-line">此規則沒有可即時預覽的條件</div>`;
   }
@@ -6173,47 +6186,77 @@ function renderRulePreview() {
   el.innerHTML = `<div class="rp-title">命中預覽</div>${body}`;
 }
 
+// 預覽一律以「最近一根完整日 K」為基準，完全不碰盤中報價（2026-09-18）。
+// 兩個理由：
+//   ① 盤中報價是證交所 MIS 的資料，沒必要為了一行預覽送到每台裝置上；
+//      日線是開放資料，本來就整份下載給前端了（sharedReportData）。
+//   ② 拿「還在動的今天」去預覽，數字每 5 秒變一次，使用者調門檻時反而看不準。
+// 基準棒＝「最近一個交易日」，定義就是報告資料裡的最後一根，不另外承諾新鮮度。
+// 報告 06:15 產出，日線倉庫 15:30 才收今天的 K 棒（main.py 的排程），所以收盤後
+// 到隔天早上，最後一根仍然是前一個交易日。2026-09-18 決定不為了補這段空窗另外
+// 產一份盤後資料——預覽是調門檻用的參考，不是即時判定；畫面把基準日寫出來
+// （見 renderRulePreview），使用者看到的是確切日期而不是模稜兩可的「現在」。
 function previewCondition(sid, c) {
-  const q = intradayQuoteMap[sid] || {};
-  const stock = sharedReportData?.stock_data?.[sid];
-  const ohlcv = stock?.daily?.ohlcv;          // [[o,h,l,c,v], ...]，最後一筆為最近交易日
-  const price = q.price != null ? q.price : stock?.levels?.current;
-  if (price == null) return false;
+  const bars = sharedReportData?.stock_data?.[sid]?.daily?.ohlcv;   // [[o,h,l,c,v], ...]
+  if (!bars || bars.length < 2) return false;
+  const last = bars[bars.length - 1];
+  const price = Number(last[3]);
+  if (!isFinite(price)) return false;
 
-  const highs = ohlcv ? ohlcv.map(r => Number(r[1])).filter(isFinite) : [];
-  const lows  = ohlcv ? ohlcv.map(r => Number(r[2])).filter(isFinite) : [];
-  const vols  = ohlcv ? ohlcv.map(r => Number(r[4])).filter(isFinite) : [];
+  // 比較窗口只看基準棒「之前」的棒：收盤價永遠 ≤ 自己那根的最高價，
+  // 把基準棒自己留在窗口裡，突破類條件就永遠不會成立。
+  const before = bars.slice(0, -1);
+  const highs = before.map(r => Number(r[1])).filter(isFinite);
+  const lows  = before.map(r => Number(r[2])).filter(isFinite);
 
   switch (c.type) {
     case "break_prior_high": {
       const w = Number(c.window) || 20;
-      if (highs.length < 2) return false;
+      if (!highs.length) return false;
       return price > Math.max(...highs.slice(-w));
     }
     case "break_prior_low": {
       const w = Number(c.window) || 20;
-      if (lows.length < 2) return false;
+      if (!lows.length) return false;
       return price < Math.min(...lows.slice(-w));
     }
-    case "break_52w_high": return highs.length >= 2 && price > Math.max(...highs.slice(-250));
-    case "break_52w_low":  return lows.length  >= 2 && price < Math.min(...lows.slice(-250));
+    case "break_52w_high": return highs.length >= 1 && price > Math.max(...highs.slice(-250));
+    case "break_52w_low":  return lows.length  >= 1 && price < Math.min(...lows.slice(-250));
     case "change_pct_above":
-      return q.changePct != null && q.changePct >= Number(c.value || 0);
-    case "change_pct_below":
-      return q.changePct != null && q.changePct <= -Math.abs(Number(c.value || 0));
+    case "change_pct_below": {
+      const prev = Number(bars[bars.length - 2][3]);
+      if (!(prev > 0)) return false;
+      const chg = (price - prev) / prev * 100;
+      return c.type === "change_pct_above"
+        ? chg >= Number(c.value || 0)
+        : chg <= -Math.abs(Number(c.value || 0));
+    }
     case "volume_vs_ma": {
+      // 基準棒的成交量 vs 其前 N 根的均量。兩邊都是日線的「股」，單位相消，
+      // 不必換算成張（以前拿 MIS 的張去比日線的股，才需要那個 /1000）。
       const w = Number(c.window) || 20;
-      if (vols.length < 2 || q.volume == null) return false;
+      const volume = Number(last[4]);
+      const vols = before.map(r => Number(r[4])).filter(isFinite);
+      if (!isFinite(volume) || !vols.length) return false;
       const tail = vols.slice(-w);
-      const avg = tail.reduce((a, b) => a + b, 0) / tail.length / 1000;  // 股 → 張
+      const avg = tail.reduce((a, b) => a + b, 0) / tail.length;
       if (!(avg > 0)) return false;
-      const times = q.volume / avg;
+      const times = volume / avg;
       return String(c.op || "above") === "below"
         ? times < Number(c.ratio || 0.5)
         : times >= Number(c.ratio || 2);
     }
     default: return false;
   }
+}
+
+// 預覽用的是哪一天的收盤：取任一檔的日線最後一個日期，退回報告日期。
+function previewBaseDate() {
+  for (const s of Object.values(sharedReportData?.stock_data || {})) {
+    const dates = s?.daily?.dates;
+    if (dates?.length) return String(dates[dates.length - 1]).slice(0, 10);
+  }
+  return String(sharedReportData?.date || "").slice(0, 10);
 }
 
 // ── 券商庫存（broker_holdings，由後端 --sync-holdings 寫入）──────
