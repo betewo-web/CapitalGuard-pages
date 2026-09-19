@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="116">
+  <meta name="app-version" content="117">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=116" rel="stylesheet">
+  <link href="watchlist.css?v=117" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -2969,7 +2969,12 @@ async function _autoRefreshOnce() {
     // 別的裝置升級，幾分鐘內徽章與上限就會跟著變，不必手動重整
     tasks.push(loadPlanState());
   }
+  // 盤中每輪拉報價。收盤後自選頁要換上當天收盤價：還沒拿齊就每輪（5 分鐘）再拉一次
+  // intraday_state（監控 13:35 前寫完最後一輪），主機沒寫到的再問 FinMind（那支自己限流）。
   if (marketOpen) tasks.push(loadIntradayQuotes(true));
+  else if (_isSessionOverToday() && _closeQuoteMissing()) {
+    tasks.push(loadIntradayQuotes(true).then(() => (_closeQuoteMissing() ? loadFinMindCloseQuotes() : null)));
+  }
   await Promise.allSettled(tasks);
   _lastRefreshAt = Date.now();
   renderCurrentTab();
@@ -3138,6 +3143,7 @@ async function manualRefresh() {
     // loadIntradayQuotes 讀的是 watchlistRows，必須等自選股先回來
     await Promise.allSettled([loadWatchlist(), refreshInbox(true), loadSharedReportData(true)]);
     await Promise.allSettled([loadIntradayQuotes(true)]);
+    if (_isSessionOverToday() && _closeQuoteMissing()) await loadFinMindCloseQuotes().catch(() => {});
     _lastRefreshAt = Date.now();
     _lastInboxRefreshAt = Date.now();
     renderCurrentTab();
@@ -4256,6 +4262,15 @@ function _toQuoteCandidate(raw, sourcePriority) {
   return { price: Number(raw.price), changePct: chg, tradeDate, sourcePriority };
 }
 
+// 三個來源的取捨：交易日期新的優先，再看有沒有漲跌幅，最後才看來源優先權
+function _quoteCandidateOrder(a, b) {
+  const dateOrder = b.tradeDate.localeCompare(a.tradeDate);
+  if (dateOrder !== 0) return dateOrder;
+  const completenessOrder = Number(b.changePct !== null) - Number(a.changePct !== null);
+  if (completenessOrder !== 0) return completenessOrder;
+  return b.sourcePriority - a.sourcePriority;
+}
+
 function getQuote(sid) {
   const candidates = [
     _toQuoteCandidate(intradayQuoteMap?.[sid], 3),
@@ -4263,14 +4278,73 @@ function getQuote(sid) {
     _toQuoteCandidate(finmindQuoteMap?.[sid], 1),
   ].filter(Boolean);
 
-  candidates.sort((a, b) => {
-    const dateOrder = b.tradeDate.localeCompare(a.tradeDate);
-    if (dateOrder !== 0) return dateOrder;
-    const completenessOrder = Number(b.changePct !== null) - Number(a.changePct !== null);
-    if (completenessOrder !== 0) return completenessOrder;
-    return b.sourcePriority - a.sourcePriority;
-  });
+  candidates.sort(_quoteCandidateOrder);
   return candidates[0] || null;
+}
+
+// ── 自選頁只顯示收盤價 ────────────────────────────────────────────
+// 2026-09-19：自選列的股價與漲跌幅只顯示收盤數據。盤中（_isMarketOpenNow）那一格寫
+// 「待收盤顯示股價」，收盤後才把當天收盤價換上去；盤前與假日顯示最近一個交易日的收盤。
+// 列上由價格導出的損益、距價位、關卡與均線距離全都用同一個收盤價，整列一個基準。
+//
+// 「這筆算不算收盤價」：
+//   • 報告檔與 FinMind 是日線，交易日期在今天以前的一律是收盤；今天的要等收盤後。
+//   • intraday_state 是監控快照，報價時刻（quote_at，沒有就用寫入時間）落在 13:31 之後
+//     才是那天的收盤——主機在盤中掛掉時最後一筆是盤中價，不能當收盤；13:30 那一分鐘
+//     可能還是收盤集合競價的試撮（monitor/quote_rules.py），也不算。
+// 同一天多個來源時優先日線：那是證交所的收盤，MIS 快照沒成交時是從五檔推出來的。
+const SESSION_CLOSE_DONE_MINS = 13 * 60 + 31;
+
+function _intradayQuoteIsClose(iq) {
+  if (!iq) return false;
+  const c = _taipeiClock(iq.quote_at || iq.updated_at);
+  return !!c && c.mins >= SESSION_CLOSE_DONE_MINS;
+}
+
+function getCloseQuote(sid) {
+  const today = taipeiDateKey(new Date());
+  const sessionOver = _isSessionOverToday();
+  const iq = intradayQuoteMap?.[sid];
+  const candidates = [
+    _toQuoteCandidate(getQuoteFromSharedData(sid), 3),
+    _toQuoteCandidate(finmindQuoteMap?.[sid], 2),
+    _intradayQuoteIsClose(iq) ? _toQuoteCandidate(iq, 1) : null,
+  ].filter(c => c && c.tradeDate && (c.tradeDate < today || (c.tradeDate === today && sessionOver)));
+
+  candidates.sort(_quoteCandidateOrder);
+  return candidates[0] || null;
+}
+
+// 收盤後還有自選股拿不到今天的收盤價（主機沒寫到收盤、日線還沒更新）
+function _closeQuoteMissing() {
+  const today = taipeiDateKey(new Date());
+  return (watchlistRows || []).some(r => {
+    const sid = String(r.stock_id || "").trim();
+    return /^\d{4}$/.test(sid) && getCloseQuote(sid)?.tradeDate !== today;
+  });
+}
+
+// 收盤後向 FinMind 補當天收盤價：只補還沒拿到今天收盤的，最多每 30 分鐘一輪
+// （FinMind 未登入有每小時額度；日線通常下午才更新，打太密只是白打）。
+const CLOSE_FINMIND_RETRY_MS = 30 * 60000;
+let _lastCloseFinMindAt = 0;
+
+async function loadFinMindCloseQuotes() {
+  if (!_isSessionOverToday()) return finmindQuoteMap;
+  if (Date.now() - _lastCloseFinMindAt < CLOSE_FINMIND_RETRY_MS) return finmindQuoteMap;
+  const today = taipeiDateKey(new Date());
+  const sids = [...new Set((watchlistRows || [])
+    .map(r => String(r.stock_id || "").trim())
+    .filter(sid => /^\d{4}$/.test(sid) && getCloseQuote(sid)?.tradeDate !== today))];
+  if (!sids.length) return finmindQuoteMap;
+  _lastCloseFinMindAt = Date.now();
+  const map = { ...finmindQuoteMap };
+  for (const sid of sids) {
+    const q = await fetchFinMindQuote(sid);
+    if (q && Number.isFinite(q.price)) map[sid] = q;
+  }
+  finmindQuoteMap = map;
+  return finmindQuoteMap;
 }
 
 function hasAnyQuote(sid) {
@@ -5280,6 +5354,36 @@ function _isMarketOpenNow() {
 
   const mins = hour * 60 + minute;
   return mins >= 9 * 60 && mins <= 13 * 60 + 35;
+}
+
+// 台北時間的星期與「當天第幾分鐘」。_isMarketOpenNow 自己也算了一次，但那支被測試釘住
+// 要在函式內寫明 Asia/Taipei，所以這裡另開一支給「收盤了沒」與「這筆快照是不是收盤」用。
+const _TPE_CLOCK_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Taipei",
+  weekday: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function _taipeiClock(value = new Date()) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = _TPE_CLOCK_FMT.formatToParts(d);
+  const part = type => parts.find(item => item.type === type)?.value || "";
+  const hour = Number(part("hour")) % 24;
+  const minute = Number(part("minute"));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return { weekday: part("weekday"), mins: hour * 60 + minute };
+}
+
+// 今天是交易日而且已經收盤：平日、過了 _isMarketOpenNow 的 13:35 之後
+// （監控最後一輪在 13:35 前寫完，monitor/realtime.py _is_market_open）。
+// 假日一律 false——不是「收盤了」，而是「今天沒有盤」。
+function _isSessionOverToday() {
+  const c = _taipeiClock();
+  if (!c || c.weekday === "Sat" || c.weekday === "Sun") return false;
+  return c.mins > 13 * 60 + 35;
 }
 
 function _signalLabel(sig) {
@@ -6314,8 +6418,9 @@ function filteredWatchRows(rows) {
     return rows.filter(r => holds.has(String(r.stock_id).trim()));
   }
   if (watchFilter === "up" || watchFilter === "down") {
+    // 漲／跌篩選跟列上顯示的是同一個收盤漲跌幅（盤中就是前一個交易日的）
     return rows.filter(r => {
-      const q = getQuote(String(r.stock_id).trim());
+      const q = getCloseQuote(String(r.stock_id).trim());
       if (!q || q.changePct === null) return false;
       return watchFilter === "up" ? q.changePct > 0 : q.changePct < 0;
     });
@@ -6337,6 +6442,12 @@ function renderWatchlist(rows) {
     : "尚未加入任何股票，從上方搜尋並加入吧！";
   grid.style.display = visible.length ? "block" : "none";
 
+  // 這一頁的價格一律收盤價（getCloseQuote）。盤中那一格不放數字；收盤後當天收盤還沒到手
+  // （主機沒寫到收盤、日線未更新）就先顯示最近一個交易日的收盤並標出日期，免得被當成今天的。
+  const marketOpen = _isMarketOpenNow();
+  const sessionOver = _isSessionOverToday();
+  const todayKey = taipeiDateKey(new Date());
+
   visible.forEach(row => {
     const sid = String(row.stock_id || "").trim();
     const fallbackName = universe[sid]?.n || "";
@@ -6353,11 +6464,16 @@ function renderWatchlist(rows) {
     const evtClass = events.length > 0 ? "wl-events-btn" : "wl-events-btn wl-events-empty";
 
     // 報價靠右自成一欄，標籤另起一行——名稱因此拿得到整行寬度，不必截斷
-    const q = getQuote(sid);
+    const q = getCloseQuote(sid);
     const sig = latestSignalOf(sid);
-    const quoteLine = q
-      ? `<div class="wl-quote"><span class="wq-price">${fmtPrice(q.price)}</span>${fmtChgHtml(q.changePct)}</div>`
-      : `<div class="wl-quote wl-quote-idle">—</div>`;
+    const closeDateTag = (q && sessionOver && q.tradeDate !== todayKey)
+      ? `<span class="wq-date">${escapeHtml(_closeDateLabel(q.tradeDate))} 收</span>`
+      : "";
+    const quoteLine = marketOpen
+      ? `<div class="wl-quote wl-quote-pending">待收盤顯示股價</div>`
+      : q
+        ? `<div class="wl-quote">${closeDateTag}<span class="wq-price">${fmtPrice(q.price)}</span>${fmtChgHtml(q.changePct)}</div>`
+        : `<div class="wl-quote wl-quote-idle">—</div>`;
 
     // 標籤用等級圓點而不是 emoji：同一個等級在全站都是同一顆顏色
     const tags = [];
@@ -6425,6 +6541,12 @@ function renderWatchlist(rows) {
     `;
     grid.appendChild(item);
   });
+}
+
+// "2026-09-18" → "9/18"：收盤日期標籤用，只在收盤後仍顯示前一日收盤時出現
+function _closeDateLabel(key) {
+  const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(String(key || ""));
+  return m ? `${Number(m[1])}/${Number(m[2])}` : "";
 }
 
 function getWatchlistRowById(rowId) {

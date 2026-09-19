@@ -599,6 +599,23 @@ body.has-bottom-nav .page-shell {
 	font-weight: 500;
 }
 
+/* 盤中那一格不放數字，改寫一句「待收盤顯示股價」：與價格同列但淡下去，不像數字那樣搶眼 */
+.wl-quote-pending {
+	color: var(--text-muted);
+	font-size: 0.75rem;
+	font-weight: 500;
+	letter-spacing: 0.02em;
+	white-space: nowrap;
+}
+
+/* 收盤後還沒拿到今天的收盤價時，標出這個價是哪一天的收盤（例：9/18 收） */
+.wl-quote .wq-date {
+	color: var(--text-muted);
+	font-size: 0.68rem;
+	font-weight: 500;
+	white-space: nowrap;
+}
+
 /* 自選列的關卡／均線行（與雷達列同一組文字）：兩段各自不換行，放不下時整段換到下一行 */
 .wl-levels {
 	display: flex;
