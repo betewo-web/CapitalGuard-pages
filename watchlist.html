@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="124">
+  <meta name="app-version" content="125">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=124" rel="stylesheet">
+  <link href="watchlist.css?v=125" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -49,7 +49,6 @@
     <div class="ug-msg dg-msg">
       <p>CapitalGuard 是公開市場資料的整理與統計工具。所有分數、訊號、事件、篩選結果與 AI 說明，都是資料計算的呈現，<b>不是投資建議</b>，也不對任何股票做買賣、持有或進出場的推介。</p>
       <p>本服務並非證券投資顧問事業，不提供個別化投資諮詢。資料可能延遲、缺漏或有誤，推播不保證即時送達。投資決策請自行判斷並承擔全部風險。</p>
-      <p class="dg-source">每日收盤價、法人買賣超、融資融券、除權息與公告等資料來源：<b>臺灣證券交易所、證券櫃檯買賣中心</b>，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供；本服務為衍生應用，資料正確性以來源機關公告為準。</p>
     </div>
     <label class="dg-check"><input type="checkbox" id="dg-agree" onchange="document.getElementById('dg-btn').disabled=!this.checked"> 我已閱讀並了解上述說明</label>
     <button type="button" id="dg-btn" class="btn btn-sm btn-outline-light mt-3" disabled onclick="acceptDisclaimer()">開始使用</button>
@@ -329,7 +328,7 @@
       </div>
       <!-- 開放資料署名（data/open_data.py ATTRIBUTION）：授權條款的生效條件，獨立一段放頁尾，
            跟免責聲明分開——免責是「這不是建議」，署名是「資料從哪來、依什麼授權」，兩件事 -->
-      <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供；本服務為衍生應用，資料正確性以來源機關公告為準。</div>
+      <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
     </section>
 
     <!-- ═══ ⚡ 盤中雷達 ═══ -->
