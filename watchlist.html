@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="132">
+  <meta name="app-version" content="133">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=132" rel="stylesheet">
+  <link href="watchlist.css?v=133" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1824,6 +1824,16 @@ function openPlanModal(focus) {
   bootstrap.Modal.getOrCreateInstance(document.getElementById("planModal")).show();
   // 開面板時順便刷新一次狀態與付款紀錄（付款導回、管理員剛指派都靠這個）
   Promise.all([loadPlanState(), loadPlanPayments()]).then(() => renderPlanModal(focus));
+  // 付款導回時綠界的 S2S 回呼可能比瀏覽器慢幾秒：再多撿幾次，方案一變就重畫
+  if (focus === "paid") {
+    const before = planState.plan && planState.plan.code;
+    for (const ms of [3000, 8000, 15000]) {
+      setTimeout(async () => {
+        await Promise.all([loadPlanState(), loadPlanPayments()]);
+        if ((planState.plan && planState.plan.code) !== before) renderPlanModal();
+      }, ms);
+    }
+  }
 }
 
 async function loadPlanPayments() {
@@ -1966,10 +1976,6 @@ function renderPlanModal(focus) {
     ${current}
     <div class="plan-sec-title">方案比較</div>
     <div class="plan-grid">${cards}</div>
-    <label class="plan-consent" id="plan-consent-row">
-      <input type="checkbox" id="plan-consent">
-      <span>我同意訂閱後服務立即開始提供，並了解依《通訊交易解除權合理例外情事適用準則》第 2 條第 5 款，不適用消費者保護法第 19 條的 7 日無條件解除權。付款前請閱讀<a href="${BILLING_TERMS_URL}" target="_blank" rel="noopener">服務條款</a>與<a href="${BILLING_REFUND_URL}" target="_blank" rel="noopener">退款政策</a>。</span>
-    </label>
     <div class="plan-sec-title">付款紀錄</div>
     ${payments}
     <div id="plan-msg" class="plan-msg"></div>
@@ -2013,19 +2019,65 @@ function checkoutClosedMessage() {
   setPlanMsgHtml(`線上付款尚未開放。想先升級請<a href="${BILLING_CONTACT_MAILTO}">來信申請</a>，由管理員開通。`);
 }
 
-async function startCheckout(code) {
+// ── 訂閱流程：選方案 → 確認視圖（勾同意、看清楚金額與規則）→ 前往綠界 ──────
+// 三步都在同一個面板裡換內容；每一步都有「返回」，按錯了不會被帶去綠界。
+// 同意勾選（7 日解除權例外的前提）未預設勾選；沒勾，「前往綠界付款」按鈕就是灰的。
+// 伺服器端也會擋（consent_required），這裡只是不讓人白跑一趟建單。
+function startCheckout(code) {
   if (!BILLING_CHECKOUT_ENABLED) { checkoutClosedMessage(); return; }
-  // 7 日解除權例外的前提：未預設勾選、使用者自己勾。伺服器端也會擋（consent_required），
-  // 這裡先擋是為了不讓人白跑一趟建單。
+  const plan = planState.plans.find(x => x.code === code);
+  if (!plan) return;
+  trackActivity("checkout_confirm_open", { plan: code });
+  const body = document.getElementById("plan-modal-body");
+  const cur = planState.plan;
+  const upgrade = plan.price_twd > (cur ? cur.price_twd : 0);
+  body.innerHTML = `
+    <div class="plan-confirm" id="plan-confirm">
+      <div class="plan-confirm-title">${upgrade ? "升級到" : "改為"}${escapeHtml(plan.name)}</div>
+      <div class="plan-confirm-box">
+        <div class="plan-card-name">${escapeHtml(plan.name)}</div>
+        <div class="plan-price">${planPriceLabel(plan)}</div>
+        <ul class="plan-confirm-points">
+          <li>自選股 ${plan.watch_limit} 檔、自訂通知規則 ${plan.rule_limit} 條${plan.ai_enabled ? "、AI 功能" : ""}</li>
+          <li>信用卡定期定額：付款後立即開通，之後每月同日自動扣款 NT$${plan.price_twd}</li>
+          <li>隨時可取消續訂，功能保留至當期結束；月費不退款</li>
+          <li>卡號在綠界（ECPay）頁面輸入並由綠界保存，不經過 CapitalGuard</li>
+        </ul>
+      </div>
+      <label class="plan-consent" id="plan-consent-row">
+        <input type="checkbox" id="plan-consent" onchange="_syncConsentButton()">
+        <span>我同意訂閱後服務立即開始提供，並了解依《通訊交易解除權合理例外情事適用準則》第 2 條第 5 款，不適用消費者保護法第 19 條的 7 日無條件解除權。付款前請閱讀<a href="${BILLING_TERMS_URL}" target="_blank" rel="noopener">服務條款</a>與<a href="${BILLING_REFUND_URL}" target="_blank" rel="noopener">退款政策</a>。</span>
+      </label>
+      <div class="plan-confirm-actions">
+        <button type="button" class="btn btn-sm btn-outline-light" onclick="renderPlanModal()">返回</button>
+        <button type="button" class="btn btn-sm btn-success btn-accent-sm" id="plan-confirm-go" disabled
+                onclick="confirmCheckout('${jsAttr(code)}')">前往綠界付款</button>
+      </div>
+      <div class="plan-confirm-note" id="plan-confirm-note">勾選同意後才能前往付款。下一頁是綠界的付款頁面，輸入卡號前都還可以關閉頁面取消。</div>
+      <div id="plan-msg" class="plan-msg"></div>
+    </div>`;
+}
+
+function _syncConsentButton() {
   const consent = document.getElementById("plan-consent");
-  const consentRow = document.getElementById("plan-consent-row");
-  if (!consent || !consent.checked) {
-    setPlanMsg("請先勾選同意服務立即開始提供、不適用 7 日解除權，才能前往付款。", true);
-    if (consentRow) { consentRow.classList.add("is-required"); consentRow.scrollIntoView({ block: "center" }); }
-    return;
-  }
-  if (consentRow) consentRow.classList.remove("is-required");
-  setPlanMsg("建立訂單中…");
+  const go = document.getElementById("plan-confirm-go");
+  if (go) go.disabled = !(consent && consent.checked);
+}
+
+// 建單 → 以表單 POST 導向綠界結帳頁（綠界只吃 form post，不能用 fetch 跳轉）。
+// 金額與方案由 Edge Function 查 plans 表決定，這裡只送方案代碼。
+async function confirmCheckout(code) {
+  const consent = document.getElementById("plan-consent");
+  if (!consent || !consent.checked) { _syncConsentButton(); return; }
+  const go = document.getElementById("plan-confirm-go");
+  const note = document.getElementById("plan-confirm-note");
+  const setBusy = (busy, label) => {
+    if (!go) return;
+    go.disabled = busy;
+    go.textContent = label || "前往綠界付款";
+  };
+  setBusy(true, "建立訂單中…");
+  setPlanMsg("");
   trackActivity("checkout_start", { plan: code });
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/create-order`, {
@@ -2033,13 +2085,16 @@ async function startCheckout(code) {
       body: JSON.stringify({ plan_code: code, consent: true }),
     });
     const data = await resp.json().catch(() => ({}));
-    if (data.code === "checkout_unavailable") { checkoutClosedMessage(); return; }
+    if (data.code === "checkout_unavailable") { setBusy(false); checkoutClosedMessage(); return; }
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-    // Secrets 還是測試金鑰時只有管理員走得到這裡：提醒這是綠界測試環境，不會真的扣款
-    if (data.stage && !confirm("目前是綠界測試環境（不會真的扣款），要前往測試結帳頁嗎？")) {
-      setPlanMsg("已取消。");
+    // Secrets 還是測試金鑰時只有管理員走得到這裡：標明是綠界測試環境、要再按一次
+    if (data.stage && !go.dataset.stageAck) {
+      go.dataset.stageAck = "1";
+      if (note) { note.textContent = "目前是綠界測試環境，不會真的扣款。再按一次前往測試結帳頁。"; note.classList.add("is-stage"); }
+      setBusy(false, "前往測試結帳頁");
       return;
     }
+    setBusy(true, "前往綠界…");
     const form = document.createElement("form");
     form.method = "POST";
     form.action = data.action_url;
@@ -2051,11 +2106,13 @@ async function startCheckout(code) {
     document.body.appendChild(form);
     form.submit();
   } catch (e) {
+    setBusy(false);
     setPlanMsg(`無法建立訂單：${e.message || e}`, true);
   }
 }
 
-async function cancelSubscription() {
+// ── 取消續訂：同樣先進確認視圖，看清楚保留到哪天再按 ─────────────────────
+function cancelSubscription() {
   const s = planState.subscription;
   if (!s || planState.plan.code === "free") {
     setPlanMsg("目前是免費版，沒有需要取消的訂閱。");
@@ -2065,8 +2122,29 @@ async function cancelSubscription() {
     setPlanMsg(`目前方案由管理員指派，會在 ${fmtPlanDate(s.current_period_end)} 自動回到免費版；如需提前結束請聯絡管理員。`);
     return;
   }
-  if (!confirm(`確定取消續訂？${planState.plan.name}功能會保留到 ${fmtPlanDate(s.current_period_end)}，之後回到免費版。月費不退款。`)) return;
-  setPlanMsg("處理中…");
+  const body = document.getElementById("plan-modal-body");
+  const until = fmtPlanDate(s.current_period_end);
+  body.innerHTML = `
+    <div class="plan-confirm">
+      <div class="plan-confirm-title">取消續訂？</div>
+      <div class="plan-confirm-box">
+        <ul class="plan-confirm-points">
+          <li>${escapeHtml(planState.plan.name)}功能保留至 <b>${until}</b>，之後回到免費版</li>
+          <li>綠界不會再扣下一期；已付的月費不退款</li>
+          <li>超出免費版上限的自選股與規則會保留資料、暫停通知，重新訂閱即恢復</li>
+        </ul>
+      </div>
+      <div class="plan-confirm-actions">
+        <button type="button" class="btn btn-sm btn-outline-light" onclick="renderPlanModal()">保留訂閱</button>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="plan-cancel-go" onclick="confirmCancel()">確定取消續訂</button>
+      </div>
+      <div id="plan-msg" class="plan-msg"></div>
+    </div>`;
+}
+
+async function confirmCancel() {
+  const go = document.getElementById("plan-cancel-go");
+  if (go) { go.disabled = true; go.textContent = "處理中…"; }
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/cancel-subscription`, {
       method: "POST", headers: billingHeaders(), body: "{}",
@@ -2077,6 +2155,7 @@ async function cancelSubscription() {
     renderPlanModal();
     setPlanMsg(`已取消續訂，功能保留至 ${fmtPlanDate(data.service_until)}。`);
   } catch (e) {
+    if (go) { go.disabled = false; go.textContent = "確定取消續訂"; }
     setPlanMsg(`取消失敗：${e.message || e}`, true);
   }
 }

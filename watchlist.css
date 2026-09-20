@@ -3181,3 +3181,15 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .plan-consent input { margin-top: 0.2rem; flex: 0 0 auto; accent-color: var(--accent-2); }
 .plan-consent a { color: inherit; text-decoration: underline; }
 .plan-consent.is-required { color: var(--danger); }
+
+/* 訂閱／取消的確認視圖：同一個面板換內容，三步（選方案 → 勾同意並確認 → 綠界） */
+.plan-confirm { display: flex; flex-direction: column; gap: 0.8rem; }
+.plan-confirm-title { font-size: 1.05rem; font-weight: 700; color: var(--text-0); }
+.plan-confirm-box { background: rgba(7, 12, 26, 0.7); border: 1px solid rgba(121, 157, 255, 0.16); border-radius: 12px; padding: 0.8rem 0.9rem; }
+.plan-confirm-box .plan-price { margin: 0.1rem 0 0.4rem; }
+.plan-confirm-points { list-style: none; margin: 0; padding: 0; font-size: 0.78rem; color: var(--text-1); line-height: 1.6; }
+.plan-confirm-points li::before { content: "·"; margin-right: 0.4rem; color: var(--text-muted); }
+.plan-confirm-actions { display: flex; gap: 0.6rem; margin-top: 0.2rem; }
+.plan-confirm-actions .btn { flex: 1; justify-content: center; }
+.plan-confirm-note { font-size: 0.72rem; color: var(--text-muted); line-height: 1.5; }
+.plan-confirm-note.is-stage { color: #ffd9b3; }
