@@ -3193,3 +3193,16 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .plan-confirm-actions .btn { flex: 1; justify-content: center; }
 .plan-confirm-note { font-size: 0.72rem; color: var(--text-muted); line-height: 1.5; }
 .plan-confirm-note.is-stage { color: #ffd9b3; }
+
+/* 金流操作結果視窗：疊在方案面板之上（Bootstrap modal 是 1055），按「我知道了」才關 */
+.billing-result { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 1.2rem; background: rgba(3, 6, 14, 0.72); backdrop-filter: blur(3px); }
+.billing-result[hidden] { display: none; }
+.billing-result-card { width: min(420px, 100%); background: rgba(12, 18, 36, 0.98); border: 1px solid rgba(121, 157, 255, 0.22); border-radius: 14px; padding: 1.1rem 1.1rem 1rem; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); }
+.billing-result-icon { width: 2.2rem; height: 2.2rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.1rem; margin-bottom: 0.6rem; background: rgba(121, 157, 255, 0.16); color: var(--text-0); }
+.billing-result.is-ok .billing-result-icon { background: rgba(245, 197, 66, 0.18); color: var(--accent-2); }
+.billing-result.is-wait .billing-result-icon { background: rgba(255, 159, 67, 0.16); color: #ffd9b3; }
+.billing-result.is-warn .billing-result-icon { background: rgba(255, 95, 133, 0.16); color: var(--danger); }
+.billing-result-title { font-size: 1.05rem; font-weight: 700; color: var(--text-0); margin-bottom: 0.5rem; }
+.billing-result-lines { list-style: none; margin: 0 0 0.9rem; padding: 0; font-size: 0.8rem; color: var(--text-1); line-height: 1.6; }
+.billing-result-lines li + li { margin-top: 0.35rem; }
+.billing-result-lines a { color: inherit; text-decoration: underline; }

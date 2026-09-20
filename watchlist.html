@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="133">
+  <meta name="app-version" content="134">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=133" rel="stylesheet">
+  <link href="watchlist.css?v=134" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -550,6 +550,17 @@
         <p class="text-muted small">載入中…</p>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- 金流操作結果視窗：每一次訂閱／取消／導回都在這裡收尾，說明狀況、按「我知道了」才關。
+     不用 Bootstrap modal 疊在方案面板上（疊兩層會亂），自己畫一層在最上面。 -->
+<div id="billing-result" class="billing-result" hidden role="dialog" aria-modal="true" aria-labelledby="billing-result-title">
+  <div class="billing-result-card">
+    <div class="billing-result-icon" id="billing-result-icon">✓</div>
+    <div class="billing-result-title" id="billing-result-title"></div>
+    <ul class="billing-result-lines" id="billing-result-lines"></ul>
+    <button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center" id="billing-result-ok">我知道了</button>
   </div>
 </div>
 
@@ -1822,18 +1833,18 @@ function openPlanModal(focus) {
   if (verEl) verEl.textContent = `App v${appVersion()}`;
   renderPlanModal(focus);
   bootstrap.Modal.getOrCreateInstance(document.getElementById("planModal")).show();
-  // 開面板時順便刷新一次狀態與付款紀錄（付款導回、管理員剛指派都靠這個）
-  Promise.all([loadPlanState(), loadPlanPayments()]).then(() => renderPlanModal(focus));
-  // 付款導回時綠界的 S2S 回呼可能比瀏覽器慢幾秒：再多撿幾次，方案一變就重畫
-  if (focus === "paid") {
-    const before = planState.plan && planState.plan.code;
-    for (const ms of [3000, 8000, 15000]) {
-      setTimeout(async () => {
-        await Promise.all([loadPlanState(), loadPlanPayments()]);
-        if ((planState.plan && planState.plan.code) !== before) renderPlanModal();
-      }, ms);
-    }
+  // 付款導回：由 _settlePaidReturn 收尾（多撿幾次回呼結果，最後跳結果視窗）
+  if (focus === "paid") { _settlePaidReturn(); return; }
+  if (focus === "pay_failed") {
+    Promise.all([loadPlanState(), loadPlanPayments()]).then(() => renderPlanModal());
+    showBillingResult({
+      tone: "warn", title: "付款未完成",
+      lines: ["綠界回報這次付款沒有成功：沒有扣款、也沒有開通。", "可以回到方案比較重新選擇方案再試一次；若持續失敗請換一張卡或來信。"],
+    });
+    return;
   }
+  // 開面板時順便刷新一次狀態與付款紀錄（管理員剛指派都靠這個）
+  Promise.all([loadPlanState(), loadPlanPayments()]).then(() => renderPlanModal(focus));
 }
 
 async function loadPlanPayments() {
@@ -2015,8 +2026,72 @@ function setPlanMsgHtml(html, isErr) {
   _revealPlanMsg(el);
 }
 
+// ── 金流操作結果視窗 ────────────────────────────────────────────────
+// 每一次訂閱／取消／從綠界導回，最後都走這裡：說清楚「發生了什麼、接下來會怎樣」，
+// 使用者按「我知道了」才關。tone：ok（完成）、wait（處理中）、warn（未完成／失敗）、info（說明）。
+// lines 是純文字陣列；要放連結用 {html} 物件（只給我們自己寫的字串，不放使用者輸入）。
+function showBillingResult({ tone = "info", title, lines = [], onClose } = {}) {
+  const box = document.getElementById("billing-result");
+  if (!box) return;
+  const icon = { ok: "✓", wait: "⏳", warn: "!", info: "i" }[tone] || "i";
+  document.getElementById("billing-result-icon").textContent = icon;
+  document.getElementById("billing-result-title").textContent = title || "";
+  document.getElementById("billing-result-lines").innerHTML = lines.map(l =>
+    typeof l === "string" ? `<li>${escapeHtml(l)}</li>` : `<li>${l.html}</li>`).join("");
+  box.className = `billing-result is-${tone}`;
+  box.hidden = false;
+  const ok = document.getElementById("billing-result-ok");
+  ok.onclick = () => { box.hidden = true; if (onClose) onClose(); };
+  ok.focus();
+  trackActivity("billing_result", { tone, title: title || "" });
+}
+
+// 從綠界導回（?pay=done）之後的收尾：綠界的 S2S 回呼可能比瀏覽器慢幾秒，
+// 先看一次，沒看到就 3／8／15 秒再撿；撿到就「訂閱完成」，撿不到就「處理中」。
+async function _settlePaidReturn() {
+  const paidNow = () => {
+    const s = planState.subscription, p = planState.plan;
+    return !!(s && p && p.price_twd > 0 && s.provider === "ecpay" && s.status === "active");
+  };
+  const announceOk = () => {
+    const s = planState.subscription, p = planState.plan;
+    renderPlanModal();
+    showBillingResult({
+      tone: "ok", title: `${p.name}已開通`,
+      lines: [
+        `本期有效至 ${fmtPlanDate(s.current_period_end)}，之後每月同日自動扣款 NT$${p.price_twd}。`,
+        "付款紀錄在「方案與用量」面板最下方；電子發票另行寄送。",
+        "隨時可以在同一個面板按「取消續訂」，功能會保留到當期結束。",
+      ],
+    });
+  };
+  await Promise.all([loadPlanState(), loadPlanPayments()]);
+  if (paidNow()) { announceOk(); return; }
+  for (const ms of [3000, 5000, 7000]) {
+    await new Promise(r => setTimeout(r, ms));
+    await Promise.all([loadPlanState(), loadPlanPayments()]);
+    if (paidNow()) { announceOk(); return; }
+  }
+  renderPlanModal("paid");
+  showBillingResult({
+    tone: "wait", title: "付款處理中",
+    lines: [
+      "綠界已把你導回，但我們還沒收到綠界的入帳通知（通常一分鐘內）。",
+      "方案會在收到通知後自動開通，不需要再付一次。",
+      "稍後重新打開「方案與用量」面板確認；超過 10 分鐘仍未開通請來信。",
+    ],
+  });
+}
+
 function checkoutClosedMessage() {
-  setPlanMsgHtml(`線上付款尚未開放。想先升級請<a href="${BILLING_CONTACT_MAILTO}">來信申請</a>，由管理員開通。`);
+  showBillingResult({
+    tone: "info", title: "線上付款尚未開放",
+    lines: [
+      "目前還沒有開放線上付款，沒有建立訂單、也沒有扣款。",
+      { html: `想先升級請<a href="${BILLING_CONTACT_MAILTO}">來信申請</a>，由管理員為你開通。` },
+    ],
+    onClose: () => renderPlanModal(),
+  });
 }
 
 // ── 訂閱流程：選方案 → 確認視圖（勾同意、看清楚金額與規則）→ 前往綠界 ──────
@@ -2107,7 +2182,10 @@ async function confirmCheckout(code) {
     form.submit();
   } catch (e) {
     setBusy(false);
-    setPlanMsg(`無法建立訂單：${e.message || e}`, true);
+    showBillingResult({
+      tone: "warn", title: "無法建立訂單",
+      lines: [`原因：${e.message || e}`, "沒有扣款、沒有開通。可以稍後再試；持續失敗請來信並附上這段訊息。"],
+    });
   }
 }
 
@@ -2115,11 +2193,18 @@ async function confirmCheckout(code) {
 function cancelSubscription() {
   const s = planState.subscription;
   if (!s || planState.plan.code === "free") {
-    setPlanMsg("目前是免費版，沒有需要取消的訂閱。");
+    showBillingResult({ tone: "info", title: "目前是免費版",
+      lines: ["沒有進行中的付費訂閱，也沒有任何扣款需要取消。"] });
     return;
   }
   if (s.provider === "manual") {
-    setPlanMsg(`目前方案由管理員指派，會在 ${fmtPlanDate(s.current_period_end)} 自動回到免費版；如需提前結束請聯絡管理員。`);
+    showBillingResult({
+      tone: "info", title: "這個方案由管理員指派",
+      lines: [
+        `不是綠界訂閱，沒有扣款；會在 ${fmtPlanDate(s.current_period_end)} 自動回到免費版。`,
+        { html: `想提前結束請<a href="${BILLING_CONTACT_MAILTO}">來信</a>，由管理員調整。` },
+      ],
+    });
     return;
   }
   const body = document.getElementById("plan-modal-body");
@@ -2153,10 +2238,21 @@ async function confirmCancel() {
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
     await loadPlanState();
     renderPlanModal();
-    setPlanMsg(`已取消續訂，功能保留至 ${fmtPlanDate(data.service_until)}。`);
+    const name = planState.plan ? planState.plan.name : "付費";
+    showBillingResult({
+      tone: "ok", title: "已取消續訂",
+      lines: [
+        `綠界已終止定期定額，之後不會再扣款。`,
+        `${name}功能保留至 ${fmtPlanDate(data.service_until)}，到期自動回到免費版；面板在那之前會顯示「已取消續訂」。`,
+        "已付的月費不退款。超出免費版上限的自選股與規則會保留資料、暫停通知，重新訂閱即恢復。",
+      ],
+    });
   } catch (e) {
     if (go) { go.disabled = false; go.textContent = "確定取消續訂"; }
-    setPlanMsg(`取消失敗：${e.message || e}`, true);
+    showBillingResult({
+      tone: "warn", title: "取消未完成",
+      lines: [`原因：${e.message || e}`, "訂閱維持原狀、綠界仍會續扣。請稍後再按一次；持續失敗請來信並附上這段訊息。"],
+    });
   }
 }
 
