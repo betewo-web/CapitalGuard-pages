@@ -2665,6 +2665,10 @@ body.has-bottom-nav .qa-panel {
 	padding: 0.15rem 0.6rem 0.6rem;
 }
 .view-hint { font-size: 0.74rem; line-height: 1.6; color: var(--text-1); }
+/* 開放資料署名：獨立一段放統計頁最底。字級與 .dg-source 相同，但這裡不降 opacity——
+   頁尾本來就不搶焦點，再降就掉到 4.5:1 以下 */
+.view-source { font-size: 0.72rem; line-height: 1.55; color: var(--text-1); padding: 0.4rem 0.6rem 0.8rem; }
+.view-source a { color: inherit; text-decoration: underline; }
 /* 統計列：分數是這一頁的主角，用最亮的字色與較大字級；輔助列（產業・備註）用 --text-1 */
 .holding-row.score-row .hr-price { color: var(--text-0); font-size: 1.12rem; }
 .holding-row.score-row .score-unit { font-size: 0.74rem; font-weight: 500; margin-left: 0.08rem; color: var(--text-1); }
