@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="117">
+  <meta name="app-version" content="118">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=117" rel="stylesheet">
+  <link href="watchlist.css?v=118" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -245,38 +245,55 @@
           onclick="togglePushSubscription()">啟用瀏覽器通知</button>
       </div>
 
-      <div class="card panel-card mb-3">
-        <div class="card-body p-3">
-          <div class="home-sec-title"><span id="home-events-headline">📋 今日事件</span></div>
-          <div class="home-stat-row" id="home-events-stats"></div>
-        </div>
-      </div>
+      <!-- 2026-09-20 首頁改版（Howard 定案）：
+           · 標題下一行市場狀態；一句話總結取代「較少見 N／其他 N」兩格大數字
+           · 自選清單永遠展開、是首頁的主內容。每列：名稱＋漲／平／跌文字籤（盤中即時，
+             漲跌為零才是平、不放股價與百分比）＋近 HOME_HISTORY_DAYS 個交易日的訊號格
+             （每格那天的則數，最右格是今天；點一格開那天的時間軸）＋第二行文字狀態。
+             不放縮寫籤：縮寫籤與當日時序是雷達分頁的，首頁講「脈絡＋今天狀態」，
+             兩頁不能同一顆粒度。訊號在首頁只出現這一次。
+           · 事件卡只放較少見的資料；「接下來 7 天」放 stock_events 裡的未來日程；
+             「統計」放報告的總分變化（只有數字、無評級），全部持平就整張不顯示
+           · 規則推薦降為最底一行 -->
+      <div class="home-status" id="home-status"></div>
 
-      <!-- 自訂規則推薦：規則數未達 RULE_NUDGE_TARGET 條時顯示，內容由 renderRuleNudge() 畫；
-           達標、沒有自選股、或按過「稍後再說」（7 天）就整張收起 -->
-      <div class="card panel-card mb-3" id="home-rule-nudge" style="display:none">
-        <div class="card-body p-3" id="home-rule-nudge-body"></div>
-      </div>
-
       <div class="card panel-card mb-3">
-        <div class="card-body p-3">
-          <div class="home-sec-title">⚡ 盤中訊號 <span class="hs-link" onclick="switchTab('live')">查看全部 →</span></div>
-          <div id="home-signals"></div>
-        </div>
+        <div class="card-body p-3" id="home-summary"></div>
       </div>
 
       <div class="card panel-card mb-3">
         <div class="card-body p-3">
-          <div class="home-sec-title">⭐ 我的自選 <span id="home-watchlist-toggle" class="hs-link" onclick="toggleHomeWatchlistExpand()">展開清單 ▼</span> <span class="hs-link" onclick="switchTab('watch')">查看自選 →</span></div>
+          <div class="home-sec-title">⭐ 我的自選 <span class="hs-link" onclick="switchTab('watch')">管理 →</span></div>
           <div id="home-watchlist"></div>
+          <div class="home-legend" id="home-watchlist-legend"></div>
         </div>
       </div>
 
       <div class="card panel-card mb-3">
         <div class="card-body p-3">
-          <div class="home-sec-title">📰 今日較少見的資料</div>
+          <div class="home-sec-title">📰 今日較少見的資料 <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
           <div id="home-news"></div>
         </div>
+      </div>
+
+      <div class="card panel-card mb-3" id="home-upcoming-card" style="display:none">
+        <div class="card-body p-3">
+          <div class="home-sec-title">📅 接下來 7 天</div>
+          <div id="home-upcoming"></div>
+        </div>
+      </div>
+
+      <div class="card panel-card mb-3" id="home-scores-card" style="display:none">
+        <div class="card-body p-3">
+          <div class="home-sec-title"><span id="home-scores-title">📊 統計</span> <span class="hs-link" onclick="switchTab('scores')">看整理 →</span></div>
+          <div id="home-scores"></div>
+        </div>
+      </div>
+
+      <!-- 自訂規則推薦：規則數未達 RULE_NUDGE_TARGET 條時顯示一行，內容由 renderRuleNudge() 畫；
+           達標、沒有自選股、或按過「稍後再說」（7 天）就收起 -->
+      <div class="home-nudge" id="home-rule-nudge" style="display:none">
+        <div id="home-rule-nudge-body"></div>
       </div>
     </section>
 
@@ -769,8 +786,10 @@
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-3">
+        <!-- 日期籤：近 HOME_HISTORY_DAYS 個交易日各標則數，點哪天畫哪天（rtlDaysHtml） -->
+        <div class="rtl-days" id="rtl-days"></div>
         <div id="rtl-chart-wrap"></div>
-        <div class="rtl-story-head">盤中發生了什麼</div>
+        <div class="rtl-story-head" id="rtl-story-head">盤中發生了什麼</div>
         <div id="rtl-story"></div>
       </div>
     </div>
@@ -995,8 +1014,6 @@ let intradayQuoteMap = {};
 let intradayQuotesLoadingPromise = null;
 let finmindQuoteMap = {};
 let finmindQuotesLoadingPromise = null;
-const HOME_WATCHLIST_EXPAND_KEY = "home_watchlist_expanded";
-let homeWatchlistExpanded = localStorage.getItem(HOME_WATCHLIST_EXPAND_KEY) === "1";
 let alertModalRowId = null;
 let removeModalRowId = null;
 let stockEvents = {};   // sid → scored stock_events rows
@@ -1050,7 +1067,9 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
 // ── PWA v2: App Shell 狀態 ──
 const APP_TABS = ["home", "scores", "live", "inbox", "watch"];
 let currentTab = null;
-let inboxRows = [];             // alert_history rows（sent_at desc）
+let inboxRows = [];             // alert_history rows（sent_at desc，近 INBOX_HISTORY_DAYS 天）
+const INBOX_HISTORY_DAYS = 30;  // 通知只抓這麼多天：首頁近 10 個交易日的格子要數得到規則命中與自訂價位
+const INBOX_HISTORY_LIMIT = 1000;
 let pendingAlertFocus = null;   // 從手機通知點進來要置中的那則（event_key）
 let _alertFocusRetries = 0;
 let _pendingAlertFocusAt = 0;   // 何時開始等：等太久（換了分頁）就放棄，別在下次進通知頁時突然跳
@@ -2907,6 +2926,7 @@ async function showMain() {
   ensurePushSubscriptionRegistered();
   refreshInbox(true);
   loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
+  loadSignalHistory(true).then(() => renderCurrentTab()).catch(() => {});   // 首頁格子的過去日子
   // 延後再跳：免責聲明閘、強制更新閘、金流導回的方案面板都在這之前處理，
   // 直接跳會疊在它們上面（_screenIsBusy 會擋，但那樣這次就白白錯過了）
   // 一次開機只跳一個視窗：推播提醒優先，跳了就略過這次的規則推薦
@@ -2975,6 +2995,8 @@ async function _autoRefreshOnce() {
   else if (_isSessionOverToday() && _closeQuoteMissing()) {
     tasks.push(loadIntradayQuotes(true).then(() => (_closeQuoteMissing() ? loadFinMindCloseQuotes() : null)));
   }
+  // 首頁格子的過去日子：自帶 10 分鐘限流（今天那格走 intraday_state，不靠它）
+  if (currentTab === "home" || radarTimelineSid) tasks.push(loadSignalHistory(false));
   await Promise.allSettled(tasks);
   _lastRefreshAt = Date.now();
   renderCurrentTab();
@@ -3142,7 +3164,7 @@ async function manualRefresh() {
   try {
     // loadIntradayQuotes 讀的是 watchlistRows，必須等自選股先回來
     await Promise.allSettled([loadWatchlist(), refreshInbox(true), loadSharedReportData(true)]);
-    await Promise.allSettled([loadIntradayQuotes(true)]);
+    await Promise.allSettled([loadIntradayQuotes(true), loadSignalHistory(true)]);
     if (_isSessionOverToday() && _closeQuoteMissing()) await loadFinMindCloseQuotes().catch(() => {});
     _lastRefreshAt = Date.now();
     _lastInboxRefreshAt = Date.now();
@@ -3199,10 +3221,86 @@ function renderCurrentTab() {
   else renderWatchlist(watchlistRows);
 }
 
-function toggleHomeWatchlistExpand() {
-  homeWatchlistExpanded = !homeWatchlistExpanded;
-  localStorage.setItem(HOME_WATCHLIST_EXPAND_KEY, homeWatchlistExpanded ? "1" : "0");
-  if (currentTab === "home") renderHome();
+// ── signal_history：每檔股票每個交易日的訊號序列（migrate_signal_history.sql，2026-09-20）──
+// intraday_state.signals_today 只有今天；首頁「近 10 個交易日」的格子與時間軸切日期
+// 讀這張表。表還沒建（查詢 404／400）就記住不支援，過去的日子只剩通知紀錄可數。
+// 內容一天只在收盤後定案，盤中每輪有新訊號的股票才會更新，所以最多每 SIGNAL_HISTORY_MS 抓一次。
+const HOME_HISTORY_DAYS = 10;          // 首頁格子與時間軸日期籤的交易日數
+const SIGNAL_HISTORY_CAL_DAYS = 21;    // 往回抓幾個日曆日（10 個交易日含連假綽綽有餘）
+const SIGNAL_HISTORY_MS = 10 * 60 * 1000;
+let signalHistoryMap = {};             // sid → { "YYYY-MM-DD": { signals, levels, prevClose, close } }
+let signalHistorySupported = true;
+let signalHistoryLoadedAt = 0;
+
+async function loadSignalHistory(force = false) {
+  if (!signalHistorySupported || !state.userId) return signalHistoryMap;
+  if (!force && Date.now() - signalHistoryLoadedAt < SIGNAL_HISTORY_MS) return signalHistoryMap;
+  const sids = [...new Set((watchlistRows || [])
+    .map(r => String(r.stock_id || "").trim())
+    .filter(sid => /^\d{4}$/.test(sid)))];
+  if (!sids.length) { signalHistoryMap = {}; return signalHistoryMap; }
+  const since = taipeiDateKey(new Date(Date.now() - SIGNAL_HISTORY_CAL_DAYS * 864e5));
+  try {
+    const rows = await sbGet("signal_history", {
+      select: "stock_id,trade_date,signals,levels,prev_close,close",
+      stock_id: `in.(${sids.join(",")})`,
+      trade_date: `gte.${since}`,
+      order: "trade_date.desc",
+      limit: String(sids.length * (SIGNAL_HISTORY_CAL_DAYS + 2)),
+    }, state.accessToken);
+    const map = {};
+    for (const row of rows || []) {
+      const sid = String(row.stock_id || "").trim();
+      const date = String(row.trade_date || "").slice(0, 10);
+      if (!/^\d{4}$/.test(sid) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const prevRaw = row.prev_close == null ? null : Number(row.prev_close);
+      const closeRaw = row.close == null ? null : Number(row.close);
+      (map[sid] ||= {})[date] = {
+        signals:   _intradaySignals(row.signals) || [],
+        levels:    _intradayLevels(row.levels),
+        prevClose: Number.isFinite(prevRaw) && prevRaw > 0 ? prevRaw : null,
+        close:     Number.isFinite(closeRaw) && closeRaw > 0 ? closeRaw : null,
+      };
+    }
+    signalHistoryMap = map;
+    signalHistoryLoadedAt = Date.now();
+  } catch (e) {
+    // 404（表不存在）與 400（欄位不齊）都當作「這個 DB 還沒跑 migration」；網路錯誤下次再試
+    if (/: (404|400)$/.test(String(e && e.message || ""))) signalHistorySupported = false;
+  }
+  return signalHistoryMap;
+}
+
+// 那天的共用日誌（內建訊號＋自動偵測）：今天讀 intraday_state.signals_today，過去讀 signal_history。
+// null＝沒有那天的序列（monitor 還沒升級、表還沒建、或那天不是交易日），雷達據此退回通知紀錄。
+function signalLogFor(sid, date) {
+  if (date === radarSessionDate()) {
+    const iq = intradayQuoteMap[sid] || null;
+    if (iq && Array.isArray(iq.signals)) return iq.signals;
+  }
+  const hist = signalHistoryMap?.[sid]?.[date];
+  return hist ? hist.signals : null;
+}
+
+// 近 n 個交易日（升冪，最後一個是雷達的交易日）。signal_history 有列的日期一定是交易日，
+// 所以有資料的區間以它為準（國定假日自然跳過）；比最早那列還早的日子（表剛建、還沒累積到
+// 10 天）與完全沒資料時，退回以平日推算——假日會出現成一格空的，累積夠了就自己對齊
+function radarHistoryDates(n = HOME_HISTORY_DAYS) {
+  const end = radarSessionDate();
+  const known = new Set();
+  for (const bySid of Object.values(signalHistoryMap || {})) for (const d of Object.keys(bySid)) if (d < end) known.add(d);
+  const earliest = known.size ? [...known].sort()[0] : null;
+  const out = [end];
+  const cursor = new Date(`${end}T00:00:00Z`);
+  while (out.length < n && !Number.isNaN(cursor.getTime())) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    const key = cursor.toISOString().slice(0, 10);
+    const weekday = cursor.getUTCDay();
+    const isWeekday = weekday !== 0 && weekday !== 6;
+    if (known.has(key) || (isWeekday && (!earliest || key < earliest))) out.push(key);
+    if (end.slice(0, 4) - key.slice(0, 4) > 1) break;   // 保險：沒資料也不會無限往回
+  }
+  return out.reverse();
 }
 
 async function loadIntradayQuotes(force = false) {
@@ -3934,26 +4032,14 @@ function renderRuleNudge() {
   const show = ruleNudgeShouldPrompt();
   card.style.display = show ? "" : "none";
   if (!show) return;
-
-  const tpls = ruleTemplateSuggestions();
-  const dots = Array.from({ length: target }, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("");
-  const planLine = planState.ready
-    ? `${escapeHtml(planState.plan.name)}可設 ${planState.plan.rule_limit} 條`
-    : "";
+  // 一行就好（2026-09-20 把大卡拿掉）：新用戶第一眼要看到的是自己的股票，不是設定教學。
+  // 範本一鍵加入仍在規則編輯器與開機彈窗（renderRuleNudgePopup）裡
   body.innerHTML = `
-    <div class="home-sec-title">📐 自訂通知規則
-      <span class="hs-link" onclick="snoozeRuleNudge()" title="7 天內不再顯示">稍後再說</span>
-    </div>
-    <div class="rule-nudge-lead">
-      ${n === 0 ? "還沒有自訂規則。" : `已設定 ${n} 條。`}條件由你決定：價格、量能、法人買賣超、月營收都能自由組合，全部成立才通知你。
-    </div>
-    <div class="rule-nudge-progress" title="已設定 ${n}/${target} 條">${dots}<span class="rule-nudge-meta">${n}/${target}${planLine ? "・" + planLine : ""}</span></div>
-    <button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center rule-nudge-cta"
-            onclick="openRuleEditorFromNudge()">＋ 自己設定條件</button>
-    ${tpls.length ? `
-      <div class="rule-nudge-or"><span>或一鍵加入範本（套用到全部自選股，之後可改門檻）</span></div>
-      <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "home")}</div>` : ""}
-    <div id="rule-nudge-msg" class="small mt-1"></div>`;
+    <span class="home-nudge-text">📐 自訂規則 ${n}／${target} 條 · 條件由你決定</span>
+    <span class="home-nudge-actions">
+      <span class="hs-link" onclick="openRuleEditorFromNudge()">設定 →</span>
+      <span class="hs-link home-nudge-later" onclick="snoozeRuleNudge()" title="7 天內不再顯示">稍後</span>
+    </span>`;
 }
 
 async function addRuleTemplate(idx, ctx, btn) {
@@ -4363,6 +4449,7 @@ async function hydrateMissingQuotes() {
 function scheduleQuoteHydration() {
   Promise.resolve()
     .then(() => loadIntradayQuotes(true))
+    .then(() => loadSignalHistory(true))     // 自選清單變了：新加的股票要有格子
     .then(() => loadFinMindQuotesForMissing(true))
     .then(() => renderCurrentTab())
     .catch(() => {});
@@ -4408,9 +4495,12 @@ async function refreshInbox(force = true) {
   if (!state.userId) return;
   if (!force && Date.now() - inboxLoadedAt < 60000) return;   // 60 秒內不重抓
   try {
+    // 按日期抓而不是「最近 200 則」：首頁近 10 個交易日的格子要數每一天的規則命中與
+    // 自訂價位，多檔多規則的用戶 200 則可能撐不到兩週（2026-09-20）
     const rows = await sbGet("alert_history", {
       order: "sent_at.desc",
-      limit: "200",
+      sent_at: `gte.${new Date(Date.now() - INBOX_HISTORY_DAYS * 864e5).toISOString()}`,
+      limit: String(INBOX_HISTORY_LIMIT),
     }, state.accessToken);
     inboxRows = rows || [];
     inboxLoadedAt = Date.now();
@@ -4775,81 +4865,72 @@ function renderHome() {
 
   renderRuleNudge();
 
-  // 今日事件摘要——只數「今天首次入庫」或「事件日就是今天」的列，
-  // 早已知道、每天重新確認的舊事件不灌水
-  const evAll = Object.values(stockEvents).flat().filter(isTodayEvent);
-  // 兩格不是三格：這裡以前是 🟠重要／🔵注意／⚪一般，用的是橘藍灰，但同一組門檻在事件卡上
-  // 卻是金／紫／淡藍——同一件事在兩個畫面長得不一樣。而且「注意」與「一般」對使用者的
-  // 行動沒有差別。現在首頁與事件卡共用 isStandoutEvent 這一個門檻，措辭也跟彈窗一致。
-  const standout = evAll.filter(isStandoutEvent).length;
-  const others = evAll.length - standout;
-  const headlineEl = document.getElementById("home-events-headline");
-  const statsEl = document.getElementById("home-events-stats");
-  const hasEvents = evAll.length > 0;
-  if (headlineEl) {
-    headlineEl.innerHTML = hasEvents
-      ? `📋 今日你的股票有 ${evAll.length} 件事 <span class="hs-link">查看明細 →</span>`
-      : "📋 今日事件";
-    headlineEl.onclick = hasEvents ? openTodayEventsPanel : null;
-  }
-  if (statsEl) {
-    statsEl.innerHTML = hasEvents ? `
-    <div class="home-stat"><div class="hs-num sev-orange">${standout}</div><div class="hs-label">較少見</div></div>
-    <div class="home-stat"><div class="hs-num sev-info">${others}</div><div class="hs-label">其他</div></div>
-  ` : `<div class="view-empty py-2" style="padding:0.5rem">今日尚無彙整事件<br><span style="font-size:.72rem;opacity:.75">每日盤後執行 python main.py --fetch-events 更新</span></div>`;
-    statsEl.onclick = hasEvents ? openTodayEventsPanel : null;
-  }
+  // 「今天」以雷達的交易日為準（週末看到的是最近一個交易日）；格子是近 HOME_HISTORY_DAYS 個交易日
+  const sessionDate = radarSessionDate();
+  const isSessionToday = sessionDate === taipeiDateKey(now);
+  const dayLabel = isSessionToday ? "今日" : _mdOf(sessionDate);
+  const days = radarHistoryDates(HOME_HISTORY_DAYS);
+  const statusEl = document.getElementById("home-status");
+  if (statusEl) statusEl.textContent = homeStatusText();
 
-  // 盤中訊號（今日前 3 筆）
-  const signals = inboxRows.filter(r =>
-    isToday(r.sent_at) && ["monitor", "post_market", "postmarket"].includes(String(r.source || "monitor")));
-  document.getElementById("home-signals").innerHTML = signals.length
-    ? signals.slice(0, 3).map(r => {
-        const sev = inferSeverity(r);
-        const sid = String(r.stock_id || "").trim();
-        return `
-          <div class="home-row" onclick="openInboxDetail('${jsAttr(String(r.id))}')">
-            <span class="sev-dot sev-${sev}"></span>
-            <span class="hr-name">${escapeHtml(sid ? stockLabelOf(sid) : "")} ${escapeHtml(alertTypeLabel(r))}</span>
-            <span class="hr-meta">${fmtTime(r.sent_at)}</span>
-          </div>`;
-      }).join("")
-    : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無盤中訊號</div>';
-
-  const homeWatchToggle = document.getElementById("home-watchlist-toggle");
-  if (homeWatchToggle) {
-    homeWatchToggle.textContent = homeWatchlistExpanded
-      ? `收合清單 ▲（${watchlistRows.length}）`
-      : `展開清單 ▼（${watchlistRows.length}）`;
-  }
-
-  // 我的自選摘要（預設收合，使用者可展開全部）
-  if (!watchlistRows.length) {
-    document.getElementById("home-watchlist").innerHTML = '<div class="view-empty py-2" style="padding:0.5rem">尚未加入自選股，到 ⭐ 自選 分頁新增</div>';
-  } else if (!homeWatchlistExpanded) {
-    document.getElementById("home-watchlist").innerHTML = '<div class="view-empty py-2" style="padding:0.5rem">已收合自選清單，點上方「展開清單」查看</div>';
-  } else {
-    const wlHtml = watchlistRows.map(row => {
+  // 每檔自選股：方向、近 N 日每天的則數（與雷達列同一個 radarStoryOf，只是不畫縮寫）、今天的狀態
+  const rows = watchlistRows.map(row => {
     const sid = String(row.stock_id || "").trim();
     const name = getPreferredStockName(sid, row.stock_name) || sid;
-    const q = getQuote(sid);
-    const sig = latestSignalOf(sid);
-    const sigDot = sig ? `<span class="sev-dot sev-${inferSeverity(sig)}"></span>` : '<span class="hr-meta">─</span>';
-    return `
-      <div class="home-row" onclick="openKLineFromWatchlist('${jsAttr(sid)}')">
-        <span class="hr-name">${escapeHtml(name)}</span>
-        <span class="hr-meta">${q ? fmtPrice(q.price) : ""}</span>
-        ${q ? fmtChgHtml(q.changePct) : ""}
-        ${sigDot}
-      </div>`;
-    }).join("");
-    document.getElementById("home-watchlist").innerHTML = wlHtml;
+    const iq = intradayQuoteMap[sid] || null;
+    const active = (iq && iq.signal && iq.signal !== "none"
+                    && taipeiDateKey(iq.signal_at || iq.updated_at) === sessionDate) ? iq : null;
+    const stories = days.map(d => radarStoryOf(sid, d).filter(e => e.src !== "post"));
+    const counts = stories.map(list => list.length);
+    const hot = stories.map(list => list.some(e => e.sev === "orange"));
+    const todayCount = counts[counts.length - 1];
+    const total = counts.reduce((a, b) => a + b, 0);
+    const standout = (stockEvents[sid] || []).filter(ev => isTodayEvent(ev) && isStandoutEvent(ev)).length;
+    return { sid, name, active, counts, hot, todayCount, total, standout, dir: homeDirectionOf(sid) };
+  });
+  // 有事的排前面：進行中 → 今天則數 → 較少見件數 → 近 N 日累計 → 名稱
+  rows.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || b.todayCount - a.todayCount
+    || b.standout - a.standout || b.total - a.total || a.name.localeCompare(b.name, "zh-Hant"));
+
+  // 一句話總結（取代以前「較少見 N／其他 N」兩格大數字）
+  const nSig = rows.filter(r => r.todayCount > 0).length;
+  const nEv = rows.reduce((acc, r) => acc + r.standout, 0);
+  const total = rows.reduce((acc, r) => acc + r.total, 0);
+  const summaryEl = document.getElementById("home-summary");
+  if (summaryEl) {
+    if (!rows.length) {
+      summaryEl.innerHTML = `<div class="home-sum"><b>尚未加入自選股</b><span class="dim">到 ⭐ 自選 分頁新增，首頁會列出每檔近 ${HOME_HISTORY_DAYS} 個交易日的訊號</span></div>`;
+    } else if (nSig || nEv) {
+      const parts = [];
+      if (nSig) parts.push(`${nSig} 檔有訊號`);
+      if (nEv) parts.push(`${nEv} 件較少見資料`);
+      const quiet = rows.length - nSig;
+      const sofar = isSessionToday && _isMarketOpenNow() ? "到目前為止" : "";
+      summaryEl.innerHTML = `<div class="home-sum"><b>${rows.length} 檔自選：${dayLabel} ${parts.join("、")}</b>
+        <span class="dim">近 ${days.length} 個交易日累計 ${total} 則${quiet ? `，其餘 ${quiet} 檔${dayLabel}${sofar}平靜` : ""}</span></div>`;
+    } else {
+      summaryEl.innerHTML = `<div class="home-sum"><b>${rows.length} 檔自選${dayLabel}都平靜</b>
+        <span class="dim">近 ${days.length} 個交易日累計 ${total} 則訊號${total ? "" : "，還沒有紀錄"}</span></div>`;
+    }
   }
 
-  // 今日較少見（跟上面三格、與事件彈窗共用 isStandoutEvent 同一個門檻）——
+  // 自選列
+  const listEl = document.getElementById("home-watchlist");
+  if (listEl) {
+    listEl.innerHTML = rows.length
+      ? rows.map(r => homeRowHtml(r, days, dayLabel)).join("")
+      : '<div class="view-empty py-2" style="padding:0.5rem">尚未加入自選股，到 ⭐ 自選 分頁新增</div>';
+  }
+  const legendEl = document.getElementById("home-watchlist-legend");
+  if (legendEl) {
+    legendEl.textContent = rows.length
+      ? `格子＝近 ${days.length} 個交易日（${_mdOf(days[0])}–${_mdOf(days[days.length - 1])}）每天的訊號數，點一格看那天的時間軸；漲／平／跌對前一日收盤，盤中即時`
+      : "";
+  }
+
+  // 今日較少見（與自選列標籤、事件彈窗共用 isStandoutEvent 同一個門檻）——
   // 僅限今天首次入庫或事件日為今天的列；先前就已知、每天重新確認的舊事件
-  // 不再重新上榜（也不重推播）。標題不再叫「重要資訊」：同一階在全站只能有一個名字，
-  // 不然同一張畫面上面寫「較少見」、下面寫「重要」，使用者會以為是兩群不同的資料。
+  // 不再重新上榜（也不重推播）。同一階在全站只能有一個名字：「較少見」。
   const newsRows = [];
   for (const [sid, evs] of Object.entries(stockEvents)) {
     for (const ev of evs) {
@@ -4857,15 +4938,136 @@ function renderHome() {
     }
   }
   newsRows.sort((a, b) => _compareEvents(a.ev, b.ev));
-  document.getElementById("home-news").innerHTML = newsRows.length
-    ? newsRows.slice(0, 6).map(({ sid, ev }) => `
-        <div class="home-row" onclick="openEventsPanel('${jsAttr(sid)}')">
-          <span class="badge-sid" style="font-size:.68rem">${escapeHtml(stockNameOf(sid) || sid)}</span>
-          <span class="hr-name">${escapeHtml(ev.title || "")}</span>
-        </div>`).join("")
-    : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無較少見的資料</div>';
-  
-    sendTodayImportantInfoNotification(newsRows);
+  const newsEl = document.getElementById("home-news");
+  if (newsEl) {
+    newsEl.innerHTML = newsRows.length
+      ? newsRows.slice(0, 6).map(({ sid, ev }) => `
+          <div class="home-feed" onclick="openEventsPanel('${jsAttr(sid)}')">
+            <span class="home-feed-tm">${escapeHtml((_EVENT_TYPE_LABEL[ev.event_type] || "").replace(/^\S+\s/, "") || "事件")}</span>
+            <span class="home-feed-tx"><b>${escapeHtml(stockNameOf(sid) || sid)}</b> ${escapeHtml(_eventTitleWithoutStock(ev.title, sid, stockNameOf(sid)))}</span>
+          </div>`).join("")
+      : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無較少見的資料</div>';
+  }
+  const newsLink = document.getElementById("home-news-link");
+  if (newsLink) newsLink.style.display = newsRows.length ? "" : "none";
+
+  homeRenderUpcoming();
+  homeRenderScores();
+  sendTodayImportantInfoNotification(newsRows);
+}
+
+// 漲／平／跌：盤中即時（現價對前一日收盤），漲跌為零才是平——Howard 2026-09-20 定案：
+// 不設 ±x% 門檻。籤裡沒有數字，首頁不放股價與百分比。拿不到報價就不掛籤。
+const HOME_DIR_LABEL = { up: "漲", down: "跌", flat: "平" };
+function homeDirectionOf(sid) {
+  const q = getQuote(sid);
+  if (!q || q.changePct === null || q.changePct === undefined) return null;
+  return q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
+}
+
+// 首頁自選列：名稱＋方向籤＋近 N 日格子（第一行），文字狀態（第二行）。點列開今天的時間軸，點格子開那天的
+function homeRowHtml(r, days, dayLabel) {
+  const dir = r.dir
+    ? `<span class="home-dir home-dir-${r.dir}">${HOME_DIR_LABEL[r.dir]}</span>`
+    : `<span class="home-dir home-dir-none">—</span>`;
+  const last = days.length - 1;
+  const cells = days.map((d, i) => {
+    const n = r.counts[i];
+    const cls = ["home-cell", n ? (r.hot[i] ? "is-hot" : "is-on") : "", i === last ? "is-today" : ""].filter(Boolean).join(" ");
+    return `<i class="${cls}" onclick="event.stopPropagation(); openRadarTimeline('${jsAttr(r.sid)}', '${jsAttr(d)}')">${n > 1 ? n : ""}</i>`;
+  }).join("");
+  const bits = [];
+  if (r.todayCount) {
+    const abbr = r.active ? (signalAbbr(String(r.active.signal)) || alertTypeLabel(r.active)) : "";
+    bits.push(`${dayLabel} <b>${r.todayCount} 則</b>${abbr ? `，進行中 ${escapeHtml(abbr)}` : ""}`);
+  } else if (r.total) {
+    bits.push(`近 ${days.length} 日 ${r.total} 則，${dayLabel}無`);
+  } else {
+    bits.push(`近 ${days.length} 日平靜`);
+  }
+  if (r.standout) bits.push(`<span class="home-ev">${r.standout} 較少見</span>`);
+  return `<div class="home-wl" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
+      <span class="home-wl-name">${escapeHtml(r.name)}</span>${dir}
+      <span class="home-strip">${cells}</span>
+      <span class="home-st">${bits.join(" · ")}</span>
+      <span class="home-more">›</span>
+    </div>`;
+}
+
+// 標題下一行：盤中／已收盤、資料時間、自選檔數（與雷達狀態列同一組字）
+function homeStatusText() {
+  const n = watchlistRows.length;
+  let latest = null;
+  for (const iq of Object.values(intradayQuoteMap || {})) {
+    const t = iq?.quote_at || iq?.updated_at;
+    if (t && (!latest || t > latest)) latest = t;
+  }
+  if (_isMarketOpenNow()) return `🟢 盤中${latest ? ` · 資料 ${fmtTime(latest)}` : ""} · 自選 ${n} 檔`;
+  return `⚪ 已收盤${latest ? ` · 資料 ${fmtTime(latest, true)}` : ""} · 自選 ${n} 檔`;
+}
+
+// 接下來 7 天：stock_events 裡事件日在明天起 7 天內的日程（除權息、法說會、財報…）。
+// 事件表本來就往後抓 90 天（loadStockEvents），首頁以前沒用到。沒有就整張不顯示
+function homeRenderUpcoming() {
+  const card = document.getElementById("home-upcoming-card");
+  const el = document.getElementById("home-upcoming");
+  if (!card || !el) return;
+  const today = _localDateIso();
+  const until = _localDateIso(new Date(Date.now() + 7 * 864e5));
+  const rows = [];
+  for (const [sid, evs] of Object.entries(stockEvents)) {
+    for (const ev of evs) {
+      const d = String(ev.event_date || "");
+      if (d > today && d <= until) rows.push({ sid, ev });
+    }
+  }
+  rows.sort((a, b) => String(a.ev.event_date).localeCompare(String(b.ev.event_date)));
+  card.style.display = rows.length ? "" : "none";
+  el.innerHTML = rows.slice(0, 6).map(({ sid, ev }) => `
+    <div class="home-feed" onclick="openEventsPanel('${jsAttr(sid)}')">
+      <span class="home-feed-tm">${escapeHtml(_mdOf(ev.event_date))}</span>
+      <span class="home-feed-tx"><b>${escapeHtml(stockNameOf(sid) || sid)}</b> ${escapeHtml(_eventTitleWithoutStock(ev.title, sid, stockNameOf(sid)) || (_EVENT_TYPE_LABEL[ev.event_type] || ""))}</span>
+    </div>`).join("");
+}
+
+// 事件標題常以「台積電（2330）」或「2330 台積電」開頭；首頁列已經寫了名稱，標題從內容起顯示
+function _eventTitleWithoutStock(title, sid, name) {
+  let t = String(title || "").trim();
+  const code = String(sid || "").trim();
+  const nm = String(name || "").trim();
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (nm && code) t = t.replace(new RegExp(`^${esc(nm)}\\s*[（(]${esc(code)}[)）]\\s*`), "");
+  if (code && nm) t = t.replace(new RegExp(`^${esc(code)}\\s+${esc(nm)}\\s+`), "");
+  if (nm) t = t.replace(new RegExp(`^${esc(nm)}\\s+`), "");
+  return t;
+}
+
+// 統計：報告裡每檔自選股的總分較前一日的變化（只有數字、沒有評級——COMPLIANCE.md）。
+// Howard 2026-09-20：要放，但只在有變化時；全部持平或還沒有報告就整張不顯示
+function homeRenderScores() {
+  const card = document.getElementById("home-scores-card");
+  const el = document.getElementById("home-scores");
+  const titleEl = document.getElementById("home-scores-title");
+  if (!card || !el) return;
+  const scores = sharedReportData?.investment_scores || {};
+  const changed = [], flat = [];
+  for (const row of watchlistRows) {
+    const sid = String(row.stock_id || "").trim();
+    const s = scores[sid];
+    if (!s) continue;
+    const chg = Number(s.score_change);
+    if (!Number.isFinite(chg)) continue;
+    (Math.abs(chg) >= 0.05 ? changed : flat).push({ sid, name: getPreferredStockName(sid, row.stock_name) || sid, chg });
+  }
+  card.style.display = changed.length ? "" : "none";
+  if (!changed.length) return;
+  changed.sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg));
+  if (titleEl) titleEl.textContent = `📊 ${sharedReportData?.date ? `${_mdOf(sharedReportData.date)} ` : ""}統計`;
+  el.innerHTML = `<div class="home-feed">
+      <span class="home-feed-tm">變動</span>
+      <span class="home-feed-tx">${changed.map(x => `<b>${escapeHtml(x.name)}</b> ${fmtScoreDelta(x.chg)}`).join("、")}${flat.length ? `，其餘 ${flat.length} 檔持平` : ""}
+        <span class="k">總分較前一日</span></span>
+    </div>`;
 }
 
 // ── 持股資料層 ───────────────────────────────────────────────────
@@ -4920,7 +5122,11 @@ function maPositions(sid, price) {
 }
 
 function nearestLevels(sid, price) {
-  const lv = intradayQuoteMap?.[sid]?.levels || sharedReportData?.stock_data?.[sid]?.levels;
+  return _nearestFromLevels(intradayQuoteMap?.[sid]?.levels || sharedReportData?.stock_data?.[sid]?.levels, price);
+}
+
+// 從一組 {support:[], resistance:[]} 挑出現價上下最近的一條（過去日子的時間軸用那天存下的關卡）
+function _nearestFromLevels(lv, price) {
   const none = { support: null, resistance: null, supPct: null, resPct: null };
   if (!lv || !(price > 0)) return none;
   const sups = (lv.support || []).map(Number).filter(v => Number.isFinite(v) && v < price);
@@ -5580,12 +5786,14 @@ function _titleWithoutStock(title, sid, name) {
   return t;
 }
 
-function radarStoryOf(sid) {
-  const date = radarSessionDate();
-  const iq = intradayQuoteMap[sid] || null;
+// date 不給＝雷達的交易日；給過去的日期就從 signal_history 讀那天的共用日誌（2026-09-20，
+// 首頁近 10 日格子與時間軸切日期），通知紀錄照樣只取那一天的
+function radarStoryOf(sid, date = null) {
+  date = date || radarSessionDate();
+  const iq = date === radarSessionDate() ? (intradayQuoteMap[sid] || null) : null;
   const wl = watchlistRows.find(w => String(w.stock_id || "").trim() === sid);
   const stockName = getPreferredStockName(sid, wl ? wl.stock_name : "") || "";
-  const logged = iq && Array.isArray(iq.signals) ? iq.signals : null;   // null＝monitor 還沒寫這欄
+  const logged = signalLogFor(sid, date);   // null＝沒有那天的序列（monitor 還沒寫、表還沒建）
   const out = [];
   const entry = o => out.push(Object.assign(
     { ms: Date.parse(o.at) || 0, rowId: null, ruleName: "", condKeys: [], level: null, price: null }, o));
@@ -5650,6 +5858,7 @@ function radarStoryOf(sid) {
 // （訊號自己講的關卡、月線、昨收、現價附近的壓力／支撐）讓人看得出相對位置。
 // 刻意不畫價格路徑：這一頁講的是「發生了什麼」，走勢留給 K 線。
 let radarTimelineSid = null;
+let radarTimelineDate = null;  // null＝雷達的交易日；過去的日期＝從 signal_history 畫那天（點首頁格子／日期籤）
 const RTL_SESSION_MIN = 270;   // 09:00 → 13:30
 const RTL_TICKS = [["09:00", 0], ["10:00", 60], ["11:00", 120], ["12:00", 180], ["", 240], ["13:30", 270]];
 // 參考橫線的名稱：訊號自己講的那條線
@@ -5671,13 +5880,42 @@ function _sessionMinutesOf(ts) {
   return (part("hour") - 9) * 60 + part("minute");
 }
 
-function openRadarTimeline(sid) {
+function openRadarTimeline(sid, date = null) {
   const sidKey = String(sid || "").trim();
   if (!sidKey) return;
   radarTimelineSid = sidKey;
-  trackActivity("radar_timeline_open", { stock: sidKey });
+  radarTimelineDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) && date !== radarSessionDate() ? date : null;
+  trackActivity("radar_timeline_open", { stock: sidKey, date: radarTimelineDate || "" });
   renderRadarTimeline(sidKey);   // 三個來源都在記憶體，畫面一開就有
   bootstrap.Modal.getOrCreateInstance(document.getElementById("radarTimelineModal")).show();
+  // 過去的日子讀 signal_history：還沒抓過或抓太久就補一次，回來重畫（自帶限流）
+  loadSignalHistory(false).then(() => refreshRadarTimelineIfOpen()).catch(() => {});
+}
+
+// 日期籤：點哪天畫哪天（雷達的交易日就是「今天」那顆）
+function rtlPickDate(date) {
+  if (!radarTimelineSid) return;
+  radarTimelineDate = date === radarSessionDate() ? null : date;
+  renderRadarTimeline(radarTimelineSid);
+}
+
+function rtlDaysHtml(sid, selected) {
+  const days = radarHistoryDates(HOME_HISTORY_DAYS);
+  const last = days[days.length - 1];
+  const todayKey = taipeiDateKey(new Date());
+  return days.map(d => {
+    const n = radarStoryOf(sid, d).filter(e => e.src !== "post").length;
+    const cls = ["rtl-day", n ? "" : "is-off", d === selected ? "is-sel" : "", d === last ? "is-today" : ""]
+      .filter(Boolean).join(" ");
+    const label = d === last && d === todayKey ? "今天" : _mdOf(d);
+    return `<span class="${cls}" role="button" onclick="rtlPickDate('${jsAttr(d)}')"><b>${label}</b><i>${n || "—"}</i></span>`;
+  }).join("");
+}
+
+// "2026-09-19" → "9/19"
+function _mdOf(dateKey) {
+  const [, m, d] = String(dateKey || "").split("-");
+  return m && d ? `${Number(m)}/${Number(d)}` : String(dateKey || "");
 }
 
 // 盤中每 5 秒拉一次 intraday_state：時間軸開著就跟著重畫
@@ -5711,10 +5949,16 @@ function rtlFocusStory(i) {
 }
 
 function renderRadarTimeline(sid) {
+  const sessionDate = radarSessionDate();
+  const date = radarTimelineDate || sessionDate;
+  const past = date !== sessionDate;
   const wl = watchlistRows.find(w => String(w.stock_id || "").trim() === sid);
   const name = getPreferredStockName(sid, wl ? wl.stock_name : "") || sid;
-  const iq = intradayQuoteMap[sid] || null;
-  const story = radarStoryOf(sid);
+  const iq = past ? null : (intradayQuoteMap[sid] || null);
+  // 過去的日子：縱軸定位、昨收線與壓力／支撐都用那天存下的（不拿今天的關卡畫上週）
+  const hist = past ? (signalHistoryMap?.[sid]?.[date] || null) : null;
+  const ref = past ? { price: hist?.close ?? null, prevClose: hist?.prevClose ?? null, levels: hist?.levels ?? null } : iq;
+  const story = radarStoryOf(sid, date);
   const intraday = story.filter(e => e.src !== "post");
   const holding = holdingBySid().get(sid);
   const active = (iq && iq.signal && iq.signal !== "none") ? iq : null;
@@ -5723,13 +5967,18 @@ function renderRadarTimeline(sid) {
   const activeHtml = active
     ? ` · 進行中 <span class="sig-chip chip-${inferSeverity(active)} chip-active">${escapeHtml(signalAbbr(String(active.signal)) || alertTypeLabel(active))}</span>`
     : "";
-  document.getElementById("rtl-sub").innerHTML = `${escapeHtml(radarSessionDate())} · ${intraday.length} 則${activeHtml}`;
-  document.getElementById("rtl-chart-wrap").innerHTML = radarTimelineChartHtml(sid, intraday, iq);
-  document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story);
+  document.getElementById("rtl-sub").innerHTML = `${escapeHtml(date)} · ${intraday.length} 則${activeHtml}`;
+  const daysEl = document.getElementById("rtl-days");
+  if (daysEl) daysEl.innerHTML = rtlDaysHtml(sid, date);
+  document.getElementById("rtl-chart-wrap").innerHTML = radarTimelineChartHtml(sid, intraday, ref, { past });
+  const headEl = document.getElementById("rtl-story-head");
+  if (headEl) headEl.textContent = past ? `${_mdOf(date)} 盤中發生了什麼` : "盤中發生了什麼";
+  document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, { past });
 }
 
-function radarTimelineChartHtml(sid, entries, iq) {
-  const priceRaw = Number(iq?.price ?? getQuote(sid)?.price);
+// opts.past：畫過去的某一天——不畫「現在」游標、不拿今天的報價與月線當參考、壓力／支撐用 iq.levels（那天存下的）
+function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
+  const priceRaw = Number(iq?.price ?? (opts.past ? NaN : getQuote(sid)?.price));
   const cur = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : null;
   // 縱向位置：訊號當時的成交價（穿過線／停在線前的畫面自然出現）；沒有就用它講的關卡、再沒有就現價
   const marks = entries.map(e => {
@@ -5745,10 +5994,10 @@ function radarTimelineChartHtml(sid, entries, iq) {
     refs.push({ label, value: v, cls });
   };
   for (const e of entries) if (RTL_LEVEL_LABEL[e.key]) addRef(RTL_LEVEL_LABEL[e.key], e.level, "sig");
-  const score = sharedReportData?.investment_scores?.[sid];
+  const score = opts.past ? null : sharedReportData?.investment_scores?.[sid];
   if (score) addRef("月", score.ma20, "ma");
   if (iq?.prevClose) addRef("昨收", iq.prevClose, "prev");
-  const lv = nearestLevels(sid, cur);
+  const lv = opts.past ? _nearestFromLevels(iq?.levels, cur) : nearestLevels(sid, cur);
   addRef("壓", lv.resistance, "lvl");
   addRef("撐", lv.support, "lvl");
 
@@ -5801,7 +6050,7 @@ function radarTimelineChartHtml(sid, entries, iq) {
       + (label ? `<text class="rtl-tick-label" x="${x}" y="${axisY + 17}" text-anchor="middle">${label}</text>` : "");
   }).join("");
   let nowSvg = "";
-  if (_isMarketOpenNow() && n) {
+  if (_isMarketOpenNow() && n && !opts.past) {
     // 盤中：最後一顆標記之後是「現在」，右邊那段是還沒發生的
     const x = Math.min(x1, xOf(n - 1) + 30).toFixed(1);
     nowSvg = `<rect class="rtl-future" x="${x}" y="${y0}" width="${(x1 - Number(x)).toFixed(1)}" height="${y1 - y0}"/>`
@@ -5816,7 +6065,7 @@ function radarTimelineChartHtml(sid, entries, iq) {
       return `<line class="rtl-tick" x1="${x}" y1="${axisY - 3}" x2="${x}" y2="${axisY + 5}"/>`
         + (label ? `<text class="rtl-tick-label" x="${x}" y="${axisY + 17}" text-anchor="${anchor}">${label}</text>` : "");
     }).join("");
-    emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">今天還沒有訊號</text>`;
+    emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">${opts.past ? "這天沒有訊號" : "今天還沒有訊號"}</text>`;
   }
   return `<div class="rtl-chart"><svg class="rtl-svg" viewBox="0 0 ${RTL_VB_W} ${RTL_VB_H}" role="img" aria-label="盤中時間軸">`
     + linesSvg + nowSvg + emptySvg
@@ -5858,7 +6107,7 @@ function rtlTextWidth(text, fontSize) {
   return w;
 }
 
-function radarStoryListHtml(story) {
+function radarStoryListHtml(story, opts = {}) {
   const intraday = story.filter(e => e.src !== "post");
   const post = story.filter(e => e.src === "post");
   const srcLabel = { builtin: "內建訊號", target: "自訂價位", auto: "自動偵測 · 未推播", rule: "📐 自訂規則", post: "盤後提醒" };
@@ -5876,7 +6125,9 @@ function radarStoryListHtml(story) {
       </div></div>`;
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
-  if (!html) html = `<div class="rtl-none">今天還沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測的條件成立時，會依時間排在這裡</span></div>`;
+  if (!html) html = opts.past
+    ? `<div class="rtl-none">這天沒有訊號<br><span>${signalHistorySupported ? "內建訊號、自訂規則與系統自動偵測那天都沒有成立" : "過去的日子只剩推播過的通知可查（signal_history 表尚未建立）"}</span></div>`
+    : `<div class="rtl-none">今天還沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測的條件成立時，會依時間排在這裡</span></div>`;
   if (post.length) html += `<div class="rtl-divider">收盤後</div>` + post.map((e, i) => item(e, intraday.length + i)).join("");
   return html;
 }

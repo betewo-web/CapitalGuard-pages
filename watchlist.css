@@ -1866,23 +1866,134 @@ body.has-bottom-nav .qa-panel {
 	margin-bottom: 0.6rem;
 }
 
-.home-sec-title .hs-link {
+/* 連結是紫（可點）不是金：金／橘留給「需要注意」（色彩語彙規則四，2026-09-20 改） */
+.home-sec-title .hs-link,
+.hs-link {
 	font-size: 0.75rem;
 	font-weight: 400;
-	color: var(--accent-2);
+	color: var(--accent);
 	text-decoration: none;
 	cursor: pointer;
 }
 
-#home-events-headline,
-#home-events-stats {
+/* ── 首頁 2026-09-20 改版：狀態列、一句話總結、自選列（方向籤＋近 10 日格子＋文字狀態） ── */
+.home-status {
+	font-size: 0.76rem;
+	color: var(--text-muted);
+	margin: -0.35rem 0.1rem 0.75rem;
+}
+
+.home-sum { font-size: 0.92rem; line-height: 1.55; color: var(--text-0); }
+.home-sum b { font-weight: 800; }
+.home-sum .dim { display: block; margin-top: 2px; font-size: 0.76rem; color: var(--text-muted); }
+
+.home-wl {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 5px 8px;
+	padding: 0.55rem 0.15rem;
+	border-bottom: 1px solid rgba(146, 146, 163, 0.12);
 	cursor: pointer;
 }
 
-#home-events-headline:hover .hs-link,
-#home-events-stats:hover .home-stat {
-	filter: brightness(1.05);
+.home-wl:last-child { border-bottom: none; }
+.home-wl-name { font-size: 0.95rem; font-weight: 700; color: var(--text-0); }
+
+.home-dir {
+	font-size: 0.72rem;
+	font-weight: 700;
+	line-height: 1;
+	padding: 3px 6px;
+	border-radius: 6px;
+	min-width: 30px;
+	text-align: center;
 }
+
+.home-dir-up   { color: var(--chg-up);   background: rgba(255, 107, 129, 0.14); }
+.home-dir-down { color: var(--chg-down); background: rgba(46, 213, 115, 0.13); }
+.home-dir-flat,
+.home-dir-none { color: var(--text-muted); background: rgba(146, 146, 163, 0.14); }
+
+.home-strip { display: inline-flex; gap: 3px; align-items: center; margin-left: auto; }
+
+.home-cell {
+	width: 13px;
+	height: 13px;
+	border-radius: 3px;
+	border: 1px solid rgba(146, 146, 163, 0.35);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-style: normal;
+	font-size: 0.6rem;
+	font-weight: 700;
+	line-height: 1;
+	color: var(--bg-0);
+	cursor: pointer;
+}
+
+.home-cell.is-on  { background: var(--sig-blue);   border-color: var(--sig-blue); }
+.home-cell.is-hot { background: var(--sig-orange); border-color: var(--sig-orange); }
+.home-cell.is-today { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
+
+.home-st { flex: 1 0 100%; order: 9; font-size: 0.76rem; color: var(--text-1); padding-left: 2px; }
+.home-st b { color: var(--text-0); font-weight: 700; }
+.home-st .home-ev { color: var(--sig-orange); }
+.home-more { color: var(--text-muted); font-size: 0.9rem; }
+.home-legend { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.5rem; line-height: 1.6; }
+
+.home-feed {
+	display: flex;
+	gap: 10px;
+	align-items: flex-start;
+	padding: 0.5rem 0.15rem;
+	border-bottom: 1px solid rgba(146, 146, 163, 0.12);
+	font-size: 0.84rem;
+	cursor: pointer;
+}
+
+.home-feed:last-child { border-bottom: none; }
+.home-feed-tm { flex: 0 0 auto; min-width: 2.6rem; font-size: 0.74rem; color: var(--text-muted); padding-top: 2px; }
+.home-feed-tx { flex: 1 1 auto; min-width: 0; color: var(--text-0); }
+.home-feed-tx b { font-weight: 700; }
+.home-feed-tx .k { font-size: 0.74rem; color: var(--text-muted); }
+
+.home-nudge {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	font-size: 0.78rem;
+	color: var(--text-1);
+	padding: 0.6rem 0.8rem;
+	border: 1px dashed var(--border);
+	border-radius: 14px;
+	margin-bottom: 0.9rem;
+}
+
+.home-nudge > div { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 8px; }
+.home-nudge-actions { display: inline-flex; gap: 12px; white-space: nowrap; }
+.home-nudge-later { color: var(--text-muted); }
+
+/* 時間軸頂端的日期籤（近 10 個交易日、各標則數） */
+.rtl-days { display: flex; gap: 4px; margin: 0 0 10px; }
+.rtl-day {
+	flex: 1 1 0;
+	min-width: 0;
+	text-align: center;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 4px 0;
+	line-height: 1.15;
+	cursor: pointer;
+}
+
+.rtl-day b { display: block; font-size: 0.62rem; font-weight: 600; color: var(--text-1); white-space: nowrap; }
+.rtl-day i { display: block; font-style: normal; font-size: 0.7rem; font-weight: 700; color: var(--sig-blue); }
+.rtl-day.is-off { opacity: 0.45; }
+.rtl-day.is-off i { color: var(--text-muted); }
+.rtl-day.is-sel { background: rgba(139, 124, 255, 0.18); border-color: var(--accent); }
+.rtl-day.is-today { border-color: rgba(255, 255, 255, 0.55); }
 
 .home-stat-row {
 	display: flex;
