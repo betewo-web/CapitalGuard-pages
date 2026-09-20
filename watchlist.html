@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="131">
+  <meta name="app-version" content="132">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=131" rel="stylesheet">
+  <link href="watchlist.css?v=132" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1915,6 +1915,7 @@ function renderPlanModal(focus) {
     watchlist:   "⭐ 自選股已達目前方案上限，升級即可加入更多。",
     alert_rules: "📐 自訂規則已達目前方案上限，升級即可新增更多。",
     paid:        "付款結果以綠界回呼為準。若方案尚未更新，請稍後再開啟這個面板確認。",
+    pay_failed:  "綠界回報這次付款未成功，沒有扣款也沒有開通。可以重新選擇方案再試一次。",
   }[focus];
 
   const current = `
@@ -2951,9 +2952,10 @@ async function showMain() {
 
   await loadWatchlist();
   // 從金流結帳頁導回（OrderResultURL）：只顯示狀態，開通與否以 webhook 為準
-  if (new URLSearchParams(location.search).get("pay") === "done") {
+  const payResult = new URLSearchParams(location.search).get("pay");
+  if (payResult === "done" || payResult === "failed") {
     history.replaceState(null, "", location.pathname + location.hash);
-    openPlanModal("paid");
+    openPlanModal(payResult === "done" ? "paid" : "pay_failed");
   }
   initPushUI();
   ensurePushSubscriptionRegistered();
