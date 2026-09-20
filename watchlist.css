@@ -990,24 +990,8 @@ body.has-bottom-nav .page-shell {
 	border-radius: 4px;
 }
 .event-calendar { color: #8fc5ff; border-color: rgba(143, 197, 255, 0.4); }
-/* 取代原本那顆「顯著度數字」徽章。舊的不論 22 分還是 91 分都是金色，顏色不帶任何資訊，
-   卻剛好用了代表「重要」的顏色，等於主動誤導；而且 0–100 的原始分數是內部機制，
-   使用者無從判斷 62 算高還算低。現在只有進入「較少見」那一階的事件才掛這個文字標籤，
-   原始分數移進「顯著度明細」摺疊區。 */
-.event-standout {
-	margin-left: auto;
-	display: inline-flex;
-	align-items: center;
-	height: 1.35rem;
-	padding: 0 0.4rem;
-	border-radius: 4px;
-	background: rgba(255, 159, 67, 0.12);
-	border: 1px solid rgba(255, 159, 67, 0.42);
-	color: var(--sig-orange);
-	font-size: 0.68rem;
-	font-weight: 700;
-	white-space: nowrap;
-}
+
+/* 2026-09-20：卡片上的「少見」小籤拿掉了（分組標題已經說了同一件事），.event-standout 不再使用 */
 .event-title {
 	font-size: 0.84rem;
 	color: var(--text-0);
