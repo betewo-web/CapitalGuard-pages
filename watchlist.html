@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="125">
+  <meta name="app-version" content="126">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=125" rel="stylesheet">
+  <link href="watchlist.css?v=126" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1247,7 +1247,7 @@ function eventImportanceClass(ev) {
 // 講得清楚的地方——以前只寫在徽章的 title 屬性裡，而 title 在觸控裝置上永遠不會浮出來。
 function renderEventSignificance(ev) {
   const score = eventScoreOf(ev);
-  const note = `<div class="event-sig-note">顯著度 <b>${score}</b> / 100：這筆資料跟它自己的過往比有多少見，不是對股票的多空判斷。`
+  const note = `<div class="event-sig-note">顯著度 <b>${score}</b> / 100：這筆資料跟它自己的過往比落差有多大，不是對股票的多空判斷。`
     + `${score >= EVENT_STANDOUT_SCORE ? "達 70 以上歸到「重點」。" : "未達 70，歸到「其他」。"}</div>`;
   const breakdown = ev?.score_breakdown;
   let parts = "";
@@ -6706,7 +6706,7 @@ function renderWatchlist(rows) {
     const events = todayEventsOf(sid);
     const standoutEvents = events.filter(isStandoutEvent);
     // 事件按鈕永遠顯示：有事件就接一個數字，沒有就只剩一個淡掉的圖示。
-    // 圖示不再因為「有少見事件」而變色——一顆變色的圖示無法自我解釋，使用者看得出它跟
+    // 圖示不再因為「有重點事件」而變色——一顆變色的圖示無法自我解釋，使用者看得出它跟
     // 別檔不一樣，卻無從知道差在哪（這正是有人來問「為什麼有的亮黃色」的原因）。
     // 強調改走下面標籤區的一句文字，用讀的就懂。
     const evtLabel = events.length > 0
