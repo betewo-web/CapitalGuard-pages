@@ -4889,7 +4889,9 @@ function renderHome() {
     const todayCount = counts[counts.length - 1];
     const total = counts.reduce((a, b) => a + b, 0);
     const standout = (stockEvents[sid] || []).filter(ev => isTodayEvent(ev) && isStandoutEvent(ev)).length;
-    return { sid, name, active, counts, hot, todayCount, total, standout, dir: homeDirectionOf(sid) };
+    const q = getQuote(sid);
+    return { sid, name, active, counts, hot, todayCount, total, standout, dir: homeDirectionOf(sid),
+             quoteDate: q && q.tradeDate ? q.tradeDate : "" };
   });
   // 有事的排前面：進行中 → 今天則數 → 較少見件數 → 近 N 日累計 → 名稱
   rows.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || b.todayCount - a.todayCount
@@ -4968,9 +4970,11 @@ function homeDirectionOf(sid) {
 
 // 首頁自選列：名稱＋方向籤＋近 N 日格子（第一行），文字狀態（第二行）。點列開今天的時間軸，點格子開那天的
 function homeRowHtml(r, days, dayLabel) {
-  const dir = r.dir
+  // 籤旁標這個漲跌是哪一天的（報價的交易日）：週末看到的是上週五的
+  const dir = (r.dir
     ? `<span class="home-dir home-dir-${r.dir}">${HOME_DIR_LABEL[r.dir]}</span>`
-    : `<span class="home-dir home-dir-none">—</span>`;
+    : `<span class="home-dir home-dir-none">—</span>`)
+    + (r.quoteDate ? `<span class="home-dir-date">${escapeHtml(_mdOf(r.quoteDate))}</span>` : "");
   const last = days.length - 1;
   const lastLabel = days[last] === taipeiDateKey(new Date()) ? "今天" : _mdOf(days[last]);
   const cells = days.map((d, i) => {
@@ -4980,7 +4984,11 @@ function homeRowHtml(r, days, dayLabel) {
   }).join("");
   // 當天的則數看最右格就好（Howard 2026-09-20）：這一行只講近 N 日累計
   // 第二行的「近 N 日有 x 則訊號」拿掉了（Howard 2026-09-20）：格子本身就是答案。事件籤留在名稱旁
-  const ev = r.standout ? `<span class="home-ev">${r.standout} 較少見</span>` : "";
+  // 事件籤＝今天有幾件「重點資料」（與下方卡片同一個門檻 isStandoutEvent）；點籤開事件面板，
+  // 點列開的是時間軸，兩者講不同的東西（Howard 2026-09-20：點進去看不到相關資訊）
+  const ev = r.standout
+    ? `<span class="home-ev" onclick="event.stopPropagation(); openEventsPanel('${jsAttr(r.sid)}')">重點 ${r.standout}</span>`
+    : "";
   return `<div class="home-wl" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
       <span class="home-wl-name">${escapeHtml(r.name)}</span>${dir}${ev}
       <span class="home-strip"><span class="home-strip-cells">${cells}</span><span class="home-strip-dates"><i>${escapeHtml(_mdOf(days[0]))}</i><i>${escapeHtml(lastLabel)}</i></span></span>

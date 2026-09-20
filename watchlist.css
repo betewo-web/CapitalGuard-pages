@@ -1940,7 +1940,9 @@ body.has-bottom-nav .qa-panel {
 .home-cell.is-hot { background: var(--sig-orange); border-color: var(--sig-orange); }
 .home-cell.is-today { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
 
+.home-dir-date { font-size: 0.66rem; color: var(--text-muted); margin-left: -3px; }
 .home-ev {
+	cursor: pointer;
 	font-size: 0.66rem;
 	font-weight: 600;
 	line-height: 1;
