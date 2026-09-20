@@ -1940,8 +1940,8 @@ body.has-bottom-nav .qa-panel {
 .home-cell.is-hot { background: var(--sig-orange); border-color: var(--sig-orange); }
 .home-cell.is-today { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
 
-.home-st { flex: 1 0 100%; order: 9; font-size: 0.76rem; color: var(--text-1); padding-left: 2px; }
-.home-st b { color: var(--text-0); font-weight: 700; }
+.home-st { flex: 1 0 100%; order: 9; font-size: 0.76rem; color: var(--text-muted); padding-left: 2px; }
+.home-st b { color: var(--text-1); font-weight: 700; }
 .home-st-gap { margin-left: 0.55rem; }
 .home-st .home-ev { color: var(--sig-orange); }
 .home-more { color: var(--text-muted); font-size: 0.9rem; }
