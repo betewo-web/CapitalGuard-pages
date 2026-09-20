@@ -3123,7 +3123,15 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .event-metric b { font-weight: 600; color: var(--text, #e6ecff); }
 .event-date-chip.event-date-observed { opacity: 0.75; }
 /* 最新一天的日期反橘：橘只做強調，日期文字本身就是意義 */
-.event-date-chip.is-latest { color: var(--sig-orange); font-weight: 700; }
+.event-date-chip.is-latest {
+	color: var(--sig-orange);
+	font-weight: 700;
+	/* 面板一開先閃 3 秒（0.6 秒 × 5 次）把視線帶過去，之後停在反橘（Howard 2026-09-20） */
+	animation: event-latest-blink 0.6s ease-in-out 5;
+}
+@keyframes event-latest-blink {
+	50% { opacity: 0.15; }
+}
 
 /* ── 零掃碼上線（ONBOARDING.md）：瀏覽器閘、iPhone 先安裝閘、安裝精靈 ── */
 .ob-box { max-width: 360px; text-align: left; }
