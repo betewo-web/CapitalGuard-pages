@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="127">
+  <meta name="app-version" content="128">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=127" rel="stylesheet">
+  <link href="watchlist.css?v=128" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -245,13 +245,13 @@
       </div>
 
       <!-- 2026-09-20 首頁改版（Howard 定案）：
-           · 標題下一行市場狀態；一句話總結取代「重點 N／其他 N」兩格大數字
+           · 標題下一行市場狀態；一句話總結取代兩格大數字
            · 自選清單永遠展開、是首頁的主內容。每列：名稱＋漲／平／跌文字籤（盤中即時，
              漲跌為零才是平、不放股價與百分比）＋近 HOME_HISTORY_DAYS 個交易日的訊號格
              （每格那天的則數，最右格是今天；點一格開那天的時間軸）＋第二行文字狀態。
              不放縮寫籤：縮寫籤與當日時序是雷達分頁的，首頁講「脈絡＋今天狀態」，
              兩頁不能同一顆粒度。訊號在首頁只出現這一次。
-           · 事件卡只放重點資料；「接下來 7 天」放 stock_events 裡的未來日程；
+           · 事件卡放今天的事件；「接下來 7 天」放 stock_events 裡的未來日程；
              「統計」放報告的總分變化（只有數字、無評級），全部持平就整張不顯示
            · 規則推薦降為最底一行 -->
       <div class="home-status" id="home-status"></div>
@@ -270,7 +270,7 @@
 
       <div class="card panel-card mb-3">
         <div class="card-body p-3">
-          <div class="home-sec-title">📰 今日重點資料 <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
+          <div class="home-sec-title">📰 今日資料 <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
           <div id="home-news"></div>
         </div>
       </div>
@@ -1208,8 +1208,7 @@ const _EVENT_TYPE_LABEL = {
 };
 // test_pwa_tabs.EventCardTests 會比對：後端 data/events.py 寫出的每種 event_type 都要有標籤，
 // 否則卡片上會出現英文原字（曾經漏掉 price、score）
-// （原本這裡有一份 importance → event-high/normal/low 的對照表，全檔沒有任何地方用它，
-//   而且留著會讓人以為三階還在。分階現在只認 eventImportanceClass 一個來源。）
+// （原本這裡有一份 importance → event-high/normal/low 的對照表與 70 分門檻，2026-09-20 全部拿掉。）
 
 // 事件不再顯示多空方向標籤（那是對個股的判斷，不是資料）；
 // 只有日程類事件保留一個「日程」標籤（COMPLIANCE.md）。
@@ -1231,15 +1230,9 @@ function _compareEvents(a, b) {
 
 // 顯著度只分兩階，門檻 70。以前是三階（70／40），但「一般」與「低」對使用者的行動
 // 完全一樣——都是「有空再看」——分不出行動差異的分級不該存在，只會多一個要背的顏色。
-const EVENT_STANDOUT_SCORE = 70;
-
-function isStandoutEvent(ev) {
-  return eventScoreOf(ev) >= EVENT_STANDOUT_SCORE;
-}
-
-function eventImportanceClass(ev) {
-  return isStandoutEvent(ev) ? "event-high" : "event-normal";
-}
+// 2026-09-20 起事件不再分兩階：近 14 天 414 件裡 68% 都過 70 分、最低分 50，
+// 一個三分之二都通過的分級等於沒有分級（Howard）。顯著度只用來排序與在明細裡說明；
+// 強調改用「最新一天」的日期反橘（renderEventCard 的 options.latestDate）。
 
 // 顯著度明細。原始分數從卡片正面移到這裡：0–100 是內部機制，使用者無從判斷 62 算高還算低，
 // 而正面那顆徽章不論幾分都是金色，顏色不帶資訊卻佔用了「重要」那個顏色。
@@ -1248,7 +1241,7 @@ function eventImportanceClass(ev) {
 function renderEventSignificance(ev) {
   const score = eventScoreOf(ev);
   const note = `<div class="event-sig-note">顯著度 <b>${score}</b> / 100：這筆資料跟它自己的過往比落差有多大，不是對股票的多空判斷。`
-    + `${score >= EVENT_STANDOUT_SCORE ? "達 70 以上歸到「重點」。" : "未達 70，歸到「其他」。"}</div>`;
+    + `</div>`;
   const breakdown = ev?.score_breakdown;
   let parts = "";
   if (breakdown && typeof breakdown === "object" && Object.keys(breakdown).length) {
@@ -1402,13 +1395,13 @@ function renderEventCard(sid, ev, options = {}) {
   // 都只認 created_at，使用者就會問「明明有新事件為什麼數字沒變」。今天首見的卡片已有「新」徽章，不再重複標日期。
   const firstSeenKey = taipeiDateKey(ev.created_at || ev.observed_at);
   const dateChip = ev.event_date
-    ? `<span class="event-date-chip" title="事件日：資料本身的日期">${escapeHtml(ev.event_date)}</span>`
+    ? `<span class="event-date-chip${options.latestDate && ev.event_date === options.latestDate ? " is-latest" : ""}" title="事件日：資料本身的日期">${escapeHtml(ev.event_date)}</span>`
       + (!newToday && firstSeenKey && firstSeenKey !== ev.event_date
         ? `<span class="event-date-chip event-date-observed" title="首見日：系統第一次記錄這筆資料的日期">首見 ${escapeHtml(firstSeenKey)}</span>`
         : "")
     : "";
   return `
-    <article class="event-item ${eventImportanceClass(ev)}">
+    <article class="event-item">
       <div class="event-meta-row">
         ${newBadge}
         <span class="event-type-badge">${escapeHtml(typeLabel)}</span>
@@ -1450,8 +1443,7 @@ function openEventsPanel(sid) {
       </div>
     `;
   } else {
-    body.innerHTML = eventLegendHtml("", events.some(isStandoutEvent))
-      + renderEventSections(sid, events);
+    body.innerHTML = eventLegendHtml("", true) + renderEventSections(sid, events);
   }
   const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal"));
   modal.show();
@@ -1460,38 +1452,31 @@ function openEventsPanel(sid) {
 // 彈窗頂部的圖例。以前整個事件彈窗沒有任何一句話說明分組或顏色是什麼意思，
 // 唯一的解釋躲在分數徽章的 title 屬性裡——而這是 PWA，title 在觸控裝置上不會浮出來。
 // 一個框講完，不要疊兩個框。
-// hasStandout=false 時不提「重點」：一份完全沒有標記的清單還寫「重點排在最前面」，
-// 使用者只會回頭找哪一則被標了。沒有就只講這裡在算什麼。
-function eventLegendHtml(extra = "", hasStandout = true) {
+function eventLegendHtml(extra = "", hasLatest = true) {
   return `<div class="event-legend">`
-    + (hasStandout
-      ? `<b>重點</b>＝這筆資料跟它自己的過往比落差比較大（顯著度 70 以上），排在最前面。`
-      : `這裡的排序看「顯著度」：這筆資料跟它自己的過往比落差有多大。這批都未達 70，沒有歸到重點的。`)
-    + `這是對<b>資料</b>的描述，不是對股票的判斷，也不是買賣建議。`
+    + (hasLatest ? `依日期新到舊排，<b>最新一天</b>的日期反橘。` : `依日期新到舊排。`)
+    + `顯著度＝這筆資料跟它自己的過往比落差有多大，是對<b>資料</b>的描述，不是對股票的判斷，也不是買賣建議。`
     + (extra ? `<br>${extra}` : "")
     + `</div>`;
 }
 
-// 分階用標題講，不用顏色講。清單本來就照顯著度排好，直接切兩段下標題，
-// 使用者用讀的就知道分組依據，不必先學會一套顏色對照表。
-// 只有一段有東西時不下標題——單一清單再加分組反而是多餘的結構。
+// 單一股票面板的清單：依事件日期新到舊、同一天分數高的在前；最新一天的日期籤反橘
+// （2026-09-20 起不再分兩區，見上方說明）。
 function renderEventSections(sid, events, options = {}) {
-  const standout = events.filter(isStandoutEvent);
-  const rest = events.filter(ev => !isStandoutEvent(ev));
-  const section = (cls, title, hint, list) => list.length
-    ? `<section class="event-section ${cls}">
-         <div class="event-section-head">
-           <span>${title}</span><span class="es-count">${list.length} 件</span>
-           ${hint ? `<span class="es-hint">${hint}</span>` : ""}
-         </div>
-         ${list.map(ev => renderEventCard(sid, ev, options)).join("")}
-       </section>`
-    : "";
-  if (!standout.length || !rest.length) {
-    return events.map(ev => renderEventCard(sid, ev, options)).join("");
-  }
-  return section("is-standout", "重點", "落差比較大的資料", standout)
-    + section("", "其他", "", rest);
+  // 事件表往後抓 90 天（財報日、除息日這類日程）：日期在明天以後的排最後、由近到遠，
+  // 「最新一天」只看今天以前——不然反橘的會是下個月的法說會
+  const today = _localDateIso();
+  const isFuture = ev => String(ev?.event_date || "") > today;
+  const past = events.filter(ev => !isFuture(ev)).sort(_compareEventsByDate);
+  const future = events.filter(isFuture).sort((a, b) => -_compareEventsByDate(a, b));
+  const latestDate = past.length ? String(past[0].event_date || "") : "";
+  return [...past, ...future].map(ev => renderEventCard(sid, ev, { ...options, latestDate })).join("");
+}
+
+// 日期新到舊，同一天顯著度高的在前（首頁與推播用 _compareEvents：分數優先）
+function _compareEventsByDate(a, b) {
+  const d = String(b?.event_date || "").localeCompare(String(a?.event_date || ""));
+  return d || (eventScoreOf(b) - eventScoreOf(a));
 }
 
 function openTodayEventsPanel() {
@@ -1516,29 +1501,11 @@ function openTodayEventsPanel() {
       </div>
     `;
   } else {
-    // 先分階、再按股票（Howard 2026-09-20）：首頁寫「N 件重點資料」，點進來第一眼就是
-    // 標題「重點 N 件」和那 N 張卡，不必在幾十張卡裡找橘框。「其他」預設收合，點標題展開。
-    // 只有一階有東西時不下標題（跟單一股票面板的 renderEventSections 同一條規則）。
-    const standout = rows.filter(({ ev }) => isStandoutEvent(ev));
-    const rest = rows.filter(({ ev }) => !isStandoutEvent(ev));
-    const legend = eventLegendHtml(
+    // 按股票分組（2026-09-20 起不再分兩階：門檻篩不掉東西）。全部都是今天，不做日期反橘
+    bodyEl.innerHTML = eventLegendHtml(
       `「今日」＝今天第一次抓到，或資料日期就是今天；`
-      + `標「<b>新</b>」的是今天第一次抓到的那 ${newCount} 件。`,
-      standout.length > 0);
-    let html = legend;
-    if (!standout.length || !rest.length) {
-      html += _todayEventGroupsHtml(rows);
-    } else {
-      html += `<section class="event-section is-standout">
-          <div class="event-section-head"><span>重點</span><span class="es-count">${standout.length} 件</span><span class="es-hint">落差比較大的資料</span></div>
-          ${_todayEventGroupsHtml(standout)}
-        </section>
-        <details class="event-section event-section-fold">
-          <summary class="event-section-head"><span>其他</span><span class="es-count">${rest.length} 件</span><span class="es-hint">點開查看</span></summary>
-          ${_todayEventGroupsHtml(rest)}
-        </details>`;
-    }
-    bodyEl.innerHTML = html;
+      + `標「<b>新</b>」的是今天第一次抓到的那 ${newCount} 件。`, false)
+      + _todayEventGroupsHtml(rows);
   }
 
   bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal")).show();
@@ -4242,7 +4209,7 @@ function alertTypeLabel(row) {
     try {
       const reg = await _swReadyOrNull();
       if (!reg) return;
-      await reg.showNotification(`今日重點資料：${newsRows.length} 則`, {
+      await reg.showNotification(`今日資料：${newsRows.length} 則`, {
         body: topRows.join("\n"),
         icon: NOTIFICATION_ICON,
         badge: NOTIFICATION_BADGE,
@@ -4251,7 +4218,7 @@ function alertTypeLabel(row) {
       });
       localStorage.setItem(key, "1");
     } catch (e) {
-      console.warn("[Notification] 無法發送今日重點資料通知:", e);
+      console.warn("[Notification] 無法發送今日資料通知:", e);
     }
   }
 
@@ -4910,16 +4877,16 @@ function renderHome() {
     const hot = stories.map(list => list.some(e => e.sev === "orange"));
     const todayCount = counts[counts.length - 1];
     const total = counts.reduce((a, b) => a + b, 0);
-    const standout = (stockEvents[sid] || []).filter(ev => isTodayEvent(ev) && isStandoutEvent(ev)).length;
+    const standout = (stockEvents[sid] || []).filter(isTodayEvent).length;   // 今天的事件數（不分階）
     const q = getQuote(sid);
     return { sid, name, active, counts, hot, todayCount, total, standout, dir: homeDirectionOf(sid),
              quoteDate: q && q.tradeDate ? q.tradeDate : "" };
   });
-  // 有事的排前面：進行中 → 今天則數 → 重點件數 → 近 N 日累計 → 名稱
+  // 有事的排前面：進行中 → 今天則數 → 今天事件數 → 近 N 日累計 → 名稱
   rows.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || b.todayCount - a.todayCount
     || b.standout - a.standout || b.total - a.total || a.name.localeCompare(b.name, "zh-Hant"));
 
-  // 一句話總結（取代以前「重點 N／其他 N」兩格大數字）
+  // 一句話總結（取代以前的兩格大數字）
   const nSig = rows.filter(r => r.todayCount > 0).length;
   const nEv = rows.reduce((acc, r) => acc + r.standout, 0);
   const total = rows.reduce((acc, r) => acc + r.total, 0);
@@ -4930,7 +4897,7 @@ function renderHome() {
     } else if (nSig || nEv) {
       const parts = [];
       if (nSig) parts.push(`${nSig} 檔有訊號`);
-      if (nEv) parts.push(`${nEv} 件重點資料`);
+      if (nEv) parts.push(`${nEv} 件資料`);
       summaryEl.innerHTML = `<div class="home-sum"><b>${rows.length} 檔自選：${dayLabel} ${parts.join("、")}</b>
         <span class="dim">近 ${days.length} 個交易日累計 ${total} 則訊號</span></div>`;
     } else {
@@ -4953,13 +4920,13 @@ function renderHome() {
       : "";
   }
 
-  // 今日重點資料（與自選列標籤、事件彈窗共用 isStandoutEvent 同一個門檻）——
+  // 今日資料：自選股今天的事件（2026-09-20 起不分階，全部列、最多 6 件）——
   // 僅限今天首次入庫或事件日為今天的列；先前就已知、每天重新確認的舊事件
-  // 不再重新上榜（也不重推播）。同一階在全站只能有一個名字：「重點」（2026-09-20 改名，卡片上的小籤一併拿掉）。
+  // 不再重新上榜（也不重推播）。
   const newsRows = [];
   for (const [sid, evs] of Object.entries(stockEvents)) {
     for (const ev of evs) {
-      if (isTodayEvent(ev) && isStandoutEvent(ev)) newsRows.push({ sid, ev });
+      if (isTodayEvent(ev)) newsRows.push({ sid, ev });
     }
   }
   newsRows.sort((a, b) => _compareEvents(a.ev, b.ev));
@@ -4971,7 +4938,7 @@ function renderHome() {
             <span class="home-feed-tm">${escapeHtml((_EVENT_TYPE_LABEL[ev.event_type] || "").replace(/^\S+\s/, "") || "事件")}</span>
             <span class="home-feed-tx"><b>${escapeHtml(stockNameOf(sid) || sid)}</b> ${escapeHtml(_eventTitleWithoutStock(ev.title, sid, stockNameOf(sid)))}</span>
           </div>`).join("")
-      : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無重點資料</div>';
+      : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無資料</div>';
   }
   const newsLink = document.getElementById("home-news-link");
   if (newsLink) newsLink.style.display = newsRows.length ? "" : "none";
@@ -5006,10 +4973,10 @@ function homeRowHtml(r, days, dayLabel) {
   }).join("");
   // 當天的則數看最右格就好（Howard 2026-09-20）：這一行只講近 N 日累計
   // 第二行的「近 N 日有 x 則訊號」拿掉了（Howard 2026-09-20）：格子本身就是答案。事件籤留在名稱旁
-  // 事件籤＝今天有幾件「重點資料」（與下方卡片同一個門檻 isStandoutEvent）；點籤開事件面板，
+  // 事件籤＝今天有幾件資料（與下方「今日資料」卡同一批）；點籤開事件面板，
   // 點列開的是時間軸，兩者講不同的東西（Howard 2026-09-20：點進去看不到相關資訊）
   const ev = r.standout
-    ? `<span class="home-ev" onclick="event.stopPropagation(); openEventsPanel('${jsAttr(r.sid)}')">重點 ${r.standout}</span>`
+    ? `<span class="home-ev" onclick="event.stopPropagation(); openEventsPanel('${jsAttr(r.sid)}')">${r.standout} 件資料</span>`
     : "";
   return `<div class="home-wl" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
       <span class="home-wl-name">${escapeHtml(r.name)}</span>${dir}${ev}
@@ -6728,9 +6695,8 @@ function renderWatchlist(rows) {
     const fallbackName = universe[sid]?.n || "";
     const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
     const events = todayEventsOf(sid);
-    const standoutEvents = events.filter(isStandoutEvent);
     // 事件按鈕永遠顯示：有事件就接一個數字，沒有就只剩一個淡掉的圖示。
-    // 圖示不再因為「有重點事件」而變色——一顆變色的圖示無法自我解釋，使用者看得出它跟
+    // 圖示不再因為「有事件」而變色——一顆變色的圖示無法自我解釋，使用者看得出它跟
     // 別檔不一樣，卻無從知道差在哪（這正是有人來問「為什麼有的亮黃色」的原因）。
     // 強調改走下面標籤區的一句文字，用讀的就懂。
     const evtLabel = events.length > 0
@@ -6753,8 +6719,8 @@ function renderWatchlist(rows) {
     // 標籤用等級圓點而不是 emoji：同一個等級在全站都是同一顆顏色
     const tags = [];
     // 事件強調排第一個：一句話講完「有幾件、為什麼值得先看」，不必去猜圖示的顏色
-    if (standoutEvents.length > 0) {
-      tags.push(`<span class="wl-signal-badge wl-tag-standout">今日 ${standoutEvents.length} 件重點</span>`);
+    if (events.length > 0) {
+      tags.push(`<span class="wl-signal-badge wl-tag-standout">今日 ${events.length} 件資料</span>`);
     }
     if (sig) {
       const sev = inferSeverity(sig);
