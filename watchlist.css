@@ -3175,3 +3175,9 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
    只用在這一顆「去 LINE」的按鈕上，避免和漲跌的紅綠混淆。 */
 .btn-line { background:#06c755; border-color:#06c755; color:#fff; font-weight:600; }
 .btn-line:hover, .btn-line:focus { background:#05b34c; border-color:#05b34c; color:#fff; }
+
+/* 結帳前的同意勾選（7 日解除權例外的前提）：未預設勾選；沒勾就按升級時整列標紅 */
+.plan-consent { display: flex; gap: 0.55rem; align-items: flex-start; margin: 0.9rem 0 0.2rem; font-size: 0.74rem; line-height: 1.5; color: var(--text-1); cursor: pointer; }
+.plan-consent input { margin-top: 0.2rem; flex: 0 0 auto; accent-color: var(--accent-2); }
+.plan-consent a { color: inherit; text-decoration: underline; }
+.plan-consent.is-required { color: var(--danger); }

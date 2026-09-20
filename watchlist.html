@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="129">
+  <meta name="app-version" content="130">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=129" rel="stylesheet">
+  <link href="watchlist.css?v=130" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1027,9 +1027,14 @@ let brokerHoldingsAt = null; // 最近一次同步時間（synced_at 最大值�
 // 只描述功能列怎麼呈現。PLAN_CODES 要與 migrate_billing.sql 的種子資料一致
 // （test_billing.py 釘住），方案面板的卡片順序與顏色靠它。
 const PLAN_CODES = ["free", "basic", "pro"];
-// 線上付款：金流（綠界）Edge Function 部署並以測試金鑰實測前保持 false——
-// 按「升級」只顯示說明，不會建單、不會導向結帳頁。
-const BILLING_CHECKOUT_ENABLED = false;
+// 線上付款的前端總開關（緊急關閉用）。真正的鎖在 create-order：Secrets 還是綠界
+// 測試金鑰（ECPAY_STAGE=true）時只有管理員能建單，一般用戶會收到 503
+// checkout_unavailable 並看到「來信申請」的說明。換正式金鑰後不需要改前端。
+const BILLING_CHECKOUT_ENABLED = true;
+const BILLING_CONTACT_MAILTO = "mailto:howard.chen@betewo.com?subject=CapitalGuard%20%E5%8D%87%E7%B4%9A%E7%94%B3%E8%AB%8B";
+// 同意勾選旁的條款連結：官網的服務條款（五、7 日解除權）與退款政策
+const BILLING_TERMS_URL = "https://betewo-web.github.io/betewo-site/terms.html#t5";
+const BILLING_REFUND_URL = "https://betewo-web.github.io/betewo-site/pricing.html#refund";
 // AI 事件解讀／AI 問答尚未完成：方案表照列（專業版功能），但標「開發中」
 const AI_FEATURES_LIVE = false;
 let planState = {
@@ -1960,6 +1965,10 @@ function renderPlanModal(focus) {
     ${current}
     <div class="plan-sec-title">方案比較</div>
     <div class="plan-grid">${cards}</div>
+    <label class="plan-consent" id="plan-consent-row">
+      <input type="checkbox" id="plan-consent">
+      <span>我同意訂閱後服務立即開始提供，並了解依《通訊交易解除權合理例外情事適用準則》第 2 條第 5 款，不適用消費者保護法第 19 條的 7 日無條件解除權。付款前請閱讀<a href="${BILLING_TERMS_URL}" target="_blank" rel="noopener">服務條款</a>與<a href="${BILLING_REFUND_URL}" target="_blank" rel="noopener">退款政策</a>。</span>
+    </label>
     <div class="plan-sec-title">付款紀錄</div>
     ${payments}
     <div id="plan-msg" class="plan-msg"></div>
@@ -1985,19 +1994,44 @@ function billingHeaders() {
 
 // 建單 → 以表單 POST 導向綠界結帳頁（綠界只吃 form post，不能用 fetch 跳轉）。
 // 金額與方案由 Edge Function 查 plans 表決定，這裡只送方案代碼。
+function setPlanMsgHtml(html, isErr) {
+  const el = document.getElementById("plan-msg");
+  if (!el) return;
+  el.innerHTML = html;
+  el.className = `plan-msg${isErr ? " is-err" : ""}`;
+}
+
+function checkoutClosedMessage() {
+  setPlanMsgHtml(`線上付款尚未開放。想先升級請<a href="${BILLING_CONTACT_MAILTO}">來信申請</a>，由管理員開通。`);
+}
+
 async function startCheckout(code) {
-  if (!BILLING_CHECKOUT_ENABLED) {
-    setPlanMsg("線上付款即將開放。想先升級請聯絡管理員，由管理員指派方案。");
+  if (!BILLING_CHECKOUT_ENABLED) { checkoutClosedMessage(); return; }
+  // 7 日解除權例外的前提：未預設勾選、使用者自己勾。伺服器端也會擋（consent_required），
+  // 這裡先擋是為了不讓人白跑一趟建單。
+  const consent = document.getElementById("plan-consent");
+  const consentRow = document.getElementById("plan-consent-row");
+  if (!consent || !consent.checked) {
+    setPlanMsg("請先勾選同意服務立即開始提供、不適用 7 日解除權，才能前往付款。", true);
+    if (consentRow) { consentRow.classList.add("is-required"); consentRow.scrollIntoView({ block: "center" }); }
     return;
   }
+  if (consentRow) consentRow.classList.remove("is-required");
   setPlanMsg("建立訂單中…");
   trackActivity("checkout_start", { plan: code });
   try {
     const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/create-order`, {
-      method: "POST", headers: billingHeaders(), body: JSON.stringify({ plan_code: code }),
+      method: "POST", headers: billingHeaders(),
+      body: JSON.stringify({ plan_code: code, consent: true }),
     });
     const data = await resp.json().catch(() => ({}));
+    if (data.code === "checkout_unavailable") { checkoutClosedMessage(); return; }
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    // Secrets 還是測試金鑰時只有管理員走得到這裡：提醒這是綠界測試環境，不會真的扣款
+    if (data.stage && !confirm("目前是綠界測試環境（不會真的扣款），要前往測試結帳頁嗎？")) {
+      setPlanMsg("已取消。");
+      return;
+    }
     const form = document.createElement("form");
     form.method = "POST";
     form.action = data.action_url;
