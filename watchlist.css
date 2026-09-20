@@ -869,7 +869,9 @@ body.has-bottom-nav .page-shell {
    會解讀成「可以點」而不是「這件普通」；而且首頁同一組門檻卻用橘／藍／灰另一套色，
    同一件事在兩個畫面長得不一樣。現在強調色統一吃 --sig-orange（全站「最高優先」那一個），
    其餘一律中性。 */
-.event-item.event-high   { border-left-color: var(--sig-orange); }
+/* 2026-09-20：左框不再用橘／灰分階（Howard 問「這條框是什麼意思」——顏色不該是意義的唯一載體）。
+   分階只由分區標題「重點／其他」講；三個 class 留著給測試與日後樣式鉤子。 */
+.event-item.event-high,
 .event-item.event-normal,
 .event-item.event-low    { border-left-color: rgba(128, 154, 212, 0.28); }
 /* 分階改用「標題」而不是「顏色」：清單本來就照顯著度排好，直接下標題，
@@ -896,6 +898,12 @@ body.has-bottom-nav .page-shell {
 	color: var(--text-muted);
 }
 .event-section.is-standout .event-section-head { color: var(--sig-orange); }
+
+/* 今日彙整的「其他」預設收合：<details> 的 summary 長得跟分區標題一樣，前面一個三角形指示開合 */
+.event-section-fold > summary { list-style: none; cursor: pointer; }
+.event-section-fold > summary::-webkit-details-marker { display: none; }
+.event-section-fold > summary::before { content: "▸"; margin-right: 0.35rem; color: var(--text-muted); }
+.event-section-fold[open] > summary::before { content: "▾"; }
 
 /* 事件彈窗頂部的一行圖例。以前整個彈窗沒有任何一句話解釋顏色或分組是什麼意思。 */
 .event-legend {

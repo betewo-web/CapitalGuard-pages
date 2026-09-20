@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="126">
+  <meta name="app-version" content="127">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=126" rel="stylesheet">
+  <link href="watchlist.css?v=127" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1496,23 +1496,15 @@ function renderEventSections(sid, events, options = {}) {
 
 function openTodayEventsPanel() {
   const rows = _collectTodayEvents();
-  const groups = [];
-  for (const { sid, ev } of rows) {
-    let group = groups.find(item => item.sid === sid);
-    if (!group) {
-      group = { sid, events: [] };
-      groups.push(group);
-    }
-    group.events.push(ev);
-  }
   const titleEl = document.getElementById("events-modal-title");
   const bodyEl = document.getElementById("events-modal-body");
   // 「今日 N 件」與「新」徽章數的不是同一件事：件數含「事件日就是今天」的舊資料，
   // 「新」只認今天第一次入庫。兩個數字擺在同一畫面卻沒說明，使用者就會問
   // 「明明有新事件為什麼數字沒變」。這裡把兩個數字一起講明白。
   const newCount = rows.filter(({ ev }) => isNewToday(ev)).length;
+  const stockCount = new Set(rows.map(({ sid }) => sid)).size;
   titleEl.textContent = rows.length > 0
-    ? `📋 今日事件彙整（${groups.length} 檔 · ${rows.length} 件，新增 ${newCount} 件）`
+    ? `📋 今日事件彙整（${stockCount} 檔 · ${rows.length} 件，新增 ${newCount} 件）`
     : "📋 今日事件";
 
   if (!rows.length) {
@@ -1524,29 +1516,61 @@ function openTodayEventsPanel() {
       </div>
     `;
   } else {
+    // 先分階、再按股票（Howard 2026-09-20）：首頁寫「N 件重點資料」，點進來第一眼就是
+    // 標題「重點 N 件」和那 N 張卡，不必在幾十張卡裡找橘框。「其他」預設收合，點標題展開。
+    // 只有一階有東西時不下標題（跟單一股票面板的 renderEventSections 同一條規則）。
+    const standout = rows.filter(({ ev }) => isStandoutEvent(ev));
+    const rest = rows.filter(({ ev }) => !isStandoutEvent(ev));
     const legend = eventLegendHtml(
       `「今日」＝今天第一次抓到，或資料日期就是今天；`
       + `標「<b>新</b>」的是今天第一次抓到的那 ${newCount} 件。`,
-      rows.some(({ ev }) => isStandoutEvent(ev)));
-    bodyEl.innerHTML = legend + groups.map(({ sid, events }) => {
-      const sidName = getPreferredStockName(sid, universe[sid]?.n) || sid;
-      return `
-        <section class="today-event-group">
-          <div class="today-event-group-head">
-            <div class="today-event-stock">
-              <strong>${escapeHtml(sidName)}</strong>
-              <span class="today-event-count">${events.length} 件</span>
-            </div>
-            <button class="today-event-stock-link" onclick="openEventsPanel('${jsAttr(sid)}')">查看此股 →</button>
-          </div>
-          <div class="today-event-group-list">
-            ${events.map(ev => renderEventCard(sid, ev, { todayMode: true, grouped: true })).join("")}
-          </div>
-        </section>`;
-    }).join("");
+      standout.length > 0);
+    let html = legend;
+    if (!standout.length || !rest.length) {
+      html += _todayEventGroupsHtml(rows);
+    } else {
+      html += `<section class="event-section is-standout">
+          <div class="event-section-head"><span>重點</span><span class="es-count">${standout.length} 件</span><span class="es-hint">落差比較大的資料</span></div>
+          ${_todayEventGroupsHtml(standout)}
+        </section>
+        <details class="event-section event-section-fold">
+          <summary class="event-section-head"><span>其他</span><span class="es-count">${rest.length} 件</span><span class="es-hint">點開查看</span></summary>
+          ${_todayEventGroupsHtml(rest)}
+        </details>`;
+    }
+    bodyEl.innerHTML = html;
   }
 
   bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal")).show();
+}
+
+// 今日彙整的一階：按股票分組，每組一個標題與「查看此股 →」
+function _todayEventGroupsHtml(rows) {
+  const groups = [];
+  for (const { sid, ev } of rows) {
+    let group = groups.find(item => item.sid === sid);
+    if (!group) {
+      group = { sid, events: [] };
+      groups.push(group);
+    }
+    group.events.push(ev);
+  }
+  return groups.map(({ sid, events }) => {
+    const sidName = getPreferredStockName(sid, universe[sid]?.n) || sid;
+    return `
+      <section class="today-event-group">
+        <div class="today-event-group-head">
+          <div class="today-event-stock">
+            <strong>${escapeHtml(sidName)}</strong>
+            <span class="today-event-count">${events.length} 件</span>
+          </div>
+          <button class="today-event-stock-link" onclick="openEventsPanel('${jsAttr(sid)}')">查看此股 →</button>
+        </div>
+        <div class="today-event-group-list">
+          ${events.map(ev => renderEventCard(sid, ev, { todayMode: true, grouped: true })).join("")}
+        </div>
+      </section>`;
+  }).join("");
 }
 
 async function refreshEvents(sid) {
