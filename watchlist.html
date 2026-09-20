@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="134">
+  <meta name="app-version" content="135">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=134" rel="stylesheet">
+  <link href="watchlist.css?v=135" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -353,7 +353,7 @@
       <div class="chip-row" id="inbox-filters">
         <button class="filter-chip active" data-f="all" onclick="setInboxFilter('all')">全部</button>
         <button class="filter-chip" data-f="unread" onclick="setInboxFilter('unread')">未讀</button>
-        <button class="filter-chip" data-f="important" onclick="setInboxFilter('important')">重要</button>
+        <button class="filter-chip" data-f="important" onclick="setInboxFilter('important')">漲跌停／破撐／到價</button>
         <button class="filter-chip" data-f="stocks" onclick="setInboxFilter('stocks')">持股</button>
       </div>
       <div id="inbox-migrate-hint" class="small mb-2" style="display:none;color:var(--sig-yellow)">
@@ -3703,9 +3703,10 @@ function getQuoteFromSharedData(sid) {
 // 訊號等級兩級，分野是「要不要處理部位」。紅綠留給漲跌幅（台股紅漲綠跌），
 // 訊號改用橘／藍，避免同一列出現相反語意的顏色。
 const SEV_META = {
-  orange: { emoji: "🟠", label: "強訊號" },
-  blue:   { emoji: "🔵", label: "注意" },
-  info:   { emoji: "⚪", label: "資訊" },
+  // 名字寫具體內容，不用要猜的抽象詞（Howard 2026-09-21）
+  orange: { emoji: "🟠", label: "漲跌停／破撐／到價" },
+  blue:   { emoji: "🔵", label: "其他盤中訊號" },
+  info:   { emoji: "⚪", label: "盤後提醒" },
 };
 const SEV_ORDER = { orange: 2, blue: 1, info: 0, none: 0 };
 // 舊資料的四級 severity 對映到新的兩級
@@ -4872,7 +4873,7 @@ function filteredInboxRows() {
     return inboxSupportsRead ? inboxRows.filter(r => !r.read_at) : [];
   }
   if (inboxFilter === "important") {
-    // 兩級之後「重要」= 強訊號（需要處理部位的事件）
+    // 橘那一級：漲停、跌停、跌破支撐、到達自訂價位、下跌方向的規則條件（ORANGE_KINDS＋後端規則等級）
     return inboxRows.filter(r => inferSeverity(r) === "orange");
   }
   if (inboxFilter === "stocks") {
@@ -4898,7 +4899,7 @@ function renderInbox() {
     const hints = {
       all: "尚無通知<br><span style='font-size:.75rem;opacity:.7'>監控觸發的警報會自動保存在這裡</span>",
       unread: inboxSupportsRead ? "沒有未讀通知 🎉" : "已讀功能需先執行 migrate_pwa_v2.sql",
-      important: "沒有重要通知",
+      important: "沒有漲跌停、跌破支撐或到價的通知",
       stocks: "你的持股／自選股尚無通知",
     };
     listEl.innerHTML = `<div class="inbox-empty">${hints[inboxFilter] || hints.all}</div>`;
@@ -5092,12 +5093,11 @@ function renderHome() {
                     && taipeiDateKey(iq.signal_at || iq.updated_at) === sessionDate) ? iq : null;
     const stories = days.map(d => radarStoryOf(sid, d).filter(e => e.src !== "post"));
     const counts = stories.map(list => list.length);
-    const hot = stories.map(list => list.some(e => e.sev === "orange"));
     const todayCount = counts[counts.length - 1];
     const total = counts.reduce((a, b) => a + b, 0);
     const standout = (stockEvents[sid] || []).filter(isTodayEvent).length;   // 今天的事件數（不分階）
     const q = getQuote(sid);
-    return { sid, name, active, counts, hot, todayCount, total, standout, dir: homeDirectionOf(sid),
+    return { sid, name, active, counts, todayCount, total, standout, dir: homeDirectionOf(sid),
              quoteDate: q && q.tradeDate ? q.tradeDate : "" };
   });
   // 有事的排前面：進行中 → 今天則數 → 今天事件數 → 近 N 日累計 → 名稱
@@ -5134,7 +5134,7 @@ function renderHome() {
   const legendEl = document.getElementById("home-watchlist-legend");
   if (legendEl) {
     legendEl.textContent = rows.length
-      ? `每格是一個交易日的訊號數（近 ${days.length} 日）：藍＝有訊號、橘＝那天有漲跌停、跌破支撐或觸及自訂價位；點一格看那天的時間軸。漲／平／跌對前一日收盤，盤中即時`
+      ? `每格是一個交易日的訊號數（近 ${days.length} 日），點一格看那天的時間軸。漲／平／跌對前一日收盤，盤中即時`
       : "";
   }
 
@@ -5186,7 +5186,8 @@ function homeRowHtml(r, days, dayLabel) {
   const lastLabel = days[last] === taipeiDateKey(new Date()) ? "今天" : _mdOf(days[last]);
   const cells = days.map((d, i) => {
     const n = r.counts[i];
-    const cls = ["home-cell", n ? (r.hot[i] ? "is-hot" : "is-on") : "", i === last ? "is-today" : ""].filter(Boolean).join(" ");
+    // 格子只有一種顏色（2026-09-21）：格子裡放不下文字，橘藍對照表使用者記不住；哪一種訊號點進去看
+    const cls = ["home-cell", n ? "is-on" : "", i === last ? "is-today" : ""].filter(Boolean).join(" ");
     return `<i class="${cls}" onclick="event.stopPropagation(); openRadarTimeline('${jsAttr(r.sid)}', '${jsAttr(d)}')">${n || ""}</i>`;
   }).join("");
   // 當天的則數看最右格就好（Howard 2026-09-20）：這一行只講近 N 日累計
@@ -5929,6 +5930,8 @@ function renderLive() {
       <span><i class="sig-chip chip-blue chip-rule">破高</i>自訂規則命中</span>
       <span><i class="sig-chip chip-auto">漲逾</i>自動偵測（未推播）</span>
       <span><i class="sig-chip chip-blue chip-active">收撐</i>進行中</span>
+      <span><i class="sig-chip chip-orange">破撐</i>橘＝漲跌停、跌破支撐、到價、下跌方向的規則</span>
+      <span><i class="sig-chip chip-blue">近壓</i>藍＝其他盤中訊號</span>
     </div>`;
 }
 
@@ -6677,7 +6680,7 @@ function renderRuleSummary() {
     <div class="rp-title">這條規則的意思</div>
     <div class="rs-line">「${escapeHtml(name)}」：<b>${escapeHtml(scope)}</b> 出現 ${chips} 時通知你。</div>
     <div class="rs-meta">評估時機：${RULE_TIERS[tier].label}（${RULE_TIERS[tier].note}）。
-      通知等級依條件自動判定：下跌方向的條件（跌破、跌幅、向下交叉）為 🟠 強訊號，其餘為 🔵 注意。</div>`;
+      通知等級依條件自動判定：下跌方向的條件（跌破、跌幅、向下交叉）為 🟠（與漲跌停、跌破支撐、到價同一級），其餘為 🔵 其他盤中訊號。</div>`;
 }
 
 async function saveRule() {
