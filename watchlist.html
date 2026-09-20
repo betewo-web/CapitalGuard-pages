@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="130">
+  <meta name="app-version" content="131">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=130" rel="stylesheet">
+  <link href="watchlist.css?v=131" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1975,11 +1975,17 @@ function renderPlanModal(focus) {
     <div class="plan-foot-note">月費不退款；取消續訂後功能保留至當期結束。超出方案的自選股與規則會保留資料、暫停通知，升級後即恢復。<span class="plan-ver">App v${appVersion()}</span></div>`;
 }
 
+// 訊息列在付款紀錄下面，面板捲在上半部時看不到——按「改為免費版」沒反應的錯覺就是這樣來的
+function _revealPlanMsg(el) {
+  if (el.textContent.trim()) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
 function setPlanMsg(text, isErr) {
   const el = document.getElementById("plan-msg");
   if (!el) return;
   el.textContent = text;
   el.className = `plan-msg${isErr ? " is-err" : ""}`;
+  _revealPlanMsg(el);
 }
 
 function billingHeaders() {
@@ -1999,6 +2005,7 @@ function setPlanMsgHtml(html, isErr) {
   if (!el) return;
   el.innerHTML = html;
   el.className = `plan-msg${isErr ? " is-err" : ""}`;
+  _revealPlanMsg(el);
 }
 
 function checkoutClosedMessage() {
