@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="119">
+  <meta name="app-version" content="120">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=119" rel="stylesheet">
+  <link href="watchlist.css?v=120" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -271,7 +271,7 @@
 
       <div class="card panel-card mb-3">
         <div class="card-body p-3">
-          <div class="home-sec-title">📰 今日較少見的資料 <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
+          <div class="home-sec-title">📰 今日重點資料 <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
           <div id="home-news"></div>
         </div>
       </div>
@@ -4904,10 +4904,8 @@ function renderHome() {
       const parts = [];
       if (nSig) parts.push(`${nSig} 檔有訊號`);
       if (nEv) parts.push(`${nEv} 件較少見資料`);
-      const quiet = rows.length - nSig;
-      const sofar = isSessionToday && _isMarketOpenNow() ? "到目前為止" : "";
       summaryEl.innerHTML = `<div class="home-sum"><b>${rows.length} 檔自選：${dayLabel} ${parts.join("、")}</b>
-        <span class="dim">近 ${days.length} 個交易日累計 ${total} 則${quiet ? `，其餘 ${quiet} 檔${dayLabel}${sofar}平靜` : ""}</span></div>`;
+        <span class="dim">近 ${days.length} 個交易日累計 ${total} 則訊號</span></div>`;
     } else {
       summaryEl.innerHTML = `<div class="home-sum"><b>${rows.length} 檔自選${dayLabel}都平靜</b>
         <span class="dim">近 ${days.length} 個交易日累計 ${total} 則訊號${total ? "" : "，還沒有紀錄"}</span></div>`;
@@ -4946,7 +4944,7 @@ function renderHome() {
             <span class="home-feed-tm">${escapeHtml((_EVENT_TYPE_LABEL[ev.event_type] || "").replace(/^\S+\s/, "") || "事件")}</span>
             <span class="home-feed-tx"><b>${escapeHtml(stockNameOf(sid) || sid)}</b> ${escapeHtml(_eventTitleWithoutStock(ev.title, sid, stockNameOf(sid)))}</span>
           </div>`).join("")
-      : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無較少見的資料</div>';
+      : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無重點資料</div>';
   }
   const newsLink = document.getElementById("home-news-link");
   if (newsLink) newsLink.style.display = newsRows.length ? "" : "none";
@@ -4975,17 +4973,10 @@ function homeRowHtml(r, days, dayLabel) {
   const cells = days.map((d, i) => {
     const n = r.counts[i];
     const cls = ["home-cell", n ? (r.hot[i] ? "is-hot" : "is-on") : "", i === last ? "is-today" : ""].filter(Boolean).join(" ");
-    return `<i class="${cls}" onclick="event.stopPropagation(); openRadarTimeline('${jsAttr(r.sid)}', '${jsAttr(d)}')">${n > 1 ? n : ""}</i>`;
+    return `<i class="${cls}" onclick="event.stopPropagation(); openRadarTimeline('${jsAttr(r.sid)}', '${jsAttr(d)}')">${n || ""}</i>`;
   }).join("");
-  const bits = [];
-  if (r.todayCount) {
-    const abbr = r.active ? (signalAbbr(String(r.active.signal)) || alertTypeLabel(r.active)) : "";
-    bits.push(`${dayLabel}<span class="home-st-gap">有 <b>${r.todayCount} 則</b>訊號</span>${abbr ? `，進行中 ${escapeHtml(abbr)}` : ""}`);
-  } else if (r.total) {
-    bits.push(`近 ${days.length} 日有 ${r.total} 則訊號，${dayLabel}無`);
-  } else {
-    bits.push(`近 ${days.length} 日平靜`);
-  }
+  // 當天的則數看最右格就好（Howard 2026-09-20）：這一行只講近 N 日累計
+  const bits = [r.total ? `近 ${days.length} 日有 <b>${r.total} 則</b>訊號` : `近 ${days.length} 日平靜`];
   if (r.standout) bits.push(`<span class="home-ev">${r.standout} 較少見</span>`);
   return `<div class="home-wl" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
       <span class="home-wl-name">${escapeHtml(r.name)}</span>${dir}
@@ -5063,11 +5054,11 @@ function homeRenderScores() {
   card.style.display = changed.length ? "" : "none";
   if (!changed.length) return;
   changed.sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg));
-  if (titleEl) titleEl.textContent = `📊 ${sharedReportData?.date ? `${_mdOf(sharedReportData.date)} ` : ""}統計`;
+  if (titleEl) titleEl.textContent = `📊 每日評分變化${sharedReportData?.date ? `（${_mdOf(sharedReportData.date)}）` : ""}`;
   el.innerHTML = `<div class="home-feed">
-      <span class="home-feed-tm">變動</span>
+      <span class="home-feed-tm">總分</span>
       <span class="home-feed-tx">${changed.map(x => `<b>${escapeHtml(x.name)}</b> ${fmtScoreDelta(x.chg)}`).join("、")}${flat.length ? `，其餘 ${flat.length} 檔持平` : ""}
-        <span class="k">總分較前一日</span></span>
+        <span class="k">與前一日的評分相比</span></span>
     </div>`;
 }
 
