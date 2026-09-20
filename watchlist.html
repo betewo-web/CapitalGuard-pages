@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="135">
+  <meta name="app-version" content="136">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=135" rel="stylesheet">
+  <link href="watchlist.css?v=136" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1850,7 +1850,11 @@ function openPlanModal(focus) {
 async function loadPlanPayments() {
   if (!state.accessToken || !planState.ready) { planPayments = null; return; }
   try {
-    planPayments = await sbGet("payments", { order: "created_at.desc", limit: "12" }, state.accessToken) || [];
+    // 欄位明列：payments.raw（簽好章的完整回呼）從 2026-09-21 起不給前端讀，select=* 會被拒
+    planPayments = await sbGet("payments", {
+      select: "id,merchant_trade_no,provider,amount_twd,plan_code,period_end,created_at",
+      order: "created_at.desc", limit: "12",
+    }, state.accessToken) || [];
   } catch (e) { planPayments = null; }
 }
 
@@ -1901,11 +1905,18 @@ function meterHtml(label, used, limit) {
 
 function subscriptionStatusHtml() {
   const p = planState.plan, s = planState.subscription;
+  // 綠界約定還「活著」（沒請求終止）就要能取消——past_due、到期都不代表綠界不再扣
+  // （官方規格：某期失敗，下一期照排程；PAYMENT_AUDIT.md F04）
+  const agreementOpen = !!(s && s.provider === "ecpay" && s.provider_ref && !s.cancel_requested_at);
+  const cancelBtn = `<button type="button" class="btn btn-xs btn-outline-danger ms-2" onclick="cancelSubscription()">取消續訂</button>`;
   // 扣款失敗要先判：plan_of() 這時已推導成 free，放在 free 之後永遠走不到
   if (s && s.status === "past_due") {
-    return `<div class="plan-status plan-status-warn">⚠️ 上期扣款失敗，已暫回免費版。請更新付款方式後重新訂閱。</div>`;
+    return `<div class="plan-status plan-status-warn">⚠️ 上期扣款失敗，已暫回免費版。綠界下期仍會嘗試扣款；不想再扣請取消續訂，想繼續用請更新付款方式後重新訂閱。${agreementOpen ? cancelBtn : ""}</div>`;
   }
   if (!s || p.code === "free") {
+    if (agreementOpen) {
+      return `<div class="plan-status plan-status-warn">⚠️ 先前的定期定額約定仍在綠界（服務已於 ${fmtPlanDate(s.current_period_end)} 到期）。不想再扣款請取消續訂。${cancelBtn}</div>`;
+    }
     return `<div class="plan-status">免費使用中，隨時可升級。</div>`;
   }
   const until = fmtPlanDate(s.current_period_end);
@@ -2192,12 +2203,9 @@ async function confirmCheckout(code) {
 // ── 取消續訂：同樣先進確認視圖，看清楚保留到哪天再按 ─────────────────────
 function cancelSubscription() {
   const s = planState.subscription;
-  if (!s || planState.plan.code === "free") {
-    showBillingResult({ tone: "info", title: "目前是免費版",
-      lines: ["沒有進行中的付費訂閱，也沒有任何扣款需要取消。"] });
-    return;
-  }
-  if (s.provider === "manual") {
+  // 能不能取消看「綠界約定是否還活著」，不看目前方案：past_due／到期的約定綠界照樣會扣
+  const agreementOpen = !!(s && s.provider === "ecpay" && s.provider_ref && !s.cancel_requested_at);
+  if (s && s.provider === "manual") {
     showBillingResult({
       tone: "info", title: "這個方案由管理員指派",
       lines: [
@@ -2207,14 +2215,25 @@ function cancelSubscription() {
     });
     return;
   }
+  if (!agreementOpen) {
+    showBillingResult({ tone: "info", title: s && s.cancel_requested_at ? "已經取消過了" : "目前是免費版",
+      lines: [s && s.cancel_requested_at
+        ? `綠界的定期定額已終止，不會再扣款；功能保留至 ${fmtPlanDate(s.current_period_end)}。`
+        : "沒有進行中的付費訂閱，也沒有任何扣款約定需要取消。"] });
+    return;
+  }
   const body = document.getElementById("plan-modal-body");
   const until = fmtPlanDate(s.current_period_end);
+  const stillActive = s.status === "active" && new Date(s.current_period_end) > new Date();
+  const planName = planNameOf(s.plan_code) || planState.plan.name;
   body.innerHTML = `
     <div class="plan-confirm">
       <div class="plan-confirm-title">取消續訂？</div>
       <div class="plan-confirm-box">
         <ul class="plan-confirm-points">
-          <li>${escapeHtml(planState.plan.name)}功能保留至 <b>${until}</b>，之後回到免費版</li>
+          ${stillActive
+            ? `<li>${escapeHtml(planName)}功能保留至 <b>${until}</b>，之後回到免費版</li>`
+            : `<li>目前已是免費版（${escapeHtml(planName)}服務於 ${until} 結束）；這一步是終止綠界那邊仍在的扣款約定</li>`}
           <li>綠界不會再扣下一期；已付的月費不退款</li>
           <li>超出免費版上限的自選股與規則會保留資料、暫停通知，重新訂閱即恢復</li>
         </ul>
@@ -2242,8 +2261,12 @@ async function confirmCancel() {
     showBillingResult({
       tone: "ok", title: "已取消續訂",
       lines: [
-        `綠界已終止定期定額，之後不會再扣款。`,
-        `${name}功能保留至 ${fmtPlanDate(data.service_until)}，到期自動回到免費版；面板在那之前會顯示「已取消續訂」。`,
+        data.verified_by === "query"
+          ? "綠界的定期定額先前已終止（已向綠界查證），之後不會再扣款。"
+          : "綠界已終止定期定額，之後不會再扣款。",
+        data.plan_active
+          ? `${name}功能保留至 ${fmtPlanDate(data.service_until)}，到期自動回到免費版；面板在那之前會顯示「已取消續訂」。`
+          : "目前維持免費版；不會再有任何扣款。",
         "已付的月費不退款。超出免費版上限的自選股與規則會保留資料、暫停通知，重新訂閱即恢復。",
       ],
     });
