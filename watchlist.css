@@ -1915,7 +1915,10 @@ body.has-bottom-nav .qa-panel {
 .home-dir-flat,
 .home-dir-none { color: var(--text-muted); background: rgba(146, 146, 163, 0.14); }
 
-.home-strip { display: inline-flex; gap: 3px; align-items: center; margin-left: auto; }
+.home-strip { display: inline-flex; flex-direction: column; gap: 2px; margin-left: auto; }
+.home-strip-cells { display: inline-flex; gap: 3px; align-items: center; }
+.home-strip-dates { display: flex; justify-content: space-between; font-size: 0.58rem; line-height: 1; color: var(--text-muted); }
+.home-strip-dates i { font-style: normal; }
 
 .home-cell {
 	width: 13px;
@@ -1939,9 +1942,10 @@ body.has-bottom-nav .qa-panel {
 
 .home-st { flex: 1 0 100%; order: 9; font-size: 0.76rem; color: var(--text-1); padding-left: 2px; }
 .home-st b { color: var(--text-0); font-weight: 700; }
+.home-st-gap { margin-left: 0.55rem; }
 .home-st .home-ev { color: var(--sig-orange); }
 .home-more { color: var(--text-muted); font-size: 0.9rem; }
-.home-legend { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.5rem; line-height: 1.6; }
+.home-legend { font-size: 0.68rem; color: var(--text-muted); margin: -0.2rem 0 0.45rem; line-height: 1.6; }
 
 .home-feed {
 	display: flex;
@@ -1988,7 +1992,8 @@ body.has-bottom-nav .qa-panel {
 	cursor: pointer;
 }
 
-.rtl-day b { display: block; font-size: 0.62rem; font-weight: 600; color: var(--text-1); white-space: nowrap; }
+.rtl-day b { display: block; font-size: 0.62rem; font-weight: 600; color: var(--text-1); white-space: nowrap; margin-bottom: 3px; }
+.rtl-sub-gap { margin-left: 0.55rem; }
 .rtl-day i { display: block; font-style: normal; font-size: 0.7rem; font-weight: 700; color: var(--sig-blue); }
 .rtl-day.is-off { opacity: 0.45; }
 .rtl-day.is-off i { color: var(--text-muted); }

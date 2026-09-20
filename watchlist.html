@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="118">
+  <meta name="app-version" content="119">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=118" rel="stylesheet">
+  <link href="watchlist.css?v=119" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -264,8 +264,8 @@
       <div class="card panel-card mb-3">
         <div class="card-body p-3">
           <div class="home-sec-title">⭐ 我的自選 <span class="hs-link" onclick="switchTab('watch')">管理 →</span></div>
-          <div id="home-watchlist"></div>
           <div class="home-legend" id="home-watchlist-legend"></div>
+          <div id="home-watchlist"></div>
         </div>
       </div>
 
@@ -4924,7 +4924,7 @@ function renderHome() {
   const legendEl = document.getElementById("home-watchlist-legend");
   if (legendEl) {
     legendEl.textContent = rows.length
-      ? `格子＝近 ${days.length} 個交易日（${_mdOf(days[0])}–${_mdOf(days[days.length - 1])}）每天的訊號數，點一格看那天的時間軸；漲／平／跌對前一日收盤，盤中即時`
+      ? `每格是一個交易日的訊號數（近 ${days.length} 日）：藍＝有訊號、橘＝那天有漲跌停、跌破支撐或觸及自訂價位；點一格看那天的時間軸。漲／平／跌對前一日收盤，盤中即時`
       : "";
   }
 
@@ -4971,6 +4971,7 @@ function homeRowHtml(r, days, dayLabel) {
     ? `<span class="home-dir home-dir-${r.dir}">${HOME_DIR_LABEL[r.dir]}</span>`
     : `<span class="home-dir home-dir-none">—</span>`;
   const last = days.length - 1;
+  const lastLabel = days[last] === taipeiDateKey(new Date()) ? "今天" : _mdOf(days[last]);
   const cells = days.map((d, i) => {
     const n = r.counts[i];
     const cls = ["home-cell", n ? (r.hot[i] ? "is-hot" : "is-on") : "", i === last ? "is-today" : ""].filter(Boolean).join(" ");
@@ -4979,16 +4980,16 @@ function homeRowHtml(r, days, dayLabel) {
   const bits = [];
   if (r.todayCount) {
     const abbr = r.active ? (signalAbbr(String(r.active.signal)) || alertTypeLabel(r.active)) : "";
-    bits.push(`${dayLabel} <b>${r.todayCount} 則</b>${abbr ? `，進行中 ${escapeHtml(abbr)}` : ""}`);
+    bits.push(`${dayLabel}<span class="home-st-gap">有 <b>${r.todayCount} 則</b>訊號</span>${abbr ? `，進行中 ${escapeHtml(abbr)}` : ""}`);
   } else if (r.total) {
-    bits.push(`近 ${days.length} 日 ${r.total} 則，${dayLabel}無`);
+    bits.push(`近 ${days.length} 日有 ${r.total} 則訊號，${dayLabel}無`);
   } else {
     bits.push(`近 ${days.length} 日平靜`);
   }
   if (r.standout) bits.push(`<span class="home-ev">${r.standout} 較少見</span>`);
   return `<div class="home-wl" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
       <span class="home-wl-name">${escapeHtml(r.name)}</span>${dir}
-      <span class="home-strip">${cells}</span>
+      <span class="home-strip"><span class="home-strip-cells">${cells}</span><span class="home-strip-dates"><i>${escapeHtml(_mdOf(days[0]))}</i><i>${escapeHtml(lastLabel)}</i></span></span>
       <span class="home-st">${bits.join(" · ")}</span>
       <span class="home-more">›</span>
     </div>`;
@@ -5967,7 +5968,7 @@ function renderRadarTimeline(sid) {
   const activeHtml = active
     ? ` · 進行中 <span class="sig-chip chip-${inferSeverity(active)} chip-active">${escapeHtml(signalAbbr(String(active.signal)) || alertTypeLabel(active))}</span>`
     : "";
-  document.getElementById("rtl-sub").innerHTML = `${escapeHtml(date)} · ${intraday.length} 則${activeHtml}`;
+  document.getElementById("rtl-sub").innerHTML = `${escapeHtml(date)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}`;
   const daysEl = document.getElementById("rtl-days");
   if (daysEl) daysEl.innerHTML = rtlDaysHtml(sid, date);
   document.getElementById("rtl-chart-wrap").innerHTML = radarTimelineChartHtml(sid, intraday, ref, { past });
