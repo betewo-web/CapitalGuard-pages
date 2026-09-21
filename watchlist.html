@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="138">
+  <meta name="app-version" content="139">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=138" rel="stylesheet">
+  <link href="watchlist.css?v=139" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -3250,6 +3250,7 @@ async function showMain() {
   refreshInbox(true);
   loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
   loadSignalHistory(true).then(() => renderCurrentTab()).catch(() => {});   // 首頁格子的過去日子
+  loadShowcase().then(s => { if (s && currentTab === "home") renderHome(); }).catch(() => {});   // 範例股
   // 延後再跳：免責聲明閘、強制更新閘、金流導回的方案面板都在這之前處理，
   // 直接跳會疊在它們上面（_screenIsBusy 會擋，但那樣這次就白白錯過了）
   // 一次開機只跳一個視窗：推播提醒優先，跳了就略過這次的規則推薦
@@ -3560,6 +3561,7 @@ async function loadSignalHistory(force = false) {
   if (!force && Date.now() - signalHistoryLoadedAt < SIGNAL_HISTORY_MS) return signalHistoryMap;
   const sids = [...new Set((watchlistRows || [])
     .map(r => String(r.stock_id || "").trim())
+    .concat(showcase ? [String(showcase.stock_id)] : [])   // 範例股一起抓，時間軸開著時重抓才不會洗掉它
     .filter(sid => /^\d{4}$/.test(sid)))];
   if (!sids.length) { signalHistoryMap = {}; return signalHistoryMap; }
   const since = taipeiDateKey(new Date(Date.now() - SIGNAL_HISTORY_CAL_DAYS * 864e5));
@@ -3592,6 +3594,80 @@ async function loadSignalHistory(force = false) {
     if (/: (404|400)$/.test(String(e && e.message || ""))) signalHistorySupported = false;
   }
   return signalHistoryMap;
+}
+
+// ── 範例股（GROWTH.md 2026-09-21「範例展示」）──
+// showcase_pick.py 每天挑「近 10 個交易日訊號最多的權值股」寫成 web/showcase.json；
+// 新用戶還沒有歷史、或某天沒訊號時，給他看一個真的有事的例子。點進去畫的是 signal_history
+// 裡真的那一天（按股票存、anon 可讀），不是假資料，也不用任何使用者的自選股。
+let showcase = null;
+async function loadShowcase() {
+  try {
+    const r = await fetch("showcase.json", { cache: "no-cache" });
+    if (!r.ok) return null;
+    const s = await r.json();
+    if (!s || !/^\d{4}$/.test(String(s.stock_id || "")) || !s.top || !s.top.date) return null;
+    showcase = s;
+  } catch { showcase = null; }
+  return showcase;
+}
+
+// 使用者的自選股全部還沒有任何歷史格子（新帳號、或表剛開始累積）才放範例列，有了自己的資料就收起
+function showcaseWanted(rows) {
+  return !!showcase && (!rows.length || rows.every(r => r.total === 0));
+}
+
+function showcaseRowHtml(days) {
+  const byDate = Object.fromEntries((showcase.days || []).map(d => [d.date, Number(d.n) || 0]));
+  const last = days.length - 1;
+  const cells = days.map((d, i) => {
+    const n = byDate[d] || 0;
+    const cls = ["home-cell", n ? "is-on" : "", i === last ? "is-today" : ""].filter(Boolean).join(" ");
+    return `<i class="${cls}">${n || ""}</i>`;
+  }).join("");
+  const top = showcase.top;
+  const when = top.first_at && top.last_at && top.first_at !== top.last_at ? `${top.first_at} 到 ${top.last_at} 之間` : (top.first_at || "");
+  return `<div class="home-wl home-example" onclick="openShowcase()">
+      <span class="home-example-tag">範例</span>
+      <span class="home-wl-name">${escapeHtml(showcase.stock_name || showcase.stock_id)}</span>
+      <span class="home-strip"><span class="home-strip-cells">${cells}</span><span class="home-strip-dates"><i>${escapeHtml(_mdOf(days[0]))}</i><i>${escapeHtml(_mdOf(days[last]))}</i></span></span>
+      <span class="home-more">›</span>
+      <span class="home-example-note">這是一檔近期訊號很多的股票。你的自選股有事時，格子會像這樣亮起來；點進去看 ${escapeHtml(_mdOf(top.date))} 那天${when ? `（${escapeHtml(when)}有 ${top.n} 則）` : ""}的時間軸。</span>
+    </div>`;
+}
+
+// 範例股不在自選裡：它的 signal_history 要另外抓一次（loadSignalHistory 只抓自選股）
+async function ensureShowcaseHistory() {
+  if (!showcase || !signalHistorySupported || !state.accessToken) return;
+  const sid = showcase.stock_id;
+  if (signalHistoryMap[sid] && signalHistoryMap[sid][showcase.top.date]) return;
+  const since = taipeiDateKey(new Date(Date.now() - SIGNAL_HISTORY_CAL_DAYS * 864e5));
+  try {
+    const rows = await sbGet("signal_history", {
+      select: "stock_id,trade_date,signals,levels,prev_close,close",
+      stock_id: `eq.${sid}`, trade_date: `gte.${since}`, order: "trade_date.desc",
+      limit: String(SIGNAL_HISTORY_CAL_DAYS + 2),
+    }, state.accessToken);
+    for (const row of rows || []) {
+      const date = String(row.trade_date || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const prevRaw = row.prev_close == null ? null : Number(row.prev_close);
+      const closeRaw = row.close == null ? null : Number(row.close);
+      (signalHistoryMap[sid] ||= {})[date] = {
+        signals:   _intradaySignals(row.signals) || [],
+        levels:    _intradayLevels(row.levels),
+        prevClose: Number.isFinite(prevRaw) && prevRaw > 0 ? prevRaw : null,
+        close:     Number.isFinite(closeRaw) && closeRaw > 0 ? closeRaw : null,
+      };
+    }
+  } catch { /* 拿不到就只畫得出空的那天；下次再點會再試 */ }
+}
+
+async function openShowcase() {
+  if (!showcase) return;
+  trackActivity("showcase_open", { stock: showcase.stock_id, date: showcase.top.date });
+  await ensureShowcaseHistory();
+  openRadarTimeline(showcase.stock_id, showcase.top.date);
 }
 
 // 那天的共用日誌（內建訊號＋自動偵測）：今天讀 intraday_state.signals_today，過去讀 signal_history。
@@ -5239,14 +5315,16 @@ function renderHome() {
 
   // 自選列
   const listEl = document.getElementById("home-watchlist");
+  const example = showcaseWanted(rows);
   if (listEl) {
-    listEl.innerHTML = rows.length
+    listEl.innerHTML = (rows.length
       ? rows.map(r => homeRowHtml(r, days, dayLabel)).join("")
-      : '<div class="view-empty py-2" style="padding:0.5rem">尚未加入自選股，到 ⭐ 自選 分頁新增</div>';
+      : '<div class="view-empty py-2" style="padding:0.5rem">尚未加入自選股，到 ⭐ 自選 分頁新增</div>')
+      + (example ? showcaseRowHtml(days) : "");
   }
   const legendEl = document.getElementById("home-watchlist-legend");
   if (legendEl) {
-    legendEl.textContent = rows.length
+    legendEl.textContent = rows.length || example
       ? `每格是一個交易日的訊號數（近 ${days.length} 日），點一格看那天的時間軸。漲／平／跌對前一日收盤，盤中即時`
       : "";
   }
@@ -6278,7 +6356,7 @@ function renderRadarTimeline(sid) {
   const date = radarTimelineDate || sessionDate;
   const past = date !== sessionDate;
   const wl = watchlistRows.find(w => String(w.stock_id || "").trim() === sid);
-  const name = getPreferredStockName(sid, wl ? wl.stock_name : "") || sid;
+  const name = getPreferredStockName(sid, wl ? wl.stock_name : (showcase && showcase.stock_id === sid ? showcase.stock_name : "")) || sid;
   const iq = past ? null : (intradayQuoteMap[sid] || null);
   // 過去的日子：縱軸定位、昨收線與壓力／支撐都用那天存下的（不拿今天的關卡畫上週）
   const hist = past ? (signalHistoryMap?.[sid]?.[date] || null) : null;
@@ -6450,9 +6528,16 @@ function radarStoryListHtml(story, opts = {}) {
       </div></div>`;
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
-  if (!html) html = opts.past
-    ? `<div class="rtl-none">這天沒有訊號<br><span>${signalHistorySupported ? "內建訊號、自訂規則與系統自動偵測那天都沒有成立" : "過去的日子只剩推播過的通知可查（signal_history 表尚未建立）"}</span></div>`
-    : `<div class="rtl-none">今天還沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測的條件成立時，會依時間排在這裡</span></div>`;
+  if (!html) {
+    html = opts.past
+      ? `<div class="rtl-none">這天沒有訊號<br><span>${signalHistorySupported ? "內建訊號、自訂規則與系統自動偵測那天都沒有成立" : "過去的日子只剩推播過的通知可查（signal_history 表尚未建立）"}</span></div>`
+      : `<div class="rtl-none">今天還沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測的條件成立時，會依時間排在這裡</span></div>`;
+    // 給他看一個有訊號的一天長什麼樣（正在看的就是範例那天時不重複）
+    const viewing = radarTimelineDate || radarSessionDate();
+    if (showcase && !(radarTimelineSid === showcase.stock_id && viewing === showcase.top.date)) {
+      html += `<div class="rtl-example"><span class="home-example-tag">範例</span>想看有訊號的一天長什麼樣？${escapeHtml(showcase.stock_name || showcase.stock_id)} ${escapeHtml(_mdOf(showcase.top.date))} 有 ${Number(showcase.top.n) || 0} 則。<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openShowcase()">看這一天 →</button></div>`;
+    }
+  }
   if (post.length) html += `<div class="rtl-divider">收盤後</div>` + post.map((e, i) => item(e, intraday.length + i)).join("");
   return html;
 }
