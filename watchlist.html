@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="139">
+  <meta name="app-version" content="141">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=139" rel="stylesheet">
+  <link href="watchlist.css?v=141" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -4736,8 +4736,16 @@ function taipeiDateKey(value) {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
+// 價格要「真的是一個正數」才算報價。以前寫 `!isFinite(Number(raw.price))`，
+// 但 Number(null)、Number("")、Number([]) 全都是 0 而且 isFinite(0) 是 true——
+// intraday_state 那一列 price 是 NULL（監控當輪沒拿到價）就會變成「股價 0 元」，
+// 再配上 prev_close 算出 −100%，自選列、持股損益、到價距離一起錯。
+// 0 元在台股不是合法報價，所以 > 0 同時擋掉 null 與真正的 0。
 function _toQuoteCandidate(raw, sourcePriority) {
-  if (!raw || !isFinite(Number(raw.price))) return null;
+  if (!raw) return null;
+  const price = Number(raw.price);
+  if (raw.price === null || raw.price === undefined || raw.price === "" ||
+      !Number.isFinite(price) || price <= 0) return null;
   // 注意：raw.changePct 可能是 0（真實平盤）或 null（無資料），需區分
   const chg = (raw.changePct == null || !Number.isFinite(Number(raw.changePct)))
     ? null
@@ -4745,7 +4753,7 @@ function _toQuoteCandidate(raw, sourcePriority) {
   const tradeDate = /^\d{4}-\d{2}-\d{2}$/.test(String(raw.tradeDate || ""))
     ? String(raw.tradeDate)
     : "";
-  return { price: Number(raw.price), changePct: chg, tradeDate, sourcePriority };
+  return { price, changePct: chg, tradeDate, sourcePriority };
 }
 
 // 三個來源的取捨：交易日期新的優先，再看有沒有漲跌幅，最後才看來源優先權
@@ -6373,10 +6381,15 @@ function renderRadarTimeline(sid) {
   document.getElementById("rtl-sub").innerHTML = `${escapeHtml(date)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}`;
   const daysEl = document.getElementById("rtl-days");
   if (daysEl) daysEl.innerHTML = rtlDaysHtml(sid, date);
-  document.getElementById("rtl-chart-wrap").innerHTML = radarTimelineChartHtml(sid, intraday, ref, { past });
+  // covered：signal_history 真的有這檔、這天的那一列。沒有列 ≠ 那天沒有訊號，
+  // 而是「我們沒有那天的紀錄」（還沒納入監控、寫入失敗、或這次沒載到）——
+  // 兩者要分開講，不能把缺資料說成「所有條件都沒成立」（稽核 I13）。
+  const covered = !past || !!hist;
+  document.getElementById("rtl-chart-wrap").innerHTML =
+    radarTimelineChartHtml(sid, intraday, ref, { past, covered });
   const headEl = document.getElementById("rtl-story-head");
   if (headEl) headEl.textContent = past ? `${_mdOf(date)} 盤中發生了什麼` : "盤中發生了什麼";
-  document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, { past });
+  document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, { past, covered });
 }
 
 // opts.past：畫過去的某一天——不畫「現在」游標、不拿今天的報價與月線當參考、壓力／支撐用 iq.levels（那天存下的）
@@ -6468,7 +6481,9 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
       return `<line class="rtl-tick" x1="${x}" y1="${axisY - 3}" x2="${x}" y2="${axisY + 5}"/>`
         + (label ? `<text class="rtl-tick-label" x="${x}" y="${axisY + 17}" text-anchor="${anchor}">${label}</text>` : "");
     }).join("");
-    emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">${opts.past ? "這天沒有訊號" : "今天還沒有訊號"}</text>`;
+    const emptyLabel = !opts.past ? "今天還沒有訊號"
+                     : (opts.covered ? "這天沒有訊號" : "沒有這天的紀錄");
+    emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">${emptyLabel}</text>`;
   }
   return `<div class="rtl-chart"><svg class="rtl-svg" viewBox="0 0 ${RTL_VB_W} ${RTL_VB_H}" role="img" aria-label="盤中時間軸">`
     + linesSvg + nowSvg + emptySvg
@@ -6529,9 +6544,16 @@ function radarStoryListHtml(story, opts = {}) {
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
   if (!html) {
-    html = opts.past
-      ? `<div class="rtl-none">這天沒有訊號<br><span>${signalHistorySupported ? "內建訊號、自訂規則與系統自動偵測那天都沒有成立" : "過去的日子只剩推播過的通知可查（signal_history 表尚未建立）"}</span></div>`
-      : `<div class="rtl-none">今天還沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測的條件成立時，會依時間排在這裡</span></div>`;
+    // 三種狀態要講不一樣的話：完整但零筆／沒有那天的紀錄／查不到（表還沒建）
+    if (!opts.past) {
+      html = `<div class="rtl-none">今天還沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測的條件成立時，會依時間排在這裡</span></div>`;
+    } else if (!signalHistorySupported) {
+      html = `<div class="rtl-none">查不到這天的紀錄<br><span>過去的日子只剩推播過的通知可查（signal_history 表尚未建立）</span></div>`;
+    } else if (!opts.covered) {
+      html = `<div class="rtl-none">沒有這天的紀錄<br><span>這檔那天還沒納入監控，或那天的序列沒有存下來——不代表那天沒有訊號</span></div>`;
+    } else {
+      html = `<div class="rtl-none">這天沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測那天都沒有成立</span></div>`;
+    }
     // 給他看一個有訊號的一天長什麼樣（正在看的就是範例那天時不重複）
     const viewing = radarTimelineDate || radarSessionDate();
     if (showcase && !(radarTimelineSid === showcase.stock_id && viewing === showcase.top.date)) {
