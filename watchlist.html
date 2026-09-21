@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="136">
+  <meta name="app-version" content="138">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=136" rel="stylesheet">
+  <link href="watchlist.css?v=138" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1048,6 +1048,11 @@ const BILLING_TERMS_URL = "https://betewo-web.github.io/betewo-site/terms.html#t
 const BILLING_REFUND_URL = "https://betewo-web.github.io/betewo-site/pricing.html#refund";
 // AI 事件解讀／AI 問答尚未完成：方案表照列（專業版功能），但標「開發中」
 const AI_FEATURES_LIVE = false;
+// 官網（分享與深連結的另一端）。專業版在 AI 上線前不開放訂閱（Howard 2026-09-21）：
+// plans.is_public=false 讓卡片從面板消失，這一句告訴使用者它去哪了
+const SITE_BASE_URL = "https://betewo-web.github.io/betewo-site/";
+const PLAN_COMING_SOON_NOTE = "專業版（AI 資料白話）開發中，上線後才開放訂閱。";
+const PLAN_NAME_FALLBACK = { free: "免費版", basic: "基本版", pro: "專業版" };   // 付款紀錄裡非公開方案的名字
 let planState = {
   ready: false,          // false = plans 表不存在或載入失敗 → 前端不做任何限制
   plan: null,            // plans 列（code / name / watch_limit / rule_limit / ai_*）
@@ -1765,20 +1770,45 @@ function isLimitError(e, kind) {
   return String((e && e.message) || "").includes(`limit:${kind}`);
 }
 
+// 撞到上限時該推哪個方案：比目前貴、而且這一項上限更高的最便宜那個（只看公開方案）
+function nextPlanFor(kind) {
+  if (!planState.ready) return null;
+  const cur = planState.plan;
+  const lim = kind === "watchlist" ? "watch_limit" : "rule_limit";
+  return (planState.plans || [])
+    .filter(x => x.price_twd > (cur.price_twd || 0) && (x[lim] === null || x[lim] > (cur[lim] || 0)))
+    .sort((a, b) => a.price_twd - b.price_twd)[0] || null;
+}
+
+// 方案的一句話：用「用途」講，不用數字堆（GROWTH.md 2026-09-21 C2）。
+// 官網 index／pricing／faq 三頁寫的是同一句（test_marketing_site 以種子數字比對），改字要一起改
+function planPitch(p) {
+  const free = (planState.plans || []).find(x => x.price_twd === 0) || { watch_limit: 3 };
+  return `${p.name}適合持股加觀察名單超過 ${free.watch_limit} 檔的人：NT$${p.price_twd}／月、${p.watch_limit} 檔自選股、${p.rule_limit} 條自訂規則。`;
+}
+
+// 上限提示是天然的轉換點：說清楚下一個方案多少錢、能放多少，按鈕直接開到那張卡
+// （以前是提示→面板→找方案→按升級，四步；現在兩步）
 function limitPromptHtml(kind, err) {
   const what = kind === "watchlist" ? "自選股" : "自訂規則";
   const unit = kind === "watchlist" ? "檔" : "條";
+  const lim = kind === "watchlist" ? "watch_limit" : "rule_limit";
+  const next = nextPlanFor(kind);
+  trackActivity("limit_hint", { kind, next: next ? next.code : "" });
   let text;
   if (planState.ready) {
     text = `${planState.plan.name}最多 ${planLimitOf(kind)} ${unit}${what}，已達上限。`;
+    if (next) text += ` ${next.name} NT$${next.price_twd}／月可放 ${next[lim]} ${unit}。`;
   } else {
     // 方案狀態沒載到但伺服器擋了：直接用伺服器的訊息
     let m = "";
     try { m = JSON.parse(String(err.message).replace(/^[^{]*/, "")).message || ""; } catch (_) {}
     text = m || `已達${what}上限。`;
   }
-  return `<span class="text-warning">⚠️ ${escapeHtml(text)}</span>
-    <button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${jsAttr(kind)}')">查看方案 →</button>`;
+  const btn = next
+    ? `<button type="button" class="btn btn-xs btn-success btn-accent-sm ms-1" onclick="openPlanModal('${jsAttr(kind)}', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} →</button>`
+    : `<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${jsAttr(kind)}')">查看方案 →</button>`;
+  return `<span class="text-warning">⚠️ ${escapeHtml(text)}</span> ${btn}`;
 }
 
 function renderWatchCount(n) {
@@ -1821,8 +1851,11 @@ function renderQaLock() {
 // ── 方案面板 ──
 let planPayments = null;   // payments 列（開面板時懶載入）
 
-function openPlanModal(focus) {
-  trackActivity("plan_open", { focus: focus || "" });
+let _planFocusCode = null;   // 這次開面板要選中的方案卡（上限提示／官網深連結帶進來）
+
+function openPlanModal(focus, planCode) {
+  _planFocusCode = planCode || null;
+  trackActivity("plan_open", { focus: focus || "", plan: _planFocusCode || "" });
   // 從規則面板點「查看方案」過來：先把規則面板收掉，Bootstrap 疊兩層 modal 會亂
   const rulesEl = document.getElementById("rulesModal");
   const rulesInst = rulesEl && bootstrap.Modal.getInstance(rulesEl);
@@ -1871,7 +1904,45 @@ function planPriceLabel(p) {
 
 function planNameOf(code) {
   const p = planState.plans.find(x => x.code === code);
-  return p ? p.name : (code || "");
+  return p ? p.name : (PLAN_NAME_FALLBACK[code] || code || "");
+}
+
+// ── 邀請朋友（B3）：台灣的傳播在 LINE 群組，App 裡以前沒有任何可以分享出去的入口 ──
+async function shareInvite() {
+  const url = `${SITE_BASE_URL}?ref=app`;
+  const text = "CapitalGuard 台股監控：自選股跌破支撐、帶量上漲、漲跌停，訊號推到手機。加 LINE 好友就能免費開始。";
+  trackActivity("invite_share", { via: navigator.share ? "share" : "copy" });
+  try {
+    if (navigator.share) { await navigator.share({ title: "CapitalGuard 台股監控", text, url }); return; }
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    setPlanMsg("已複製介紹文字與連結，貼給朋友即可。");
+  } catch (e) {
+    if (e && e.name === "AbortError") return;   // 使用者自己取消分享
+    setPlanMsg(`分享沒有成功，可以直接把官網網址傳給朋友：${url}`, true);
+  }
+}
+
+// ── 官網深連結（B2）：pricing 的「開啟 App 升級」帶 ?plan=basic 進來 ──
+// 開機時先把參數存起來（未登入、要先過安裝精靈都可能發生），該開的時候才開
+function stashPlanIntent(qs) {
+  const code = qs.get("plan");
+  if (!code) return;
+  if (/^[a-z]{2,12}$/.test(code)) localStorage.setItem("cg-plan-intent", code);
+  qs.delete("plan");
+  const q = qs.toString();
+  history.replaceState(null, "", location.pathname + (q ? `?${q}` : "") + location.hash);
+}
+
+function consumePlanIntent() {
+  const code = localStorage.getItem("cg-plan-intent");
+  if (!code || !state.accessToken) return false;
+  const gate = document.getElementById("onboard-gate");
+  // 精靈、免責同意、別的 modal 還開著：等它們結束再開（finishOnboarding 會再叫一次）
+  if ((gate && gate.style.display && gate.style.display !== "none") || _screenIsBusy()) return false;
+  localStorage.removeItem("cg-plan-intent");
+  trackActivity("plan_deeplink", { plan: code });
+  openPlanModal("deeplink", code);
+  return true;
 }
 
 // 功能列。數字全部來自 plans 表；「共有」的功能三欄都打勾，
@@ -1941,14 +2012,20 @@ function renderPlanModal(focus) {
   }
 
   const p = planState.plan, u = planState.usage || {};
-  const focusHint = {
+  // 要選中的方案：上限提示或官網深連結指定的那個；已經是目前方案就不必再推
+  const target = _planFocusCode && _planFocusCode !== p.code
+    ? planState.plans.find(x => x.code === _planFocusCode) || null : null;
+  const pitch = target && target.price_twd > 0 ? planPitch(target) : "";
+  let focusHint = {
     ai:          "🤖 AI 事件解讀與 AI 問答是專業版功能。",
     ai_limit:    "🤖 今日 AI 使用次數已達上限，明天會重置。",
     watchlist:   "⭐ 自選股已達目前方案上限，升級即可加入更多。",
     alert_rules: "📐 自訂規則已達目前方案上限，升級即可新增更多。",
+    deeplink:    pitch || "從官網過來的：先看看目前方案的用量，需要再升級。",
     paid:        "付款結果以綠界回呼為準。若方案尚未更新，請稍後再開啟這個面板確認。",
     pay_failed:  "綠界回報這次付款未成功，沒有扣款也沒有開通。可以重新選擇方案再試一次。",
   }[focus];
+  if (pitch && (focus === "watchlist" || focus === "alert_rules")) focusHint += ` ${pitch}`;
 
   const current = `
     <div class="plan-current">
@@ -1977,8 +2054,9 @@ function renderPlanModal(focus) {
       cta = `<button type="button" class="btn btn-sm ${up ? "btn-success btn-accent-sm" : "btn-outline-light"} w-100 justify-content-center"
                onclick="startCheckout('${jsAttr(x.code)}')">${up ? "升級到" : "改為"}${escapeHtml(x.name)}</button>`;
     }
+    const isFocus = !!(target && x.code === target.code);
     return `
-      <div class="plan-card plan-card-${escapeHtml(x.code)}${isCurrent ? " is-current" : ""}">
+      <div class="plan-card plan-card-${escapeHtml(x.code)}${isCurrent ? " is-current" : ""}${isFocus ? " is-focus" : ""}"${isFocus ? ' id="plan-card-focus"' : ""}>
         <div class="plan-card-name">${escapeHtml(x.name)}</div>
         <div class="plan-price">${planPriceLabel(x)}</div>
         <ul class="plan-feats">${planFeatureRows(x)}</ul>
@@ -1993,15 +2071,23 @@ function renderPlanModal(focus) {
       </tbody></table>`
     : `<div class="text-muted small">尚無付款紀錄</div>`;
 
+  // 公開方案裡沒有含 AI 的＝專業版收起來了：說一句它去哪了，別讓人以為功能消失
+  const comingSoon = planState.plans.some(x => x.ai_enabled) ? "" : `<div class="plan-coming-soon">${PLAN_COMING_SOON_NOTE}</div>`;
+
   body.innerHTML = `
     ${focusHint ? `<div class="plan-focus-hint">${focusHint}</div>` : ""}
     ${current}
     <div class="plan-sec-title">方案比較</div>
     <div class="plan-grid">${cards}</div>
+    ${comingSoon}
     <div class="plan-sec-title">付款紀錄</div>
     ${payments}
     <div id="plan-msg" class="plan-msg"></div>
+    <div class="plan-invite">覺得好用？<button type="button" class="btn btn-xs btn-outline-info" onclick="shareInvite()">邀請朋友一起用</button><span>朋友加 LINE 好友就能免費開始。</span></div>
     <div class="plan-foot-note">月費不退款；取消續訂後功能保留至當期結束。超出方案的自選股與規則會保留資料、暫停通知，升級後即恢復。<span class="plan-ver">App v${appVersion()}</span></div>`;
+  // 上限提示／深連結帶進來的那張卡：捲到看得見的地方（面板上半部是目前方案與用量）
+  const focusEl = target && document.getElementById("plan-card-focus");
+  if (focusEl) setTimeout(() => focusEl.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
 }
 
 // 訊息列在付款紀錄下面，面板捲在上半部時看不到——按「改為免費版」沒反應的錯覺就是這樣來的
@@ -2938,6 +3024,7 @@ function finishOnboarding(extra) {
   _obPushView = "ask";
   document.getElementById("onboard-gate").style.display = "none";
   initPushUI();
+  setTimeout(consumePlanIntent, 600);   // 從官網定價頁一路走到這裡的人，精靈結束就開方案面板
 }
 
 // 本地跳一則通知讓他親眼看到；真正的端到端（伺服器 → 推播服務 → 這台裝置）
@@ -2964,6 +3051,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (!(await enforceAppVersion())) return;
 
   const qs = new URLSearchParams(location.search);
+  stashPlanIntent(qs);   // 官網「開啟 App 升級」帶的 ?plan=：先收起來，登入與精靈之後再開
   // 從 URL ?code= 一次性登入碼登入（LIFF 驗證後跳轉、LINE 邀請連結、報告推播）。
   // 碼用過即刪，不像舊的 ?token= 會把長期 token 留在通知中心與伺服器紀錄裡。
   const urlCode = qs.get("code");
@@ -3154,6 +3242,8 @@ async function showMain() {
   if (payResult === "done" || payResult === "failed") {
     history.replaceState(null, "", location.pathname + location.hash);
     openPlanModal(payResult === "done" ? "paid" : "pay_failed");
+  } else {
+    consumePlanIntent();
   }
   initPushUI();
   ensurePushSubscriptionRegistered();

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="136">
+  <meta name="app-version" content="138">
   <title>管理儀表板 — 台股監控</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -370,6 +370,9 @@ const ACTION_LABELS = {
   inbox_read_all:    "全部標為已讀",
   report_open:       "開每日報告",
   plan_open:         "開方案面板",
+  plan_deeplink:     "官網深連結開方案",
+  limit_hint:        "看到上限提示",
+  invite_share:      "邀請朋友",
   checkout_start:    "開始結帳",
   checkout_confirm_open: "開結帳確認視圖",
   billing_result:    "金流結果視窗",
@@ -865,7 +868,14 @@ function renderAll(s) {
       xAxis: axisVal({ splitLine: { show: false }, axisLabel: { show: false } }), yAxis: axisCat(et.map(x => x[0]), { inverse: true }),
       series: [hbarSeries("筆數", et.map(x => x[1]), S[0])] });
   }
+  // LINE 加好友人數：notify/line_nudge.py 每晚寫進 app_config.line_followers（JSON 字串，前一天的數字）
+  let followers = null;
+  try { followers = sys.line_followers ? JSON.parse(sys.line_followers) : null; } catch { followers = null; }
+  const followersText = followers
+    ? `${fmtInt(followers.followers)} 人（${followers.date}；可觸達 ${fmtInt(followers.targeted_reaches)}、封鎖 ${fmtInt(followers.blocks)}）`
+    : "尚無資料（reporter 20:30 才會寫）";
   const sysRows = [
+    ["LINE 加好友人數", followersText],
     ["伺服器最低 App 版本", `v${sys.min_app_version}`],
     ["盤中報價最後寫入", `${fmtDate(sys.intraday_updated_at)}（${ago(sys.intraday_updated_at)}，${fmtInt(sys.intraday_rows)} 檔）`],
     ["最後一則通知", `${fmtDate(sys.last_alert_at)}（${ago(sys.last_alert_at)}）`],

@@ -2986,6 +2986,11 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .plan-msg:empty { display: none; }
 .plan-msg.is-err { color: var(--danger); }
 .plan-foot-note { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.8rem; line-height: 1.5; }
+/* 上限提示／官網深連結指定的那張卡：紫框標出「就是這張」 */
+.plan-card.is-focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.plan-coming-soon { font-size: 0.74rem; color: var(--text-muted); margin: 0.5rem 0 0.2rem; }
+.plan-invite { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; font-size: 0.78rem; color: var(--text-1); margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
+.plan-invite span { color: var(--text-muted); font-size: 0.72rem; }
 /* 版本號：回報問題時一眼看出跑的是哪一版 */
 .plan-ver { float: right; margin-left: 0.6rem; font-family: "Space Grotesk", sans-serif; opacity: 0.7; }
 .plan-ver-head { font-size: 0.72rem; font-weight: 500; opacity: 0.75; margin-left: 0.4rem; font-family: "Space Grotesk", sans-serif; }
