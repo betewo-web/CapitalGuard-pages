@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="149">
+  <meta name="app-version" content="150">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=149" rel="stylesheet">
+  <link href="watchlist.css?v=150" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -5493,25 +5493,10 @@ function _nearestFromLevels(lv, price) {
   };
 }
 
-// 雷達列與自選列共用的兩行文字（使用者定案的精簡格式，2026-09-11）：
-//   壓(193) 距離2.6% · 撐(172) 距離8.7%
-//   月(184) 之上2.3% · 季(200) 之下1%
-// 括號後空一格，關係詞與數字之間不空。壓力／支撐只講距離（方向由字義決定：壓力必在上、
-// 支撐必在下）；均線要講之上／之下，現價在均線的哪一邊才是重點。
-// 均線行只放月線與季線：半年線、年線離現價中位數 20%／49%，放進來只是佔位，四條全列也一定換行。
-// 兩個分頁共用同一個函式：格式只能有一份，改一邊另一邊就漂移。
-function levelLinesOf(sid, price) {
-  const lv = nearestLevels(sid, price);
-  const dist = [];
-  if (lv.resPct != null) dist.push(`壓(${fmtPrice(lv.resistance)}) 距離${fmtPct(lv.resPct)}%`);
-  if (lv.supPct != null) dist.push(`撐(${fmtPrice(lv.support)}) 距離${fmtPct(lv.supPct)}%`);
-  const MA_SHORT = { 20: "月", 60: "季" };
-  const ma = maPositions(sid, price);
-  const maLine = ma.filter(m => MA_SHORT[m.n])
-    .map(m => `${MA_SHORT[m.n]}(${fmtPrice(m.value)}) ${m.pct >= 0 ? "之上" : "之下"}${fmtPct(m.pct)}%`)
-    .join(" · ");
-  return { lv, ma, dist, distLine: dist.join(" · "), maLine };
-}
+// levelLinesOf（壓(193) 距離2.6% · 撐(172) 距離8.7% ／ 月(184) 之上2.3% 那兩行）2026-09-22 移除：
+// 雷達分頁沒了、自選頁也不再顯示（Howard）。關卡要看去個股字卡，圖上就畫著最近的支撐與壓力。
+// maPositions 留著——K 線表頭的均線還在用。
+
 
 // 這檔股票今天觸發過的訊號（通知紀錄的今日列；最新在前）。
 // 來源收監控、盤後與自訂規則：規則通知也是「這檔今天有動靜」，以前只收監控與盤後，
@@ -7022,9 +7007,8 @@ function renderWatchlist(rows) {
     // 圖示不再因為「有事件」而變色——一顆變色的圖示無法自我解釋，使用者看得出它跟
     // 別檔不一樣，卻無從知道差在哪（這正是有人來問「為什麼有的亮黃色」的原因）。
     // 強調改走下面標籤區的一句文字，用讀的就懂。
-    const evtLabel = events.length > 0
-      ? `${ICON_EVENTS}<span class="wl-ic-count">${events.length}</span>`
-      : ICON_EVENTS;
+    const evtLabel = `${ICON_EVENTS}<span class="wl-ic-label">事件</span>${
+      events.length > 0 ? `<span class="wl-ic-count">${events.length}</span>` : ""}`;
     const evtClass = events.length > 0 ? "wl-events-btn" : "wl-events-btn wl-events-empty";
 
     // 報價靠右自成一欄，標籤另起一行——名稱因此拿得到整行寬度，不必截斷
@@ -7072,18 +7056,15 @@ function renderWatchlist(rows) {
       tags.push(`<span class="wl-signal-badge wl-tag-locked" title="超出目前方案的自選股上限，不再產生通知；升級後恢復">🔒 超出方案</span>`);
     }
 
-    // 離關卡多遠／在均線哪一邊：與雷達列同一個函式、同一組來源（intraday_state.levels 與
-    // 報告的 investment_scores.maNN）。以前只有雷達有，使用者在自選頁看不到；沒有資料的股票
-    // （剛加入還沒跑過監控、或不在評分名單內）這兩行就不出現，不佔位。
-    const lines = q ? levelLinesOf(sid, q.price) : { distLine: "", maLine: "" };
-    const levelsHtml = (lines.distLine || lines.maLine)
-      ? `<div class="wl-levels">${[lines.distLine, lines.maLine].filter(Boolean).map(t => `<span>${escapeHtml(t)}</span>`).join("")}</div>`
-      : "";
+    // 壓／撐／月／季那兩行 2026-09-22 拿掉（Howard）：這一頁是「設定自選股」，
+    // 關卡要看去個股字卡（盤中雷達那一頁的圖上就畫著最近的支撐與壓力）。
 
     const item = document.createElement("article");
     item.className = active ? "wl-row" : "wl-row is-inactive";
     item.dataset.id = row.id;
     item.dataset.sid = sid;
+    // 2026-09-22 改版（Howard）：字與按鈕都放大、上下更寬鬆。
+    // 由上而下＝名稱＋代號／收盤價／標籤／一排四顆帶文字的按鈕（手機也看得到字，不再只有圖示）
     item.innerHTML = `
       <div class="wl-row-head">
         <div class="wl-ident">
@@ -7092,15 +7073,12 @@ function renderWatchlist(rows) {
         </div>
         ${quoteLine}
       </div>
-      ${levelsHtml}
-      <div class="wl-row-foot">
-        <div class="wl-tags">${tags.join("")}</div>
-        <div class="wl-row-actions">
-          <button class="${evtClass}" title="今日事件" onclick="openEventsPanel('${jsAttr(sid)}')">${evtLabel}</button>
-          <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(sid)}" onclick="openKLineFromWatchlist('${jsAttr(sid)}')">${ICON_CHART}<span class="wl-ic-label">K線</span></button>
-          <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${jsAttr(row.id)}')">${ICON_BELL}<span class="wl-ic-label">通知</span></button>
-          <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}</button>
-        </div>
+      ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
+      <div class="wl-row-actions">
+        <button class="${evtClass}" title="今日事件" onclick="openEventsPanel('${jsAttr(sid)}')">${evtLabel}</button>
+        <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(sid)}" onclick="openKLineFromWatchlist('${jsAttr(sid)}')">${ICON_CHART}<span class="wl-ic-label">K 線</span></button>
+        <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${jsAttr(row.id)}')">${ICON_BELL}<span class="wl-ic-label">通知</span></button>
+        <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}<span class="wl-ic-label">移除</span></button>
       </div>
     `;
     grid.appendChild(item);

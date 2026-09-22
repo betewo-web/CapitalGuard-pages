@@ -398,11 +398,11 @@ body.has-bottom-nav .page-shell {
 	position: relative;
 	display: flex;
 	align-items: center;
-	gap: 0.4rem;
-	height: 42px;
-	padding: 0 0.4rem 0 0.75rem;
-	margin-bottom: 0.7rem;
-	border-radius: 12px;
+	gap: 0.5rem;
+	height: 52px;
+	padding: 0 0.5rem 0 0.9rem;
+	margin-bottom: 0.9rem;
+	border-radius: 14px;
 	border: 1px solid rgba(121, 157, 255, 0.24);
 	background: rgba(8, 13, 26, 0.62);
 	transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
@@ -430,7 +430,7 @@ body.has-bottom-nav .page-shell {
 	border: none;
 	background: transparent;
 	color: var(--text-0);
-	font-size: 0.86rem;
+	font-size: 1rem;
 	font-family: inherit;
 }
 
@@ -440,17 +440,17 @@ body.has-bottom-nav .page-shell {
 
 .wl-addbar-input::placeholder {
 	color: #67799c;
-	font-size: 0.82rem;
+	font-size: 0.92rem;
 }
 
 /* 單色平面，不用漸層：小尺寸的漸層在手機上只會看起來髒 */
 .wl-addbar-btn {
 	flex-shrink: 0;
-	height: 30px;
-	padding: 0 0.9rem;
+	height: 40px;
+	padding: 0 1.2rem;
 	border: none;
-	border-radius: 8px;
-	font-size: 0.8rem;
+	border-radius: 10px;
+	font-size: 0.95rem;
 	font-weight: 700;
 	letter-spacing: 0.04em;
 	color: #04231f;
@@ -462,7 +462,7 @@ body.has-bottom-nav .page-shell {
 .wl-addbar-btn:active { background: #2fcbb8; }
 
 .wl-add-msg {
-	font-size: 0.76rem;
+	font-size: 0.86rem;
 	margin: -0.3rem 0 0.7rem;
 	min-height: 0;
 }
@@ -505,9 +505,9 @@ body.has-bottom-nav .page-shell {
 }
 
 .watchlist-list {
-	padding: 0.45rem 0.55rem 0.7rem;
+	padding: 0.8rem 0.7rem 1rem;
 	display: grid;
-	gap: 0.4rem;
+	gap: 0.8rem;
 }
 
 /* 兩行式列：上行「名稱＋代號 …… 報價」，下行「標籤 …… 動作」。
@@ -516,13 +516,13 @@ body.has-bottom-nav .page-shell {
 	/* grid item 預設 min-width:auto 會被最長的內容撐開，整列因此橫向溢出 */
 	min-width: 0;
 	border: 1px solid rgba(121, 157, 255, 0.16);
-	border-radius: 12px;
+	border-radius: 16px;
 	/* 底色壓深：名稱與價格是白字，底越深對比越高 */
 	background: rgba(7, 12, 26, 0.78);
-	padding: 0.42rem 0.6rem 0.4rem;
+	padding: 0.95rem 0.9rem 0.8rem;
 	display: flex;
 	flex-direction: column;
-	gap: 0.26rem;
+	gap: 0.7rem;
 	transition: border-color 0.24s ease, background 0.24s ease;
 }
 
@@ -547,10 +547,10 @@ body.has-bottom-nav .page-shell {
 .wl-name {
 	min-width: 0;
 	color: #ffffff;
-	font-size: 0.97rem;
+	font-size: 1.14rem;
 	font-weight: 700;
 	letter-spacing: 0.015em;
-	line-height: 1.26;
+	line-height: 1.3;
 	white-space: normal;
 	overflow-wrap: anywhere;
 	display: -webkit-box;
@@ -563,8 +563,8 @@ body.has-bottom-nav .page-shell {
 .wl-sid {
 	flex-shrink: 0;
 	font-family: "Space Grotesk", ui-monospace, monospace;
-	font-size: 0.75rem;
-	font-weight: 500;
+	font-size: 0.86rem;
+	font-weight: 600;
 	letter-spacing: 0.04em;
 	color: #9dbbe4;
 }
@@ -573,8 +573,8 @@ body.has-bottom-nav .page-shell {
 	flex-shrink: 0;
 	display: flex;
 	align-items: baseline;
-	gap: 0.35rem;
-	font-size: 0.8rem;
+	gap: 0.4rem;
+	font-size: 0.92rem;
 	font-weight: 700;
 	font-variant-numeric: tabular-nums;
 	font-feature-settings: "tnum" 1;
@@ -582,7 +582,7 @@ body.has-bottom-nav .page-shell {
 
 /* 價格是這一列第二重要的資訊，給到跟名稱同級的白 */
 .wl-quote .wq-price {
-	font-size: 0.98rem;
+	font-size: 1.22rem;
 	font-weight: 700;
 	color: #ffffff;
 	letter-spacing: 0.01em;
@@ -602,7 +602,7 @@ body.has-bottom-nav .page-shell {
 /* 盤中那一格不放數字，改寫一句「待收盤顯示股價」：與價格同列但淡下去，不像數字那樣搶眼 */
 .wl-quote-pending {
 	color: var(--text-muted);
-	font-size: 0.75rem;
+	font-size: 0.86rem;
 	font-weight: 500;
 	letter-spacing: 0.02em;
 	white-space: nowrap;
@@ -611,47 +611,28 @@ body.has-bottom-nav .page-shell {
 /* 收盤後還沒拿到今天的收盤價時，標出這個價是哪一天的收盤（例：9/18 收） */
 .wl-quote .wq-date {
 	color: var(--text-muted);
-	font-size: 0.68rem;
+	font-size: 0.78rem;
 	font-weight: 500;
 	white-space: nowrap;
 }
 
-/* 自選列的關卡／均線行（與雷達列同一組文字）：兩段各自不換行，放不下時整段換到下一行 */
-.wl-levels {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.1rem 0.7rem;
-	font-size: 0.72rem;
-	line-height: 1.35;
-	color: var(--text-1);
-	font-variant-numeric: tabular-nums;
-}
-.wl-levels span { white-space: nowrap; }
-.wl-row.is-inactive .wl-levels { opacity: 0.5; }
-
-.wl-row-foot {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	flex-wrap: wrap;
-	gap: 0.34rem 0.5rem;
-	min-width: 0;
-}
+/* 壓／撐／月／季那一行與它的兩個容器 2026-09-22 拿掉（Howard） */
 
 .wl-tags {
 	min-width: 0;
 	display: flex;
 	align-items: center;
-	gap: 0.3rem;
+	gap: 0.4rem;
 	flex-wrap: wrap;
 }
 
+/* 四顆動作鈕自己一排、平均分寬，上面一條分隔線：手指點得到，字也讀得到 */
 .wl-row-actions {
-	flex-shrink: 0;
-	margin-left: auto;
 	display: flex;
-	align-items: center;
-	gap: 0.28rem;
+	align-items: stretch;
+	gap: 0.45rem;
+	padding-top: 0.7rem;
+	border-top: 1px solid rgba(140, 168, 220, 0.16);
 }
 
 /* 動作鈕：24px 的正方形線框鈕，圖示是 currentColor 的 SVG，
@@ -663,15 +644,16 @@ body.has-bottom-nav .page-shell {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 0.2rem;
-	height: 24px;
-	min-width: 24px;
-	padding: 0 0.28rem;
-	border-radius: 7px;
-	border: 1px solid rgba(140, 168, 220, 0.22);
-	background: rgba(255, 255, 255, 0.025);
-	color: #b6c6e2;
-	font-size: 0.72rem;
+	flex: 1 1 0;
+	gap: 0.35rem;
+	height: 40px;
+	min-width: 0;
+	padding: 0 0.4rem;
+	border-radius: 11px;
+	border: 1px solid rgba(140, 168, 220, 0.3);
+	background: rgba(255, 255, 255, 0.04);
+	color: #cfdcf2;
+	font-size: 0.88rem;
 	font-weight: 600;
 	line-height: 1;
 	white-space: nowrap;
@@ -685,21 +667,9 @@ body.has-bottom-nav .page-shell {
 	display: block;
 }
 
-/* 視覺上是 24px，但手指的可點範圍撐到 40px 高。
-   只在觸控裝置上加，滑鼠不需要、加了反而會蓋到隔壁的 hover。 */
-@media (pointer: coarse) {
-	.wl-icon-btn::after,
-	.wl-events-btn::after {
-		content: "";
-		position: absolute;
-		inset: -8px -2px;
-	}
-}
-
-/* 標籤只在桌機出現 */
+/* 2026-09-22 起手機也顯示文字：只有圖示的按鈕沒人看得懂（Howard：按鈕都要顯著） */
 .wl-ic-label {
-	display: none;
-	padding-right: 0.14rem;
+	display: inline;
 }
 
 .wl-ic-count {
@@ -1480,62 +1450,25 @@ body.has-bottom-nav .qa-panel {
 	}
 
 	.watchlist-list {
-		padding: 0.55rem 0.8rem 0.8rem;
-		gap: 0.35rem;
+		padding: 0.9rem 0.9rem 1.1rem;
+		gap: 0.7rem;
 	}
 
-	/* 桌機寬度夠，兩行併回一行：display:contents 讓 head／foot 消失，
-	   它們的子元素直接變成 .wl-row 的 flex item，再用 order 重排成
-	   名稱 ─ 標籤 ─ 報價 ─ 動作。報價給固定最小寬度，價格才會對齊成一欄。 */
+	/* 桌機不再把整列併成一行（2026-09-22）：四顆帶文字的按鈕加上標籤要將近 900px，
+	   768–1000px 之間一定擠爆。改成同一種直式卡片，只是留白更大、名稱不折行。 */
 	.wl-row {
-		flex-direction: row;
-		align-items: center;
-		gap: 0.6rem;
-		padding: 0.42rem 0.85rem;
-	}
-
-	.wl-row-head,
-	.wl-row-foot {
-		display: contents;
-	}
-
-	.wl-ident {
-		order: 1;
-		flex: 1 1 auto;
-		align-items: baseline;
-	}
-
-	.wl-tags {
-		order: 2;
-		flex: 0 0 auto;
-	}
-
-	.wl-quote {
-		order: 3;
-		flex: 0 0 auto;
-		min-width: 132px;
-		justify-content: flex-end;
-	}
-
-	.wl-row-actions {
-		order: 4;
-		margin-left: 0;
-	}
-
-	.wl-name {
-		font-size: 1rem;
-		-webkit-line-clamp: 1;
-	}
-
-	/* 桌機才放得下文字，圖示旁補上標籤 */
-	.wl-ic-label {
-		display: inline;
+		padding: 1.05rem 1.15rem 0.9rem;
+		gap: 0.75rem;
 	}
 
 	.wl-icon-btn,
 	.wl-events-btn {
-		height: 26px;
-		padding: 0 0.4rem;
+		height: 42px;
+		font-size: 0.92rem;
+	}
+
+	.wl-name {
+		-webkit-line-clamp: 1;
 	}
 }
 
@@ -1684,8 +1617,8 @@ body.has-bottom-nav .qa-panel {
 	background: rgba(255, 255, 255, 0.03);
 	color: var(--text-1);
 	border-radius: 999px;
-	padding: 0.3rem 0.85rem;
-	font-size: 0.78rem;
+	padding: 0.42rem 1rem;
+	font-size: 0.88rem;
 	cursor: pointer;
 	transition: all 0.15s;
 	white-space: nowrap;
@@ -2204,7 +2137,7 @@ body.has-bottom-nav .qa-panel {
 .rule-card {
 	background: rgba(7, 12, 26, 0.7);
 	border: 1px solid rgba(121, 157, 255, 0.16);
-	border-radius: 12px;
+	border-radius: 16px;
 	padding: 0.62rem 0.72rem 0.55rem;
 	margin-bottom: 0.45rem;
 	transition: border-color 0.18s ease, background 0.18s ease;
@@ -2663,11 +2596,11 @@ body.has-bottom-nav .qa-panel {
 .wl-signal-badge {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.3rem;
-	font-size: 0.69rem;
-	font-weight: 500;
-	line-height: 1;
-	padding: 0.28rem 0.5rem;
+	gap: 0.35rem;
+	font-size: 0.82rem;
+	font-weight: 600;
+	line-height: 1.1;
+	padding: 0.38rem 0.7rem;
 	border-radius: 999px;
 	border: 1px solid rgba(146, 146, 163, 0.24);
 	background: rgba(255, 255, 255, 0.045);
@@ -3027,7 +2960,7 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	flex-direction: column;
 	background: rgba(7, 12, 26, 0.7);
 	border: 1px solid rgba(121, 157, 255, 0.16);
-	border-radius: 12px;
+	border-radius: 16px;
 	padding: 0.75rem 0.8rem;
 }
 .plan-card.is-current {
