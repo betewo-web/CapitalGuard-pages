@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="154">
+  <meta name="app-version" content="155">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=154" rel="stylesheet">
+  <link href="watchlist.css?v=155" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -372,20 +372,19 @@
       </div>
       <div id="add-msg" class="wl-add-msg"></div>
 
-      <!-- 自選股清單（篩選 chips 收進標題列，省下一整行） -->
+      <!-- 自選股清單。篩選籤（全部／有訊號／上漲／下跌／持股）2026-09-22 整行拿掉（Howard）：
+           它們篩的是股價與訊號，而那些值已經不在這一頁上了。
+           「通知」也從每一列抽出來放到這裡——一次設定完幾檔比一列一列點快。 -->
       <div class="card panel-card">
         <div class="card-header wl-panel-head">
           <div class="wl-panel-head-top">
             <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
-            <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-rules-btn" onclick="openRulesModal()"
-                    title="用條件組合自訂通知，全部成立才發送">自訂規則</button>
-          </div>
-          <div class="chip-row chip-row-inline" id="watch-filters">
-            <button class="filter-chip active" data-f="all" onclick="setWatchFilter('all')">全部</button>
-            <button class="filter-chip" data-f="signal" onclick="setWatchFilter('signal')">有訊號</button>
-            <button class="filter-chip" data-f="up" onclick="setWatchFilter('up')">上漲</button>
-            <button class="filter-chip" data-f="down" onclick="setWatchFilter('down')">下跌</button>
-            <button class="filter-chip" data-f="holding" onclick="setWatchFilter('holding')">持股</button>
+            <span class="wl-head-actions">
+              <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-alerts-btn" onclick="openAlertSettingsPicker()"
+                      title="設定每一檔要收哪些通知">🔔 通知</button>
+              <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-rules-btn" onclick="openRulesModal()"
+                      title="用條件組合自訂通知，全部成立才發送">自訂規則</button>
+            </span>
           </div>
         </div>
         <div class="card-body p-0">
@@ -563,6 +562,13 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3">
+        <!-- 2026-09-22：通知從每一列抽到設定頁標題列，所以要能在這裡換股票。
+             每個開關都是按一下就存（onAlertSettingToggle → updateAlert），切換股票不會掉東西。 -->
+        <div class="alert-stock-row">
+          <label class="alert-stock-label" for="alert-stock-select">股票</label>
+          <select id="alert-stock-select" class="form-select form-select-sm alert-stock-select"
+                  onchange="openAlertSettings(this.value)"></select>
+        </div>
         <div class="d-flex justify-content-end gap-2 mb-2">
           <button type="button" class="btn btn-sm btn-outline-light" onclick="setAllAlertSettings(true)">全開</button>
           <button type="button" class="btn btn-sm btn-outline-light" onclick="setAllAlertSettings(false)">全關</button>
@@ -1115,7 +1121,6 @@ let intradaySupportsLevels = true;   // migrate_intraday_levels.sql 未執行時
 let intradayOptionalCols = ["levels", "quote_at", "signals_today"];
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
-let watchFilter = "all";        // all / signal / up / down / holding
 let scoresFilter = "mine";      // mine / screen / picks
 
 // ── 事件彙整功能（Feature 2）────────────────────────────────────
@@ -4863,26 +4868,8 @@ function fmtChgHtml(chg) {
   return `<span class="${cls}">${chg > 0 ? "+" : ""}${chg.toFixed(2)}%</span>`;
 }
 
-function latestSignalOf(sid) {
-  const q = intradayQuoteMap?.[sid];
-  if (q && q.signal && q.signal !== "none") {
-    return {
-      stock_id: sid,
-      signal: q.signal,
-      severity: q.severity || "none",
-      signal_at: q.signal_at || null,
-      updated_at: q.updated_at || null,
-      source: "intraday_state",
-    };
-  }
-  for (const r of inboxRows) {
-    if (String(r.stock_id || "").trim() === sid && isToday(r.sent_at)) {
-      const src = String(r.source || "monitor");
-      if (src === "monitor" || src === "post_market" || src === "postmarket") return r;
-    }
-  }
-  return null;
-}
+
+// 收盤後向 FinMind 補當天收盤價：只補還沒拿到今天收盤的，最多每 30 分鐘一輪
 
 // ── PWA v2: 通知 Inbox ───────────────────────────────────────────
 // 後端把通知標題組成「{代號} {名稱} …」（realtime.py 的 label）。列表與詳情只從名稱起顯示：
@@ -6969,38 +6956,15 @@ async function loadWatchlist() {
   loadStockEvents(sids).then(() => renderCurrentTab());
 }
 
-function setWatchFilter(f) {
-  watchFilter = f;
-  document.querySelectorAll("#watch-filters .filter-chip").forEach(c =>
-    c.classList.toggle("active", c.dataset.f === f));
-  renderWatchlist(watchlistRows);
-}
-
-function filteredWatchRows(rows) {
-  if (watchFilter === "signal") {
-    return rows.filter(r => latestSignalOf(String(r.stock_id).trim()));
-  }
-  if (watchFilter === "holding") {
-    const holds = holdingBySid();
-    return rows.filter(r => holds.has(String(r.stock_id).trim()));
-  }
-  if (watchFilter === "up" || watchFilter === "down") {
-    // 漲／跌篩選跟列上顯示的是同一個收盤漲跌幅（盤中就是前一個交易日的）
-    return rows.filter(r => {
-      const q = getCloseQuote(String(r.stock_id).trim());
-      if (!q || q.changePct === null) return false;
-      return watchFilter === "up" ? q.changePct > 0 : q.changePct < 0;
-    });
-  }
-  return rows;
-}
+// 篩選籤（全部／有訊號／上漲／下跌／持股）2026-09-22 隨那一行一起移除：股價與訊號都不在這一頁了，
+// 篩選的兩支函式與狀態變數一併刪掉，清單就是自選股的原順序。latestSignalOf 也跟著走（只有它在用）。
 
 function renderWatchlist(rows) {
   const grid = document.getElementById("wl-grid");
   if (!grid) return;
   grid.innerHTML = "";
   renderWatchCount(rows.length);
-  const visible = filteredWatchRows(rows);
+  const visible = rows;
   const emptyEl = document.getElementById("wl-empty");
   emptyEl.style.display = visible.length ? "none" : "";
   emptyEl.textContent = rows.length
@@ -7008,8 +6972,7 @@ function renderWatchlist(rows) {
     : "尚未加入任何股票，從上方搜尋並加入吧！";
   grid.style.display = visible.length ? "block" : "none";
 
-  // 收盤價已經搬到「🌙 盤後」：這一頁不再讀任何報價（漲／跌篩選仍然用 getCloseQuote，
-  // 在 filteredWatchRows 裡）。
+  // 收盤價、事件、持股都在「🌙 盤後」：這一頁不再讀任何報價。
 
   visible.forEach(row => {
     const sid = String(row.stock_id || "").trim();
@@ -7027,8 +6990,8 @@ function renderWatchlist(rows) {
     item.className = active ? "wl-row" : "wl-row is-inactive";
     item.dataset.id = row.id;
     item.dataset.sid = sid;
-    // 2026-09-22：字與按鈕都放大、上下更寬鬆；由上而下＝名稱＋代號／（超出方案）／
-    // 兩顆帶文字的按鈕。收盤價、事件、持股與 K 線都在「🌙 盤後」那一頁。
+    // 2026-09-22：列上只剩名稱＋代號／（超出方案）／一顆「移除」。
+    // 收盤價、事件、持股與 K 線在「🌙 盤後」，通知改從標題列那顆「🔔 通知」一次設定。
     item.innerHTML = `
       <div class="wl-row-head">
         <div class="wl-ident">
@@ -7038,7 +7001,6 @@ function renderWatchlist(rows) {
       </div>
       ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
       <div class="wl-row-actions">
-        <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${jsAttr(row.id)}')">${ICON_BELL}<span class="wl-ic-label">通知</span></button>
         <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}<span class="wl-ic-label">移除</span></button>
       </div>
     `;
@@ -7110,6 +7072,7 @@ function renderPost() {
       }
     }
     // 事件：有幾件寫幾件，點整塊開事件面板（與首頁的「N 件資料」同一個面板）
+    // 事件條與 K 線同一列（2026-09-22）：有事件時事件條吃掉剩下的寬度，沒有就只有 K 線
     const evLine = r.events.length
       ? `<button type="button" class="post-ev" onclick="openEventsPanel('${jsAttr(r.sid)}')">
            ${ICON_EVENTS}<span>今日 ${r.events.length} 件資料</span><span class="post-ev-go">查看 →</span>
@@ -7122,10 +7085,10 @@ function renderPost() {
         ${quote}
       </div>
       ${facts.length ? `<div class="post-facts">${facts.join("")}</div>` : ""}
-      ${evLine}
       <div class="post-actions">
-        <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(r.sid)}"
-                onclick="openKLineFromWatchlist('${jsAttr(r.sid)}')">${ICON_CHART}<span class="wl-ic-label">看 K 線</span></button>
+        ${evLine}
+        <button class="wl-icon-btn post-kline" title="K線分析" aria-label="K線分析 ${escapeHtml(r.sid)}"
+                onclick="openKLineFromWatchlist('${jsAttr(r.sid)}')">${ICON_CHART}<span class="wl-ic-label">K 線</span></button>
       </div>
     </article>`;
   }).join("");
@@ -7141,6 +7104,16 @@ function getWatchlistRowById(rowId) {
   return watchlistRows.find(r => String(r.id) === String(rowId));
 }
 
+// 設定頁標題列的「🔔 通知」：通知不再掛在每一列上，從這裡挑股票設定（2026-09-22 Howard）
+function openAlertSettingsPicker() {
+  if (!watchlistRows.length) {
+    const msgEl = document.getElementById("add-msg");
+    if (msgEl) msgEl.innerHTML = '<span class="text-warning">還沒有自選股，先用上面的「新增」加一檔</span>';
+    return;
+  }
+  openAlertSettings(watchlistRows[0].id);
+}
+
 function openAlertSettings(rowId) {
   const row = getWatchlistRowById(rowId);
   if (!row) return;
@@ -7150,6 +7123,16 @@ function openAlertSettings(rowId) {
   const fallbackName = universe[sid]?.n || "";
   const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
   document.getElementById("alert-settings-title").textContent = `通知設定｜${displayName} ${sid}`;
+  // 股票下拉：每次開都重建（自選股可能剛增減），選中目前這一檔
+  const pick = document.getElementById("alert-stock-select");
+  if (pick) {
+    pick.innerHTML = watchlistRows.map(r => {
+      const s2 = String(r.stock_id || "").trim();
+      const n2 = getPreferredStockName(s2, r.stock_name) || universe[s2]?.n || s2;
+      return `<option value="${jsAttr(String(r.id))}">${escapeHtml(`${n2} ${s2}`)}</option>`;
+    }).join("");
+    pick.value = String(rowId);
+  }
 
   // 盤中即時
   document.getElementById("alert-break-support").checked    = !!row.alert_break_support;

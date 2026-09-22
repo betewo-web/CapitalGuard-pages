@@ -251,6 +251,20 @@ body.has-bottom-nav .page-shell {
 }
 
 /* 標題與「自訂規則」永遠同一排，按鈕靠最右；手機上也不換行 */
+/* 標題列右側：🔔 通知／自訂規則 兩顆並排（2026-09-22：通知從每一列抽上來） */
+.wl-head-actions { display: inline-flex; gap: 0.45rem; flex-wrap: wrap; justify-content: flex-end; }
+
+/* 通知設定視窗頂端的股票下拉：通知改從標題列進來，要能在裡面換股票 */
+.alert-stock-row {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	margin-bottom: 0.9rem;
+}
+
+.alert-stock-label { flex: 0 0 auto; font-size: 0.86rem; font-weight: 700; color: var(--text-1); }
+.alert-stock-select { flex: 1 1 auto; min-width: 0; font-size: 0.95rem; }
+
 .wl-panel-head-top {
 	display: flex;
 	align-items: center;
@@ -1857,8 +1871,10 @@ body.has-bottom-nav .qa-panel {
 .post-ev-go { margin-left: auto; color: var(--accent); font-weight: 700; white-space: nowrap; }
 .post-ev:active { transform: scale(0.99); }
 
-/* K 線 2026-09-22 從設定頁搬來這裡：卡片底部一顆整寬的按鈕，樣式與設定頁那兩顆同一套 */
-.post-actions { display: flex; }
+/* 卡片底部一列：有事件時「今日 N 件資料」吃掉剩下的寬度，K 線固定在右邊 */
+.post-actions { display: flex; align-items: stretch; gap: 0.5rem; }
+.post-actions .post-ev { flex: 1 1 auto; width: auto; }
+.post-actions .post-kline { flex: 0 0 auto; min-width: 104px; }
 
 /* 連結是紫（可點）不是金：金／橘留給「需要注意」（色彩語彙規則四，2026-09-20 改） */
 .home-sec-title .hs-link,
