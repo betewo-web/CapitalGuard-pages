@@ -641,14 +641,16 @@ body.has-bottom-nav .page-shell {
 	flex-wrap: wrap;
 }
 
-/* 四顆動作鈕自己一排、平均分寬，上面一條分隔線：手指點得到，字也讀得到 */
+/* 2026-09-22：設定列上只剩「移除」，與名稱同一排靠右——不再是自己一排、也不需要分隔線 */
 .wl-row-actions {
+	flex: 0 0 auto;
+	margin-left: auto;
 	display: flex;
-	align-items: stretch;
+	align-items: center;
 	gap: 0.45rem;
-	padding-top: 0.7rem;
-	border-top: 1px solid rgba(140, 168, 220, 0.16);
 }
+
+.wl-row-actions .wl-icon-btn { flex: 0 0 auto; padding: 0 0.9rem; }
 
 /* 動作鈕：24px 的正方形線框鈕，圖示是 currentColor 的 SVG，
    hover／停用態變色時圖示會跟著變（emoji 做不到這件事）。
@@ -1478,7 +1480,7 @@ body.has-bottom-nav .qa-panel {
 
 	.wl-icon-btn,
 	.wl-events-btn {
-		height: 42px;
+		height: 40px;
 		font-size: 0.92rem;
 	}
 

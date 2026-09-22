@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="156">
+  <meta name="app-version" content="157">
   <title>管理儀表板 — 台股監控</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -232,7 +232,7 @@
     <div class="card span-12" id="c-watchadds"></div>
   </div>
 
-  <h2 class="sec">自訂規則 <small>條件型別、層別與使用者分布</small></h2>
+  <h2 class="sec">進階訊號 <small>條件型別、層別與使用者分布</small></h2>
   <div class="tiles" id="rule-tiles" style="margin-bottom:.8rem"></div>
   <div class="grid">
     <div class="card span-8" id="c-ruletypes"></div>
@@ -413,7 +413,7 @@ const RULE_TYPE_INFO = {
   roe_above:        ["fundamental", "ROE 高於"],
 };
 const SOURCE_LABELS = {
-  monitor: "盤中訊號", rule: "自訂規則", post_market: "盤後提醒", postmarket: "盤後提醒（舊）",
+  monitor: "盤中訊號", rule: "進階訊號", post_market: "盤後提醒", postmarket: "盤後提醒（舊）",
   daily_report: "每日報告", daily_report_web_push: "每日報告", daily_report_line: "每日報告（LINE，已停用）",
 };
 const KIND_LABELS = {
@@ -664,7 +664,7 @@ function renderAll(s) {
     tile("付費訂閱", fmtInt(paid), { text: `手動指派 ${fmtInt(manual)} · 7 日內到期 ${fmtInt(p.subscriptions.expiring_7d)}`, cls: p.subscriptions.expiring_7d ? "warn" : "" }),
     tile("月經常收入 MRR", fmtMoney(p.mrr_twd), { text: `手動指派等值 ${fmtMoney(p.mrr_manual_twd)}` }),
     tile("自選股（筆）", fmtInt(w.total), { text: `${fmtInt(w.distinct_stocks)} 檔 · 每人 ${w.avg_per_user ?? 0}` }),
-    tile("自訂規則", fmtInt(r.total), { text: `其中真實使用者 ${fmtInt(r.total_real)} 條 · ${fmtInt(r.users_real)} 人` }),
+    tile("進階訊號", fmtInt(r.total), { text: `其中真實使用者 ${fmtInt(r.total_real)} 條 · ${fmtInt(r.users_real)} 人` }),
     tile("推播裝置", fmtInt(al.push_subscriptions.total), { text: `${fmtInt(al.push_subscriptions.users)} 人已開通知（${fmtPct(al.push_subscriptions.users, u.total)}）`, cls: al.push_subscriptions.users < u.total ? "warn" : "up" }),
   ].join("");
 
@@ -800,7 +800,7 @@ function renderAll(s) {
   if (card("c-ruletypes", "條件型別", "不含管理者。每種條件出現的次數，顏色＝評估層別",
       { head: ["條件", "層別", "次數", "規則數", "人數"], rows: types.map(x => [x.name, TIER_LABELS[x.tier] || x.tier, x.n, x.rules, x.users]),
         legend: tierOrder.map((t, i) => ({ name: `${TIER_LABELS[t]}（${tierTotals[i][1]}）`, color: S[i] })),
-        empty: "真實使用者目前沒有任何自訂規則", tall: types.length > 8 })) {
+        empty: "真實使用者目前沒有任何進階訊號", tall: types.length > 8 })) {
     mountChart("c-ruletypes", { ...baseOption(), grid: { left: 8, right: 40, top: 8, bottom: 4, containLabel: true },
       tooltip: { ...baseOption().tooltip, formatter: ps => ps.map(p => { const t = types[p.dataIndex]; return `${p.marker}${escapeHtml(t.name)}（${TIER_LABELS[t.tier] || ""}）　<b>${fmtInt(t.n)}</b> 次 · ${fmtInt(t.rules)} 條規則 · ${fmtInt(t.users)} 人`; }).join("<br>") },
       xAxis: axisVal({ splitLine: { show: false }, axisLabel: { show: false } }), yAxis: axisCat(types.map(x => x.name), { inverse: true }),

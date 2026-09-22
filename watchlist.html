@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="156">
+  <meta name="app-version" content="157">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=156" rel="stylesheet">
+  <link href="watchlist.css?v=157" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -279,7 +279,7 @@
         </div>
       </div>
 
-      <!-- 自訂規則推薦：規則數未達 RULE_NUDGE_TARGET 條時顯示一行，內容由 renderRuleNudge() 畫；
+      <!-- 進階訊號推薦：規則數未達 RULE_NUDGE_TARGET 條時顯示一行，內容由 renderRuleNudge() 畫；
            達標、沒有自選股、或按過「稍後再說」（7 天）就收起 -->
       <div class="home-nudge" id="home-rule-nudge" style="display:none">
         <div id="home-rule-nudge-body"></div>
@@ -373,12 +373,12 @@
       <div id="add-msg" class="wl-add-msg"></div>
 
       <!-- 自選股清單。2026-09-22（Howard）：篩選籤整行、「我的自選股 N」標題都拿掉，
-           標題列只剩兩顆並排的按鈕——標準訊號（每檔要收哪些內建通知）與進階訊號（條件組合的自訂規則）。 -->
+           標題列只剩兩顆並排的按鈕——基礎訊號（每檔要收哪些內建通知）與進階訊號（條件組合的進階訊號）。 -->
       <div class="card panel-card">
         <div class="card-header wl-panel-head">
           <div class="wl-head-actions">
             <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-alerts-btn" onclick="openAlertSettingsPicker()"
-                    title="每一檔要收哪些內建訊號的通知">🔔 標準訊號</button>
+                    title="每一檔要收哪些內建訊號的通知">🔔 基礎訊號</button>
             <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-rules-btn" onclick="openRulesModal()"
                     title="用條件組合自訂通知，全部成立才發送">進階訊號</button>
           </div>
@@ -410,11 +410,11 @@
   </button>
 </nav>
 
-<!-- ── 自訂規則：清單與編輯器共用同一個面板 ────────────────────────
+<!-- ── 進階訊號：清單與編輯器共用同一個面板 ────────────────────────
      兩個 modal 互相切換時，Bootstrap 得先把上層淡出、backdrop 收掉，
      再淡入下層——中間那一格沒有任何 modal，畫面會閃一下自選清單。
      改成同一個面板換內容，就沒有那個空檔了。 -->
-<!-- 自訂規則推薦彈窗：開啟 App 時主動跳出，條件與首頁卡片相同，另外再加頻率上限。
+<!-- 進階訊號推薦彈窗：開啟 App 時主動跳出，條件與首頁卡片相同，另外再加頻率上限。
      內容由 renderRuleNudgePopup() 畫；不用 Web Push 是刻意的，見 maybeShowRuleNudgePopup() 註解。 -->
 <div class="modal fade sheet-modal" id="ruleNudgeModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -554,7 +554,7 @@
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
-        <h5 class="mb-0" id="alert-settings-title">標準訊號</h5>
+        <h5 class="mb-0" id="alert-settings-title">基礎訊號</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3">
@@ -1786,13 +1786,13 @@ function nextPlanFor(kind) {
 // 官網 index／pricing／faq 三頁寫的是同一句（test_marketing_site 以種子數字比對），改字要一起改
 function planPitch(p) {
   const free = (planState.plans || []).find(x => x.price_twd === 0) || { watch_limit: 3 };
-  return `${p.name}適合持股加觀察名單超過 ${free.watch_limit} 檔的人：NT$${p.price_twd}／月、${p.watch_limit} 檔自選股、${p.rule_limit} 條自訂規則。`;
+  return `${p.name}適合持股加觀察名單超過 ${free.watch_limit} 檔的人：NT$${p.price_twd}／月、${p.watch_limit} 檔自選股、${p.rule_limit} 條進階訊號。`;
 }
 
 // 上限提示是天然的轉換點：說清楚下一個方案多少錢、能放多少，按鈕直接開到那張卡
 // （以前是提示→面板→找方案→按升級，四步；現在兩步）
 function limitPromptHtml(kind, err) {
-  const what = kind === "watchlist" ? "自選股" : "自訂規則";
+  const what = kind === "watchlist" ? "自選股" : "進階訊號";
   const unit = kind === "watchlist" ? "檔" : "條";
   const lim = kind === "watchlist" ? "watch_limit" : "rule_limit";
   const next = nextPlanFor(kind);
@@ -2017,7 +2017,7 @@ function renderPlanModal(focus) {
     ai:          "🤖 AI 事件解讀與 AI 問答是專業版功能。",
     ai_limit:    "🤖 今日 AI 使用次數已達上限，明天會重置。",
     watchlist:   "⭐ 自選股已達目前方案上限，升級即可加入更多。",
-    alert_rules: "📐 自訂規則已達目前方案上限，升級即可新增更多。",
+    alert_rules: "📐 進階訊號已達目前方案上限，升級即可新增更多。",
     deeplink:    pitch || "從官網過來的：先看看目前方案的用量，需要再升級。",
     paid:        "付款結果以綠界回呼為準。若方案尚未更新，請稍後再開啟這個面板確認。",
     pay_failed:  "綠界回報這次付款未成功，沒有扣款也沒有開通。可以重新選擇方案再試一次。",
@@ -2033,7 +2033,7 @@ function renderPlanModal(focus) {
       </div>
       <div class="plan-meters">
         ${meterHtml("⭐ 自選股", u.watchlist || 0, p.watch_limit)}
-        ${meterHtml("📐 自訂規則", u.rules || 0, p.rule_limit)}
+        ${meterHtml("📐 進階訊號", u.rules || 0, p.rule_limit)}
         ${p.ai_enabled ? meterHtml("🤖 今日 AI 次數", u.ai_today || 0, p.ai_daily_limit) : ""}
       </div>
       ${subscriptionStatusHtml()}
@@ -2769,7 +2769,7 @@ async function renderOnboarding() {
     const blockedCopy = _obPushBlockedShown ? _pushBlockedCopy() : null;
     if (_obPushBlockedShown) {
       body.innerHTML = `<p>${blockedCopy.lead}</p>
-         <p>開啟之後，<b>自訂規則成立、盤後報告完成、自選股有新事件</b>才會主動通知你；關著的話，這些只能等你自己想到打開 App 才看得到。</p>
+         <p>開啟之後，<b>進階訊號成立、盤後報告完成、自選股有新事件</b>才會主動通知你；關著的話，這些只能等你自己想到打開 App 才看得到。</p>
          <p class="ob-lead-sm">${blockedCopy.how}</p>
          <ol class="ob-ol">${_pushUnblockSteps().map(t => `<li>${t}</li>`).join("")}</ol>
          ${_pushUnblockFallback() ? `<p class="ob-note ob-fallback">${_pushUnblockFallback()}</p>` : ""}
@@ -2777,14 +2777,14 @@ async function renderOnboarding() {
     } else if (_obPushView === "why") {
       body.innerHTML = `<p><b>沒有通知，等於只剩一半的服務。</b></p>
          <ul class="ob-ol">
-           <li>自訂規則成立的當下就告訴你——事後才打開 App 是補不回來的</li>
+           <li>進階訊號成立的當下就告訴你——事後才打開 App 是補不回來的</li>
            <li>盤後報告產出、自選股有新事件時提醒你去看</li>
            <li>不開啟的話，這些只會留在 App 的「通知」分頁，要你自己想到才看得到</li>
          </ul>
          <p class="ob-note">按「好，開啟通知」之後，<b>瀏覽器會問你一次</b>，請選「允許」。</p>
          <div id="ob-push-msg" class="ob-note" role="status" aria-live="polite"></div>`;
     } else {
-      body.innerHTML = `<p>自訂規則成立、盤後報告完成、自選股有新事件時，通知會直接送到這台裝置。</p>
+      body.innerHTML = `<p>進階訊號成立、盤後報告完成、自選股有新事件時，通知會直接送到這台裝置。</p>
          <p class="ob-note">按下去之後，<b>瀏覽器會問你一次</b>，請選「允許」。這個詢問一台裝置只會出現一次，選了「不允許」就得進系統設定才改得回來。</p>
          <div id="ob-push-msg" class="ob-note" role="status" aria-live="polite"></div>`;
     }
@@ -3987,7 +3987,7 @@ const SIGNAL_ICON_ART = {
   volume_spike: { inner: _icoBars(true) },
   target_high:  { inner: _icoTarget(true) },
   target_low:   { inner: _icoTarget(false) },
-  // ── 自動偵測／自訂規則的條件（key 與 SIGNAL_ABBR、後端 AUTO_CATALOG 同一組）──
+  // ── 自動偵測／進階訊號的條件（key 與 SIGNAL_ABBR、後端 AUTO_CATALOG 同一組）──
   break_prior_high:     { inner: _icoCrossUp(false) },
   break_prior_low:      { inner: _icoCrossDn(false) },
   break_52w_high:       { inner: _ico52w(true) },
@@ -4005,7 +4005,7 @@ const SIGNAL_ICON_ART = {
   "macd_cross:up":      { inner: _icoMacd(true) },
   "macd_cross:down":    { inner: _icoMacd(false) },
   // ── 非盤中來源：自己畫的路徑，不用現成圖庫。底色一樣依等級著色 ──
-  // 自訂規則：三條可調滑桿，滑塊各在不同位置——「條件是使用者自己調的」
+  // 進階訊號：三條可調滑桿，滑塊各在不同位置——「條件是使用者自己調的」
   rule: { inner:
       '<g stroke="#fff" stroke-width="2.4" stroke-linecap="round" opacity=".55">'
     + '<line x1="9" y1="14" x2="39" y2="14"/><line x1="9" y1="24" x2="39" y2="24"/>'
@@ -4152,7 +4152,7 @@ const RULE_CATALOG = [
 
 const RULE_CATALOG_BY_TYPE = Object.fromEntries(RULE_CATALOG.map(c => [c.type, c]));
 
-// ── 自訂規則推薦（rule nudge）────────────────────────────────────
+// ── 進階訊號推薦（rule nudge）────────────────────────────────────
 // 規則少於 RULE_NUDGE_TARGET 條的使用者（免費版或付費版都一樣）在首頁看到
 // 一張卡：目前幾條、幾條可一鍵加入的範本、以及進編輯器的入口。
 // 範本只是「預先填好參數的目錄條目」：type 與參數名必須是 RULE_CATALOG 裡有的
@@ -4345,7 +4345,7 @@ function renderPushNudgePopup() {
        用 Chrome 登入後點「⋮ → 加到主畫面」裝起來，再按首頁的「啟用通知」。</div>`
     : `<div class="rule-nudge-lead">你尚未開啟推播通知。</div>
        <ul class="small ps-3 mb-2">
-         <li>自訂規則的條件成立時，通知會直接送到這台裝置</li>
+         <li>進階訊號的條件成立時，通知會直接送到這台裝置</li>
          <li>盤後報告完成、自選股有新事件時也會提醒</li>
          <li>未開啟時，這些資訊只能打開 App 才看得到</li>
        </ul>
@@ -4425,7 +4425,7 @@ function renderRuleNudge() {
   // 一行就好（2026-09-20 把大卡拿掉）：新用戶第一眼要看到的是自己的股票，不是設定教學。
   // 範本一鍵加入仍在規則編輯器與開機彈窗（renderRuleNudgePopup）裡
   body.innerHTML = `
-    <span class="home-nudge-text">📐 自訂規則 ${n}／${target} 條 · 條件由你決定</span>
+    <span class="home-nudge-text">📐 進階訊號 ${n}／${target} 條 · 條件由你決定</span>
     <span class="home-nudge-actions">
       <span class="hs-link" onclick="openRuleEditorFromNudge()">設定 →</span>
       <span class="hs-link home-nudge-later" onclick="snoozeRuleNudge()" title="7 天內不再顯示">稍後</span>
@@ -4489,7 +4489,7 @@ const SIGNAL_LABEL_MAP = {
 
 // ── 雷達縮寫表：訊號 key → 兩個字（RSI／MACD 例外）─────────────────────────
 // key 與後端同一組：內建訊號＝detect_alerts 的 kind，自動偵測＝monitor/auto_signals.py 的
-// AUTO_CATALOG（條件型別，有方向的加「:變體」），自訂規則命中則由規則條件經 conditionKey()
+// AUTO_CATALOG（條件型別，有方向的加「:變體」），進階訊號命中則由規則條件經 conditionKey()
 // 對到同一張表；test_pwa_tabs 與 test_auto_signals 雙向比對。
 // 兩個字的理由：一列要塞得下 6–8 顆、由左到右一眼掃完當天的順序；全名留給時間軸的故事列。
 const SIGNAL_ABBR = {
@@ -4548,7 +4548,7 @@ function inferSeverity(row) {
   const kind = signalKindOf(row);
   if (ORANGE_KINDS.includes(kind)) return "orange";
   if (BLUE_KINDS.includes(kind))   return "blue";
-  // 自訂規則的等級由後端依條件推導，直接採用
+  // 進階訊號的等級由後端依條件推導，直接採用
   const s = String(row.severity || "").toLowerCase();
   if (LEGACY_SEV[s]) return LEGACY_SEV[s];
   if (SEV_META[s])   return s;
@@ -4570,7 +4570,7 @@ function alertGlyph(row) {
 function alertTypeLabel(row) {
   const sig = signalKindOf(row);
   if (sig && SIGNAL_LABEL_MAP[sig]) return SIGNAL_LABEL_MAP[sig];
-  if (String(row.source || "") === "rule") return "自訂規則";
+  if (String(row.source || "") === "rule") return "進階訊號";
   const t = String(row.title || "");
   const m = t.match(/(跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|帶量上漲|帶量下跌|帶量上攻|帶量下殺|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
   if (m) return m[1].replace("達到自訂", "");
@@ -5139,7 +5139,7 @@ function openInboxDetail(rowId) {
   const isDailyReport = String(source || "").startsWith("daily_report");
   document.getElementById("alert-history-open-report-btn").style.display = isDailyReport ? "inline-flex" : "none";
 
-  // 自訂規則的通知才給停用按鈕。狀態型條件（ROE、毛利率…）會天天成立，
+  // 進階訊號的通知才給停用按鈕。狀態型條件（ROE、毛利率…）會天天成立，
   // 使用者要能從通知本身直接關掉，而不是自己回去翻規則清單。
   const stopBtn = document.getElementById("alert-history-stop-rule-btn");
   stopBtn.style.display = ruleIdFromEventKey(row) ? "inline-flex" : "none";
@@ -5494,7 +5494,7 @@ function _nearestFromLevels(lv, price) {
 
 
 // 這檔股票今天觸發過的訊號（通知紀錄的今日列；最新在前）。
-// 來源收監控、盤後與自訂規則：規則通知也是「這檔今天有動靜」，以前只收監控與盤後，
+// 來源收監控、盤後與進階訊號：規則通知也是「這檔今天有動靜」，以前只收監控與盤後，
 // 一檔只被規則打到的股票在通知頁有一則、雷達卻寫「今日無訊號」（2026-09-14 鈺創）。
 // 每日報告不收——它沒有 stock_id，本來就對不到任何一列。
 // 列上的訊號徽章與「有訊號」計數仍只看 intraday_state 的內建訊號，這裡不影響。
@@ -5954,7 +5954,7 @@ function _signalLevelLabel(signal, level, compact = false) {
 // ── 盤中雷達：當日故事（訊號序列）與時間軸 ─────────────────────────────────
 // 資料三來源都在記憶體，不需要動後端就能重繪：
 //   1. intraday_state.signals_today（monitor 每輪寫的當日序列：內建訊號＋自動偵測，每種只記第一次）
-//   2. alert_history 當日列：自訂規則命中（每位使用者自己的）、自訂價位（target_*）、盤後提醒；
+//   2. alert_history 當日列：進階訊號命中（每位使用者自己的）、自訂價位（target_*）、盤後提醒；
 //      monitor 還沒升級（signals 為 null）時內建訊號也退回這裡
 //   3. intraday_state.signal（進行中）：日誌還沒收到它（突破要兩輪確認）時先補一顆
 // 「今天」以雷達的交易日為準：intraday_state 最後一次報價的台北日期。收盤後、週末看到的是
@@ -5968,7 +5968,7 @@ function radarSessionDate() {
   return (latest && taipeiDateKey(latest)) || taipeiDateKey(new Date());
 }
 
-// 自訂規則的條件：規則面板載入過的完整列優先，否則用開頁時為推薦卡抓的 id+conditions
+// 進階訊號的條件：規則面板載入過的完整列優先，否則用開頁時為推薦卡抓的 id+conditions
 function ruleConditionsById(ruleId) {
   if (!ruleId) return null;
   for (const rows of [alertRules, ruleNudge.rules]) {
@@ -6038,7 +6038,7 @@ function radarStoryOf(sid, date = null) {
       const keys = (conds || []).map(conditionKey).filter(Boolean);
       const abbr = (conds || []).map(c => signalAbbr(conditionKey(c), c)).filter(Boolean).join("+");
       entry({ key: keys[0] || "rule", at: r.sent_at, price, level: _levelFromText(r.body), text: r.body || "", src: "rule", sev,
-              abbr: abbr || "規則", title: title || "自訂規則", condKeys: keys,
+              abbr: abbr || "規則", title: title || "進階訊號", condKeys: keys,
               rowId: String(r.id), ruleName: title });
     } else if (RADAR_POST_SOURCES.includes(source)) {
       entry({ key: "post_market", at: r.sent_at, text: r.body || "", src: "post", sev, abbr: "",
@@ -6390,7 +6390,7 @@ function rtlTextWidth(text, fontSize) {
 function radarStoryListHtml(story, opts = {}) {
   const intraday = story.filter(e => e.src !== "post");
   const post = story.filter(e => e.src === "post");
-  const srcLabel = { builtin: "內建訊號", target: "自訂價位", auto: "自動偵測 · 未推播", rule: "📐 自訂規則", post: "盤後提醒" };
+  const srcLabel = { builtin: "內建訊號", target: "自訂價位", auto: "自動偵測 · 未推播", rule: "📐 進階訊號", post: "盤後提醒" };
   const item = (e, i) => {
     const link = e.rowId ? ` role="button" tabindex="0" onclick="openInboxDetailFromRadar('${jsAttr(e.rowId)}')"` : "";
     const lvl = (e.src === "builtin" || e.src === "target") ? _signalLevelLabel(e.key, e.level)
@@ -6408,13 +6408,13 @@ function radarStoryListHtml(story, opts = {}) {
   if (!html) {
     // 三種狀態要講不一樣的話：完整但零筆／沒有那天的紀錄／查不到（表還沒建）
     if (!opts.past) {
-      html = `<div class="rtl-none">今天還沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測的條件成立時，會依時間排在這裡</span></div>`;
+      html = `<div class="rtl-none">今天還沒有訊號<br><span>內建訊號、進階訊號與系統自動偵測的條件成立時，會依時間排在這裡</span></div>`;
     } else if (!signalHistorySupported) {
       html = `<div class="rtl-none">查不到這天的紀錄<br><span>過去的日子只剩推播過的通知可查（signal_history 表尚未建立）</span></div>`;
     } else if (!opts.covered) {
       html = `<div class="rtl-none">沒有這天的紀錄<br><span>這檔那天還沒納入監控，或那天的序列沒有存下來——不代表那天沒有訊號</span></div>`;
     } else {
-      html = `<div class="rtl-none">這天沒有訊號<br><span>內建訊號、自訂規則與系統自動偵測那天都沒有成立</span></div>`;
+      html = `<div class="rtl-none">這天沒有訊號<br><span>內建訊號、進階訊號與系統自動偵測那天都沒有成立</span></div>`;
     }
     // 給他看一個有訊號的一天長什麼樣（正在看的就是範例那天時不重複）
     const viewing = radarTimelineDate || radarSessionDate();
@@ -6426,7 +6426,7 @@ function radarStoryListHtml(story, opts = {}) {
   return html;
 }
 
-// 自訂規則通知的 event_key 形如 "2330:rule:{uuid}:2026-08-30"
+// 進階訊號通知的 event_key 形如 "2330:rule:{uuid}:2026-08-30"
 function ruleIdFromEventKey(row) {
   const parts = String((row && row.event_key) || "").split(":");
   return parts.length >= 4 && parts[1] === "rule" ? parts[2] : "";
@@ -6442,7 +6442,7 @@ async function stopRuleFromDetail() {
   } catch (e) { /* 讀不到就用泛用文案確認 */ }
 
   const label = rule ? `「${rule.name || "(未命名)"}」` : "這條規則";
-  if (!confirm(`停用${label}？\n\n之後不會再收到它的通知，規則仍會保留，隨時可以在「📐 自訂規則」重新啟用。`)) return;
+  if (!confirm(`停用${label}？\n\n之後不會再收到它的通知，規則仍會保留，隨時可以在「📐 進階訊號」重新啟用。`)) return;
 
   try {
     await sbPatch("alert_rules", { id: `eq.${ruleId}` }, { enabled: false }, state.accessToken);
@@ -6458,7 +6458,7 @@ async function stopRuleFromDetail() {
   }
 }
 
-// ── 自訂規則：清單與編輯 ────────────────────────────────────────
+// ── 進階訊號：清單與編輯 ────────────────────────────────────────
 let alertRules = [];
 let editingRuleId = null;
 let editorConditions = [];
@@ -6513,7 +6513,7 @@ async function refreshRules() {
   if (!alertRules.length) {
     listEl.innerHTML = `<div class="rules-empty">
       <div class="rules-empty-icon">${ICON_RULES}</div>
-      <div class="rules-empty-title">尚無自訂規則</div>
+      <div class="rules-empty-title">尚無進階訊號</div>
       <div class="rules-empty-hint">用上面的「新增規則」把條件組起來，<br>全部成立時才會通知你</div>
       ${tplHtml}
     </div>`;
@@ -6930,7 +6930,7 @@ async function loadWatchlist() {
     loadActiveIds("active_watchlist"),   // 方案上限內仍生效的列（BILLING.md）
     loadBrokerHoldings(),
     loadPlanState(),
-    loadRuleNudgeState(),   // 首頁的自訂規則推薦卡要知道目前幾條
+    loadRuleNudgeState(),   // 首頁的進階訊號推薦卡要知道目前幾條
   ]);
   planState.activeWatchIds = activeIds;
   watchlistRows = (rows || []).map(row => {
@@ -6980,7 +6980,7 @@ function renderWatchlist(rows) {
     item.className = active ? "wl-row" : "wl-row is-inactive";
     item.dataset.id = row.id;
     item.dataset.sid = sid;
-    // 2026-09-22：列上只剩名稱＋代號／（超出方案）／一顆「移除」。
+    // 2026-09-22：一列就是「名稱＋代號 …… 移除」，超出方案時多一行標記。
     // 收盤價、事件、持股與 K 線在「🌙 盤後」，通知改從標題列那顆「🔔 通知」一次設定。
     item.innerHTML = `
       <div class="wl-row-head">
@@ -6988,11 +6988,11 @@ function renderWatchlist(rows) {
           <span class="wl-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
           <span class="wl-sid">${escapeHtml(sid)}</span>
         </div>
+        <div class="wl-row-actions">
+          <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}<span class="wl-ic-label">移除</span></button>
+        </div>
       </div>
       ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
-      <div class="wl-row-actions">
-        <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}<span class="wl-ic-label">移除</span></button>
-      </div>
     `;
     grid.appendChild(item);
   });
@@ -7112,7 +7112,7 @@ function openAlertSettings(rowId) {
   const sid = String(row.stock_id || "").trim();
   const fallbackName = universe[sid]?.n || "";
   const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
-  document.getElementById("alert-settings-title").textContent = `標準訊號｜${displayName} ${sid}`;
+  document.getElementById("alert-settings-title").textContent = `基礎訊號｜${displayName} ${sid}`;
   // 股票下拉：每次開都重建（自選股可能剛增減），選中目前這一檔
   const pick = document.getElementById("alert-stock-select");
   if (pick) {
