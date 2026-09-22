@@ -1839,10 +1839,6 @@ body.has-bottom-nav .qa-panel {
 	margin: -0.35rem 0.1rem 0.75rem;
 }
 
-.home-sum { font-size: 0.92rem; line-height: 1.55; color: var(--text-0); }
-.home-sum b { font-weight: 800; }
-.home-sum .dim { display: block; margin-top: 2px; font-size: 0.76rem; color: var(--text-muted); }
-
 /* ── 自選方塊（2026-09-22 五版）：一檔一列、佔滿整行 ──
    上排＝名稱＋漲／平／跌＋「共 N 則訊號」（在右邊），下排＝評分變化與今日資料籤。
    兩欄並排改回一欄是因為名稱＋狀態擠在 175px 裡要折行；整行寬度下一眼就讀得完。
@@ -1859,7 +1855,7 @@ body.has-bottom-nav .qa-panel {
 	display: flex;
 	flex-direction: column;
 	gap: 7px;
-	padding: 0.7rem 0.8rem;
+	padding: 0.85rem 0.9rem;
 	border: 1px solid var(--border);
 	border-radius: 16px;
 	background: var(--surface);
@@ -1876,7 +1872,7 @@ body.has-bottom-nav .qa-panel {
 
 .home-tile-name {
 	min-width: 0;
-	font-size: 0.92rem;
+	font-size: 1.08rem;
 	font-weight: 700;
 	color: var(--text-0);
 	overflow: hidden;
@@ -1889,9 +1885,9 @@ body.has-bottom-nav .qa-panel {
 /* 每個方塊右側的兩格數字（2026-09-22 從頁面頂端搬進來）：這一檔今天幾則訊號、貼著幾條關卡。
    與雷達分頁那兩格同一組定義，只是數的是「這一檔」而不是「幾檔」。0 用灰色。 */
 .home-tile-stat {
-	min-width: 60px;
+	min-width: 68px;
 	text-align: center;
-	padding: 3px 6px;
+	padding: 4px 7px;
 	border: 1px solid var(--border);
 	border-radius: 10px;
 	background: rgba(255, 255, 255, 0.03);
@@ -1900,7 +1896,7 @@ body.has-bottom-nav .qa-panel {
 .home-tile-stat b {
 	display: block;
 	font-family: "Space Grotesk", sans-serif;
-	font-size: 1rem;
+	font-size: 1.3rem;
 	font-weight: 700;
 	line-height: 1.15;
 }
@@ -1908,7 +1904,7 @@ body.has-bottom-nav .qa-panel {
 .home-tile-stat i {
 	display: block;
 	font-style: normal;
-	font-size: 0.6rem;
+	font-size: 0.68rem;
 	color: var(--text-muted);
 	white-space: nowrap;
 }
@@ -1916,7 +1912,7 @@ body.has-bottom-nav .qa-panel {
 .home-tile-stat .hs-zero { color: var(--text-muted); opacity: 0.6; }
 
 .home-tile-live {
-	font-size: 0.62rem;
+	font-size: 0.72rem;
 	font-weight: 700;
 	line-height: 1;
 	padding: 3px 5px;
@@ -1928,7 +1924,7 @@ body.has-bottom-nav .qa-panel {
 
 /* 還在板上：漲停／跌停直接寫出來，實底比「進行中」的空框更顯眼（打開板之後這顆籤就不見了） */
 .home-tile-live.is-limit {
-	font-size: 0.68rem;
+	font-size: 0.78rem;
 	padding: 3px 7px;
 	color: var(--bg-0);
 	background: var(--sig-orange);
@@ -1938,19 +1934,18 @@ body.has-bottom-nav .qa-panel {
 .home-tile-foot {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	justify-content: flex-end;
 	gap: 6px;
 	padding-top: 7px;
 	border-top: 1px solid rgba(146, 146, 163, 0.14);
-	font-size: 0.74rem;
+	font-size: 0.78rem;
 	color: var(--text-muted);
 }
 
-.home-tile-score { white-space: nowrap; }
 .home-tile-empty { grid-column: 1 / -1; padding: 0.9rem 0.2rem; font-size: 0.85rem; color: var(--text-muted); }
 
 .home-dir {
-	font-size: 0.72rem;
+	font-size: 0.8rem;
 	font-weight: 700;
 	line-height: 1;
 	padding: 3px 6px;
@@ -1972,7 +1967,7 @@ body.has-bottom-nav .qa-panel {
 
 .home-ev {
 	cursor: pointer;
-	font-size: 0.66rem;
+	font-size: 0.74rem;
 	font-weight: 600;
 	line-height: 1;
 	padding: 3px 5px;
@@ -1987,7 +1982,6 @@ body.has-bottom-nav .qa-panel {
 .home-example-note { font-size: 0.74rem; color: var(--text-1); line-height: 1.5; }
 .rtl-example .home-example-tag { margin-right: 0.35rem; }
 .rtl-example { margin-top: 0.8rem; padding: 0.6rem 0.7rem; border: 1px dashed rgba(139, 124, 255, 0.55); border-radius: 12px; font-size: 0.8rem; color: var(--text-1); line-height: 1.6; background: rgba(139, 124, 255, 0.06); }
-.home-legend { font-size: 0.68rem; color: var(--text-muted); margin: -0.2rem 0 0.45rem; line-height: 1.6; }
 
 .home-feed {
 	display: flex;
