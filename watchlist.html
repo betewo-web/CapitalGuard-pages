@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="162">
+  <meta name="app-version" content="163">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=162" rel="stylesheet">
+  <link href="watchlist.css?v=163" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -366,7 +366,6 @@
 
       <div class="view-head">
         <h2 class="view-title">🌙 盤後</h2>
-        <span class="view-sub" id="post-status"></span>
       </div>
       <div id="post-list" class="post-list"></div>
       <div id="post-empty" class="view-empty" style="display:none"></div>
@@ -398,7 +397,7 @@
         <div class="card-header wl-panel-head">
           <div class="wl-head-actions">
             <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-alerts-btn" onclick="openAlertSettingsPicker()"
-                    title="每一檔要收哪些內建訊號的通知">🔔 基礎訊號</button>
+                    title="每一檔要收哪些內建訊號的通知">基礎訊號</button>
             <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-rules-btn" onclick="openRulesModal()"
                     title="用條件組合自訂通知，全部成立才發送">進階訊號</button>
           </div>
@@ -1139,6 +1138,8 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
   if (searchIcon) searchIcon.innerHTML = ICON_SEARCH;
   const rulesBtn = document.getElementById("wl-rules-btn");
   if (rulesBtn) rulesBtn.innerHTML = `${ICON_RULES}<span>進階訊號</span>`;
+  const alertsBtn = document.getElementById("wl-alerts-btn");
+  if (alertsBtn) alertsBtn.innerHTML = `${ICON_BELL}<span>基礎訊號</span>`;
 }
 
 // ── PWA v2: App Shell 狀態 ──
@@ -7062,7 +7063,6 @@ function renderWatchlist(rows) {
 function renderPost() {
   const listEl = document.getElementById("post-list");
   const emptyEl = document.getElementById("post-empty");
-  const statusEl = document.getElementById("post-status");
   if (!listEl) return;
 
   const holdings = holdingBySid();
@@ -7082,16 +7082,7 @@ function renderPost() {
     || (b.q ? b.q.changePct : -Infinity) - (a.q ? a.q.changePct : -Infinity)
     || a.name.localeCompare(b.name, "zh-Hant"));
 
-  if (statusEl) {
-    const dates = rows.map(r => r.q?.tradeDate).filter(Boolean).sort();
-    const latest = dates.length ? dates[dates.length - 1] : "";
-    const up = rows.filter(r => r.q && r.q.changePct > 0).length;
-    const down = rows.filter(r => r.q && r.q.changePct < 0).length;
-    const nEv = rows.reduce((acc, r) => acc + r.events.length, 0);
-    statusEl.textContent = rows.length
-      ? `${latest ? `${_mdOf(latest)} 收盤 · ` : ""}漲 ${up} · 跌 ${down}${nEv ? ` · 今日 ${nEv} 件資料` : ""}`
-      : "";
-  }
+  // 「9/22 收盤 · 漲 N · 跌 N」那一行 2026-09-22 拿掉（Howard）：每張卡片上都有自己的收盤價與日期。
 
   if (emptyEl) {
     emptyEl.style.display = rows.length ? "none" : "";

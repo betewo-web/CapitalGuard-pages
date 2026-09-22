@@ -253,7 +253,16 @@ body.has-bottom-nav .page-shell {
 /* 標題與「自訂規則」永遠同一排，按鈕靠最右；手機上也不換行 */
 /* 標題列＝兩顆並排的按鈕（2026-09-22：標題與計數籤拿掉後，這一排就是整個 header） */
 .wl-head-actions { display: flex; gap: 0.6rem; width: 100%; }
-.wl-head-actions .btn { flex: 1 1 0; min-height: 40px; font-size: 0.92rem; font-weight: 700; }
+.wl-head-actions .btn {
+	flex: 1 1 0;
+	min-height: 46px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4rem;
+	font-size: 1.02rem;
+	font-weight: 700;
+}
 
 /* ── 基礎訊號面板（2026-09-22 整理）──
    設定對象（含「全部股票」）→ 開關 → 價位 → 取消／完成。開關只改草稿，按「完成」才寫回去。 */
@@ -477,13 +486,16 @@ body.has-bottom-nav .page-shell {
 	font-size: 0.95rem;
 	font-weight: 700;
 	letter-spacing: 0.04em;
-	color: #04231f;
-	background: #8b7cff;
-	transition: background 0.18s ease;
+	/* 2026-09-22：原本是紫底配深綠字（更早期青綠按鈕留下來的），對比低又跟全站色彩語彙對不上。
+	   改成品牌紫實底＋白字：紫＝可點，這是這一頁的主要動作。 */
+	color: #fff;
+	background: var(--accent);
+	box-shadow: 0 2px 10px rgba(139, 124, 255, 0.35);
+	transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 
-.wl-addbar-btn:hover { background: #62f0de; }
-.wl-addbar-btn:active { background: #2fcbb8; }
+.wl-addbar-btn:hover { background: #9d90ff; }
+.wl-addbar-btn:active { background: #7a6af0; box-shadow: none; }
 
 .wl-add-msg {
 	font-size: 0.86rem;
@@ -1803,12 +1815,12 @@ body.has-bottom-nav .qa-panel {
 	position: relative;
 	flex: 1 1 0;
 	min-width: 0;
-	padding: 9px 4px;
+	padding: 11px 4px;
 	border: none;
 	border-radius: 10px;
 	background: transparent;
 	color: var(--text-muted);
-	font-size: 0.9rem;
+	font-size: 1.02rem;
 	font-weight: 600;
 	line-height: 1.2;
 	cursor: pointer;
