@@ -1775,6 +1775,58 @@ body.has-bottom-nav .qa-panel {
 
 .home-manage-btn:active { transform: scale(0.97); }
 
+/* 第二顆（自選設定）低一階：同樣大小與字重，只是底色拿掉——同時兩個實心會互相搶 */
+.home-manage-btn.is-ghost {
+	background: transparent;
+	border-color: rgba(139, 124, 255, 0.55);
+	color: var(--text-1);
+}
+
+.home-sec-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* ── 🌙 盤後（2026-09-22）：收盤價／事件／持股從自選設定搬過來的那一頁 ──
+   與自選設定同一種卡片語彙（.wl-name／.wl-quote／.wl-signal-badge 都沿用），
+   差別是這裡沒有按鈕列，只有一塊可點的事件條。 */
+.post-list { display: grid; gap: 0.8rem; }
+
+.post-row {
+	padding: 0.95rem 0.9rem;
+	border: 1px solid rgba(121, 157, 255, 0.16);
+	border-radius: 16px;
+	background: rgba(7, 12, 26, 0.78);
+	display: flex;
+	flex-direction: column;
+	gap: 0.7rem;
+}
+
+.post-row-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	min-width: 0;
+}
+
+.post-row-head .wl-name { flex: 0 1 auto; -webkit-line-clamp: 1; }
+.post-row-head .wl-quote { margin-left: auto; }
+
+.post-ev {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	width: 100%;
+	padding: 0.6rem 0.75rem;
+	border: 1px solid rgba(255, 159, 67, 0.45);
+	border-radius: 12px;
+	background: rgba(255, 159, 67, 0.08);
+	color: var(--text-0);
+	font-size: 0.88rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.post-ev-go { margin-left: auto; color: var(--accent); font-weight: 700; white-space: nowrap; }
+.post-ev:active { transform: scale(0.99); }
+
 /* 連結是紫（可點）不是金：金／橘留給「需要注意」（色彩語彙規則四，2026-09-20 改） */
 .home-sec-title .hs-link,
 .hs-link {

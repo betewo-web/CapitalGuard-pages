@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="151">
+  <meta name="app-version" content="152">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=151" rel="stylesheet">
+  <link href="watchlist.css?v=152" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -256,8 +256,11 @@
       <!-- 方塊自己就是卡片，不再包一層 panel-card：少一層框 -->
       <div class="home-sec mb-3">
         <div class="home-sec-title">⭐ 我的自選
-          <!-- 自選分頁 2026-09-22 從底部導覽拿掉，這顆就是唯一入口：做成實心按鈕、字放大 -->
-          <button type="button" class="home-manage-btn" onclick="switchTab('watch')">⚙ 自選設定</button>
+          <!-- 兩個入口都沒有底部導覽鈕：盤後＝收盤價／事件／持股，自選設定＝加股、價位與通知 -->
+          <span class="home-sec-actions">
+            <button type="button" class="home-manage-btn" onclick="switchTab('post')">🌙 盤後</button>
+            <button type="button" class="home-manage-btn is-ghost" onclick="switchTab('watch')">⚙ 自選設定</button>
+          </span>
         </div>
         <div class="home-grid" id="home-watchlist"></div>
       </div>
@@ -344,6 +347,19 @@
     </section>
 
     <!-- ═══ ⭐ 自選 ═══ -->
+    <!-- ═══ 🌙 盤後 ═══
+         收盤後要看的三件事：收盤價與漲跌幅、今天有哪些事件、持股的損益與距自訂價位。
+         2026-09-22 從「自選設定」搬過來（那一頁只留設定）。資料全部已經在記憶體裡：
+         getCloseQuote（日線／報告／intraday_state 收盤後的最後一筆）、stockEvents、holdingEntries。 -->
+    <section id="view-post" class="app-view">
+      <div class="view-head">
+        <h2 class="view-title">🌙 盤後</h2>
+        <span class="view-sub" id="post-status"></span>
+      </div>
+      <div id="post-list" class="post-list"></div>
+      <div id="post-empty" class="view-empty" style="display:none"></div>
+    </section>
+
     <section id="view-watch" class="app-view">
 
       <!-- 新增股票：單行搜尋列（原本的整張卡片佔掉近三倍高度） -->
@@ -1071,9 +1087,9 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
 }
 
 // ── PWA v2: App Shell 狀態 ──
-// watch 沒有底部導覽鈕：入口是首頁「⭐ 自選設定」那顆（2026-09-22）。留在這裡是為了
-// switchTab 認得它、#watch 的 hash 也還能路由回來
-const APP_TABS = ["home", "scores", "inbox", "watch"];
+// post 與 watch 都沒有底部導覽鈕：入口是首頁標題列那兩顆（🌙 盤後／⚙ 自選設定，2026-09-22）。
+// 留在這裡是為了 switchTab 認得它們、#post／#watch 的 hash 也還能路由回來
+const APP_TABS = ["home", "scores", "inbox", "watch", "post"];
 let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc，近 INBOX_HISTORY_DAYS 天）
 const INBOX_HISTORY_DAYS = 30;  // 通知只抓這麼多天：首頁近 10 個交易日的格子要數得到規則命中與自訂價位
@@ -3499,6 +3515,10 @@ function switchTab(tab, silent = false) {
   });
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
+  // 盤後頁要收盤價：主機沒寫到收盤時向 FinMind 補一次（那支自己限流），回來重畫
+  if (tab === "post" && _isSessionOverToday() && _closeQuoteMissing()) {
+    loadFinMindCloseQuotes().then(() => renderCurrentTab()).catch(() => {});
+  }
   // 評分頁靠報告資料；登入後那次載入還沒回來就先顯示載入中，回來再畫。
   // 已載入但還是昨天的（PWA 沒真的關過）→ 過期才重抓，不進輪詢
   if (tab === "scores" && !sharedReportData) {
@@ -3521,6 +3541,7 @@ function renderCurrentTab() {
   if (currentTab === "home") renderHome();
   else if (currentTab === "scores") renderScores();
   else if (currentTab === "inbox") renderInbox();
+  else if (currentTab === "post") renderPost();
   else renderWatchlist(watchlistRows);
 }
 
@@ -6984,7 +7005,6 @@ function renderWatchlist(rows) {
   grid.innerHTML = "";
   renderWatchCount(rows.length);
   const visible = filteredWatchRows(rows);
-  const holdingsBySid = holdingBySid();   // 每列查一次 Map，不要每列重算持股清單
   const emptyEl = document.getElementById("wl-empty");
   emptyEl.style.display = visible.length ? "none" : "";
   emptyEl.textContent = rows.length
@@ -6992,87 +7012,36 @@ function renderWatchlist(rows) {
     : "尚未加入任何股票，從上方搜尋並加入吧！";
   grid.style.display = visible.length ? "block" : "none";
 
-  // 這一頁的價格一律收盤價（getCloseQuote）。盤中那一格不放數字；收盤後當天收盤還沒到手
-  // （主機沒寫到收盤、日線未更新）就先顯示最近一個交易日的收盤並標出日期，免得被當成今天的。
-  const marketOpen = _isMarketOpenNow();
-  const sessionOver = _isSessionOverToday();
-  const todayKey = taipeiDateKey(new Date());
+  // 收盤價已經搬到「🌙 盤後」：這一頁不再讀任何報價（漲／跌篩選仍然用 getCloseQuote，
+  // 在 filteredWatchRows 裡）。
 
   visible.forEach(row => {
     const sid = String(row.stock_id || "").trim();
     const fallbackName = universe[sid]?.n || "";
     const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
-    const events = todayEventsOf(sid);
-    // 事件按鈕永遠顯示：有事件就接一個數字，沒有就只剩一個淡掉的圖示。
-    // 圖示不再因為「有事件」而變色——一顆變色的圖示無法自我解釋，使用者看得出它跟
-    // 別檔不一樣，卻無從知道差在哪（這正是有人來問「為什麼有的亮黃色」的原因）。
-    // 強調改走下面標籤區的一句文字，用讀的就懂。
-    const evtLabel = `${ICON_EVENTS}<span class="wl-ic-label">事件</span>${
-      events.length > 0 ? `<span class="wl-ic-count">${events.length}</span>` : ""}`;
-    const evtClass = events.length > 0 ? "wl-events-btn" : "wl-events-btn wl-events-empty";
-
-    // 報價靠右自成一欄，標籤另起一行——名稱因此拿得到整行寬度，不必截斷
-    const q = getCloseQuote(sid);
-    const closeDateTag = (q && sessionOver && q.tradeDate !== todayKey)
-      ? `<span class="wq-date">${escapeHtml(_closeDateLabel(q.tradeDate))} 收</span>`
-      : "";
-    const quoteLine = marketOpen
-      ? `<div class="wl-quote wl-quote-pending">待收盤顯示股價</div>`
-      : q
-        ? `<div class="wl-quote">${closeDateTag}<span class="wq-price">${fmtPrice(q.price)}</span>${fmtChgHtml(q.changePct)}</div>`
-        : `<div class="wl-quote wl-quote-idle">—</div>`;
-
-    // 標籤用等級圓點而不是 emoji：同一個等級在全站都是同一顆顏色
+    // 收盤價、事件、持股 2026-09-22 搬到「🌙 盤後」（Howard）：這一頁只做設定。
+    // 超出方案的標記留著——它解釋的正是「為什麼這一檔沒有通知」，屬於設定。
     const tags = [];
-    // 事件強調排第一個：一句話講完「有幾件、為什麼值得先看」，不必去猜圖示的顏色
-    if (events.length > 0) {
-      tags.push(`<span class="wl-signal-badge wl-tag-standout">今日 ${events.length} 件資料</span>`);
-    }
-    // 訊號 2026-09-22 從這一頁拿掉（Howard）：這裡是「設定自選股」，訊號在首頁與個股字卡講。
-    // latestSignalOf 留著——「有訊號」篩選籤還用它。
-    // 持股資訊併在列上（持股分頁已改為評分頁）：股數、損益％、距自訂上下價位
-    const hold = holdingsBySid.get(sid);
-    if (hold) {
-      tags.push(`<span class="wl-signal-badge wl-tag-holding">持股 ${hold.shares.toLocaleString()} 股</span>`);
-      if (q && hold.cost > 0) {
-        const plPct = (q.price - hold.cost) / hold.cost * 100;
-        tags.push(`<span class="wl-signal-badge ${plPct >= 0 ? "chg-up" : "chg-down"}">損益 ${plPct >= 0 ? "+" : ""}${plPct.toFixed(1)}%</span>`);
-      }
-      if (q && row.target_price_low != null && Number(row.target_price_low) > 0) {
-        const d = (q.price - Number(row.target_price_low)) / q.price * 100;
-        tags.push(`<span class="wl-signal-badge${d <= 3 ? " wl-tag-warn" : ""}">距下跌價位 ${d.toFixed(1)}%</span>`);
-      }
-      if (q && row.target_price_high != null && Number(row.target_price_high) > 0) {
-        const d = (Number(row.target_price_high) - q.price) / q.price * 100;
-        tags.push(`<span class="wl-signal-badge">距上漲價位 ${d.toFixed(1)}%</span>`);
-      }
-    }
-    // 超出方案上限的股票：資料保留、通知暫停。標出來使用者才知道為什麼沒通知
     const active = isWatchRowActive(row);
     if (!active) {
       tags.push(`<span class="wl-signal-badge wl-tag-locked" title="超出目前方案的自選股上限，不再產生通知；升級後恢復">🔒 超出方案</span>`);
     }
 
-    // 壓／撐／月／季那兩行 2026-09-22 拿掉（Howard）：這一頁是「設定自選股」，
-    // 關卡要看去個股字卡（盤中雷達那一頁的圖上就畫著最近的支撐與壓力）。
-
     const item = document.createElement("article");
     item.className = active ? "wl-row" : "wl-row is-inactive";
     item.dataset.id = row.id;
     item.dataset.sid = sid;
-    // 2026-09-22 改版（Howard）：字與按鈕都放大、上下更寬鬆。
-    // 由上而下＝名稱＋代號／收盤價／標籤／一排四顆帶文字的按鈕（手機也看得到字，不再只有圖示）
+    // 2026-09-22：字與按鈕都放大、上下更寬鬆；由上而下＝名稱＋代號／（超出方案）／
+    // 三顆帶文字的按鈕。收盤價、事件、持股都在「🌙 盤後」那一頁。
     item.innerHTML = `
       <div class="wl-row-head">
         <div class="wl-ident">
           <span class="wl-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
           <span class="wl-sid">${escapeHtml(sid)}</span>
         </div>
-        ${quoteLine}
       </div>
       ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
       <div class="wl-row-actions">
-        <button class="${evtClass}" title="今日事件" onclick="openEventsPanel('${jsAttr(sid)}')">${evtLabel}</button>
         <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(sid)}" onclick="openKLineFromWatchlist('${jsAttr(sid)}')">${ICON_CHART}<span class="wl-ic-label">K 線</span></button>
         <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${jsAttr(row.id)}')">${ICON_BELL}<span class="wl-ic-label">通知</span></button>
         <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}<span class="wl-ic-label">移除</span></button>
@@ -7080,6 +7049,92 @@ function renderWatchlist(rows) {
     `;
     grid.appendChild(item);
   });
+}
+
+// ── 🌙 盤後（view-post）─────────────────────────────────────────────
+// 2026-09-22：收盤價、今日事件、持股三塊從「自選設定」搬到這裡（Howard）。
+// 那一頁是設定，這一頁是收盤後看一次的東西。資料都在記憶體，不需要新的請求。
+// 排序：持股的排前面（最在意），再來漲跌幅由大到小；沒有報價的排最後。
+function renderPost() {
+  const listEl = document.getElementById("post-list");
+  const emptyEl = document.getElementById("post-empty");
+  const statusEl = document.getElementById("post-status");
+  if (!listEl) return;
+
+  const holdings = holdingBySid();
+  const sessionOver = _isSessionOverToday();
+  const todayKey = taipeiDateKey(new Date());
+  const rows = watchlistRows.map(row => {
+    const sid = String(row.stock_id || "").trim();
+    return {
+      sid, row,
+      name: getPreferredStockName(sid, row.stock_name) || universe[sid]?.n || sid,
+      q: getCloseQuote(sid),
+      events: todayEventsOf(sid),
+      hold: holdings.get(sid) || null,
+    };
+  });
+  rows.sort((a, b) => (b.hold ? 1 : 0) - (a.hold ? 1 : 0)
+    || (b.q ? b.q.changePct : -Infinity) - (a.q ? a.q.changePct : -Infinity)
+    || a.name.localeCompare(b.name, "zh-Hant"));
+
+  if (statusEl) {
+    const dates = rows.map(r => r.q?.tradeDate).filter(Boolean).sort();
+    const latest = dates.length ? dates[dates.length - 1] : "";
+    const up = rows.filter(r => r.q && r.q.changePct > 0).length;
+    const down = rows.filter(r => r.q && r.q.changePct < 0).length;
+    const nEv = rows.reduce((acc, r) => acc + r.events.length, 0);
+    statusEl.textContent = rows.length
+      ? `${latest ? `${_mdOf(latest)} 收盤 · ` : ""}漲 ${up} · 跌 ${down}${nEv ? ` · 今日 ${nEv} 件資料` : ""}`
+      : "";
+  }
+
+  if (emptyEl) {
+    emptyEl.style.display = rows.length ? "none" : "";
+    emptyEl.textContent = "尚未加入自選股，到首頁的「⚙ 自選設定」新增";
+  }
+
+  listEl.innerHTML = rows.map(r => {
+    const q = r.q;
+    // 收盤後還沒拿到今天的收盤價時，標出這個價是哪一天的（例：9/19 收）
+    const dateTag = (q && sessionOver && q.tradeDate !== todayKey)
+      ? `<span class="wq-date">${escapeHtml(_closeDateLabel(q.tradeDate))} 收</span>` : "";
+    const quote = q
+      ? `<div class="wl-quote">${dateTag}<span class="wq-price">${fmtPrice(q.price)}</span>${fmtChgHtml(q.changePct)}</div>`
+      : `<div class="wl-quote wl-quote-idle">—</div>`;
+
+    const tags = [];
+    if (r.hold) {
+      tags.push(`<span class="wl-signal-badge wl-tag-holding">持股 ${r.hold.shares.toLocaleString()} 股</span>`);
+      if (q && r.hold.cost > 0) {
+        const plPct = (q.price - r.hold.cost) / r.hold.cost * 100;
+        tags.push(`<span class="wl-signal-badge ${plPct >= 0 ? "chg-up" : "chg-down"}">損益 ${plPct >= 0 ? "+" : ""}${plPct.toFixed(1)}%</span>`);
+      }
+      if (q && r.row.target_price_low != null && Number(r.row.target_price_low) > 0) {
+        const d = (q.price - Number(r.row.target_price_low)) / q.price * 100;
+        tags.push(`<span class="wl-signal-badge${d <= 3 ? " wl-tag-warn" : ""}">距下跌價位 ${d.toFixed(1)}%</span>`);
+      }
+      if (q && r.row.target_price_high != null && Number(r.row.target_price_high) > 0) {
+        const d = (Number(r.row.target_price_high) - q.price) / q.price * 100;
+        tags.push(`<span class="wl-signal-badge">距上漲價位 ${d.toFixed(1)}%</span>`);
+      }
+    }
+    // 事件：有幾件寫幾件，點整塊開事件面板（與首頁的「N 件資料」同一個面板）
+    const evLine = r.events.length
+      ? `<button type="button" class="post-ev" onclick="openEventsPanel('${jsAttr(r.sid)}')">
+           ${ICON_EVENTS}<span>今日 ${r.events.length} 件資料</span><span class="post-ev-go">查看 →</span>
+         </button>`
+      : "";
+    return `<article class="post-row">
+      <div class="post-row-head">
+        <span class="wl-name">${escapeHtml(r.name)}</span>
+        <span class="wl-sid">${escapeHtml(r.sid)}</span>
+        ${quote}
+      </div>
+      ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
+      ${evLine}
+    </article>`;
+  }).join("");
 }
 
 // "2026-09-18" → "9/18"：收盤日期標籤用，只在收盤後仍顯示前一日收盤時出現
