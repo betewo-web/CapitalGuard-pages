@@ -253,16 +253,22 @@ body.has-bottom-nav .page-shell {
 /* 標題與「自訂規則」永遠同一排，按鈕靠最右；手機上也不換行 */
 /* 標題列＝兩顆並排的按鈕（2026-09-22：標題與計數籤拿掉後，這一排就是整個 header） */
 .wl-head-actions { display: flex; gap: 0.6rem; width: 100%; }
-.wl-head-actions .btn {
+/* 選擇器要三個 class：.btn.btn-ghost（0,2,0）排在這條後面，兩者權重相同時後者贏——
+   2026-09-22 連改三次字級都沒生效就是這個原因。這裡用 .wl-head-actions .btn.btn-ghost（0,3,0）壓過它。 */
+.wl-head-actions .btn.btn-ghost {
 	flex: 1 1 0;
-	min-height: 46px;
+	min-height: 48px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 0.4rem;
-	font-size: 1.1rem;
+	gap: 0.45rem;
+	padding: 0.5rem 0.8rem;
+	font-size: 1.12rem;
 	font-weight: 700;
+	line-height: 1.2;
 }
+
+.wl-head-actions .btn.btn-ghost .ic { width: 18px; height: 18px; }
 
 /* ── 基礎訊號面板（2026-09-22 整理）──
    設定對象（含「全部股票」）→ 開關 → 價位 → 取消／完成。開關只改草稿，按「完成」才寫回去。 */
