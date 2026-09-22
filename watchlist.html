@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="158">
+  <meta name="app-version" content="159">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=158" rel="stylesheet">
+  <link href="watchlist.css?v=159" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -229,6 +229,15 @@
 
     <!-- ═══ 🏠 首頁 Today ═══ -->
     <section id="view-home" class="app-view">
+      <!-- 首頁的三個分頁（2026-09-22 Howard）：總覽（原本的首頁）／盤後／設定。
+           三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
+           底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
+      <nav class="home-tabs" aria-label="首頁分頁">
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')">🏠 總覽</button>
+        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')">🌙 盤後</button>
+        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')">⚙ 設定</button>
+      </nav>
+
       <!-- 「今日總覽」標題與日期 2026-09-22 拿掉（Howard）：日期與盤中／收盤都在下面那行狀態裡，
            首頁一開就直接是自選股。#home-date 還留著（隱藏），renderHome 仍然會寫，不必改邏輯 -->
       <span id="home-date" style="display:none"></span>
@@ -255,13 +264,7 @@
 
       <!-- 方塊自己就是卡片，不再包一層 panel-card：少一層框 -->
       <div class="home-sec mb-3">
-        <div class="home-sec-title">⭐ 我的自選
-          <!-- 兩個入口都沒有底部導覽鈕：盤後＝收盤價／持股／事件／K 線，設定＝加股、價位與通知 -->
-          <span class="home-sec-actions">
-            <button type="button" class="home-manage-btn" onclick="switchTab('post')">🌙 盤後</button>
-            <button type="button" class="home-manage-btn is-ghost" onclick="switchTab('watch')">⚙ 設定</button>
-          </span>
-        </div>
+        <div class="home-sec-title">⭐ 我的自選</div>
         <div class="home-grid" id="home-watchlist"></div>
       </div>
 
@@ -352,6 +355,15 @@
          2026-09-22 從「設定」頁搬過來（那一頁只留設定）。K 線也在這裡。資料全部已經在記憶體裡：
          getCloseQuote（日線／報告／intraday_state 收盤後的最後一筆）、stockEvents、holdingEntries。 -->
     <section id="view-post" class="app-view">
+      <!-- 首頁的三個分頁（2026-09-22 Howard）：總覽（原本的首頁）／盤後／設定。
+           三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
+           底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
+      <nav class="home-tabs" aria-label="首頁分頁">
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')">🏠 總覽</button>
+        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')">🌙 盤後</button>
+        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')">⚙ 設定</button>
+      </nav>
+
       <div class="view-head">
         <h2 class="view-title">🌙 盤後</h2>
         <span class="view-sub" id="post-status"></span>
@@ -361,6 +373,14 @@
     </section>
 
     <section id="view-watch" class="app-view">
+      <!-- 首頁的三個分頁（2026-09-22 Howard）：總覽（原本的首頁）／盤後／設定。
+           三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
+           底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
+      <nav class="home-tabs" aria-label="首頁分頁">
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')">🏠 總覽</button>
+        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')">🌙 盤後</button>
+        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')">⚙ 設定</button>
+      </nav>
 
       <!-- 新增股票：單行搜尋列（原本的整張卡片佔掉近三倍高度） -->
       <div class="wl-addbar">
@@ -1103,9 +1123,10 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
 }
 
 // ── PWA v2: App Shell 狀態 ──
-// post 與 watch 都沒有底部導覽鈕：入口是首頁標題列那兩顆（🌙 盤後／⚙ 設定，2026-09-22）。
-// 留在這裡是為了 switchTab 認得它們、#post／#watch 的 hash 也還能路由回來
+// 首頁是三個分頁（總覽／盤後／設定），三者都是獨立的 view，由頂端那條 .home-tabs 切換；
+// 底部導覽只有「首頁」一格，三頁都算它亮著（HOME_GROUP）
 const APP_TABS = ["home", "scores", "inbox", "watch", "post"];
+const HOME_GROUP = ["home", "post", "watch"];
 let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc，近 INBOX_HISTORY_DAYS 天）
 const INBOX_HISTORY_DAYS = 30;  // 通知只抓這麼多天：首頁近 10 個交易日的格子要數得到規則命中與自訂價位
@@ -3520,9 +3541,12 @@ function switchTab(tab, silent = false) {
     const el = document.getElementById(`view-${t}`);
     if (el) el.classList.toggle("active", t === tab);
   });
+  // 首頁／盤後／設定是同一個畫面的三個分頁：底部導覽的「首頁」對三頁都亮著
   document.querySelectorAll("#bottom-nav .bottom-nav-item").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.tab === tab);
+    const t = btn.dataset.tab;
+    btn.classList.toggle("active", t === tab || (t === "home" && HOME_GROUP.includes(tab)));
   });
+  document.querySelectorAll(".home-tab").forEach(b => b.classList.toggle("is-active", b.dataset.tab === tab));
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
   // 盤後頁要收盤價：主機沒寫到收盤時向 FinMind 補一次（那支自己限流），回來重畫
@@ -7052,7 +7076,7 @@ function renderPost() {
 
   if (emptyEl) {
     emptyEl.style.display = rows.length ? "none" : "";
-    emptyEl.textContent = "尚未加入自選股，到首頁的「⚙ 設定」新增";
+    emptyEl.textContent = "尚未加入自選股，切到上面的「⚙ 設定」分頁新增";
   }
 
   listEl.innerHTML = rows.map(r => {

@@ -1772,6 +1772,38 @@ body.has-bottom-nav .qa-panel {
 	margin-bottom: 0.6rem;
 }
 
+/* ── 首頁的三個分頁（2026-09-22）：總覽／盤後／設定 ──
+   三個各自是一個 view，這一條在三頁都有一份，所以看起來像同一個畫面在換分頁。
+   樣式與個股字卡的分頁列（.rtl-tabs）同一套，使用者只要學一次。 */
+.home-tabs {
+	display: flex;
+	gap: 6px;
+	margin: -0.2rem 0 0.9rem;
+}
+
+.home-tab {
+	flex: 1 1 0;
+	min-width: 0;
+	padding: 9px 4px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: rgba(146, 146, 163, 0.08);
+	color: var(--text-1);
+	font-size: 0.9rem;
+	font-weight: 700;
+	line-height: 1.2;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.home-tab.is-active {
+	background: rgba(139, 124, 255, 0.2);
+	border-color: var(--accent);
+	color: var(--text-0);
+}
+
+.home-tab:active { transform: scale(0.98); }
+
 /* 「自選設定」：底部導覽拿掉自選分頁之後，這是加／刪自選股、設定價位與通知的唯一入口，
    所以不再是一條細連結，而是看得見的按鈕（紫框實底、字級比清單標題還大一點）。 */
 .home-manage-btn {
