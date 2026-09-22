@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="152">
+  <meta name="app-version" content="153">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=152" rel="stylesheet">
+  <link href="watchlist.css?v=153" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -5369,11 +5369,8 @@ function homeTileHtml(r) {
   const stat = (n, label, cls) =>
     `<span class="home-tile-stat"><b class="${n ? cls : "hs-zero"}">${n}</b><i>${label}</i></span>`;
   const lead = stat(r.todayCount, "⚡ 訊號", "sev-orange") + stat(r.nearCount, "🎯 逼近關卡", "sev-blue");
-  // 事件籤＝今天有幾件資料（與下方「今日資料」卡同一批）；點籤開事件面板，
-  // 點方塊開的是時間軸，兩者講不同的東西（Howard 2026-09-20：點進去看不到相關資訊）
-  const ev = r.standout
-    ? `<span class="home-ev" onclick="event.stopPropagation(); openEventsPanel('${jsAttr(r.sid)}')">${r.standout} 件資料</span>`
-    : "";
+  // 事件籤 2026-09-22 從方塊上拿掉（Howard）：方塊只講訊號，事件在下面那張「今日資料」卡
+  // 與「🌙 盤後」頁。r.standout 仍用於排序（今天有事的排前面）。
   // 評分 2026-09-22 從方塊上拿掉（Howard）：首頁只講「今天誰有事」，評分變化在 📊 統計 分頁。
   // 沒有事件就連第二行都不畫，一列就是一行
   return `<div class="home-tile${r.todayCount ? " is-hot" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
@@ -5381,7 +5378,6 @@ function homeTileHtml(r) {
         <span class="home-tile-name">${escapeHtml(r.name)}</span>${dir}${live}
         <span class="home-tile-lead">${lead}</span>
       </div>
-      ${ev ? `<div class="home-tile-foot">${ev}</div>` : ""}
     </div>`;
 }
 
@@ -7103,20 +7099,15 @@ function renderPost() {
       ? `<div class="wl-quote">${dateTag}<span class="wq-price">${fmtPrice(q.price)}</span>${fmtChgHtml(q.changePct)}</div>`
       : `<div class="wl-quote wl-quote-idle">—</div>`;
 
-    const tags = [];
+    // 持股與損益是「讀的」不是「按的」：2026-09-22 從膠囊籤改成純文字（Howard：籤看起來像按鈕）。
+    // 距上下價位那兩項同日拿掉——那是通知的設定值，不是收盤後要讀的數字。
+    const facts = [];
     if (r.hold) {
-      tags.push(`<span class="wl-signal-badge wl-tag-holding">持股 ${r.hold.shares.toLocaleString()} 股</span>`);
+      facts.push(`<span class="post-fact"><i>持股</i><b>${r.hold.shares.toLocaleString()} 股</b></span>`);
       if (q && r.hold.cost > 0) {
         const plPct = (q.price - r.hold.cost) / r.hold.cost * 100;
-        tags.push(`<span class="wl-signal-badge ${plPct >= 0 ? "chg-up" : "chg-down"}">損益 ${plPct >= 0 ? "+" : ""}${plPct.toFixed(1)}%</span>`);
-      }
-      if (q && r.row.target_price_low != null && Number(r.row.target_price_low) > 0) {
-        const d = (q.price - Number(r.row.target_price_low)) / q.price * 100;
-        tags.push(`<span class="wl-signal-badge${d <= 3 ? " wl-tag-warn" : ""}">距下跌價位 ${d.toFixed(1)}%</span>`);
-      }
-      if (q && r.row.target_price_high != null && Number(r.row.target_price_high) > 0) {
-        const d = (Number(r.row.target_price_high) - q.price) / q.price * 100;
-        tags.push(`<span class="wl-signal-badge">距上漲價位 ${d.toFixed(1)}%</span>`);
+        facts.push(`<span class="post-fact"><i>損益</i><b class="${plPct >= 0 ? "chg-up" : "chg-down"}">${
+          plPct >= 0 ? "+" : ""}${plPct.toFixed(1)}%</b></span>`);
       }
     }
     // 事件：有幾件寫幾件，點整塊開事件面板（與首頁的「N 件資料」同一個面板）
@@ -7131,7 +7122,7 @@ function renderPost() {
         <span class="wl-sid">${escapeHtml(r.sid)}</span>
         ${quote}
       </div>
-      ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
+      ${facts.length ? `<div class="post-facts">${facts.join("")}</div>` : ""}
       ${evLine}
     </article>`;
   }).join("");

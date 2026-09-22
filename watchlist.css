@@ -1790,13 +1790,15 @@ body.has-bottom-nav .qa-panel {
 .post-list { display: grid; gap: 0.8rem; }
 
 .post-row {
-	padding: 0.95rem 0.9rem;
-	border: 1px solid rgba(121, 157, 255, 0.16);
+	padding: 1rem;
+	/* 邊線比自選列深一階：這一頁沒有按鈕當視覺錨點，卡片的界線要自己站得住 */
+	border: 1px solid rgba(150, 178, 235, 0.34);
 	border-radius: 16px;
-	background: rgba(7, 12, 26, 0.78);
+	background: rgba(12, 18, 34, 0.9);
+	box-shadow: 0 6px 18px rgba(3, 6, 16, 0.45);
 	display: flex;
 	flex-direction: column;
-	gap: 0.7rem;
+	gap: 0.55rem;
 }
 
 .post-row-head {
@@ -1804,6 +1806,34 @@ body.has-bottom-nav .qa-panel {
 	align-items: baseline;
 	gap: 0.5rem;
 	min-width: 0;
+	padding-bottom: 0.55rem;
+	border-bottom: 1px solid rgba(150, 178, 235, 0.18);
+}
+
+/* 持股／損益是讀的不是按的：沒有框、沒有底色，標籤淡、數字亮（膠囊籤會被當成按鈕） */
+.post-facts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem 1.6rem;
+}
+
+.post-fact {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.45rem;
+	font-size: 0.9rem;
+}
+
+.post-fact i {
+	font-style: normal;
+	font-size: 0.8rem;
+	color: var(--text-muted);
+}
+
+.post-fact b {
+	font-weight: 700;
+	color: var(--text-0);
+	font-variant-numeric: tabular-nums;
 }
 
 .post-row-head .wl-name { flex: 0 1 auto; -webkit-line-clamp: 1; }
@@ -1970,17 +2000,6 @@ body.has-bottom-nav .qa-panel {
 	.home-tile { padding: 0.7rem 0.6rem; }
 }
 
-.home-ev {
-	cursor: pointer;
-	font-size: 0.74rem;
-	font-weight: 600;
-	line-height: 1;
-	padding: 3px 5px;
-	border-radius: 6px;
-	color: var(--sig-orange);
-	border: 1px solid rgba(255, 159, 67, 0.55);
-	white-space: nowrap;
-}
 /* 範例方塊：虛線紫框＋「範例」籤，橫跨兩欄，底下說明它為什麼在這裡（沒有自己的歷史時才出現） */
 .home-tile.home-example { grid-column: 1 / -1; border: 1px dashed rgba(139, 124, 255, 0.55); background: rgba(139, 124, 255, 0.06); }
 .home-example-tag { font-size: 0.62rem; font-weight: 700; color: var(--accent); border: 1px solid rgba(139, 124, 255, 0.6); border-radius: 6px; padding: 2px 6px; line-height: 1; white-space: nowrap; }
