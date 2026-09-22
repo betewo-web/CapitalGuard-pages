@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="144">
+  <meta name="app-version" content="145">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=144" rel="stylesheet">
+  <link href="watchlist.css?v=145" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -810,9 +810,9 @@
           <div id="rtl-story"></div>
         </div>
 
-        <!-- 分頁二：歷史訊號——一天一列（日期、則數、那天的縮寫籤），點一列回到分頁一看那天（rtlDaysHtml） -->
+        <!-- 分頁二：歷史訊號——一天一列（日期、則數、那天的訊號全名），純清單不是按鈕（rtlDaysHtml） -->
         <div class="rtl-pane" id="rtl-pane-history" style="display:none">
-          <div class="rtl-history-head">近 <span id="rtl-history-n"></span> 個交易日的訊號<span class="k">點一天看那天的盤中</span></div>
+          <div class="rtl-history-head">近 <span id="rtl-history-n"></span> 個交易日的訊號<span class="k">每天各發生過什麼</span></div>
           <div class="rtl-days" id="rtl-days"></div>
         </div>
 
@@ -6317,23 +6317,25 @@ function rtlPickDate(date) {
   switchStockCardTab("radar");
 }
 
-// 歷史清單：新到舊，一天一列——日期（週幾）、則數、那天的縮寫籤（與雷達列同一顆籤）。
-// 盤後提醒不算在則數裡，與首頁、雷達一致
-function rtlDaysHtml(sid, selected) {
+// 歷史清單（2026-09-22 四版，Howard）：一天一列，就只是一份可以讀的清單——
+// 不是按鈕、不跳分頁、今天那列不框起來，訊號寫全名不用縮寫（縮寫是雷達列為了塞進一行才有的，
+// 這裡有整列的寬度）。列高加大，一眼掃得下去。盤後提醒不算則數，與首頁、雷達一致。
+function rtlDaysHtml(sid) {
   const days = radarHistoryDates(HOME_HISTORY_DAYS);
   const last = days[days.length - 1];
   const todayKey = taipeiDateKey(new Date());
   return days.slice().reverse().map(d => {
     const story = radarStoryOf(sid, d).filter(e => e.src !== "post");
-    const chips = story.slice(0, 6).map(e => radarChipHtml(e, false)).join("")
-      + (story.length > 6 ? `<span class="rtl-day-more">+${story.length - 6}</span>` : "");
-    const cls = ["rtl-day", d === selected ? "is-sel" : "", d === last ? "is-today" : ""].filter(Boolean).join(" ");
+    const names = story.slice(0, 6).map(e => `<span class="rtl-day-sig">${escapeHtml(e.title || "")}</span>`).join("")
+      + (story.length > 6 ? `<span class="rtl-day-more">還有 ${story.length - 6} 則</span>` : "");
     const label = d === last && d === todayKey ? "今天" : `${_mdOf(d)}（${_weekdayZh(d)}）`;
-    return `<button type="button" class="${cls}" onclick="rtlPickDate('${jsAttr(d)}')">
-        <span class="rtl-day-d">${escapeHtml(label)}</span>
-        <span class="rtl-day-n">${story.length ? `${story.length} 則` : "沒有訊號"}</span>
-        <span class="rtl-day-chips">${chips}</span>
-      </button>`;
+    return `<div class="rtl-day">
+        <div class="rtl-day-top">
+          <span class="rtl-day-d">${escapeHtml(label)}</span>
+          <span class="rtl-day-n">${story.length ? `${story.length} 則` : "沒有訊號"}</span>
+        </div>
+        ${story.length ? `<div class="rtl-day-sigs">${names}</div>` : ""}
+      </div>`;
   }).join("");
 }
 
@@ -6404,7 +6406,7 @@ function renderRadarTimeline(sid) {
   document.getElementById("rtl-sub").innerHTML =
     `${escapeHtml(dayText)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}${backHtml}`;
   const daysEl = document.getElementById("rtl-days");
-  if (daysEl) daysEl.innerHTML = rtlDaysHtml(sid, date);
+  if (daysEl) daysEl.innerHTML = rtlDaysHtml(sid);
   const dayCountEl = document.getElementById("rtl-history-n");
   if (dayCountEl) dayCountEl.textContent = String(radarHistoryDates(HOME_HISTORY_DAYS).length);
   // covered：signal_history 真的有這檔、這天的那一列。沒有列 ≠ 那天沒有訊號，

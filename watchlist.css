@@ -1987,55 +1987,50 @@ body.has-bottom-nav .qa-panel {
 .home-nudge-actions { display: inline-flex; gap: 12px; white-space: nowrap; }
 .home-nudge-later { color: var(--text-muted); }
 
-/* ── 第二層的「歷史訊號」（2026-09-22）──
-   一進來是當日盤中雷達，按頂端的「歷史訊號」才展開這一塊：近 10 個交易日一天一列，
-   點一列就換成那天的盤中。從首頁方塊拿掉的 10 小格，換成這份看得懂的清單。 */
-.rtl-history {
-	margin: 0 0 12px;
-	padding: 10px;
-	border: 1px solid var(--border);
-	border-radius: 14px;
-	background: rgba(146, 146, 163, 0.06);
-}
+/* ── 字卡分頁二「歷史訊號」（2026-09-22 四版）──
+   純清單：一天一列，不是按鈕、不跳分頁、今天那列也不框起來（Howard）。
+   訊號寫全名不用縮寫——縮寫是雷達列為了塞進一行才有的，這裡有整列寬度。
+   列高刻意加大（上下 12px、兩行），十天掃過去看得清楚。 */
+.rtl-history { margin: 0 0 4px; }
 
 .rtl-history-head {
 	display: flex;
 	align-items: baseline;
 	justify-content: space-between;
 	gap: 8px;
-	font-size: 0.82rem;
+	font-size: 0.86rem;
 	font-weight: 700;
-	margin-bottom: 8px;
+	margin-bottom: 10px;
 }
 
-.rtl-history-head .k { font-size: 0.7rem; font-weight: 400; color: var(--text-muted); }
+.rtl-history-head .k { font-size: 0.72rem; font-weight: 400; color: var(--text-muted); }
 
-.rtl-days { display: flex; flex-direction: column; gap: 4px; }
+.rtl-days { display: flex; flex-direction: column; gap: 8px; }
 
 .rtl-day {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	width: 100%;
-	text-align: left;
-	padding: 7px 8px;
-	border: 1px solid transparent;
-	border-radius: 10px;
-	background: rgba(146, 146, 163, 0.09);
+	padding: 12px 12px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: rgba(146, 146, 163, 0.07);
 	color: var(--text-0);
-	cursor: pointer;
 }
 
-.rtl-day-d { flex: 0 0 4.9rem; font-size: 0.78rem; font-weight: 700; }
-.rtl-day-n { flex: 0 0 3.4rem; font-size: 0.74rem; color: var(--text-muted); }
-.rtl-day-chips { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
-.rtl-day-more { font-size: 0.66rem; color: var(--text-muted); align-self: center; }
+.rtl-day-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.rtl-day-d { font-size: 0.92rem; font-weight: 700; }
+.rtl-day-n { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; }
+.rtl-day-sigs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+.rtl-day-sig {
+	font-size: 0.78rem;
+	line-height: 1.25;
+	padding: 4px 9px;
+	border-radius: 8px;
+	background: rgba(86, 168, 255, 0.14);
+	color: var(--text-0);
+}
+
+.rtl-day-more { font-size: 0.74rem; color: var(--text-muted); align-self: center; }
 .rtl-sub-gap { margin-left: 0.55rem; }
-/* 選中的那天（畫面上正在看的）用實色紫框，今天多一條白框 */
-.rtl-day.is-sel { background: rgba(139, 124, 255, 0.18); border-color: var(--accent); }
-.rtl-day.is-today .rtl-day-d { color: var(--text-0); }
-.rtl-day.is-today { border-color: rgba(255, 255, 255, 0.28); }
-.rtl-day.is-today.is-sel { border-color: var(--accent); }
 
 .home-stat-row {
 	display: flex;
