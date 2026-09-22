@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="167">
+  <meta name="app-version" content="168">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=167" rel="stylesheet">
+  <link href="watchlist.css?v=168" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -863,7 +863,7 @@
 
         <!-- 分頁二：歷史訊號——一天一列（日期、則數、那天的訊號全名），純清單不是按鈕（rtlDaysHtml） -->
         <div class="rtl-pane" id="rtl-pane-history" style="display:none">
-          <div class="rtl-history-head">近 <span id="rtl-history-n"></span> 個交易日的訊號<span class="k">每天各發生過什麼</span></div>
+          <div class="rtl-history-head">近 <span id="rtl-history-n"></span> 個交易日<span class="k">，每天各發生過什麼</span></div>
           <div class="rtl-days" id="rtl-days"></div>
         </div>
 
@@ -872,8 +872,8 @@
         <div class="kline-head-row">
           <span class="text-info fw-bold" id="kline-code"></span>
           <span class="fw-semibold d-none" id="kline-name"></span>
-          <span class="badge bg-secondary" id="kline-industry" style="font-size:0.72rem;"></span>
-          <span class="ms-auto" style="font-size:0.85rem;">現價 <strong id="kline-price"></strong></span>
+          <span class="badge bg-secondary" id="kline-industry" style="font-size:0.8rem;"></span>
+          <span class="ms-auto" style="font-size:0.95rem;">現價 <strong id="kline-price"></strong></span>
           <span id="kline-ma" class="kline-ma-chip">MA —</span>
         </div>
         <div class="d-flex align-items-center flex-wrap gap-2 mb-2 kline-toolbar-row">
@@ -6241,8 +6241,10 @@ function rtlDaysHtml(sid) {
   const todayKey = taipeiDateKey(new Date());
   return days.slice().reverse().map(d => {
     const story = radarStoryOf(sid, d).filter(e => e.src !== "post");
-    const names = story.slice(0, 6).map(e => `<span class="rtl-day-sig">${escapeHtml(e.title || "")}</span>`).join("")
-      + (story.length > 6 ? `<span class="rtl-day-more">還有 ${story.length - 6} 則</span>` : "");
+    // 訊號全名用頓號串成一句話。以前一顆一顆掛籤，看起來像可以按的按鈕，
+    // 但這一頁不是按鈕、也不跳分頁（Howard 2026-09-23）——純文字才不會被誤解。
+    const names = story.slice(0, 6).map(e => escapeHtml(e.title || "")).join("、")
+      + (story.length > 6 ? `<span class="rtl-day-more">…還有 ${story.length - 6} 則</span>` : "");
     const label = d === last && d === todayKey ? "今天" : `${_mdOf(d)}（${_weekdayZh(d)}）`;
     return `<div class="rtl-day">
         <div class="rtl-day-top">
@@ -8209,8 +8211,10 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
     yAxis: nv,
     lineStyle: { color: `rgba(${rgb},0.85)`, type: "dashed", width: 1.4 },
     label: {
-      show: true, formatter: text, position, distance: 4, fontSize: 10, color: "#eef3ff",
-      backgroundColor: `rgba(${rgb},0.28)`, borderColor: `rgba(${rgb},0.5)`, borderWidth: 1, borderRadius: 3, padding: [1, 4],
+      // 底色要夠深：0.28 的半透明色壓在 K 棒上，字會跟紅綠棒混在一起看不清楚
+      // （2026-09-23 字放大之後更明顯，標籤變寬、蓋到的 K 棒更多）
+      show: true, formatter: text, position, distance: 4, fontSize: 12, color: "#eef3ff",
+      backgroundColor: "rgba(10,15,30,0.86)", borderColor: `rgba(${rgb},0.85)`, borderWidth: 1, borderRadius: 4, padding: [2, 5],
     },
   });
   const markLines = [];
@@ -8265,7 +8269,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   const usable = Math.max(120, chartH - legendH - (sliderBottom + sliderH + dateLabelH) - gridGap * subCount);
   const subH = Math.max(38, Math.round(usable * (hasChips ? 0.16 : 0.20)));
   const mainH = Math.max(110, usable - subH * subCount);
-  const gridBox = { left: 46, right: 18 };
+  const gridBox = { left: 52, right: 18 };
   const grids = [{ ...gridBox, top: legendH, height: mainH }];
   grids.push({ ...gridBox, top: legendH + mainH + gridGap, height: subH });
   if (hasChips) grids.push({ ...gridBox, top: legendH + mainH + gridGap + subH + gridGap, height: subH });
@@ -8286,7 +8290,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
     gridIndex: i,
     data: dates,
     axisLabel: {
-      show: i === lastGrid, fontSize: 10, color: "#a6badf", hideOverlap: true,
+      show: i === lastGrid, fontSize: 12, color: "#a6badf", hideOverlap: true,
       formatter: v => (period === "monthly" ? String(v).slice(0, 7) : String(v).slice(5, 10)),
     },
     axisTick: { show: i === lastGrid },
@@ -8305,7 +8309,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
         // 刻度切細一階：scale:true 會把上下界湊成整數刻度，splitNumber 4 時 28–49 會被撐成
         // 25–50，下緣多出一整格空白、K 棒被擠到上半部；6 會湊成 27–51，貼得比較近
         splitNumber: 6,
-        axisLabel: { fontSize: 10, color: "#a6badf" },
+        axisLabel: { fontSize: 12, color: "#a6badf" },
         splitLine: { lineStyle: { color: "rgba(148,171,220,0.18)" } },
       };
     }
@@ -8318,7 +8322,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
       splitNumber: 2,
       // 最上面那個刻度不標：副圖之間只有 4–5% 的間隔，上一格的 0 與下一格的最大值會疊在一起
       axisLabel: {
-        fontSize: 10, color: "#a6badf", showMaxLabel: false,
+        fontSize: 12, color: "#a6badf", showMaxLabel: false,
         formatter: v => fmtLots(i === 1 ? v / 1000 : v),
       },
       splitLine: { lineStyle: { color: "rgba(148,171,220,0.18)" } },
@@ -8336,7 +8340,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   const chipLabel = currentChipsView === "foreign" ? "外資" : currentChipsView === "trust" ? "投信" : currentChipsView === "dealer" ? "自營商" : "三大合計";
   const subTitle = (gridIdx, text) => ({
     type: "text", left: gridBox.left + 4, top: grids[gridIdx].top + 2, silent: true, z: 10,
-    style: { text, fill: "#a6badf", fontSize: 10 },
+    style: { text, fill: "#a6badf", fontSize: 12 },
   });
   const graphic = [subTitle(1, "成交量(張)")];
   if (hasChips) graphic.push(subTitle(2, `${chipLabel}淨買超(張)`));
@@ -8404,7 +8408,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
       },
       formatter: params => {
         if (!params?.length) return "";
-        let h = `<div style="font-size:12px;padding:4px;"><b>${params[0].axisValue}</b><br/>`;
+        let h = `<div style="font-size:13px;padding:5px;"><b>${params[0].axisValue}</b><br/>`;
         params.forEach(p => {
           if (p.seriesName === "K線" && Array.isArray(p.data)) {
             h += `開:<b>${p.data[1]}</b> 高:<b>${p.data[4]}</b> 低:<b>${p.data[3]}</b> 收:<b>${p.data[2]}</b><br/>`;
@@ -8420,7 +8424,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
     },
     legend: {
       type: "scroll", data: legendData, top: 4, left: 46, right: 18, itemWidth: 12, itemGap: 8,
-      textStyle: { fontSize: 10, color: "#dce7ff" }, pageIconSize: 9, pageTextStyle: { color: "#a6badf" },
+      textStyle: { fontSize: 12, color: "#dce7ff" }, pageIconSize: 11, pageTextStyle: { color: "#a6badf" },
       // 手機預設只畫 MA20／MA60：四條均線疊在 K 棒上太滿，點圖例可以再開；
       // 開過之後切週期／籌碼不重設（klineLegendSelected）
       selected: klineLegendSelected || defaultKLineLegendSelected(mobile),

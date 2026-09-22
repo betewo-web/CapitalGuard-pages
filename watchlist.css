@@ -1347,7 +1347,7 @@ body.has-bottom-nav .qa-panel {
 	border-radius: 999px;
 	border: 1px solid rgba(121, 157, 255, 0.32);
 	background: rgba(24, 38, 74, 0.5);
-	font-size: 0.72rem;
+	font-size: 0.82rem;
 	color: #bfd0ee;
 	white-space: normal;
 	word-break: break-word;
@@ -1386,8 +1386,8 @@ body.has-bottom-nav .qa-panel {
 /* 手機操作提示：只在手機模式（與 isKLineMobileMode 同一組條件）顯示 */
 .kline-hint {
 	display: none;
-	margin-top: 0.3rem;
-	font-size: 0.68rem;
+	margin-top: 0.4rem;
+	font-size: 0.8rem;
 	line-height: 1.3;
 	color: var(--text-muted);
 }
@@ -1413,18 +1413,18 @@ body.has-bottom-nav .qa-panel {
 }
 
 .kline-select-label {
-	font-size: 0.72rem;
+	font-size: 0.84rem;
 	color: #96a9cd;
 	white-space: nowrap;
 }
 
 .kline-select {
-	min-height: 30px;
-	height: 30px;
-	min-width: 92px;
-	max-width: 120px;
+	min-height: 34px;
+	height: 34px;
+	min-width: 96px;
+	max-width: 128px;
 	padding: 0.18rem 0.45rem;
-	font-size: 0.76rem;
+	font-size: 0.88rem;
 	border-radius: 8px;
 	background-color: rgba(8, 13, 26, 0.82);
 }
@@ -1529,7 +1529,7 @@ body.has-bottom-nav .qa-panel {
 	}
 
 	.kline-select {
-		min-width: 82px;
+		min-width: 88px;
 		max-width: 100%;
 	}
 }
@@ -2166,43 +2166,33 @@ body.has-bottom-nav .qa-panel {
    列高刻意加大（上下 12px、兩行），十天掃過去看得清楚。 */
 .rtl-history { margin: 0 0 4px; }
 
+/* 標題一句話講完：原本用 space-between 把「每天各發生過什麼」推到最右邊，
+   中間空一大段看起來像少了什麼（Howard 2026-09-23）。 */
 .rtl-history-head {
-	display: flex;
-	align-items: baseline;
-	justify-content: space-between;
-	gap: 8px;
 	font-size: 0.95rem;
 	font-weight: 700;
 	margin-bottom: 10px;
 }
 
-.rtl-history-head .k { font-size: 0.8rem; font-weight: 400; color: var(--text-muted); }
+.rtl-history-head .k { font-size: 0.86rem; font-weight: 400; color: var(--text-muted); }
 
-.rtl-days { display: flex; flex-direction: column; gap: 8px; }
+/* 一天一列，列與列之間只有一條分隔線：框起來＋一顆顆藍底的籤看起來都像可以按，
+   但這一頁純粹是一份可以讀的清單（Howard 2026-09-23）。 */
+.rtl-days { display: flex; flex-direction: column; }
 
 .rtl-day {
-	padding: 12px 12px;
-	border: 1px solid var(--border);
-	border-radius: 12px;
-	background: rgba(146, 146, 163, 0.07);
+	padding: 12px 2px;
+	border-bottom: 1px solid rgba(146, 146, 163, 0.16);
 	color: var(--text-0);
 }
+
+.rtl-day:last-child { border-bottom: none; }
 
 .rtl-day-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .rtl-day-d { font-size: 1rem; font-weight: 700; }
 .rtl-day-n { font-size: 0.86rem; color: var(--text-muted); white-space: nowrap; }
-.rtl-day-sigs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-
-.rtl-day-sig {
-	font-size: 0.86rem;
-	line-height: 1.25;
-	padding: 4px 9px;
-	border-radius: 8px;
-	background: rgba(86, 168, 255, 0.14);
-	color: var(--text-0);
-}
-
-.rtl-day-more { font-size: 0.82rem; color: var(--text-muted); align-self: center; }
+.rtl-day-sigs { margin-top: 5px; font-size: 0.9rem; line-height: 1.6; color: var(--text-1); }
+.rtl-day-more { color: var(--text-muted); }
 .rtl-sub-gap { margin-left: 0.55rem; }
 
 .home-stat-row {
