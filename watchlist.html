@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="163">
+  <meta name="app-version" content="164">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=163" rel="stylesheet">
+  <link href="watchlist.css?v=164" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -233,9 +233,9 @@
            三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
            底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
       <nav class="home-tabs" aria-label="首頁分頁">
-        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')">🏠 總覽</button>
-        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')">🌙 盤後</button>
-        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')">⚙ 設定</button>
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>總覽</button>
+        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
+        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
       </nav>
 
       <!-- 「今日總覽」標題與日期 2026-09-22 拿掉（Howard）：日期與盤中／收盤都在下面那行狀態裡，
@@ -264,20 +264,20 @@
 
       <!-- 方塊自己就是卡片，不再包一層 panel-card：少一層框 -->
       <div class="home-sec mb-3">
-        <div class="home-sec-title">⭐ 我的自選</div>
+        <div class="home-sec-title"><i data-icon="star"></i>我的自選</div>
         <div class="home-grid" id="home-watchlist"></div>
       </div>
 
       <div class="card panel-card mb-3">
         <div class="card-body p-3">
-          <div class="home-sec-title">📰 今日資料 <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
+          <div class="home-sec-title"><i data-icon="news"></i>今日資料 <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
           <div id="home-news"></div>
         </div>
       </div>
 
       <div class="card panel-card mb-3" id="home-upcoming-card" style="display:none">
         <div class="card-body p-3">
-          <div class="home-sec-title">📅 接下來 7 天</div>
+          <div class="home-sec-title"><i data-icon="calendar"></i>接下來 7 天</div>
           <div id="home-upcoming"></div>
         </div>
       </div>
@@ -359,14 +359,12 @@
            三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
            底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
       <nav class="home-tabs" aria-label="首頁分頁">
-        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')">🏠 總覽</button>
-        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')">🌙 盤後</button>
-        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')">⚙ 設定</button>
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>總覽</button>
+        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
+        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
       </nav>
 
-      <div class="view-head">
-        <h2 class="view-title">🌙 盤後</h2>
-      </div>
+      <!-- 標題「🌙 盤後」2026-09-22 拿掉（Howard）：上面的分頁列已經寫著「盤後」，不必再說一次 -->
       <div id="post-list" class="post-list"></div>
       <div id="post-empty" class="view-empty" style="display:none"></div>
     </section>
@@ -376,9 +374,9 @@
            三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
            底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
       <nav class="home-tabs" aria-label="首頁分頁">
-        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')">🏠 總覽</button>
-        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')">🌙 盤後</button>
-        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')">⚙ 設定</button>
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>總覽</button>
+        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
+        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
       </nav>
 
       <!-- 新增股票：單行搜尋列（原本的整張卡片佔掉近三倍高度） -->
@@ -418,13 +416,13 @@
 <!-- ── 底部導航（登入後顯示） ── -->
 <nav id="bottom-nav" class="bottom-nav" style="display:none" aria-label="主導航">
   <button class="bottom-nav-item" data-tab="home" onclick="switchTab('home')">
-    <span class="bn-icon">🏠</span><span>首頁</span>
+    <span class="bn-icon" data-icon="home"></span><span>首頁</span>
   </button>
   <button class="bottom-nav-item" data-tab="scores" onclick="switchTab('scores')">
-    <span class="bn-icon">📊</span><span>統計</span>
+    <span class="bn-icon" data-icon="chart"></span><span>統計</span>
   </button>
   <button class="bottom-nav-item" data-tab="inbox" onclick="switchTab('inbox')">
-    <span class="bn-icon">🔔</span><span>通知</span>
+    <span class="bn-icon" data-icon="bell"></span><span>通知</span>
     <span class="bn-badge" id="inbox-badge"></span>
   </button>
 </nav>
@@ -1126,6 +1124,12 @@ const ICON_CHART  = _svg('<path d="M2.2 13.6h11.6"/><path d="M4.6 11.2V7.4"/><pa
 const ICON_BELL   = _svg('<path d="M4.1 6.6a3.9 3.9 0 0 1 7.8 0c0 2.9 1 3.9 1 3.9H3.1s1-1 1-3.9Z"/><path d="M6.5 12.6a1.7 1.7 0 0 0 3 0"/>');
 const ICON_EVENTS = _svg('<rect x="3.3" y="3.2" width="9.4" height="10.4" rx="1.7"/><path d="M6.2 2.1h3.6v2.1H6.2z"/><path d="M6 7.6h4M6 10.2h2.6"/>');
 const ICON_CLOSE  = _svg('<path d="M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4"/>');
+// 導覽與區塊標題用的線條圖示（2026-09-22 起全站不用 emoji 當圖示）
+const ICON_HOME   = _svg('<path d="M2.6 7.4 8 2.8l5.4 4.6"/><path d="M4.1 8.3v4.9h7.8V8.3"/><path d="M6.6 13.2V9.8h2.8v3.4"/>');
+const ICON_MOON   = _svg('<path d="M13 9.4A5.6 5.6 0 0 1 6.6 3a5.6 5.6 0 1 0 6.4 6.4Z"/>');
+const ICON_GEAR   = _svg('<circle cx="8" cy="8" r="2.2"/><path d="M8 1.9v1.6M8 12.5v1.6M14.1 8h-1.6M3.5 8H1.9M12.3 3.7l-1.1 1.1M4.8 11.2l-1.1 1.1M12.3 12.3l-1.1-1.1M4.8 4.8 3.7 3.7"/>');
+const ICON_STAR   = _svg('<path d="M8 2.4l1.7 3.6 3.9.5-2.9 2.7.8 3.9L8 11.2l-3.5 1.9.8-3.9-2.9-2.7 3.9-.5z"/>');
+const ICON_CAL    = _svg('<rect x="2.6" y="3.6" width="10.8" height="10" rx="1.8"/><path d="M2.6 6.6h10.8M5.6 2.2v2.6M10.4 2.2v2.6"/>');
 const ICON_SEARCH = _svg('<circle cx="6.9" cy="6.9" r="4.1"/><path d="M10 10 13.6 13.6"/>', 14);
 const ICON_RULES  = _svg('<path d="M2.6 5.2h10.8M2.6 10.8h10.8"/><circle cx="6" cy="5.2" r="1.7"/><circle cx="10.4" cy="10.8" r="1.7"/>', 14);
 const ICON_EDIT   = _svg('<path d="M11.1 2.6 13.4 4.9 5.6 12.7 2.6 13.4l0.7-3z"/>', 14);
@@ -1140,6 +1144,13 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
   if (rulesBtn) rulesBtn.innerHTML = `${ICON_RULES}<span>進階訊號</span>`;
   const alertsBtn = document.getElementById("wl-alerts-btn");
   if (alertsBtn) alertsBtn.innerHTML = `${ICON_BELL}<span>基礎訊號</span>`;
+  // 底部導覽、首頁分頁、區塊標題的圖示：一律線條 SVG（2026-09-22 起不用 emoji 當圖示）
+  const ICONS_BY_NAME = { home: ICON_HOME, chart: ICON_CHART, bell: ICON_BELL, star: ICON_STAR,
+                          news: ICON_EVENTS, calendar: ICON_CAL, moon: ICON_MOON, gear: ICON_GEAR };
+  document.querySelectorAll("[data-icon]").forEach(el => {
+    const ic = ICONS_BY_NAME[el.dataset.icon];
+    if (ic) el.innerHTML = ic;
+  });
 }
 
 // ── PWA v2: App Shell 狀態 ──
@@ -7086,7 +7097,7 @@ function renderPost() {
 
   if (emptyEl) {
     emptyEl.style.display = rows.length ? "none" : "";
-    emptyEl.textContent = "尚未加入自選股，切到上面的「⚙ 設定」分頁新增";
+    emptyEl.textContent = "尚未加入自選股，切到上面的「設定」分頁新增";
   }
 
   listEl.innerHTML = rows.map(r => {

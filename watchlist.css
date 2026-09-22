@@ -260,7 +260,7 @@ body.has-bottom-nav .page-shell {
 	align-items: center;
 	justify-content: center;
 	gap: 0.4rem;
-	font-size: 1.02rem;
+	font-size: 1.1rem;
 	font-weight: 700;
 }
 
@@ -486,16 +486,15 @@ body.has-bottom-nav .page-shell {
 	font-size: 0.95rem;
 	font-weight: 700;
 	letter-spacing: 0.04em;
-	/* 2026-09-22：原本是紫底配深綠字（更早期青綠按鈕留下來的），對比低又跟全站色彩語彙對不上。
-	   改成品牌紫實底＋白字：紫＝可點，這是這一頁的主要動作。 */
-	color: #fff;
-	background: var(--accent);
-	box-shadow: 0 2px 10px rgba(139, 124, 255, 0.35);
+	/* 2026-09-22 Howard 指定金色：品牌金實底＋深色字（金在深底上要配深字才讀得清楚） */
+	color: #2a1f00;
+	background: var(--accent-2);
+	box-shadow: 0 2px 10px rgba(245, 197, 66, 0.3);
 	transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 
-.wl-addbar-btn:hover { background: #9d90ff; }
-.wl-addbar-btn:active { background: #7a6af0; box-shadow: none; }
+.wl-addbar-btn:hover { background: #ffd65e; }
+.wl-addbar-btn:active { background: #e0b234; box-shadow: none; }
 
 .wl-add-msg {
 	font-size: 0.86rem;
@@ -1556,11 +1555,11 @@ body.has-bottom-nav .qa-panel {
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 2px;
+	gap: 3px;
 	border: none;
 	background: none;
 	color: var(--text-muted);
-	font-size: 0.68rem;
+	font-size: 0.82rem;
 	font-family: "Noto Sans TC", sans-serif;
 	cursor: pointer;
 	position: relative;
@@ -1568,19 +1567,22 @@ body.has-bottom-nav .qa-panel {
 	transition: color 0.15s;
 }
 
+/* 2026-09-22：三顆圖示從 emoji 換成線條 SVG（跟 App 其他地方同一套），所以不再需要灰階濾鏡 */
 .bottom-nav-item .bn-icon {
-	font-size: 1.25rem;
-	line-height: 1.1;
-	filter: grayscale(0.55) opacity(0.75);
-	transition: filter 0.15s, transform 0.15s;
+	display: inline-flex;
+	line-height: 1;
+	opacity: 0.8;
+	transition: opacity 0.15s, transform 0.15s;
 }
+
+.bottom-nav-item .bn-icon .ic { width: 21px; height: 21px; stroke-width: 1.4; }
 
 .bottom-nav-item.active {
 	color: var(--accent);
 }
 
 .bottom-nav-item.active .bn-icon {
-	filter: none;
+	opacity: 1;
 	transform: translateY(-1px);
 }
 
@@ -1786,6 +1788,9 @@ body.has-bottom-nav .qa-panel {
 }
 
 /* ── 首頁 Today ── */
+.home-sec-title [data-icon] { display: inline-flex; margin-right: 6px; color: var(--accent-2); }
+.home-sec-title [data-icon] .ic { width: 16px; height: 16px; }
+
 .home-sec-title {
 	display: flex;
 	align-items: center;
@@ -1827,6 +1832,9 @@ body.has-bottom-nav .qa-panel {
 	white-space: nowrap;
 	transition: color 0.15s ease, background 0.15s ease;
 }
+
+.home-tab [data-icon] { display: inline-flex; vertical-align: -2px; margin-right: 5px; }
+.home-tab [data-icon] .ic { width: 16px; height: 16px; }
 
 /* 段與段之間的細線：相鄰兩段都沒被選中時才畫，選中的那一段自己有底色 */
 .home-tab + .home-tab::before {
