@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="145">
+  <meta name="app-version" content="146">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=145" rel="stylesheet">
+  <link href="watchlist.css?v=146" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -3622,8 +3622,10 @@ function showcaseTileHtml() {
   const top = showcase.top;
   const when = top.first_at && top.last_at && top.first_at !== top.last_at ? `${top.first_at} 到 ${top.last_at} 之間` : (top.first_at || "");
   return `<div class="home-tile home-example" onclick="openShowcase()">
-      <div class="home-tile-head"><span class="home-tile-name">${escapeHtml(showcase.stock_name || showcase.stock_id)}</span><span class="home-example-tag">範例</span></div>
-      <div class="home-tile-lead"><b class="home-tile-n">${Number(top.n) || 0} 則</b><span class="home-tile-when">${escapeHtml(_mdOf(top.date))}</span></div>
+      <div class="home-tile-head">
+        <span class="home-tile-name">${escapeHtml(showcase.stock_name || showcase.stock_id)}</span><span class="home-example-tag">範例</span>
+        <span class="home-tile-lead"><b class="home-tile-n">共 ${Number(top.n) || 0} 則訊號</b></span>
+      </div>
       <div class="home-example-note">這是一檔近期訊號很多的股票。你的自選股有事時，方塊上就會像這樣寫著今天幾則；點進去看 ${escapeHtml(_mdOf(top.date))} 那天${when ? `（${escapeHtml(when)}有 ${top.n} 則）` : ""}的盤中。</div>
     </div>`;
 }
@@ -5288,41 +5290,47 @@ function renderHome() {
     const total = counts.reduce((a, b) => a + b, 0);
     const standout = (stockEvents[sid] || []).filter(isTodayEvent).length;   // 今天的事件數（不分階）
     const chg = Number(scoreMap[sid]?.score_change);
-    const q = getQuote(sid);   // 只為了標這個漲跌是哪一個交易日的（週末看到的是上週五）
+    // 逼近關卡：與雷達分頁同一個算法（距最近支撐／壓力 RADAR_NEAR_PCT 以內），只拿來數，不上方塊
+    const lv = nearestLevels(sid, getQuote(sid)?.price ?? null);
+    const nearPct = Math.min(lv.supPct != null ? lv.supPct : Infinity,
+                             lv.resPct != null ? lv.resPct : Infinity);
     return { sid, name, active, counts, todayCount, total, standout, dir: homeDirectionOf(sid),
-             scoreChange: Number.isFinite(chg) ? chg : null,
-             quoteDate: q && q.tradeDate ? q.tradeDate : "" };
+             scoreChange: Number.isFinite(chg) ? chg : null, nearPct,
+             limitKind: (active && (active.signal === "limit_up" || active.signal === "limit_down"))
+                        ? active.signal : "" };
   });
   // 有事的排前面：進行中 → 今天則數 → 今天事件數 → 近 N 日累計 → 名稱
   rows.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || b.todayCount - a.todayCount
     || b.standout - a.standout || b.total - a.total || a.name.localeCompare(b.name, "zh-Hant"));
 
-  // 一句話總結（取代以前的兩格大數字）
+  // 兩格數字（Howard 2026-09-22：就像盤中雷達那樣）＋一行摘要。
+  // 「有訊號」數的是方塊上寫著幾則的那些檔，「逼近關卡」是其餘裡面貼著支撐／壓力的——
+  // 與雷達分頁同一組定義，只是那裡還有第三格「平靜」。
   const nSig = rows.filter(r => r.todayCount > 0).length;
+  const nNear = rows.filter(r => !r.todayCount && r.nearPct <= RADAR_NEAR_PCT).length;
   const nEv = rows.reduce((acc, r) => acc + r.standout, 0);
   const total = rows.reduce((acc, r) => acc + r.total, 0);
   const summaryEl = document.getElementById("home-summary");
   if (summaryEl) {
     if (!rows.length) {
       summaryEl.innerHTML = `<div class="home-sum"><b>尚未加入自選股</b><span class="dim">到 ⭐ 自選 分頁新增，首頁會列出每檔近 ${HOME_HISTORY_DAYS} 個交易日的訊號</span></div>`;
-    } else if (nSig || nEv) {
-      const parts = [];
-      if (nSig) parts.push(`${nSig} 檔有訊號`);
-      if (nEv) parts.push(`${nEv} 件資料`);
-      summaryEl.innerHTML = `<div class="home-sum"><b>${rows.length} 檔自選：${dayLabel} ${parts.join("、")}</b>
-        <span class="dim">近 ${days.length} 個交易日累計 ${total} 則訊號</span></div>`;
     } else {
-      summaryEl.innerHTML = `<div class="home-sum"><b>${rows.length} 檔自選${dayLabel}都平靜</b>
-        <span class="dim">近 ${days.length} 個交易日累計 ${total} 則訊號${total ? "" : "，還沒有紀錄"}</span></div>`;
+      summaryEl.innerHTML = `
+        <div class="home-stat-row">
+          <div class="home-stat"><div class="hs-num sev-orange">${nSig}</div><div class="hs-label">⚡ 有訊號</div></div>
+          <div class="home-stat"><div class="hs-num sev-blue">${nNear}</div><div class="hs-label">🎯 逼近關卡</div></div>
+        </div>
+        <div class="home-sum"><span class="dim">${rows.length} 檔自選 · 近 ${days.length} 個交易日累計 ${total} 則訊號${
+          total ? "" : "，還沒有紀錄"}${nEv ? ` · ${dayLabel} ${nEv} 件資料` : ""}</span></div>`;
     }
   }
 
-  // 自選方塊（兩欄）
+  // 自選方塊：一檔一列（2026-09-22 Howard）
   const listEl = document.getElementById("home-watchlist");
   const example = showcaseWanted(rows);
   if (listEl) {
     listEl.innerHTML = (rows.length
-      ? rows.map(r => homeTileHtml(r, dayLabel)).join("")
+      ? rows.map(r => homeTileHtml(r)).join("")
       : '<div class="home-tile-empty">尚未加入自選股，到 ⭐ 自選 分頁新增</div>')
       + (example ? showcaseTileHtml() : "");
   }
@@ -5370,20 +5378,24 @@ function homeDirectionOf(sid) {
   return q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
 }
 
-// 首頁方塊（2026-09-22）：一檔一塊、兩欄並排。由上而下——名稱＋漲／平／跌籤／今天幾則／評分變化。
-// 近 10 個交易日的格子同日拿掉（Howard）：歷史移進第二層的「歷史訊號」，首頁只講今天。
+// 首頁方塊（2026-09-22 五版，Howard）：一檔一列、佔滿整行。
+// 上排＝名稱＋漲／平／跌＋「共 N 則訊號」，下排＝評分變化與今日資料籤。
+// 日期與「今日」都拿掉了（哪一天由標題下面那行狀態講），字體略小。
 // 點方塊開的就是當日盤中雷達（`radarTimelineModal`，不是切到雷達分頁）；點資料籤開事件面板。
-function homeTileHtml(r, dayLabel) {
-  // 籤旁標這個漲跌是哪一天的（報價的交易日）：週末看到的是上週五的
-  const dir = (r.dir
+function homeTileHtml(r) {
+  const dir = r.dir
     ? `<span class="home-dir home-dir-${r.dir}">${HOME_DIR_LABEL[r.dir]}</span>`
-    : `<span class="home-dir home-dir-none">—</span>`)
-    + (r.quoteDate ? `<span class="home-dir-date">${escapeHtml(_mdOf(r.quoteDate))}</span>` : "");
-  // 主行：當天幾則（大字）＋是哪一天（淡字）＋進行中。沒有就一句「沒有訊號」，不留空白
+    : `<span class="home-dir home-dir-none">—</span>`;
+  // 還在漲停／跌停板上就直接寫「漲停」「跌停」，不寫籠統的「進行中」（Howard）。
+  // 打開漲停後 monitor 下一輪的 top_alert 就不再是 limit_up，intraday_state.signal 跟著換，
+  // 這顆籤自己會消失——不必另外判斷「打開了沒」。
+  const limitLabel = r.limitKind === "limit_up" ? "漲停" : r.limitKind === "limit_down" ? "跌停" : "";
+  const live = limitLabel
+    ? `<span class="home-tile-live is-limit">${limitLabel}</span>`
+    : r.active ? `<span class="home-tile-live">進行中</span>` : "";
   const lead = r.todayCount
-    ? `<b class="home-tile-n">${r.todayCount} 則</b><span class="home-tile-when">${escapeHtml(dayLabel)}</span>${
-        r.active ? `<span class="home-tile-live">進行中</span>` : ""}`
-    : `<span class="home-tile-calm">沒有訊號</span><span class="home-tile-when">${escapeHtml(dayLabel)}</span>`;
+    ? `<b class="home-tile-n">共 ${r.todayCount} 則訊號</b>${live}`
+    : `<span class="home-tile-calm">沒有訊號</span>${live}`;
   // 事件籤＝今天有幾件資料（與下方「今日資料」卡同一批）；點籤開事件面板，
   // 點方塊開的是時間軸，兩者講不同的東西（Howard 2026-09-20：點進去看不到相關資訊）
   const ev = r.standout
@@ -5397,8 +5409,10 @@ function homeTileHtml(r, dayLabel) {
     : fmtScoreDelta(chg);
   const score = `<span class="home-tile-score">評分 ${scoreTxt}</span>`;
   return `<div class="home-tile${r.todayCount ? " is-hot" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
-      <div class="home-tile-head"><span class="home-tile-name">${escapeHtml(r.name)}</span>${dir}</div>
-      <div class="home-tile-lead">${lead}</div>
+      <div class="home-tile-head">
+        <span class="home-tile-name">${escapeHtml(r.name)}</span>${dir}
+        <span class="home-tile-lead">${lead}</span>
+      </div>
       <div class="home-tile-foot">${score}${ev}</div>
     </div>`;
 }

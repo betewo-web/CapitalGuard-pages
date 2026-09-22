@@ -1843,22 +1843,23 @@ body.has-bottom-nav .qa-panel {
 .home-sum b { font-weight: 800; }
 .home-sum .dim { display: block; margin-top: 2px; font-size: 0.76rem; color: var(--text-muted); }
 
-/* ── 自選方塊（2026-09-22 改版）：一檔一塊、兩欄並排 ──
-   方塊裡由上而下＝名稱＋漲／平／跌／今天幾則／近 10 個交易日的格子／評分變化。
-   其他細節一律點進第二層（時間軸）。留白是刻意的：方塊間 10px、方塊內每段 8px。 */
+/* ── 自選方塊（2026-09-22 五版）：一檔一列、佔滿整行 ──
+   上排＝名稱＋漲／平／跌＋「共 N 則訊號」（在右邊），下排＝評分變化與今日資料籤。
+   兩欄並排改回一欄是因為名稱＋狀態擠在 175px 裡要折行；整行寬度下一眼就讀得完。
+   其他細節一律點進字卡（盤中雷達／歷史訊號／看 K 線）。 */
 .home-sec { margin-top: 0.1rem; }
 
 .home-grid {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 10px;
+	grid-template-columns: 1fr;
+	gap: 8px;
 }
 
 .home-tile {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
-	padding: 0.8rem 0.75rem;
+	gap: 7px;
+	padding: 0.7rem 0.8rem;
 	border: 1px solid var(--border);
 	border-radius: 16px;
 	background: var(--surface);
@@ -1874,9 +1875,8 @@ body.has-bottom-nav .qa-panel {
 .home-tile-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
 
 .home-tile-name {
-	flex: 1 1 auto;
 	min-width: 0;
-	font-size: 1rem;
+	font-size: 0.92rem;
 	font-weight: 700;
 	color: var(--text-0);
 	overflow: hidden;
@@ -1884,10 +1884,9 @@ body.has-bottom-nav .qa-panel {
 	white-space: nowrap;
 }
 
-.home-tile-lead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; line-height: 1.15; }
-.home-tile-n { font-size: 1.2rem; font-weight: 800; color: var(--text-0); }
-.home-tile-when { font-size: 0.7rem; color: var(--text-muted); }
-.home-tile-calm { font-size: 0.88rem; font-weight: 600; color: var(--text-muted); }
+.home-tile-lead { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; line-height: 1.2; }
+.home-tile-n { font-size: 0.85rem; font-weight: 700; color: var(--text-0); }
+.home-tile-calm { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
 
 .home-tile-live {
 	font-size: 0.62rem;
@@ -1900,14 +1899,23 @@ body.has-bottom-nav .qa-panel {
 	white-space: nowrap;
 }
 
+/* 還在板上：漲停／跌停直接寫出來，實底比「進行中」的空框更顯眼（打開板之後這顆籤就不見了） */
+.home-tile-live.is-limit {
+	font-size: 0.68rem;
+	padding: 3px 7px;
+	color: var(--bg-0);
+	background: var(--sig-orange);
+	border-color: var(--sig-orange);
+}
+
 .home-tile-foot {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 6px;
-	padding-top: 8px;
+	padding-top: 7px;
 	border-top: 1px solid rgba(146, 146, 163, 0.14);
-	font-size: 0.76rem;
+	font-size: 0.74rem;
 	color: var(--text-muted);
 }
 
@@ -1935,7 +1943,6 @@ body.has-bottom-nav .qa-panel {
 	.home-tile { padding: 0.7rem 0.6rem; }
 }
 
-.home-dir-date { font-size: 0.66rem; color: var(--text-muted); white-space: nowrap; }
 .home-ev {
 	cursor: pointer;
 	font-size: 0.66rem;
