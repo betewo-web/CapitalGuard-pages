@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="148">
+  <meta name="app-version" content="149">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=148" rel="stylesheet">
+  <link href="watchlist.css?v=149" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -255,7 +255,10 @@
 
       <!-- 方塊自己就是卡片，不再包一層 panel-card：少一層框 -->
       <div class="home-sec mb-3">
-        <div class="home-sec-title">⭐ 我的自選 <span class="hs-link" onclick="switchTab('watch')">自選設定 →</span></div>
+        <div class="home-sec-title">⭐ 我的自選
+          <!-- 自選分頁 2026-09-22 從底部導覽拿掉，這顆就是唯一入口：做成實心按鈕、字放大 -->
+          <button type="button" class="home-manage-btn" onclick="switchTab('watch')">⚙ 自選設定</button>
+        </div>
         <div class="home-grid" id="home-watchlist"></div>
       </div>
 
@@ -315,15 +318,9 @@
       <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
     </section>
 
-    <!-- ═══ ⚡ 盤中雷達 ═══ -->
-    <section id="view-live" class="app-view">
-      <div class="view-head">
-        <h2 class="view-title">⚡ 盤中雷達</h2>
-        <span class="view-sub" id="live-status"></span>
-      </div>
-      <div class="home-stat-row live-stat-row" id="live-stats"></div>
-      <div id="live-list"></div>
-    </section>
+    <!-- ⚡ 盤中雷達分頁 2026-09-22 拿掉（Howard）：首頁本來就是每檔一列、帶「訊號／逼近關卡」兩格數字，
+         點進去的個股字卡第一頁就叫「盤中雷達」（同一天的時間軸，講得比那頁的縮寫籤細）。
+         兩個地方講同一件事，留一個。renderLive 與縮寫籤 radarChipHtml 一併移除。 -->
 
     <!-- ═══ 🔔 通知 Inbox ═══ -->
     <section id="view-inbox" class="app-view">
@@ -396,15 +393,9 @@
   <button class="bottom-nav-item" data-tab="scores" onclick="switchTab('scores')">
     <span class="bn-icon">📊</span><span>統計</span>
   </button>
-  <button class="bottom-nav-item" data-tab="live" onclick="switchTab('live')">
-    <span class="bn-icon">⚡</span><span>盤中</span>
-  </button>
   <button class="bottom-nav-item" data-tab="inbox" onclick="switchTab('inbox')">
     <span class="bn-icon">🔔</span><span>通知</span>
     <span class="bn-badge" id="inbox-badge"></span>
-  </button>
-  <button class="bottom-nav-item" data-tab="watch" onclick="switchTab('watch')">
-    <span class="bn-icon">⭐</span><span>自選</span>
   </button>
 </nav>
 
@@ -1080,7 +1071,9 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
 }
 
 // ── PWA v2: App Shell 狀態 ──
-const APP_TABS = ["home", "scores", "live", "inbox", "watch"];
+// watch 沒有底部導覽鈕：入口是首頁「⭐ 自選設定」那顆（2026-09-22）。留在這裡是為了
+// switchTab 認得它、#watch 的 hash 也還能路由回來
+const APP_TABS = ["home", "scores", "inbox", "watch"];
 let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc，近 INBOX_HISTORY_DAYS 天）
 const INBOX_HISTORY_DAYS = 30;  // 通知只抓這麼多天：首頁近 10 個交易日的格子要數得到規則命中與自訂價位
@@ -3289,7 +3282,8 @@ function _refreshIntervalMs() {
 }
 
 function _inboxIntervalMs() {
-  return currentTab === "live" ? INBOX_MS_LIVE_TAB : INBOX_MS_MARKET;
+  // 首頁現在就是盤中那一頁（每檔一列＋兩格數字），所以快的那個間隔給首頁
+  return currentTab === "home" ? INBOX_MS_LIVE_TAB : INBOX_MS_MARKET;
 }
 
 // 自動更新只抓輕量資料：盤中每一輪都拉報價，Inbox 到期才拉。
@@ -3505,12 +3499,6 @@ function switchTab(tab, silent = false) {
   });
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
-  if (tab === "live") {
-    Promise.all([loadIntradayQuotes(true), refreshInbox(false)]).then(() => renderLive());
-    // 關卡的備援來源是報告資料：登入那次載入失敗（手機網路）後原本再也沒人重抓，
-    // 雷達就一直「無關卡資料」。這裡補一次（有快取就直接回傳，不會重下 6MB）
-    if (!sharedReportData) loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
-  }
   // 評分頁靠報告資料；登入後那次載入還沒回來就先顯示載入中，回來再畫。
   // 已載入但還是昨天的（PWA 沒真的關過）→ 過期才重抓，不進輪詢
   if (tab === "scores" && !sharedReportData) {
@@ -3532,7 +3520,6 @@ function renderCurrentTab() {
   if (!currentTab) return;
   if (currentTab === "home") renderHome();
   else if (currentTab === "scores") renderScores();
-  else if (currentTab === "live") renderLive();
   else if (currentTab === "inbox") renderInbox();
   else renderWatchlist(watchlistRows);
 }
@@ -5377,16 +5364,24 @@ function homeTileHtml(r) {
     </div>`;
 }
 
-// 標題下一行：盤中／已收盤、資料時間、自選檔數（與雷達狀態列同一組字）
+// 清單上方那一行：盤中／已收盤、報價時刻、自選檔數。
+// 2026-09-22 盤中雷達分頁拿掉之後，「報價停更」的警告搬到這裡——取價跑在自家主機上，
+// 機器一停畫面上的價就凍住而且看起來完全正常，這是最危險的失效模式，一定要有地方講出來。
 function homeStatusText() {
   const n = watchlistRows.length;
-  let latest = null;
+  let latestQuoteAt = null, latestAt = null;
   for (const iq of Object.values(intradayQuoteMap || {})) {
-    const t = iq?.quote_at || iq?.updated_at;
-    if (t && (!latest || t > latest)) latest = t;
+    if (iq?.quote_at && (!latestQuoteAt || iq.quote_at > latestQuoteAt)) latestQuoteAt = iq.quote_at;
+    if (iq?.updated_at && (!latestAt || iq.updated_at > latestAt)) latestAt = iq.updated_at;
   }
-  if (_isMarketOpenNow()) return `🟢 盤中${latest ? ` · 資料 ${fmtTime(latest)}` : ""} · 自選 ${n} 檔`;
-  return `⚪ 已收盤${latest ? ` · 資料 ${fmtTime(latest, true)}` : ""} · 自選 ${n} 檔`;
+  const isOpen = _isMarketOpenNow();
+  // 新鮮度以 quote_at（報價有效時刻）為準；舊 DB 沒那一欄就退回寫入時間，否則永遠誤報停更
+  const freshnessAt = latestQuoteAt || latestAt;
+  const quoteAge = freshnessAt ? quoteAgeMs(freshnessAt) : null;
+  const quoteStale = isOpen && quoteAge !== null && quoteAge >= QUOTE_STALE_MS;
+  if (quoteStale) return `🟠 報價已停止更新 · 最後 ${fmtClock(freshnessAt)}（${fmtAgeRough(quoteAge)}）· 自選 ${n} 檔`;
+  if (isOpen) return `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : latestAt ? ` · 資料 ${fmtTime(latestAt)}` : ""} · 自選 ${n} 檔`;
+  return `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${n} 檔`;
 }
 
 // 接下來 7 天：stock_events 裡事件日在明天起 7 天內的日程（除權息、法說會、財報…）。
@@ -5972,124 +5967,9 @@ function _signalLevelLabel(signal, level, compact = false) {
   return `關卡 ${p}`;
 }
 
-// 雷達是「狀態驅動」而不是「事件驅動」：每檔自選股永遠有一列——現價（intraday_state，
-// 後端只在盤中寫、收盤後留最後一筆＝收盤狀態）、離最近支撐／壓力多遠（報告資料的
-// levels）、當前訊號、今天觸發過什麼（通知紀錄）。以前這頁只是「今天的通知」換個皮，
-// 沒發通知就是空頁；通知本身留給通知分頁，這裡不再重複列一遍。
-function renderLive() {
-  const listEl = document.getElementById("live-list");
-  if (!listEl) return;
-  const isOpen = _isMarketOpenNow();
-  const statusEl = document.getElementById("live-status");
-  const holdings = holdingBySid();
-
-  const rows = watchlistRows.map(r => {
-    const sid = String(r.stock_id || "").trim();
-    const iq = intradayQuoteMap[sid] || null;
-    const q = getQuote(sid);
-    const price = q ? q.price : null;
-    // 關卡只拿來算「逼近關卡」與排序；價格與漲跌幅都不上畫面——雷達講的是「今天發生了什麼」
-    // （2026-09-18 改版），價格留給 K 線與自選列
-    const lv = nearestLevels(sid, price);
-    const active = (iq && iq.signal && iq.signal !== "none") ? iq : null;
-    const chips = radarStoryOf(sid).filter(e => e.src !== "post");   // 盤後提醒只在時間軸的故事列
-    const nearPct = Math.min(lv.supPct != null ? lv.supPct : Infinity,
-                             lv.resPct != null ? lv.resPct : Infinity);
-    return {
-      sid, iq, lv, active, chips, nearPct,
-      latestMs: chips.length ? chips[chips.length - 1].ms : 0,
-      sev: active ? inferSeverity(active) : null,
-      name: getPreferredStockName(sid, r.stock_name) || sid,
-      holding: holdings.get(sid) || null,
-    };
-  });
-
-  const latestAt = rows.reduce((m, x) =>
-    (x.iq?.updated_at && (!m || x.iq.updated_at > m)) ? x.iq.updated_at : m, null);
-  // 報價時間＝這份報價有效的時刻（intraday_state.quote_at：MIS 快照 sysTime 或富果抓取時間）。
-  // 它與寫入時間的差就是「來源本身的延遲」；盤中顯示到秒，快照多久沒換一眼看得出。
-  const latestQuoteAt = rows.reduce((m, x) =>
-    (x.iq?.quote_at && (!m || x.iq.quote_at > m)) ? x.iq.quote_at : m, null);
-  const nSignal = rows.filter(x => x.active).length;
-  const nNear = rows.filter(x => !x.active && x.nearPct <= RADAR_NEAR_PCT).length;
-  const nQuiet = rows.length - nSignal - nNear;
-  // 新鮮度以 quote_at 為準，沒有那一欄（舊 DB 還沒跑 migration）就退回寫入時間——
-  // 主機停了兩個都會一起凍住，用哪個都偵測得到，但 quote_at 更貼近「報價多舊」。
-  const freshnessAt = latestQuoteAt || latestAt;
-  const quoteAge = freshnessAt ? quoteAgeMs(freshnessAt) : null;
-  const quoteStale = isOpen && quoteAge !== null && quoteAge >= QUOTE_STALE_MS;
-  statusEl.textContent = quoteStale
-    ? `🟠 報價已停止更新 · 最後 ${fmtClock(freshnessAt)}（${fmtAgeRough(quoteAge)}）· 自選 ${rows.length} 檔`
-    : isOpen
-      ? `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : ""} · 自選 ${rows.length} 檔`
-      : `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${rows.length} 檔`;
-  // 三格數的是「自選股的狀態」，跟首頁三格數「事件」不同，標籤刻意不用同一組字
-  document.getElementById("live-stats").innerHTML = `
-    <div class="home-stat"><div class="hs-num sev-orange">${nSignal}</div><div class="hs-label">⚡ 有訊號</div></div>
-    <div class="home-stat"><div class="hs-num sev-blue">${nNear}</div><div class="hs-label">🎯 逼近關卡</div></div>
-    <div class="home-stat"><div class="hs-num sev-info">${nQuiet}</div><div class="hs-label">— 平靜</div></div>
-  `;
-  if (!rows.length) {
-    listEl.innerHTML = `<div class="view-empty">尚未加入自選股<br>
-      <span style="font-size:.78rem;opacity:.8">雷達會依時間列出每檔自選股今天發生過的訊號，點進去是盤中時間軸</span><br>
-      <button class="btn btn-sm btn-outline-info mt-3" onclick="switchTab('watch')">前往自選股 →</button></div>`;
-    return;
-  }
-
-  // 排序：進行中（強訊號 → 注意）→ 最新一則訊號的時間 → 距關卡最近
-  const sevRank = { orange: 0, blue: 1 };
-  rows.sort((a, b) => {
-    const ra = a.active ? (sevRank[a.sev] ?? 2) : 3;
-    const rb = b.active ? (sevRank[b.sev] ?? 2) : 3;
-    if (ra !== rb) return ra - rb;
-    if (a.latestMs !== b.latestMs) return b.latestMs - a.latestMs;
-    return a.nearPct - b.nearPct;
-  });
-
-  listEl.innerHTML = `<div class="card panel-card"><div class="card-body p-0">` + rows.map(x => {
-    const tags = [];
-    if (x.holding) tags.push(`<span class="wl-signal-badge wl-tag-holding">持</span>`);
-    const nearCls = (!x.active && x.nearPct <= RADAR_NEAR_PCT) ? " radar-near" : "";
-    const liveCls = x.active ? ` radar-live-${x.sev}` : "";
-    // 縮寫由左到右＝時間順序；進行中的那一顆（intraday_state.signal）加白框
-    const activeKind = x.active ? String(x.iq.signal) : "";
-    let activeIdx = -1;
-    for (let i = x.chips.length - 1; i >= 0 && activeKind; i--) {
-      if (x.chips[i].key === activeKind) { activeIdx = i; break; }
-    }
-    const todayHtml = x.chips.length
-      ? `<div class="radar-chips">${x.chips.map((e, i) => radarChipHtml(e, i === activeIdx)).join("")}</div>`
-      : `<div class="radar-chips radar-chips-empty">今日尚無訊號</div>`;
-    const last = x.chips[x.chips.length - 1];
-    return `
-      <div class="holding-row radar-row${nearCls}${liveCls}" onclick="openRadarTimeline('${jsAttr(x.sid)}')">
-        <div class="hr-left">
-          <div class="hr-title">${escapeHtml(x.name)} ${tags.join(" ")}</div>
-          ${todayHtml}
-        </div>
-        <div class="hr-right">
-          <div class="hr-price radar-count${x.chips.length ? "" : " is-zero"}">${x.chips.length}</div>
-          <div class="hr-sub">${last ? `最新 ${fmtTime(last.at)}` : "—"}</div>
-        </div>
-      </div>`;
-  }).join("") + `</div></div>` + `
-    <div class="radar-legend">
-      <span><i class="sig-chip chip-blue">破壓</i>內建訊號</span>
-      <span><i class="sig-chip chip-blue chip-rule">破高</i>自訂規則命中</span>
-      <span><i class="sig-chip chip-auto">漲逾</i>自動偵測（未推播）</span>
-      <span><i class="sig-chip chip-blue chip-active">收撐</i>進行中</span>
-      <span><i class="sig-chip chip-orange">破撐</i>橘＝漲跌停、跌破支撐、到價、下跌方向的規則</span>
-      <span><i class="sig-chip chip-blue">近壓</i>藍＝其他盤中訊號</span>
-    </div>`;
-}
-
-// 雷達列的一顆縮寫籤：實底＝內建訊號、虛線框＝自訂規則命中（有推播）、透明框＝自動偵測（未推播）
-function radarChipHtml(e, active) {
-  const cls = ["sig-chip", `chip-${e.sev}`,
-    e.src === "rule" ? "chip-rule" : "", e.src === "auto" ? "chip-auto" : "", active ? "chip-active" : ""]
-    .filter(Boolean).join(" ");
-  return `<span class="${cls}">${escapeHtml(e.abbr || "?")}</span>`;
-}
+// 盤中雷達分頁（renderLive）與雷達列的縮寫籤（radarChipHtml）2026-09-22 移除：
+// 首頁每檔一列就是那頁在做的事，個股字卡第一頁「盤中雷達」講得更細。
+// radarStoryOf／radarSessionDate／nearestLevels 等共用的算法都留著——首頁與字卡都在用。
 
 // ── 盤中雷達：當日故事（訊號序列）與時間軸 ─────────────────────────────────
 // 資料三來源都在記憶體，不需要動後端就能重繪：

@@ -1822,6 +1822,26 @@ body.has-bottom-nav .qa-panel {
 	margin-bottom: 0.6rem;
 }
 
+/* 「自選設定」：底部導覽拿掉自選分頁之後，這是加／刪自選股、設定價位與通知的唯一入口，
+   所以不再是一條細連結，而是看得見的按鈕（紫框實底、字級比清單標題還大一點）。 */
+.home-manage-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 7px 14px;
+	border: 1px solid var(--accent);
+	border-radius: 999px;
+	background: rgba(139, 124, 255, 0.18);
+	color: var(--text-0);
+	font-size: 0.92rem;
+	font-weight: 700;
+	line-height: 1.2;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.home-manage-btn:active { transform: scale(0.97); }
+
 /* 連結是紫（可點）不是金：金／橘留給「需要注意」（色彩語彙規則四，2026-09-20 改） */
 .home-sec-title .hs-link,
 .hs-link {
@@ -2567,12 +2587,6 @@ body.has-bottom-nav .qa-panel {
 	color: var(--accent-2);
 }
 
-.live-stat-row {
-	display: flex;
-	gap: 0.6rem;
-	margin-bottom: 0.9rem;
-}
-
 /* ── 持股 ── */
 .holding-summary {
 	display: flex;
@@ -2770,18 +2784,8 @@ body.has-bottom-nav .qa-panel {
 	color: var(--text-muted);
 }
 
-/* ── 雷達列：逼近關卡（±1% 內）的列左緣一條藍線 ── */
-.holding-row.radar-near { box-shadow: inset 3px 0 0 var(--sig-blue); }
-
-/* ── 雷達列（2026-09-18 改版）：不放股價與漲跌幅，第二行是當天的訊號縮寫，由左到右＝時間順序 ──
-   實底＝內建訊號、虛線框＝自訂規則命中（有推播）、透明框＝系統自動偵測（未推播）、白框＝進行中。
-   底色仍走等級色（橘＝需要注意、藍＝其餘），與通知匣的左邊條同一套；縮寫本身承載意義。 */
-.holding-row.radar-live-orange { box-shadow: inset 3px 0 0 var(--sig-orange); }
-.holding-row.radar-live-blue   { box-shadow: inset 3px 0 0 var(--sig-blue); }
-.holding-row .hr-price.radar-count { font-size: 1.15rem; color: var(--text-0); }
-.holding-row .hr-price.radar-count.is-zero { color: var(--text-muted); font-weight: 500; }
-.radar-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-.radar-chips.radar-chips-empty { font-size: 0.74rem; color: var(--text-muted); }
+/* 雷達列的樣式 2026-09-22 隨著盤中雷達分頁一起拿掉；.sig-chip 留著——
+   個股字卡的副標還用它畫「進行中」那顆籤。 */
 .sig-chip {
 	display: inline-block;
 	font-size: 0.72rem;
@@ -2801,8 +2805,6 @@ body.has-bottom-nav .qa-panel {
 .sig-chip.chip-rule   { border-style: dashed; border-color: currentColor; }
 .sig-chip.chip-auto   { background: transparent; border-color: rgba(146, 146, 163, 0.4); color: var(--text-1); font-weight: 500; }
 .sig-chip.chip-active { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
-.radar-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 4px 0; font-size: 0.7rem; color: var(--text-muted); }
-.radar-legend span { display: inline-flex; align-items: center; gap: 5px; }
 
 /* ── 個股字卡：三個分頁（盤中雷達／歷史訊號／看 K 線）──
    2026-09-22：K 線從獨立 modal 併進來。K 線那一頁在桌機要寬，其餘兩頁維持 560px 的閱讀寬度。 */

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="148">
+  <meta name="app-version" content="149">
   <title>管理儀表板 — 台股監控</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -384,7 +384,9 @@ const ACTION_LABELS = {
   ai_qa:             "AI 問答",
   disclaimer_accept: "同意免責聲明",
 };
-const TAB_LABELS = { home: "首頁", scores: "評分", live: "雷達", inbox: "通知", watch: "自選" };
+// live（盤中雷達）2026-09-22 整頁移除；watch 還在，只是入口改成首頁的「自選設定」按鈕。
+// 舊資料裡仍有 live 的 tab_view，label() 找不到鍵時會原樣顯示 "live"，不影響統計
+const TAB_LABELS = { home: "首頁", scores: "評分", inbox: "通知", watch: "自選" };
 const TIER_LABELS = { intraday: "盤中", technical: "技術", chips: "籌碼", fundamental: "基本面" };
 const TIER_COLORS = { intraday: "var(--series-1)", technical: "var(--series-2)", chips: "var(--series-3)", fundamental: "var(--series-4)" };
 // 條件型別：{ type: [tier, 名稱] }——與 monitor/rules.py 的 CONDITION_REGISTRY 同一份（測試釘住）
