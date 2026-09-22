@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="150">
+  <meta name="app-version" content="151">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=150" rel="stylesheet">
+  <link href="watchlist.css?v=151" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -351,7 +351,7 @@
         <span class="wl-addbar-icon" aria-hidden="true"></span>
         <input id="inp-stock" class="wl-addbar-input" placeholder="加入追蹤：代號或名稱，如 2330／台積電"
                autocomplete="off" aria-label="輸入股票代號或名稱" oninput="onStockInput()" onkeydown="onStockKey(event)">
-        <button class="wl-addbar-btn" onclick="addStock()">加入</button>
+        <button class="wl-addbar-btn" onclick="addStock()">新增</button>
         <div id="autocomplete-list" class="rounded" style="display:none;"></div>
       </div>
       <div id="add-msg" class="wl-add-msg"></div>
@@ -7013,7 +7013,6 @@ function renderWatchlist(rows) {
 
     // 報價靠右自成一欄，標籤另起一行——名稱因此拿得到整行寬度，不必截斷
     const q = getCloseQuote(sid);
-    const sig = latestSignalOf(sid);
     const closeDateTag = (q && sessionOver && q.tradeDate !== todayKey)
       ? `<span class="wq-date">${escapeHtml(_closeDateLabel(q.tradeDate))} 收</span>`
       : "";
@@ -7029,10 +7028,8 @@ function renderWatchlist(rows) {
     if (events.length > 0) {
       tags.push(`<span class="wl-signal-badge wl-tag-standout">今日 ${events.length} 件資料</span>`);
     }
-    if (sig) {
-      const sev = inferSeverity(sig);
-      tags.push(`<span class="wl-signal-badge"><i class="sev-dot sev-${sev}"></i>${escapeHtml(alertTypeLabel(sig))}</span>`);
-    }
+    // 訊號 2026-09-22 從這一頁拿掉（Howard）：這裡是「設定自選股」，訊號在首頁與個股字卡講。
+    // latestSignalOf 留著——「有訊號」篩選籤還用它。
     // 持股資訊併在列上（持股分頁已改為評分頁）：股數、損益％、距自訂上下價位
     const hold = holdingsBySid.get(sid);
     if (hold) {
