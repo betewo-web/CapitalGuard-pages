@@ -1873,10 +1873,21 @@ body.has-bottom-nav .qa-panel {
 
 .post-ev:active { transform: scale(0.99); }
 
-/* 卡片底部一列：有事件時「今日 N 件資料」吃掉剩下的寬度，K 線固定在右邊 */
+/* 卡片底部一列：資料／持股／K 線。有事件時「今日 N 件資料」吃掉剩下的寬度 */
 .post-actions { display: flex; align-items: stretch; gap: 0.5rem; }
-.post-actions .post-ev { flex: 1 1 auto; width: auto; }
-.post-actions .post-kline { flex: 0 0 auto; min-width: 104px; }
+.post-actions .post-ev { flex: 2 1 auto; width: auto; }
+.post-actions .wl-icon-btn { flex: 1 1 0; min-width: 88px; }
+
+/* 持股面板（盤後卡片的「持股」開的）：兩個欄位、一句說明、一顆整寬的儲存 */
+.hold-field { margin-bottom: 0.9rem; }
+.hold-label { display: block; font-size: 0.86rem; font-weight: 600; color: var(--text-1); margin-bottom: 0.35rem; }
+.hold-input { background: #1c1c2b; color: var(--text-0); border-color: #3a3a52; font-size: 1rem; }
+.hold-input:focus { background: #1c1c2b; color: var(--text-0); }
+.hold-clear { color: var(--text-muted); border-color: #3a3a52; }
+.hold-hint { font-size: 0.78rem; color: var(--text-muted); }
+
+/* 基礎訊號面板：講明白這些開關只影響選中的那一檔 */
+.alert-stock-hint { font-size: 0.8rem; color: var(--text-muted); margin: -0.4rem 0 0.9rem; line-height: 1.5; }
 
 /* 連結是紫（可點）不是金：金／橘留給「需要注意」（色彩語彙規則四，2026-09-20 改） */
 .home-sec-title .hs-link,

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="157">
+  <meta name="app-version" content="158">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=157" rel="stylesheet">
+  <link href="watchlist.css?v=158" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -565,6 +565,9 @@
           <select id="alert-stock-select" class="form-select form-select-sm alert-stock-select"
                   onchange="openAlertSettings(this.value)"></select>
         </div>
+        <!-- 2026-09-22：入口從每一列改到標題列之後，有人以為這裡是「一次設定全部」。
+             這一句把它講明白：開關只影響上面選中的那一檔。 -->
+        <div class="alert-stock-hint">以下開關只影響上面選的這一檔；要設定別檔請用上面的選單切換。</div>
         <div class="d-flex justify-content-end gap-2 mb-2">
           <button type="button" class="btn btn-sm btn-outline-light" onclick="setAllAlertSettings(true)">全開</button>
           <button type="button" class="btn btn-sm btn-outline-light" onclick="setAllAlertSettings(false)">全關</button>
@@ -670,31 +673,42 @@
           <button type="button" class="btn btn-sm btn-primary" onclick="savePriceTargets()">儲存價位</button>
         </div>
 
-        <!-- 持股設定 -->
-        <div class="alert-group-label mt-2">📊 持股（供「持股」分頁計算損益，留空 = 純觀察）</div>
-        <div class="row g-2 mt-1">
-          <div class="col-6">
-            <label class="form-label mb-1" style="color:#c9c9d4;font-size:.82rem;font-weight:600">持有股數（股，1張=1000）</label>
-            <div class="input-group input-group-sm">
-              <input id="inp-shares" type="number" class="form-control" placeholder="如 1000" step="1" min="0"
-                style="background:#1c1c2b;color:#f5f5f7;border-color:#3a3a52;font-size:.95rem;">
-              <button class="btn btn-outline-secondary" type="button" onclick="clearHoldingInput('shares')" title="清除" style="color:#9292a3;border-color:#3a3a52;">✕</button>
-            </div>
-          </div>
-          <div class="col-6">
-            <label class="form-label mb-1" style="color:#c9c9d4;font-size:.82rem;font-weight:600">平均成本（元）</label>
-            <div class="input-group input-group-sm">
-              <input id="inp-avg-cost" type="number" class="form-control" placeholder="如 580.5" step="0.01" min="0"
-                style="background:#1c1c2b;color:#f5f5f7;border-color:#3a3a52;font-size:.95rem;">
-              <button class="btn btn-outline-secondary" type="button" onclick="clearHoldingInput('cost')" title="清除" style="color:#9292a3;border-color:#3a3a52;">✕</button>
-            </div>
-          </div>
-        </div>
-        <div class="d-flex justify-content-end mt-2">
-          <button type="button" class="btn btn-sm btn-primary" onclick="saveHoldings()">儲存持股</button>
-        </div>
+        <!-- 持股（股數與平均成本）2026-09-22 搬到「🌙 盤後」的每張卡片（Howard）：
+             那是看損益的地方，不是設定通知的地方。 -->
 
         <div id="alert-settings-msg" class="small mt-2 text-muted"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 持股（🌙 盤後 的每張卡片點「持股」開）──
+     股數與平均成本 2026-09-22 從「基礎訊號」搬到這裡：那一頁設定通知，這裡是看損益的。 -->
+<div class="modal fade sheet-modal" id="holdingsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="hold-title">持股</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body p-3">
+        <div class="hold-field">
+          <label class="hold-label" for="hold-shares">持有股數（股，1 張＝1000）</label>
+          <div class="input-group input-group-sm">
+            <input id="hold-shares" type="number" class="form-control hold-input" placeholder="如 1000" step="1" min="0">
+            <button class="btn btn-outline-secondary hold-clear" type="button" onclick="clearHoldingInput('shares')" title="清除">✕</button>
+          </div>
+        </div>
+        <div class="hold-field">
+          <label class="hold-label" for="hold-cost">平均成本（元）</label>
+          <div class="input-group input-group-sm">
+            <input id="hold-cost" type="number" class="form-control hold-input" placeholder="如 580.5" step="0.01" min="0">
+            <button class="btn btn-outline-secondary hold-clear" type="button" onclick="clearHoldingInput('cost')" title="清除">✕</button>
+          </div>
+        </div>
+        <div class="hold-hint">兩欄留空＝純觀察，不計算損益。</div>
+        <div id="hold-msg" class="small mt-2 text-muted"></div>
+        <button type="button" class="btn btn-primary w-100 mt-2" onclick="saveHoldings()">儲存</button>
       </div>
     </div>
   </div>
@@ -7077,6 +7091,8 @@ function renderPost() {
       ${facts.length ? `<div class="post-facts">${facts.join("")}</div>` : ""}
       <div class="post-actions">
         ${evLine}
+        <button class="wl-icon-btn" title="持股與成本" aria-label="持股 ${escapeHtml(r.sid)}"
+                onclick="openHoldingsSheet('${jsAttr(r.sid)}')">💼<span class="wl-ic-label">持股</span></button>
         <button class="wl-icon-btn post-kline" title="K線分析" aria-label="K線分析 ${escapeHtml(r.sid)}"
                 onclick="openKLineFromWatchlist('${jsAttr(r.sid)}')">${ICON_CHART}<span class="wl-ic-label">K 線</span></button>
       </div>
@@ -7143,8 +7159,6 @@ function openAlertSettings(rowId) {
   document.getElementById("inp-target-high").value = (tHigh != null && tHigh !== "") ? tHigh : "";
   document.getElementById("inp-target-low").value  = (tLow  != null && tLow  !== "") ? tLow  : "";
   // 持股
-  document.getElementById("inp-shares").value   = (row.shares   != null && row.shares   !== "") ? row.shares   : "";
-  document.getElementById("inp-avg-cost").value = (row.avg_cost != null && row.avg_cost !== "") ? row.avg_cost : "";
 
   document.getElementById("alert-settings-msg").textContent = "";
 
@@ -7277,15 +7291,32 @@ async function savePriceTargets() {
   }
 }
 
+// ── 🌙 盤後：持股（股數與平均成本）──────────────────────────────
+// 2026-09-22 從「基礎訊號」搬過來（Howard）：那一頁在設定通知，持股是看損益用的。
+let holdingsRowId = null;
+
+function openHoldingsSheet(sid) {
+  const key = String(sid || "").trim();
+  const row = watchlistRows.find(r => String(r.stock_id || "").trim() === key);
+  if (!row) return;
+  holdingsRowId = row.id;
+  const name = getPreferredStockName(key, row.stock_name) || universe[key]?.n || key;
+  document.getElementById("hold-title").textContent = `持股｜${name} ${key}`;
+  document.getElementById("hold-shares").value = (row.shares   != null && row.shares   !== "") ? row.shares   : "";
+  document.getElementById("hold-cost").value   = (row.avg_cost != null && row.avg_cost !== "") ? row.avg_cost : "";
+  document.getElementById("hold-msg").innerHTML = "";
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("holdingsModal")).show();
+}
+
 function clearHoldingInput(which) {
-  document.getElementById(which === "shares" ? "inp-shares" : "inp-avg-cost").value = "";
+  document.getElementById(which === "shares" ? "hold-shares" : "hold-cost").value = "";
 }
 
 async function saveHoldings() {
-  if (!alertModalRowId) return;
-  const msgEl = document.getElementById("alert-settings-msg");
-  const sharesRaw = document.getElementById("inp-shares").value.trim();
-  const costRaw   = document.getElementById("inp-avg-cost").value.trim();
+  if (!holdingsRowId) return;
+  const msgEl = document.getElementById("hold-msg");
+  const sharesRaw = document.getElementById("hold-shares").value.trim();
+  const costRaw   = document.getElementById("hold-cost").value.trim();
   const shares = sharesRaw !== "" ? parseFloat(sharesRaw) : null;
   const cost   = costRaw   !== "" ? parseFloat(costRaw)   : null;
   if (shares !== null && (isNaN(shares) || shares < 0)) {
@@ -7298,11 +7329,13 @@ async function saveHoldings() {
   }
   msgEl.innerHTML = '<span class="text-muted">儲存中…</span>';
   try {
-    await sbPatch("watchlist", { "id": `eq.${alertModalRowId}` },
+    await sbPatch("watchlist", { "id": `eq.${holdingsRowId}` },
       { shares: shares, avg_cost: cost }, state.accessToken);
-    const row = getWatchlistRowById(alertModalRowId);
+    const row = getWatchlistRowById(holdingsRowId);
     if (row) { row.shares = shares; row.avg_cost = cost; }
-    msgEl.innerHTML = `<span class="text-success">✅ 持股已儲存${shares ? `（${shares} 股）` : "（已清除）"}</span>`;
+    msgEl.innerHTML = `<span class="text-success">✅ 已儲存${shares ? `（${shares} 股）` : "（已清除）"}</span>`;
+    renderPost();   // 卡片上的持股與損益立刻跟著換
+    setTimeout(() => bootstrap.Modal.getInstance(document.getElementById("holdingsModal"))?.hide(), 600);
   } catch (e) {
     msgEl.innerHTML = `<span class="text-danger">❌ 儲存失敗：${e.message}<br><span style="font-size:.72rem">若為欄位錯誤，請先在 Supabase 執行 migrate_pwa_v2.sql</span></span>`;
   }
