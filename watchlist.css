@@ -1801,10 +1801,10 @@ body.has-bottom-nav .qa-panel {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	font-size: 0.92rem;
+	font-size: 1.05rem;
 	font-weight: 700;
 	color: var(--text-0);
-	margin-bottom: 0.6rem;
+	margin-bottom: 0.7rem;
 }
 
 /* ── 首頁的三個分頁（2026-09-22）：總覽／盤後／設定 ──
@@ -1979,7 +1979,7 @@ body.has-bottom-nav .qa-panel {
 /* 連結是紫（可點）不是金：金／橘留給「需要注意」（色彩語彙規則四，2026-09-20 改） */
 .home-sec-title .hs-link,
 .hs-link {
-	font-size: 0.75rem;
+	font-size: 0.86rem;
 	font-weight: 400;
 	color: var(--accent);
 	text-decoration: none;
@@ -2132,15 +2132,16 @@ body.has-bottom-nav .qa-panel {
 	align-items: flex-start;
 	padding: 0.5rem 0.15rem;
 	border-bottom: 1px solid rgba(146, 146, 163, 0.12);
-	font-size: 0.84rem;
+	/* 2026-09-22：今日資料／接下來 7 天整組放大（Howard） */
+	font-size: 0.98rem;
 	cursor: pointer;
 }
 
 .home-feed:last-child { border-bottom: none; }
-.home-feed-tm { flex: 0 0 auto; min-width: 2.6rem; font-size: 0.74rem; color: var(--text-muted); padding-top: 2px; }
-.home-feed-tx { flex: 1 1 auto; min-width: 0; color: var(--text-0); }
+.home-feed-tm { flex: 0 0 auto; min-width: 3.4rem; font-size: 0.86rem; color: var(--text-muted); padding-top: 2px; }
+.home-feed-tx { flex: 1 1 auto; min-width: 0; color: var(--text-0); line-height: 1.55; }
 .home-feed-tx b { font-weight: 700; }
-.home-feed-tx .k { font-size: 0.74rem; color: var(--text-muted); }
+.home-feed-tx .k { font-size: 0.86rem; color: var(--text-muted); }
 
 .home-nudge {
 	display: flex;
@@ -2274,13 +2275,13 @@ body.has-bottom-nav .qa-panel {
 }
 
 .rules-count {
-	font-size: 0.76rem;
+	font-size: 0.9rem;
 	color: #93a2bd;
 	letter-spacing: 0.01em;
 }
 
 .rules-msg {
-	font-size: 0.76rem;
+	font-size: 0.88rem;
 	color: var(--text-muted);
 	margin-top: 0.6rem;
 }
@@ -2381,7 +2382,7 @@ body.has-bottom-nav .qa-panel {
 	display: flex;
 	align-items: center;
 	gap: 0.45rem;
-	font-size: 0.72rem;
+	font-size: 0.86rem;
 	color: #93a2bd;
 	margin-bottom: 0.45rem;
 }
@@ -2420,9 +2421,9 @@ body.has-bottom-nav .qa-panel {
 }
 
 .rule-cond-chip {
-	font-size: 0.72rem;
-	line-height: 1.35;
-	padding: 0.26rem 0.5rem;
+	font-size: 0.88rem;
+	line-height: 1.45;
+	padding: 0.34rem 0.6rem;
 	border-radius: 7px;
 	border: 1px solid rgba(140, 168, 220, 0.2);
 	background: rgba(255, 255, 255, 0.03);
@@ -2468,13 +2469,13 @@ body.has-bottom-nav .qa-panel {
 
 .rules-empty-title {
 	color: var(--text-1);
-	font-size: 0.92rem;
+	font-size: 1.05rem;
 	font-weight: 700;
 	margin-bottom: 0.3rem;
 }
 
 .rules-empty-hint {
-	font-size: 0.76rem;
+	font-size: 0.9rem;
 	line-height: 1.6;
 }
 
@@ -2538,13 +2539,13 @@ body.has-bottom-nav .qa-panel {
 
 /* 規則面板：空狀態置中，但範本列要靠左才讀得順；有規則時範本放清單上方 */
 .rules-empty .rule-tpl-list { text-align: left; margin-top: 0.6rem; }
-.rules-empty-sub { margin-top: 1rem; font-size: 0.76rem; color: var(--text-muted); }
+.rules-empty-sub { margin-top: 1rem; font-size: 0.88rem; color: var(--text-muted); }
 .rule-tpl-strip { margin-bottom: 0.8rem; }
 .rule-tpl-strip .rules-empty-sub { margin-top: 0; margin-bottom: 0.4rem; }
 
 /* 編輯器 */
 .rule-field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.7rem; flex: 1 1 auto; }
-.rule-field > label { font-size: 0.75rem; color: var(--text-muted); }
+.rule-field > label { font-size: 0.88rem; color: var(--text-muted); }
 .rule-row { display: flex; gap: 0.7rem; flex-wrap: wrap; }
 
 .rule-input {
@@ -2552,8 +2553,8 @@ body.has-bottom-nav .qa-panel {
 	border: 1px solid var(--border);
 	border-radius: 8px;
 	color: var(--text-0);
-	padding: 0.35rem 0.5rem;
-	font-size: 0.85rem;
+	padding: 0.5rem 0.65rem;
+	font-size: 1rem;
 	width: 100%;
 }
 .rule-input:focus { outline: 2px solid var(--accent-2); outline-offset: -1px; }
@@ -2564,10 +2565,10 @@ body.has-bottom-nav .qa-panel {
 	display: flex;
 	align-items: center;
 	gap: 0.45rem;
-	font-size: 0.86rem;
+	font-size: 1rem;
 	font-weight: 700;
 	color: var(--text-0);
-	margin-bottom: 0.4rem;
+	margin-bottom: 0.45rem;
 }
 .rule-step-no {
 	display: inline-flex;
@@ -2582,10 +2583,10 @@ body.has-bottom-nav .qa-panel {
 	font-weight: 700;
 	flex-shrink: 0;
 }
-.rule-step-sub { margin-left: auto; font-size: 0.72rem; font-weight: 400; color: var(--text-muted); }
-.rule-hint { margin-top: 0.3rem; font-size: 0.72rem; line-height: 1.5; color: var(--text-muted); }
-.rule-cond-index { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
-.rule-and { text-align: center; font-size: 0.72rem; font-weight: 700; color: var(--accent-2); margin: -0.1rem 0 0.35rem; }
+.rule-step-sub { margin-left: auto; font-size: 0.84rem; font-weight: 400; color: var(--text-muted); }
+.rule-hint { margin-top: 0.3rem; font-size: 0.84rem; line-height: 1.55; color: var(--text-muted); }
+.rule-cond-index { font-size: 0.84rem; color: var(--text-muted); white-space: nowrap; }
+.rule-and { text-align: center; font-size: 0.84rem; font-weight: 700; color: var(--accent-2); margin: -0.1rem 0 0.35rem; }
 .rule-add-cond { margin-top: 0.1rem; }
 
 /* 白話摘要 */
@@ -2596,7 +2597,7 @@ body.has-bottom-nav .qa-panel {
 	padding: 0.6rem 0.7rem;
 	margin-top: 0.2rem;
 }
-.rs-line { font-size: 0.82rem; line-height: 1.8; }
+.rs-line { font-size: 0.94rem; line-height: 1.8; }
 .rs-chip {
 	display: inline-block;
 	background: var(--surface-2);
@@ -2620,7 +2621,7 @@ body.has-bottom-nav .qa-panel {
 
 .rule-cond-top { display: flex; gap: 0.5rem; align-items: center; }
 .rule-cond-top .rule-input { flex: 1 1 auto; }
-.rule-cond-tier { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.3rem; }
+.rule-cond-tier { font-size: 0.82rem; color: var(--text-muted); margin-top: 0.3rem; }
 
 .rule-params {
 	display: grid;
@@ -2629,7 +2630,7 @@ body.has-bottom-nav .qa-panel {
 	margin-top: 0.5rem;
 }
 .rule-param { display: flex; flex-direction: column; gap: 0.2rem; }
-.rule-param > span { font-size: 0.7rem; color: var(--text-muted); }
+.rule-param > span { font-size: 0.82rem; color: var(--text-muted); }
 
 .rule-preview {
 	background: var(--surface-2);
@@ -3572,3 +3573,16 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .alert-cancel { border: 1px solid var(--border); background: transparent; color: var(--text-1); }
 .alert-done { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
 .alert-done:active { transform: scale(0.99); }
+
+
+/* 2026-09-22（Howard）：進階訊號面板的主要動作鈕「新增訊號」要放大。
+   選擇器三個 class，才壓得過同檔後面的 .btn.btn-accent-sm（同權重時後者贏——v165 的教訓）。 */
+.rules-toolbar .btn.btn-accent-sm {
+	min-height: 44px;
+	padding: 0.45rem 1rem;
+	font-size: 1.02rem;
+	font-weight: 700;
+	border-radius: 10px;
+}
+
+.rules-toolbar .btn.btn-accent-sm svg { width: 16px; height: 16px; }
