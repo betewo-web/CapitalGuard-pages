@@ -1884,9 +1884,36 @@ body.has-bottom-nav .qa-panel {
 	white-space: nowrap;
 }
 
-.home-tile-lead { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; line-height: 1.2; }
-.home-tile-n { font-size: 0.85rem; font-weight: 700; color: var(--text-0); }
-.home-tile-calm { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
+.home-tile-lead { display: flex; align-items: center; gap: 6px; margin-left: auto; line-height: 1.2; }
+
+/* 每個方塊右側的兩格數字（2026-09-22 從頁面頂端搬進來）：這一檔今天幾則訊號、貼著幾條關卡。
+   與雷達分頁那兩格同一組定義，只是數的是「這一檔」而不是「幾檔」。0 用灰色。 */
+.home-tile-stat {
+	min-width: 60px;
+	text-align: center;
+	padding: 3px 6px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: rgba(255, 255, 255, 0.03);
+}
+
+.home-tile-stat b {
+	display: block;
+	font-family: "Space Grotesk", sans-serif;
+	font-size: 1rem;
+	font-weight: 700;
+	line-height: 1.15;
+}
+
+.home-tile-stat i {
+	display: block;
+	font-style: normal;
+	font-size: 0.6rem;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.home-tile-stat .hs-zero { color: var(--text-muted); opacity: 0.6; }
 
 .home-tile-live {
 	font-size: 0.62rem;

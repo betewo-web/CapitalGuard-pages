@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="146">
+  <meta name="app-version" content="147">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=146" rel="stylesheet">
+  <link href="watchlist.css?v=147" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -3624,7 +3624,7 @@ function showcaseTileHtml() {
   return `<div class="home-tile home-example" onclick="openShowcase()">
       <div class="home-tile-head">
         <span class="home-tile-name">${escapeHtml(showcase.stock_name || showcase.stock_id)}</span><span class="home-example-tag">範例</span>
-        <span class="home-tile-lead"><b class="home-tile-n">共 ${Number(top.n) || 0} 則訊號</b></span>
+        <span class="home-tile-lead"><span class="home-tile-stat"><b class="sev-orange">${Number(top.n) || 0}</b><i>⚡ 訊號</i></span></span>
       </div>
       <div class="home-example-note">這是一檔近期訊號很多的股票。你的自選股有事時，方塊上就會像這樣寫著今天幾則；點進去看 ${escapeHtml(_mdOf(top.date))} 那天${when ? `（${escapeHtml(when)}有 ${top.n} 則）` : ""}的盤中。</div>
     </div>`;
@@ -5290,12 +5290,13 @@ function renderHome() {
     const total = counts.reduce((a, b) => a + b, 0);
     const standout = (stockEvents[sid] || []).filter(isTodayEvent).length;   // 今天的事件數（不分階）
     const chg = Number(scoreMap[sid]?.score_change);
-    // 逼近關卡：與雷達分頁同一個算法（距最近支撐／壓力 RADAR_NEAR_PCT 以內），只拿來數，不上方塊
+    // 逼近關卡：與雷達分頁同一個算法（距關卡 RADAR_NEAR_PCT 以內）。方塊上那一格數的是
+    // 這檔自己貼著幾條關卡——支撐、壓力各算一條，所以是 0、1 或 2
     const lv = nearestLevels(sid, getQuote(sid)?.price ?? null);
-    const nearPct = Math.min(lv.supPct != null ? lv.supPct : Infinity,
-                             lv.resPct != null ? lv.resPct : Infinity);
+    const nearCount = (lv.supPct != null && lv.supPct <= RADAR_NEAR_PCT ? 1 : 0)
+                    + (lv.resPct != null && lv.resPct <= RADAR_NEAR_PCT ? 1 : 0);
     return { sid, name, active, counts, todayCount, total, standout, dir: homeDirectionOf(sid),
-             scoreChange: Number.isFinite(chg) ? chg : null, nearPct,
+             scoreChange: Number.isFinite(chg) ? chg : null, nearCount,
              limitKind: (active && (active.signal === "limit_up" || active.signal === "limit_down"))
                         ? active.signal : "" };
   });
@@ -5303,11 +5304,9 @@ function renderHome() {
   rows.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || b.todayCount - a.todayCount
     || b.standout - a.standout || b.total - a.total || a.name.localeCompare(b.name, "zh-Hant"));
 
-  // 兩格數字（Howard 2026-09-22：就像盤中雷達那樣）＋一行摘要。
-  // 「有訊號」數的是方塊上寫著幾則的那些檔，「逼近關卡」是其餘裡面貼著支撐／壓力的——
-  // 與雷達分頁同一組定義，只是那裡還有第三格「平靜」。
+  // 一行摘要。兩格數字 2026-09-22 從這裡搬進每個方塊裡（Howard）：頁面層級的「幾檔有訊號」
+  // 看完還是得一檔一檔找，數字長在自己那一列上才知道是誰。
   const nSig = rows.filter(r => r.todayCount > 0).length;
-  const nNear = rows.filter(r => !r.todayCount && r.nearPct <= RADAR_NEAR_PCT).length;
   const nEv = rows.reduce((acc, r) => acc + r.standout, 0);
   const total = rows.reduce((acc, r) => acc + r.total, 0);
   const summaryEl = document.getElementById("home-summary");
@@ -5316,11 +5315,8 @@ function renderHome() {
       summaryEl.innerHTML = `<div class="home-sum"><b>尚未加入自選股</b><span class="dim">到 ⭐ 自選 分頁新增，首頁會列出每檔近 ${HOME_HISTORY_DAYS} 個交易日的訊號</span></div>`;
     } else {
       summaryEl.innerHTML = `
-        <div class="home-stat-row">
-          <div class="home-stat"><div class="hs-num sev-orange">${nSig}</div><div class="hs-label">⚡ 有訊號</div></div>
-          <div class="home-stat"><div class="hs-num sev-blue">${nNear}</div><div class="hs-label">🎯 逼近關卡</div></div>
-        </div>
-        <div class="home-sum"><span class="dim">${rows.length} 檔自選 · 近 ${days.length} 個交易日累計 ${total} 則訊號${
+        <div class="home-sum"><b>${rows.length} 檔自選：${dayLabel} ${nSig ? `${nSig} 檔有訊號` : "都沒有訊號"}</b>
+        <span class="dim">近 ${days.length} 個交易日累計 ${total} 則訊號${
           total ? "" : "，還沒有紀錄"}${nEv ? ` · ${dayLabel} ${nEv} 件資料` : ""}</span></div>`;
     }
   }
@@ -5379,7 +5375,7 @@ function homeDirectionOf(sid) {
 }
 
 // 首頁方塊（2026-09-22 五版，Howard）：一檔一列、佔滿整行。
-// 上排＝名稱＋漲／平／跌＋「共 N 則訊號」，下排＝評分變化與今日資料籤。
+// 上排＝名稱＋漲／平／跌＋漲停／進行中，右側兩格數字（訊號／逼近關卡）；下排＝評分變化與今日資料籤。
 // 日期與「今日」都拿掉了（哪一天由標題下面那行狀態講），字體略小。
 // 點方塊開的就是當日盤中雷達（`radarTimelineModal`，不是切到雷達分頁）；點資料籤開事件面板。
 function homeTileHtml(r) {
@@ -5393,9 +5389,11 @@ function homeTileHtml(r) {
   const live = limitLabel
     ? `<span class="home-tile-live is-limit">${limitLabel}</span>`
     : r.active ? `<span class="home-tile-live">進行中</span>` : "";
-  const lead = r.todayCount
-    ? `<b class="home-tile-n">共 ${r.todayCount} 則訊號</b>${live}`
-    : `<span class="home-tile-calm">沒有訊號</span>${live}`;
+  // 兩格數字（2026-09-22 從頁面頂端搬進來）：這一檔今天幾則訊號、貼著幾條關卡。
+  // 0 用灰色，眼睛才會停在有數字的那幾列
+  const stat = (n, label, cls) =>
+    `<span class="home-tile-stat"><b class="${n ? cls : "hs-zero"}">${n}</b><i>${label}</i></span>`;
+  const lead = stat(r.todayCount, "⚡ 訊號", "sev-orange") + stat(r.nearCount, "🎯 逼近關卡", "sev-blue");
   // 事件籤＝今天有幾件資料（與下方「今日資料」卡同一批）；點籤開事件面板，
   // 點方塊開的是時間軸，兩者講不同的東西（Howard 2026-09-20：點進去看不到相關資訊）
   const ev = r.standout
@@ -5410,7 +5408,7 @@ function homeTileHtml(r) {
   const score = `<span class="home-tile-score">評分 ${scoreTxt}</span>`;
   return `<div class="home-tile${r.todayCount ? " is-hot" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
       <div class="home-tile-head">
-        <span class="home-tile-name">${escapeHtml(r.name)}</span>${dir}
+        <span class="home-tile-name">${escapeHtml(r.name)}</span>${dir}${live}
         <span class="home-tile-lead">${lead}</span>
       </div>
       <div class="home-tile-foot">${score}${ev}</div>
