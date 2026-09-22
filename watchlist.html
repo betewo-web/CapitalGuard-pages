@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="142">
+  <meta name="app-version" content="143">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=142" rel="stylesheet">
+  <link href="watchlist.css?v=143" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -784,15 +784,22 @@
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <h5 class="mb-0 fw-bold" id="rtl-name"></h5>
             <span id="rtl-tags"></span>
-            <button type="button" class="btn btn-sm btn-outline-info ms-auto" onclick="openKLineFromRadarTimeline()">看 K 線</button>
+            <button type="button" class="btn btn-sm btn-outline-light ms-auto" id="rtl-history-btn"
+                    onclick="toggleRadarHistory()">歷史訊號</button>
+            <button type="button" class="btn btn-sm btn-outline-info" onclick="openKLineFromRadarTimeline()">看 K 線</button>
           </div>
           <div class="rtl-sub" id="rtl-sub"></div>
         </div>
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-3">
-        <!-- 日期籤：近 HOME_HISTORY_DAYS 個交易日各標則數，點哪天畫哪天（rtlDaysHtml） -->
-        <div class="rtl-days" id="rtl-days"></div>
+        <!-- 一進來看到的是「當日盤中雷達」；歷史收在這塊裡，按頂端的「歷史訊號」才展開
+             （2026-09-22 Howard：首頁方塊拿掉 10 小格，歷史移到這一層）。
+             清單一天一列：日期（週幾）、則數、那天的縮寫籤，點一列就換成那天的盤中（rtlDaysHtml） -->
+        <div class="rtl-history" id="rtl-history" style="display:none">
+          <div class="rtl-history-head">近 <span id="rtl-history-n"></span> 個交易日的訊號<span class="k">點一天看那天的盤中</span></div>
+          <div class="rtl-days" id="rtl-days"></div>
+        </div>
         <div id="rtl-chart-wrap"></div>
         <div class="rtl-story-head" id="rtl-story-head">盤中發生了什麼</div>
         <div id="rtl-story"></div>
@@ -3610,21 +3617,13 @@ function showcaseWanted(rows) {
 }
 
 // 範例方塊：橫跨兩欄（說明比一格塞得下的長），其餘結構與 homeTileHtml 一致
-function showcaseTileHtml(days) {
-  const byDate = Object.fromEntries((showcase.days || []).map(d => [d.date, Number(d.n) || 0]));
-  const last = days.length - 1;
-  const cells = days.map((d, i) => {
-    const n = byDate[d] || 0;
-    const cls = ["home-cell", n ? "is-on" : "", i === last ? "is-today" : ""].filter(Boolean).join(" ");
-    return `<i class="${cls}">${n || ""}</i>`;
-  }).join("");
+function showcaseTileHtml() {
   const top = showcase.top;
   const when = top.first_at && top.last_at && top.first_at !== top.last_at ? `${top.first_at} 到 ${top.last_at} 之間` : (top.first_at || "");
   return `<div class="home-tile home-example" onclick="openShowcase()">
       <div class="home-tile-head"><span class="home-tile-name">${escapeHtml(showcase.stock_name || showcase.stock_id)}</span><span class="home-example-tag">範例</span></div>
-      <div class="home-strip-cells">${cells}</div>
-      <div class="home-strip-dates"><i>${escapeHtml(_mdOf(days[0]))}</i><i>${escapeHtml(_mdOf(days[last]))}</i></div>
-      <div class="home-example-note">這是一檔近期訊號很多的股票。你的自選股有事時，格子會像這樣亮起來；點進去看 ${escapeHtml(_mdOf(top.date))} 那天${when ? `（${escapeHtml(when)}有 ${top.n} 則）` : ""}的時間軸。</div>
+      <div class="home-tile-lead"><b class="home-tile-n">${Number(top.n) || 0} 則</b><span class="home-tile-when">${escapeHtml(_mdOf(top.date))}</span></div>
+      <div class="home-example-note">這是一檔近期訊號很多的股票。你的自選股有事時，方塊上就會像這樣寫著今天幾則；點進去看 ${escapeHtml(_mdOf(top.date))} 那天${when ? `（${escapeHtml(when)}有 ${top.n} 則）` : ""}的盤中。</div>
     </div>`;
 }
 
@@ -5322,15 +5321,15 @@ function renderHome() {
   const example = showcaseWanted(rows);
   if (listEl) {
     listEl.innerHTML = (rows.length
-      ? rows.map(r => homeTileHtml(r, days, dayLabel)).join("")
+      ? rows.map(r => homeTileHtml(r, dayLabel)).join("")
       : '<div class="home-tile-empty">尚未加入自選股，到 ⭐ 自選 分頁新增</div>')
-      + (example ? showcaseTileHtml(days) : "");
+      + (example ? showcaseTileHtml() : "");
   }
   const legendEl = document.getElementById("home-watchlist-legend");
   if (legendEl) {
     const scoreNote = sharedReportData?.date ? `；評分變化是 ${_mdOf(sharedReportData.date)} 的報告對前一日` : "";
     legendEl.textContent = rows.length || example
-      ? `每格是一個交易日的訊號數（近 ${days.length} 日）：點方塊看細節，點某一格直接開那天${scoreNote}`
+      ? `點方塊看那一天的盤中：幾點發生什麼、離關卡多遠；裡面按「歷史訊號」可以翻近 ${days.length} 個交易日${scoreNote}`
       : "";
   }
 
@@ -5370,23 +5369,15 @@ function homeDirectionOf(sid) {
   return q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
 }
 
-// 首頁方塊（2026-09-22 改版）：一檔一塊、兩欄並排。由上而下——
-// 名稱＋漲／平／跌籤／近 N 日格子＋頭尾日期／底部評分變化與今日資料籤。
-// 點方塊開今天的時間軸（第二層，在裡面還能切日期）、點某一格直接開那天、點資料籤開事件面板。
-function homeTileHtml(r, days, dayLabel) {
+// 首頁方塊（2026-09-22）：一檔一塊、兩欄並排。由上而下——名稱＋漲／平／跌籤／今天幾則／評分變化。
+// 近 10 個交易日的格子同日拿掉（Howard）：歷史移進第二層的「歷史訊號」，首頁只講今天。
+// 點方塊開的就是當日盤中雷達（`radarTimelineModal`，不是切到雷達分頁）；點資料籤開事件面板。
+function homeTileHtml(r, dayLabel) {
   // 籤旁標這個漲跌是哪一天的（報價的交易日）：週末看到的是上週五的
   const dir = (r.dir
     ? `<span class="home-dir home-dir-${r.dir}">${HOME_DIR_LABEL[r.dir]}</span>`
     : `<span class="home-dir home-dir-none">—</span>`)
     + (r.quoteDate ? `<span class="home-dir-date">${escapeHtml(_mdOf(r.quoteDate))}</span>` : "");
-  const last = days.length - 1;
-  const lastLabel = days[last] === taipeiDateKey(new Date()) ? "今天" : _mdOf(days[last]);
-  const cells = days.map((d, i) => {
-    const n = r.counts[i];
-    // 格子只有一種顏色（2026-09-21）：格子裡放不下文字，橘藍對照表使用者記不住；哪一種訊號點進去看
-    const cls = ["home-cell", n ? "is-on" : "", i === last ? "is-today" : ""].filter(Boolean).join(" ");
-    return `<i class="${cls}" onclick="event.stopPropagation(); openRadarTimeline('${jsAttr(r.sid)}', '${jsAttr(d)}')">${n || ""}</i>`;
-  }).join("");
   // 主行：當天幾則（大字）＋是哪一天（淡字）＋進行中。沒有就一句「沒有訊號」，不留空白
   const lead = r.todayCount
     ? `<b class="home-tile-n">${r.todayCount} 則</b><span class="home-tile-when">${escapeHtml(dayLabel)}</span>${
@@ -5407,8 +5398,6 @@ function homeTileHtml(r, days, dayLabel) {
   return `<div class="home-tile${r.todayCount ? " is-hot" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
       <div class="home-tile-head"><span class="home-tile-name">${escapeHtml(r.name)}</span>${dir}</div>
       <div class="home-tile-lead">${lead}</div>
-      <div class="home-strip-cells">${cells}</div>
-      <div class="home-strip-dates"><i>${escapeHtml(_mdOf(days[0]))}</i><i>${escapeHtml(lastLabel)}</i></div>
       <div class="home-tile-foot">${score}${ev}</div>
     </div>`;
 }
@@ -6282,30 +6271,59 @@ function openRadarTimeline(sid, date = null) {
   radarTimelineSid = sidKey;
   radarTimelineDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) && date !== radarSessionDate() ? date : null;
   trackActivity("radar_timeline_open", { stock: sidKey, date: radarTimelineDate || "" });
+  toggleRadarHistory(false);     // 一進來看到的一定是當日盤中雷達，歷史要自己按開
   renderRadarTimeline(sidKey);   // 三個來源都在記憶體，畫面一開就有
   bootstrap.Modal.getOrCreateInstance(document.getElementById("radarTimelineModal")).show();
   // 過去的日子讀 signal_history：還沒抓過或抓太久就補一次，回來重畫（自帶限流）
   loadSignalHistory(false).then(() => refreshRadarTimelineIfOpen()).catch(() => {});
 }
 
-// 日期籤：點哪天畫哪天（雷達的交易日就是「今天」那顆）
+// 「歷史訊號」：同一層裡展開／收起近 HOME_HISTORY_DAYS 個交易日的清單。
+// 預設收起——點首頁方塊進來第一眼要是「當日盤中雷達」，不是一排日期（Howard 2026-09-22）
+function toggleRadarHistory(force = null) {
+  const panel = document.getElementById("rtl-history");
+  const btn = document.getElementById("rtl-history-btn");
+  if (!panel) return;
+  const open = force === null ? panel.style.display === "none" : !!force;
+  panel.style.display = open ? "" : "none";
+  if (btn) btn.textContent = open ? "收起歷史" : "歷史訊號";
+  if (open) trackActivity("radar_history_open", { stock: radarTimelineSid || "" });
+}
+
+// 清單裡點一天：收起清單、換成那天的盤中（雷達的交易日就是「今天」那列）
 function rtlPickDate(date) {
   if (!radarTimelineSid) return;
   radarTimelineDate = date === radarSessionDate() ? null : date;
+  trackActivity("radar_timeline_pick", { stock: radarTimelineSid, date });
+  toggleRadarHistory(false);
   renderRadarTimeline(radarTimelineSid);
 }
 
+// 歷史清單：新到舊，一天一列——日期（週幾）、則數、那天的縮寫籤（與雷達列同一顆籤）。
+// 盤後提醒不算在則數裡，與首頁、雷達一致
 function rtlDaysHtml(sid, selected) {
   const days = radarHistoryDates(HOME_HISTORY_DAYS);
   const last = days[days.length - 1];
   const todayKey = taipeiDateKey(new Date());
-  return days.map(d => {
-    const n = radarStoryOf(sid, d).filter(e => e.src !== "post").length;
-    const cls = ["rtl-day", n ? "" : "is-off", d === selected ? "is-sel" : "", d === last ? "is-today" : ""]
-      .filter(Boolean).join(" ");
-    const label = d === last && d === todayKey ? "今天" : _mdOf(d);
-    return `<span class="${cls}" role="button" onclick="rtlPickDate('${jsAttr(d)}')"><b>${label}</b><i>${n || "—"}</i></span>`;
+  return days.slice().reverse().map(d => {
+    const story = radarStoryOf(sid, d).filter(e => e.src !== "post");
+    const chips = story.slice(0, 6).map(e => radarChipHtml(e, false)).join("")
+      + (story.length > 6 ? `<span class="rtl-day-more">+${story.length - 6}</span>` : "");
+    const cls = ["rtl-day", d === selected ? "is-sel" : "", d === last ? "is-today" : ""].filter(Boolean).join(" ");
+    const label = d === last && d === todayKey ? "今天" : `${_mdOf(d)}（${_weekdayZh(d)}）`;
+    return `<button type="button" class="${cls}" onclick="rtlPickDate('${jsAttr(d)}')">
+        <span class="rtl-day-d">${escapeHtml(label)}</span>
+        <span class="rtl-day-n">${story.length ? `${story.length} 則` : "沒有訊號"}</span>
+        <span class="rtl-day-chips">${chips}</span>
+      </button>`;
   }).join("");
+}
+
+// "2026-09-19" → "五"
+function _weekdayZh(dateKey) {
+  const [y, m, d] = String(dateKey || "").split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return "日一二三四五六"[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] || "";
 }
 
 // "2026-09-19" → "9/19"
@@ -6363,9 +6381,15 @@ function renderRadarTimeline(sid) {
   const activeHtml = active
     ? ` · 進行中 <span class="sig-chip chip-${inferSeverity(active)} chip-active">${escapeHtml(signalAbbr(String(active.signal)) || alertTypeLabel(active))}</span>`
     : "";
-  document.getElementById("rtl-sub").innerHTML = `${escapeHtml(date)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}`;
+  // 副標：哪一天（今天就寫「今天」）、幾則；看的是過去某天時給一個回到今天的出口
+  const dayText = date === taipeiDateKey(new Date()) ? "今天" : `${_mdOf(date)}（${_weekdayZh(date)}）`;
+  const backHtml = past ? ` <span class="hs-link" onclick="rtlPickDate('${jsAttr(sessionDate)}')">回今天</span>` : "";
+  document.getElementById("rtl-sub").innerHTML =
+    `${escapeHtml(dayText)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}${backHtml}`;
   const daysEl = document.getElementById("rtl-days");
   if (daysEl) daysEl.innerHTML = rtlDaysHtml(sid, date);
+  const dayCountEl = document.getElementById("rtl-history-n");
+  if (dayCountEl) dayCountEl.textContent = String(radarHistoryDates(HOME_HISTORY_DAYS).length);
   // covered：signal_history 真的有這檔、這天的那一列。沒有列 ≠ 那天沒有訊號，
   // 而是「我們沒有那天的紀錄」（還沒納入監控、寫入失敗、或這次沒載到）——
   // 兩者要分開講，不能把缺資料說成「所有條件都沒成立」（稽核 I13）。

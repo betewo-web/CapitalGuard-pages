@@ -1934,35 +1934,10 @@ body.has-bottom-nav .qa-panel {
 .home-dir-flat,
 .home-dir-none { color: var(--text-muted); background: rgba(146, 146, 163, 0.14); }
 
-/* 格子攤滿方塊寬度（grid-auto-columns 1fr，不寫死 10 格），比以前的 13px 方塊高、點得到 */
-.home-strip-cells { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; }
-.home-strip-dates { display: flex; justify-content: space-between; font-size: 0.6rem; line-height: 1; color: var(--text-muted); margin-top: -4px; }
-.home-strip-dates i { font-style: normal; }
-
-.home-cell {
-	min-width: 0;
-	height: 18px;
-	border-radius: 4px;
-	border: 1px solid rgba(146, 146, 163, 0.35);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	font-style: normal;
-	font-size: 0.6rem;
-	font-weight: 700;
-	line-height: 1;
-	color: var(--bg-0);
-	cursor: pointer;
-}
-
-.home-cell.is-on  { background: var(--sig-blue);   border-color: var(--sig-blue); }
-.home-cell.is-today { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
-
-/* 320px 的機器上一欄只剩 ~114px：格子縮到 8px 出頭，數字要跟著縮才不會爆出來 */
+/* 近 10 日的小格 2026-09-22 拿掉（Howard）：歷史移到第二層的「歷史訊號」清單（.rtl-history）。
+   方塊上只剩今天——格子在 175px 寬的方塊裡本來就只能是裝飾，看不出哪天發生什麼。 */
 @media (max-width: 359px) {
 	.home-tile { padding: 0.7rem 0.6rem; }
-	.home-strip-cells { gap: 2px; }
-	.home-cell { font-size: 0.54rem; }
 }
 
 .home-dir-date { font-size: 0.66rem; color: var(--text-muted); white-space: nowrap; }
@@ -2017,26 +1992,55 @@ body.has-bottom-nav .qa-panel {
 .home-nudge-actions { display: inline-flex; gap: 12px; white-space: nowrap; }
 .home-nudge-later { color: var(--text-muted); }
 
-/* 時間軸頂端的日期籤（近 10 個交易日、各標則數） */
-.rtl-days { display: flex; gap: 4px; margin: 0 0 10px; }
-.rtl-day {
-	flex: 1 1 0;
-	min-width: 0;
-	text-align: center;
+/* ── 第二層的「歷史訊號」（2026-09-22）──
+   一進來是當日盤中雷達，按頂端的「歷史訊號」才展開這一塊：近 10 個交易日一天一列，
+   點一列就換成那天的盤中。從首頁方塊拿掉的 10 小格，換成這份看得懂的清單。 */
+.rtl-history {
+	margin: 0 0 12px;
+	padding: 10px;
 	border: 1px solid var(--border);
-	border-radius: 8px;
-	padding: 4px 0;
-	line-height: 1.15;
+	border-radius: 14px;
+	background: rgba(146, 146, 163, 0.06);
+}
+
+.rtl-history-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+	font-size: 0.82rem;
+	font-weight: 700;
+	margin-bottom: 8px;
+}
+
+.rtl-history-head .k { font-size: 0.7rem; font-weight: 400; color: var(--text-muted); }
+
+.rtl-days { display: flex; flex-direction: column; gap: 4px; }
+
+.rtl-day {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	text-align: left;
+	padding: 7px 8px;
+	border: 1px solid transparent;
+	border-radius: 10px;
+	background: rgba(146, 146, 163, 0.09);
+	color: var(--text-0);
 	cursor: pointer;
 }
 
-.rtl-day b { display: block; font-size: 0.62rem; font-weight: 600; color: var(--text-1); white-space: nowrap; margin-bottom: 3px; }
+.rtl-day-d { flex: 0 0 4.9rem; font-size: 0.78rem; font-weight: 700; }
+.rtl-day-n { flex: 0 0 3.4rem; font-size: 0.74rem; color: var(--text-muted); }
+.rtl-day-chips { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.rtl-day-more { font-size: 0.66rem; color: var(--text-muted); align-self: center; }
 .rtl-sub-gap { margin-left: 0.55rem; }
-.rtl-day i { display: block; font-style: normal; font-size: 0.7rem; font-weight: 700; color: var(--sig-blue); }
-.rtl-day.is-off { opacity: 0.45; }
-.rtl-day.is-off i { color: var(--text-muted); }
+/* 選中的那天（畫面上正在看的）用實色紫框，今天多一條白框 */
 .rtl-day.is-sel { background: rgba(139, 124, 255, 0.18); border-color: var(--accent); }
-.rtl-day.is-today { border-color: rgba(255, 255, 255, 0.55); }
+.rtl-day.is-today .rtl-day-d { color: var(--text-0); }
+.rtl-day.is-today { border-color: rgba(255, 255, 255, 0.28); }
+.rtl-day.is-today.is-sel { border-color: var(--accent); }
 
 .home-stat-row {
 	display: flex;
