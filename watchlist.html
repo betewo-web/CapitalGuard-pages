@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="166">
+  <meta name="app-version" content="167">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=166" rel="stylesheet">
+  <link href="watchlist.css?v=167" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -5407,13 +5407,14 @@ function homeTileHtml(r) {
   const dir = r.dir
     ? `<span class="home-dir home-dir-${r.dir}">${HOME_DIR_LABEL[r.dir]}</span>`
     : `<span class="home-dir home-dir-none">—</span>`;
-  // 還在漲停／跌停板上就直接寫「漲停」「跌停」，不寫籠統的「進行中」（Howard）。
+  // 現在是哪一種訊號就寫哪一種，不寫籠統的「進行中」（Howard，2026-09-22 擴及全部訊號）：
+  // 漲停／跌停實底最顯眼，其餘寫全名（逼近壓力、跌破支撐…）。
   // 打開漲停後 monitor 下一輪的 top_alert 就不再是 limit_up，intraday_state.signal 跟著換，
-  // 這顆籤自己會消失——不必另外判斷「打開了沒」。
-  const limitLabel = r.limitKind === "limit_up" ? "漲停" : r.limitKind === "limit_down" ? "跌停" : "";
-  const live = limitLabel
-    ? `<span class="home-tile-live is-limit">${limitLabel}</span>`
-    : r.active ? `<span class="home-tile-live">進行中</span>` : "";
+  // 這顆籤自己會換字或消失——不必另外判斷「打開了沒」。
+  const liveLabel = r.active ? liveSignalLabel(r.active.signal) : "";
+  const live = liveLabel
+    ? `<span class="home-tile-live${r.limitKind ? " is-limit" : ""}">${escapeHtml(liveLabel)}</span>`
+    : "";
   // 兩格數字（2026-09-22 從頁面頂端搬進來）：這一檔今天幾則訊號、貼著幾條關卡。
   // 0 用灰色，眼睛才會停在有數字的那幾列
   const stat = (n, label, cls) =>
@@ -5997,20 +5998,28 @@ function _isSessionOverToday() {
   return c.mins > 13 * 60 + 35;
 }
 
-function _signalLabel(sig) {
-  return SIGNAL_LABEL_MAP[sig] || sig || "訊號";
+// 現在正在發生的那一種訊號，寫全名：「漲停」「逼近壓力」「跌破支撐」。
+// 首頁那一列與個股字卡的副標都用它——2026-09-22 Howard：不要再寫籠統的「進行中」，
+// 那句話沒有告訴任何人現在發生什麼事。查不到名字就退回兩字縮寫，再查不到就不寫。
+function liveSignalLabel(signal) {
+  const key = String(signal || "").trim();
+  if (!key || key === "none") return "";
+  return SIGNAL_LABEL_MAP[key] || AUTO_SIGNAL_LABELS[key] || SIGNAL_ABBR[key] || "";
 }
 
 
 
-// 價位一律 fmtPrice（忠實小數）；compact 參數保留給既有呼叫端，現在兩種情境格式相同
+// 價位一律 fmtPrice（忠實小數）。compact＝只給數字：故事列的標題已經寫著「逼近壓力」，
+// 後面再掛一句「壓力 1,122.5」就是同一個詞講兩次（Howard 2026-09-22 的清楚一點）。
 function _signalLevelLabel(signal, level, compact = false) {
   if (level == null || !Number.isFinite(Number(level))) return "";
   const value = Number(level);
   const p = fmtPrice(value);
   // 爆量的 level 是量能倍數（intraday_state.level），不是張數也不是價位：
-  // 張數是 MIS 原值，偵測跑在自家主機上就不必送出去（monitor/realtime.py 的說明）
+  // 張數是 MIS 原值，偵測跑在自家主機上就不必送出去（monitor/realtime.py 的說明）。
+  // 倍數沒有單位就看不懂，compact 也要留著「量能 … 倍」。
   if (signal === "volume_spike") return `量能 ${p} 倍`;
+  if (compact) return p;
   if (["break_sup", "near_sup", "reclaim_sup"].includes(signal)) return `支撐 ${p}`;
   if (["break_res", "near_res"].includes(signal)) return `壓力 ${p}`;
   if (["target_high", "target_low"].includes(signal)) return `目標價 ${p}`;
@@ -6303,8 +6312,11 @@ function renderRadarTimeline(sid) {
   const active = (iq && iq.signal && iq.signal !== "none") ? iq : null;
   document.getElementById("rtl-name").textContent = name;
   document.getElementById("rtl-tags").innerHTML = holding ? '<span class="wl-signal-badge wl-tag-holding">持</span>' : "";
+  // 「進行中」太籠統（Howard 2026-09-22，欣興還在漲停板上卻只看到「進行中 漲停」）：
+  // 直接寫現在是哪一種訊號——「現在 漲停」「現在 逼近壓力」。intraday_state.signal
+  // 換掉或收盤後這顆籤自己會消失，不必另外判斷。
   const activeHtml = active
-    ? ` · 進行中 <span class="sig-chip chip-${inferSeverity(active)} chip-active">${escapeHtml(signalAbbr(String(active.signal)) || alertTypeLabel(active))}</span>`
+    ? ` · <span class="sig-chip chip-${inferSeverity(active)} chip-active">現在 ${escapeHtml(liveSignalLabel(active.signal) || alertTypeLabel(active))}</span>`
     : "";
   // 副標：哪一天（今天就寫「今天」）、幾則；看的是過去某天時給一個回到今天的出口
   const dayText = date === taipeiDateKey(new Date()) ? "今天" : `${_mdOf(date)}（${_weekdayZh(date)}）`;
@@ -6335,30 +6347,41 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     const p = Number(e.price), l = Number(e.level);
     return { e, v: (Number.isFinite(p) && p > 0) ? p : (Number.isFinite(l) && l > 0) ? l : cur };
   });
-  // 參考橫線候選：訊號自己的關卡 → 月線／昨收 → 現價最近的壓力／支撐；同一價位只畫一次
+  // 參考橫線候選：訊號自己的關卡 → 現價 → 昨收 → 現價最近的壓力／支撐 → 月線。
+  // 同一個價位只畫一次，同一個名字也只畫一次（RTL_REF_PRIO 的順序＝誰先進來、誰留下）。
   const refs = [];
   const addRef = (label, value, cls) => {
     const v = Number(value);
     if (!(Number.isFinite(v) && v > 0)) return;
+    // 一個名字一條線：訊號自己講的月線是盤中算的 MA20、報告的月線是昨天收盤算的，
+    // 兩者差個 1% 就會變成兩條都叫「月」的線，看起來像這檔有兩條月線
+    // （Howard 2026-09-22 晶宏）。先進來的留下——那是訊號當下判斷用的那一條。
+    if (refs.some(r => r.label === label)) return;
     if (refs.some(r => Math.abs(r.value - v) / v < 0.002)) return;
-    refs.push({ label, value: v, cls });
+    refs.push({ label, value: v, cls, prio: RTL_REF_PRIO[cls] ?? 9 });
   };
   for (const e of entries) if (RTL_LEVEL_LABEL[e.key]) addRef(RTL_LEVEL_LABEL[e.key], e.level, "sig");
-  const score = opts.past ? null : sharedReportData?.investment_scores?.[sid];
-  if (score) addRef("月", score.ma20, "ma");
+  // 現價（過去的日子＝那天的收盤）一定畫一條：關卡全在很遠的地方時（聯發科 2026-09-22，
+  // 支撐在 3,852、壓力一條都沒有），圖上會連一條靠近價格的線都沒有，看不出訊號離現在多遠
+  addRef(opts.past ? "收盤" : "現價", cur, "cur");
   if (iq?.prevClose) addRef("昨收", iq.prevClose, "prev");
   const lv = opts.past ? _nearestFromLevels(iq?.levels, cur) : nearestLevels(sid, cur);
   addRef("壓", lv.resistance, "lvl");
   addRef("撐", lv.support, "lvl");
+  const score = opts.past ? null : sharedReportData?.investment_scores?.[sid];
+  if (score) addRef("月", score.ma20, "ma");
 
-  // 縱軸範圍以訊號位置為主；離範圍 6% 以上的參考線不畫（否則把訊號擠成一排）
+  // 縱軸範圍以訊號位置與現價為主。參考線可以把它拉開，但有限度：拉太開就會把訊號
+  // 全擠成最上面一排（聯發科：昨收在 3% 外，一拉開四顆訊號就黏在天花板上）
   const core = marks.map(m => m.v).filter(v => Number.isFinite(v) && v > 0);
   if (cur) core.push(cur);
   let lo = core.length ? Math.min(...core) : 0, hi = core.length ? Math.max(...core) : 0;
   const mid = (lo + hi) / 2 || 1;
   if (hi - lo < mid * 0.015) { lo = mid * 0.9925; hi = mid * 1.0075; }
+  const room = Math.max((hi - lo) * 2, mid * 0.03);
   const keep = core.length
-    ? refs.filter(r => r.value >= lo - mid * 0.06 && r.value <= hi + mid * 0.06).slice(0, 5)
+    ? refs.slice().sort((a, b) => a.prio - b.prio)
+        .filter(r => r.value >= lo - room && r.value <= hi + room).slice(0, RTL_MAX_LINES)
     : [];
   for (const r of keep) { lo = Math.min(lo, r.value); hi = Math.max(hi, r.value); }
   const pad = (hi - lo) * 0.12 || mid * 0.01;
@@ -6367,53 +6390,107 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   // 整張圖是一個 SVG（viewBox 固定、寬度跟著容器縮放）：標記以前是 HTML 疊在圖上、
   // 用 transform 放在非整數像素，手機會把它光柵化得糊糊的，外圈陰影又跟圖示圓角對不齊，
   // 看起來像粗糙的截圖（Howard 2026-09-18 兩次反映）。向量座標裡畫就沒有這些事。
-  const { x0, x1, y0, y1 } = RTL_PLOT;
+  const { x0, y0, y1 } = RTL_PLOT;
   const yOf = v => y0 + (1 - (v - lo) / (hi - lo)) * (y1 - y0);
+
+  // 參考線的自動排版（2026-09-22 Howard：台達電、台積電好幾條疊在一起看不清楚）：
+  //   1. 距離小於 RTL_LINE_MERGE 的兩條就是同一條線（台達電「前高 1,885」與「撐 1,880」
+  //      相差 0.3%），只留重要的那條——訊號自己講的 > 現價 > 昨收 > 壓撐 > 月線。
+  //   2. 剩下的線都畫在真正的價位上，只把標籤往下錯開到彼此至少差 RTL_LABEL_GAP，
+  //      錯開的那個用一小段接線連回自己的線。
+  const lines = [];
+  for (const r of keep.slice().sort((a, b) => b.value - a.value)) {
+    const y = yOf(r.value);
+    const clash = lines.find(k => Math.abs(k.y - y) < RTL_LINE_MERGE);
+    if (!clash) lines.push(Object.assign({}, r, { y }));
+    else if (r.prio < clash.prio) Object.assign(clash, r, { y });
+  }
+  lines.sort((a, b) => a.y - b.y);
+  let lastLabelY = -Infinity;
+  for (const r of lines) { r.ly = Math.max(r.y, lastLabelY + RTL_LABEL_GAP); lastLabelY = r.ly; }
+  const spill = lines.length ? lines[lines.length - 1].ly - (y1 + 6) : 0;
+  if (spill > 0) for (const r of lines) r.ly = Math.max(y0 - 4, r.ly - spill);
+  // 右邊留給標籤的寬度跟著最長的那一個走：標籤短的時候圖就可以寬一點
+  const labelOf = r => `${r.label} ${fmtPrice(r.value)}`;
+  const gutter = Math.min(RTL_GUTTER_MAX, Math.max(RTL_GUTTER_MIN,
+    Math.max(0, ...lines.map(r => rtlTextWidth(labelOf(r), RTL_FONT.label))) + 12));
+  const x1 = RTL_VB_W - gutter;
+
   const n = marks.length;
   // 橫向：依發生順序等距排開，不照真實時間比例。台股訊號多半集中在開盤那半小時，
   // 照比例畫會把三四顆擠在最左邊一團（Howard：先顧閱讀體驗）；順序與各自的時間仍看得到
   const xOf = i => x0 + rtlSlotPct(i, n) / 100 * (x1 - x0);
   const midY = (y0 + y1) / 2;
+  // 一天十則訊號時一格只剩 25 單位、圖示 34 單位——不縮就是疊在一起看不清楚。
+  // 圖示跟著格子縮（有下限），縮寫的字級跟著圖示走；還是撞在一起的往上下找空位。
+  const slot = n > 1 ? (x1 - x0) * (rtlSlotPct(1, n) - rtlSlotPct(0, n)) / 100 : x1 - x0;
+  const icon = Math.max(RTL_ICON_MIN, Math.min(RTL_ICON, slot - 4));
+  // 縮寫的字級：不超過圖示的比例，也不讓最長的那個縮寫（「MACD↑」「RSI高」）寬過一格
+  const maxEm = Math.max(1, ...marks.map(m => rtlTextWidth(String(m.e.abbr || ""), 1)));
+  const fs = Math.max(RTL_FONT.abbrMin, Math.min(RTL_FONT.abbr, icon * 0.37, (slot - 10) / maxEm));
+  const markW = Math.max(icon, maxEm * fs + 8) + 2;   // 一顆標記實際佔的寬（圖示或縮寫，取寬的）
+  const rowH = icon + fs + 8;
+  const top = y0 + icon / 2, bottom = y1 - icon / 2 - fs - 4;
+  const clampY = v => Math.max(top, Math.min(bottom, v));
   const placed = [];
+  const hits = (x, y) => placed.some(q => Math.abs(q.x - x) < markW - 0.5 && Math.abs(q.y - y) < rowH);
   let marksSvg = "";
   marks.forEach((m, i) => {
     const x = xOf(i);
-    let y = Number.isFinite(m.v) && m.v > 0 ? yOf(m.v) : midY;
-    // 等距時相鄰兩顆只差一格，圖示加縮寫比一格還寬：價位相近就往空的那邊錯開一層
-    for (const p of placed) if (Math.abs(p.x - x) < RTL_SLOT_MIN && Math.abs(p.y - y) < RTL_STACK) y = p.y < midY ? p.y + RTL_STACK : p.y - RTL_STACK;
-    y = Math.max(y0 + 18, Math.min(y1 - 24, y));
+    const base = clampY(Number.isFinite(m.v) && m.v > 0 ? yOf(m.v) : midY);
+    let y = base;
+    // 撞到就一層一層往外找：上半部的往下讓、下半部的往上讓（免得全部擠到同一邊）
+    for (let k = 1; k <= 5 && hits(x, y); k++) {
+      const cands = base < midY ? [base + k * rowH, base - k * rowH] : [base - k * rowH, base + k * rowH];
+      for (const c of cands) {
+        const cc = clampY(c);
+        if (!hits(x, cc)) { y = cc; break; }
+      }
+    }
     placed.push({ x, y });
-    marksSvg += rtlMarkerSvg(m.e, x, y, i);
+    marksSvg += rtlMarkerSvg(m.e, x, y, i, icon, fs);
   });
-  const linesSvg = keep.map(r => {
-    const y = yOf(r.value).toFixed(1);
-    return `<line class="rtl-line rtl-line-${r.cls}" x1="${x0}" y1="${y}" x2="${x1}" y2="${y}"/>`
-      + `<text class="rtl-line-label rtl-line-${r.cls}" x="${x1 + 5}" y="${(Number(y) + 3.5).toFixed(1)}">${escapeHtml(r.label)} ${fmtPrice(r.value)}</text>`;
+  const linesSvg = lines.map(r => {
+    const y = r.y.toFixed(1), ly = r.ly.toFixed(1);
+    const lead = Math.abs(r.ly - r.y) > 1.5
+      ? `<line class="rtl-lead rtl-line-${r.cls}" x1="${x1}" y1="${y}" x2="${(x1 + 6).toFixed(1)}" y2="${ly}"/>`
+      : "";
+    return `<line class="rtl-line rtl-line-${r.cls}" x1="${x0}" y1="${y}" x2="${x1}" y2="${y}"/>` + lead
+      + `<text class="rtl-line-label rtl-line-${r.cls}" x="${(x1 + 8).toFixed(1)}" y="${(r.ly + RTL_FONT.label * 0.35).toFixed(1)}">${escapeHtml(labelOf(r))}</text>`;
   }).join("");
-  // 刻度＝每顆標記的時間；標記多到擠不下時隔一顆標一次（時間仍在故事列裡）
-  const every = n > 7 ? 2 : 1;
-  const axisY = y1 + 10;
+  // 刻度＝每顆標記的時間。同一分鐘的只寫一次（開盤那批常常五顆都是 09:00，寫五次只是雜訊），
+  // 擠不下的也不寫——每一則的時間在下面的故事列裡都有
+  const axisY = y1 + RTL_AXIS_GAP;
+  const tickMin = rtlTextWidth("09:00", RTL_FONT.tick) + 8;
+  let lastTickText = "", lastTickX = -Infinity;
   let ticksSvg = marks.map((m, i) => {
-    const x = xOf(i).toFixed(1);
-    const label = i % every === 0 ? fmtTime(m.e.at) : "";
-    return `<line class="rtl-tick" x1="${x}" y1="${axisY - 3}" x2="${x}" y2="${axisY + 5}"/>`
-      + (label ? `<text class="rtl-tick-label" x="${x}" y="${axisY + 17}" text-anchor="middle">${label}</text>` : "");
+    const x = xOf(i);
+    const text = fmtTime(m.e.at);
+    const show = text !== lastTickText && x - lastTickX >= tickMin;
+    if (show) { lastTickText = text; lastTickX = x; }
+    return `<line class="rtl-tick" x1="${x.toFixed(1)}" y1="${axisY - 4}" x2="${x.toFixed(1)}" y2="${axisY + 6}"/>`
+      + (show ? `<text class="rtl-tick-label" x="${x.toFixed(1)}" y="${(axisY + RTL_FONT.tick + 7).toFixed(1)}" text-anchor="middle">${text}</text>` : "");
   }).join("");
   let nowSvg = "";
   if (_isMarketOpenNow() && n && !opts.past) {
-    // 盤中：最後一顆標記之後是「現在」，右邊那段是還沒發生的
-    const x = Math.min(x1, xOf(n - 1) + 30).toFixed(1);
-    nowSvg = `<rect class="rtl-future" x="${x}" y="${y0}" width="${(x1 - Number(x)).toFixed(1)}" height="${y1 - y0}"/>`
-      + `<line class="rtl-now" x1="${x}" y1="${y0 - 2}" x2="${x}" y2="${axisY}"/>`
-      + `<text class="rtl-now-label" x="${x}" y="${y0 - 6}" text-anchor="middle">${fmtTime(new Date())}</text>`;
+    // 盤中：最後一顆標記之後就是「現在」，右邊那段還沒發生。橫軸是發生順序、不是時間比例，
+    // 所以這條線只說「到這裡為止」——標籤寫「現在 11:44」，光寫一個時間沒人看得懂
+    // （Howard 2026-09-22 晶宏）。
+    const x = Math.min(x1, xOf(n - 1) + RTL_NOW_GAP);
+    const label = `現在 ${fmtTime(new Date())}`;
+    const lw = rtlTextWidth(label, RTL_FONT.now);
+    const lx = Math.min(x1 - lw / 2, Math.max(x0 + lw / 2, x));
+    nowSvg = (x1 - x > 4 ? `<rect class="rtl-future" x="${x.toFixed(1)}" y="${y0}" width="${(x1 - x).toFixed(1)}" height="${y1 - y0}"/>` : "")
+      + `<line class="rtl-now" x1="${x.toFixed(1)}" y1="${y0 - 2}" x2="${x.toFixed(1)}" y2="${axisY}"/>`
+      + `<text class="rtl-now-label" x="${lx.toFixed(1)}" y="${(y0 - 8).toFixed(1)}" text-anchor="middle">${escapeHtml(label)}</text>`;
   }
   let emptySvg = "";
   if (!n) {
     ticksSvg = RTL_TICKS.map(([label, min]) => {
       const x = (x0 + min / RTL_SESSION_MIN * (x1 - x0)).toFixed(1);
       const anchor = min === 0 ? "start" : min === RTL_SESSION_MIN ? "end" : "middle";
-      return `<line class="rtl-tick" x1="${x}" y1="${axisY - 3}" x2="${x}" y2="${axisY + 5}"/>`
-        + (label ? `<text class="rtl-tick-label" x="${x}" y="${axisY + 17}" text-anchor="${anchor}">${label}</text>` : "");
+      return `<line class="rtl-tick" x1="${x}" y1="${axisY - 4}" x2="${x}" y2="${axisY + 6}"/>`
+        + (label ? `<text class="rtl-tick-label" x="${x}" y="${(axisY + RTL_FONT.tick + 7).toFixed(1)}" text-anchor="${anchor}">${label}</text>` : "");
     }).join("");
     const emptyLabel = !opts.past ? "今天還沒有訊號"
                      : (opts.covered ? "這天沒有訊號" : "沒有這天的紀錄");
@@ -6425,31 +6502,46 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     + `</svg></div>`;
 }
 
-// SVG 座標系（viewBox 單位）：右邊 70 留給參考線標籤、下面留給刻度時間
-const RTL_VB_W = 360, RTL_VB_H = 272;
-const RTL_PLOT = { x0: 10, x1: 288, y0: 18, y1: 232 };
-const RTL_ICON = 30;        // 標記圖示邊長
-const RTL_SLOT_MIN = 40;    // 兩顆標記橫向差距小於這個就算相鄰
-const RTL_STACK = 54;       // 相鄰且價位接近時錯開的距離（圖示＋縮寫的高度）
+// SVG 座標系。viewBox 寬 320 ≈ 手機上字卡裡的可用寬度（390px 螢幕：modal 374 − p-3 32 −
+// 圖框 24 ≈ 318），所以下面這些單位就是實際看到的 px——字級 12.5 就是 12.5px。
+// 2026-09-22 Howard：圖上的字太小，全部放大一級，右邊留給標籤的寬度改成跟著標籤長短算
+// （radarTimelineChartHtml 的 gutter），標籤短的時候圖就寬一點。
+const RTL_VB_W = 320, RTL_VB_H = 284;
+const RTL_PLOT = { x0: 8, y0: 30, y1: 240 };   // x1 動態算（右邊留給參考線標籤）
+const RTL_GUTTER_MIN = 58, RTL_GUTTER_MAX = 124;
+const RTL_AXIS_GAP = 13;    // 橫軸離繪圖區下緣
+const RTL_ICON = 34;        // 標記圖示邊長（訊號少的日子）
+const RTL_ICON_MIN = 24;    // 訊號多到一格塞不下時，圖示最小縮到這麼大
+const RTL_NOW_GAP = 32;     // 「現在」游標離最後一顆標記多遠
+const RTL_MAX_LINES = 5;    // 最多幾條參考橫線
+const RTL_LINE_MERGE = 13;  // 兩條線靠得比這個近就當成同一條，只留優先序高的
+const RTL_LABEL_GAP = 15;   // 兩個標籤至少差這麼多，否則往下錯開＋接線
+// 字級：與 watchlist.css 的 .rtl-* 同一組數字（CSS 負責上色與粗細，這裡只用來估寬度）。
+// 縮寫是唯一會被程式改大小的（跟著圖示縮），所以標在 <text> 上而不是 CSS。
+const RTL_FONT = { label: 12.5, tick: 12, abbr: 12.5, abbrMin: 9.5, now: 12.5 };
+// 參考線的優先序：訊號自己講的關卡 > 現價 > 昨收 > 最近的壓力／支撐 > 月線
+const RTL_REF_PRIO = { sig: 0, cur: 1, prev: 2, lvl: 3, ma: 4 };
 
-// 第 i 顆（共 n 顆）標記的橫向位置（%）：等距、兩端留 8%，只有一顆就置中
+// 第 i 顆（共 n 顆）標記的橫向位置（%）：等距、只有一顆就置中。
+// 兩端平常留 8%，訊號多的日子收到 3%——多出來的寬度就是多一點不重疊的空間。
 function rtlSlotPct(i, n) {
   if (n <= 1) return 50;
-  return 8 + (i / (n - 1)) * 84;
+  const margin = n >= 7 ? 3 : 8;
+  return margin + (i / (n - 1)) * (100 - margin * 2);
 }
 
 // 一顆標記：底色框（與背景同色的暈邊把後面的參考線隔開）＋ 48 座標系的圖案縮放進來 ＋ 縮寫
-function rtlMarkerSvg(e, x, y, i) {
-  const half = RTL_ICON / 2, k = RTL_ICON / 48;
+function rtlMarkerSvg(e, x, y, i, size = RTL_ICON, fs = RTL_FONT.abbr) {
+  const half = size / 2, k = size / 48;
   const { bg, inner } = signalIconParts({ signal: e.key, severity: e.sev, source: e.src === "rule" ? "rule" : "monitor" });
   const abbr = String(e.abbr || "");
-  const w = rtlTextWidth(abbr, 9.5) + 8;
-  const ty = y + half + 12;
+  const w = rtlTextWidth(abbr, fs) + 8;
+  const ty = y + half + fs + 2;
   return `<g class="rtl-mark rtl-src-${e.src}" onclick="rtlFocusStory(${i})">`
-    + `<rect x="${(x - half - 2).toFixed(1)}" y="${(y - half - 2).toFixed(1)}" width="${RTL_ICON + 4}" height="${RTL_ICON + 4}" rx="${(11 * k + 2).toFixed(1)}" class="rtl-mark-halo"/>`
+    + `<rect x="${(x - half - 2).toFixed(1)}" y="${(y - half - 2).toFixed(1)}" width="${(size + 4).toFixed(1)}" height="${(size + 4).toFixed(1)}" rx="${(11 * k + 2).toFixed(1)}" class="rtl-mark-halo"/>`
     + `<g transform="translate(${(x - half).toFixed(1)} ${(y - half).toFixed(1)}) scale(${k.toFixed(4)})"><rect width="48" height="48" rx="11" fill="${bg}"/>${inner}</g>`
-    + `<rect class="rtl-abbr-bg" x="${(x - w / 2).toFixed(1)}" y="${(ty - 10).toFixed(1)}" width="${w.toFixed(1)}" height="13.5" rx="3.5"/>`
-    + `<text class="rtl-abbr" x="${x.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="middle">${escapeHtml(abbr)}</text></g>`;
+    + `<rect class="rtl-abbr-bg" x="${(x - w / 2).toFixed(1)}" y="${(ty - fs).toFixed(1)}" width="${w.toFixed(1)}" height="${(fs + 4.5).toFixed(1)}" rx="4"/>`
+    + `<text class="rtl-abbr" x="${x.toFixed(1)}" y="${ty.toFixed(1)}" style="font-size:${fs.toFixed(1)}px" text-anchor="middle">${escapeHtml(abbr)}</text></g>`;
 }
 
 // 估文字寬度（viewBox 單位）：中日韓字 ≈ 1 em、其餘 ≈ 0.6 em；縮寫最多五個字，估一下就夠畫底框
@@ -6465,11 +6557,11 @@ function radarStoryListHtml(story, opts = {}) {
   const srcLabel = { builtin: "內建訊號", target: "自訂價位", auto: "自動偵測 · 未推播", rule: "📐 進階訊號", post: "盤後提醒" };
   const item = (e, i) => {
     const link = e.rowId ? ` role="button" tabindex="0" onclick="openInboxDetailFromRadar('${jsAttr(e.rowId)}')"` : "";
-    const lvl = (e.src === "builtin" || e.src === "target") ? _signalLevelLabel(e.key, e.level)
+    const lvl = (e.src === "builtin" || e.src === "target") ? _signalLevelLabel(e.key, e.level, true)
               : (Number.isFinite(Number(e.level)) && e.level > 0 ? fmtPrice(e.level) : "");
     return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-sev="${e.sev}"${link}>
       <div class="rtl-time">${fmtTime(e.at)}</div>
-      ${signalIconSvg({ signal: e.key, severity: e.sev, source: e.src === "rule" ? "rule" : e.src === "post" ? "post_market" : "monitor" }, 34)}
+      ${signalIconSvg({ signal: e.key, severity: e.sev, source: e.src === "rule" ? "rule" : e.src === "post" ? "post_market" : "monitor" }, 38)}
       <div class="rtl-text">
         <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
         ${e.text ? `<div class="rtl-desc">${escapeHtml(e.text)}</div>` : ""}

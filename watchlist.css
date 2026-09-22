@@ -2066,7 +2066,7 @@ body.has-bottom-nav .qa-panel {
 .home-tile-stat .hs-zero { color: var(--text-muted); opacity: 0.6; }
 
 .home-tile-live {
-	font-size: 0.72rem;
+	font-size: 0.78rem;
 	font-weight: 700;
 	line-height: 1;
 	padding: 3px 5px;
@@ -2076,9 +2076,10 @@ body.has-bottom-nav .qa-panel {
 	white-space: nowrap;
 }
 
-/* 還在板上：漲停／跌停直接寫出來，實底比「進行中」的空框更顯眼（打開板之後這顆籤就不見了） */
+/* 籤上寫的是現在哪一種訊號（逼近壓力、跌破支撐…）；還在漲停／跌停板上的那顆用實底，
+   一列掃過去最先看到它（打開板之後 monitor 換訊號，這顆籤自己會換字或消失） */
 .home-tile-live.is-limit {
-	font-size: 0.78rem;
+	font-size: 0.82rem;
 	padding: 3px 7px;
 	color: var(--bg-0);
 	background: var(--sig-orange);
@@ -2124,7 +2125,7 @@ body.has-bottom-nav .qa-panel {
 .home-example-tag { font-size: 0.62rem; font-weight: 700; color: var(--accent); border: 1px solid rgba(139, 124, 255, 0.6); border-radius: 6px; padding: 2px 6px; line-height: 1; white-space: nowrap; }
 .home-example-note { font-size: 0.74rem; color: var(--text-1); line-height: 1.5; }
 .rtl-example .home-example-tag { margin-right: 0.35rem; }
-.rtl-example { margin-top: 0.8rem; padding: 0.6rem 0.7rem; border: 1px dashed rgba(139, 124, 255, 0.55); border-radius: 12px; font-size: 0.8rem; color: var(--text-1); line-height: 1.6; background: rgba(139, 124, 255, 0.06); }
+.rtl-example { margin-top: 0.8rem; padding: 0.7rem 0.8rem; border: 1px dashed rgba(139, 124, 255, 0.55); border-radius: 12px; font-size: 0.88rem; color: var(--text-1); line-height: 1.6; background: rgba(139, 124, 255, 0.06); }
 
 .home-feed {
 	display: flex;
@@ -2170,12 +2171,12 @@ body.has-bottom-nav .qa-panel {
 	align-items: baseline;
 	justify-content: space-between;
 	gap: 8px;
-	font-size: 0.86rem;
+	font-size: 0.95rem;
 	font-weight: 700;
 	margin-bottom: 10px;
 }
 
-.rtl-history-head .k { font-size: 0.72rem; font-weight: 400; color: var(--text-muted); }
+.rtl-history-head .k { font-size: 0.8rem; font-weight: 400; color: var(--text-muted); }
 
 .rtl-days { display: flex; flex-direction: column; gap: 8px; }
 
@@ -2188,12 +2189,12 @@ body.has-bottom-nav .qa-panel {
 }
 
 .rtl-day-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.rtl-day-d { font-size: 0.92rem; font-weight: 700; }
-.rtl-day-n { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; }
+.rtl-day-d { font-size: 1rem; font-weight: 700; }
+.rtl-day-n { font-size: 0.86rem; color: var(--text-muted); white-space: nowrap; }
 .rtl-day-sigs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
 .rtl-day-sig {
-	font-size: 0.78rem;
+	font-size: 0.86rem;
 	line-height: 1.25;
 	padding: 4px 9px;
 	border-radius: 8px;
@@ -2201,7 +2202,7 @@ body.has-bottom-nav .qa-panel {
 	color: var(--text-0);
 }
 
-.rtl-day-more { font-size: 0.74rem; color: var(--text-muted); align-self: center; }
+.rtl-day-more { font-size: 0.82rem; color: var(--text-muted); align-self: center; }
 .rtl-sub-gap { margin-left: 0.55rem; }
 
 .home-stat-row {
@@ -2912,9 +2913,9 @@ body.has-bottom-nav .qa-panel {
    個股字卡的副標還用它畫「進行中」那顆籤。 */
 .sig-chip {
 	display: inline-block;
-	font-size: 0.72rem;
+	font-size: 0.82rem;
 	line-height: 1;
-	padding: 4px 7px;
+	padding: 5px 9px;
 	border-radius: 7px;
 	font-weight: 600;
 	font-style: normal;
@@ -2954,7 +2955,7 @@ body.has-bottom-nav .qa-panel {
 	border-radius: 9px;
 	background: transparent;
 	color: var(--text-muted);
-	font-size: 0.82rem;
+	font-size: 0.9rem;
 	font-weight: 600;
 	line-height: 1.2;
 	cursor: pointer;
@@ -2991,49 +2992,58 @@ body.has-bottom-nav .qa-panel {
 }
 
 /* ── 盤中時間軸：橫軸 09:00–13:30、縱軸價位；幾條參考橫線給相對位置，不畫價格路徑 ── */
-.rtl-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.rtl-chart { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px 12px 8px; }
-/* 時間軸是一張 SVG（viewBox 360×272，寬度跟著容器）：線、刻度、標記全在向量座標裡，
-   不再是 HTML 疊圖——那樣在手機上會被光柵化成糊糊的「截圖」。文字用 CSS 上色，字體跟頁面同一套。 */
-.rtl-svg { display: block; width: 100%; height: auto; font-family: inherit; }
-.rtl-svg text { fill: var(--text-muted); font-size: 9px; }
-.rtl-line { stroke: rgba(201, 201, 212, 0.45); stroke-width: 1; stroke-dasharray: 4 3; }
-.rtl-line-prev { stroke: rgba(146, 146, 163, 0.4); stroke-dasharray: 1.5 3; }
+.rtl-sub { font-size: 0.86rem; color: var(--text-muted); margin-top: 5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rtl-chart { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 8px 6px; }
+/* 時間軸是一張 SVG（viewBox 320×284，寬度跟著容器）：線、刻度、標記全在向量座標裡，
+   不再是 HTML 疊圖——那樣在手機上會被光柵化成糊糊的「截圖」。文字用 CSS 上色，字體跟頁面同一套。
+   2026-09-22（Howard：圖上的字太小）：viewBox 寬度從 360 收到 320，讓一個單位≈手機上的一個 px，
+   字級整組放大到 12–14px。下面這些數字與 watchlist.html 的 RTL_FONT 是同一組，改一邊要改兩邊
+   （JS 只拿它估文字寬度，畫出來的大小以這裡為準）。 */
+/* 桌機的字卡有 560px 寬，SVG 再跟著撐大就會比內文還大——圖固定最寬 400px、置中 */
+.rtl-svg { display: block; width: 100%; max-width: 400px; margin: 0 auto; height: auto; font-family: inherit; }
+.rtl-svg text { fill: var(--text-muted); font-size: 12px; }
+.rtl-line { stroke: rgba(201, 201, 212, 0.45); stroke-width: 1.1; stroke-dasharray: 5 4; }
+.rtl-line-prev { stroke: rgba(146, 146, 163, 0.45); stroke-dasharray: 2 3; }
 .rtl-line-ma   { stroke: rgba(232, 121, 249, 0.6); }
-.rtl-line-sig  { stroke: rgba(201, 201, 212, 0.7); }
+.rtl-line-sig  { stroke: rgba(201, 201, 212, 0.75); }
+/* 現價（過去的日子＝收盤）：整張圖的基準點，比其他參考線亮一階 */
+.rtl-line-cur  { stroke: rgba(245, 245, 247, 0.6); stroke-dasharray: 7 4; }
 .rtl-svg text.rtl-line-sig { fill: var(--text-1); }
-.rtl-svg text.rtl-line-label { font-size: 8.5px; }
-.rtl-future { fill: rgba(146, 146, 163, 0.06); }
-.rtl-now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
-.rtl-svg text.rtl-now-label { fill: var(--accent); font-size: 8.5px; font-weight: 600; }
+.rtl-svg text.rtl-line-cur { fill: var(--text-0); font-weight: 600; }
+.rtl-svg text.rtl-line-label { font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+/* 標籤被錯開時連回自己那條線的那一小段 */
+.rtl-lead { stroke-width: 1; stroke-dasharray: none; opacity: 0.75; fill: none; }
+.rtl-future { fill: rgba(146, 146, 163, 0.07); }
+.rtl-now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.rtl-svg text.rtl-now-label { fill: var(--accent); font-size: 12.5px; font-weight: 700; }
 .rtl-axis { stroke: rgba(146, 146, 163, 0.4); stroke-width: 2.5; stroke-linecap: round; }
-.rtl-tick { stroke: rgba(146, 146, 163, 0.65); stroke-width: 1; }
-.rtl-svg text.rtl-tick-label { fill: var(--text-1); font-size: 8.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.rtl-tick { stroke: rgba(146, 146, 163, 0.65); stroke-width: 1.2; }
+.rtl-svg text.rtl-tick-label { fill: var(--text-1); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .rtl-mark { cursor: pointer; }
 .rtl-mark-halo { fill: var(--bg-1); }
 .rtl-abbr-bg { fill: rgba(15, 15, 26, 0.88); }
-.rtl-svg text.rtl-abbr { fill: var(--text-0); font-size: 9.5px; font-weight: 700; }
-.rtl-svg .rtl-src-auto text.rtl-abbr { fill: var(--text-1); font-weight: 500; }
-.rtl-svg text.rtl-empty { font-size: 10.5px; }
-.rtl-story-head { font-size: 0.8rem; color: var(--text-muted); margin: 16px 0 8px; font-weight: 600; }
-.rtl-item { display: flex; align-items: flex-start; gap: 9px; padding: 8px 6px; border-radius: 12px; border-left: 3px solid transparent; }
+.rtl-svg text.rtl-abbr { fill: var(--text-0); font-size: 12.5px; font-weight: 700; }
+.rtl-svg .rtl-src-auto text.rtl-abbr { fill: var(--text-1); font-weight: 600; }
+.rtl-svg text.rtl-empty { font-size: 14px; }
+.rtl-story-head { font-size: 0.9rem; color: var(--text-muted); margin: 16px 0 8px; font-weight: 600; }
+.rtl-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 6px; border-radius: 12px; border-left: 3px solid transparent; }
 .rtl-item.is-link { cursor: pointer; }
 .rtl-item.is-link:hover { background: var(--surface); }
 .rtl-item[data-sev="orange"] { border-left-color: var(--sig-orange); }
 .rtl-item[data-sev="blue"]   { border-left-color: var(--sig-blue); }
 .rtl-item.is-target { animation: inbox-target-flash 3s ease-out; }
-.rtl-time { width: 40px; flex: 0 0 auto; font-size: 0.76rem; color: var(--text-1); font-variant-numeric: tabular-nums; padding-top: 9px; font-weight: 600; }
-.rtl-item > .sig-ico { flex: 0 0 auto; width: 34px; height: 34px; }
+.rtl-time { width: 46px; flex: 0 0 auto; font-size: 0.88rem; color: var(--text-1); font-variant-numeric: tabular-nums; padding-top: 9px; font-weight: 600; }
+.rtl-item > .sig-ico { flex: 0 0 auto; width: 38px; height: 38px; }
 .rtl-text { flex: 1 1 auto; min-width: 0; padding-top: 2px; }
-.rtl-title { font-weight: 700; font-size: 0.9rem; }
-.rtl-lvl { font-weight: 500; font-size: 0.78rem; color: var(--text-1); margin-left: 6px; }
-.rtl-desc { font-size: 0.78rem; color: var(--text-1); margin-top: 2px; line-height: 1.45; white-space: pre-wrap; }
-.rtl-src { display: inline-block; margin-top: 4px; font-size: 0.66rem; color: var(--text-muted); padding: 2px 6px; border-radius: 5px; background: rgba(146, 146, 163, 0.14); }
+.rtl-title { font-weight: 700; font-size: 1rem; }
+.rtl-lvl { font-weight: 500; font-size: 0.88rem; color: var(--text-1); margin-left: 6px; }
+.rtl-desc { font-size: 0.86rem; color: var(--text-1); margin-top: 3px; line-height: 1.5; white-space: pre-wrap; }
+.rtl-src { display: inline-block; margin-top: 5px; font-size: 0.74rem; color: var(--text-muted); padding: 2px 7px; border-radius: 5px; background: rgba(146, 146, 163, 0.14); }
 .rtl-src-rule { border: 1px dashed rgba(146, 146, 163, 0.6); }
 .rtl-src-auto { background: transparent; border: 1px solid rgba(146, 146, 163, 0.35); }
-.rtl-divider { font-size: 0.72rem; color: var(--text-muted); margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
-.rtl-none { padding: 14px 6px; font-size: 0.85rem; color: var(--text-1); }
-.rtl-none span { font-size: 0.74rem; color: var(--text-muted); }
+.rtl-divider { font-size: 0.82rem; color: var(--text-muted); margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+.rtl-none { padding: 14px 6px; font-size: 0.95rem; color: var(--text-1); }
+.rtl-none span { font-size: 0.84rem; color: var(--text-muted); }
 
 /* ── 通知詳情「為什麼通知你」 ── */
 .why-box {
