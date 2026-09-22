@@ -1848,18 +1848,76 @@ body.has-bottom-nav .qa-panel {
 .home-sum b { font-weight: 800; }
 .home-sum .dim { display: block; margin-top: 2px; font-size: 0.76rem; color: var(--text-muted); }
 
-.home-wl {
+/* ── 自選方塊（2026-09-22 改版）：一檔一塊、兩欄並排 ──
+   方塊裡由上而下＝名稱＋漲／平／跌／今天幾則／近 10 個交易日的格子／評分變化。
+   其他細節一律點進第二層（時間軸）。留白是刻意的：方塊間 10px、方塊內每段 8px。 */
+.home-sec { margin-top: 0.1rem; }
+
+.home-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.home-tile {
 	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 5px 8px;
-	padding: 0.55rem 0.15rem;
-	border-bottom: 1px solid rgba(146, 146, 163, 0.12);
+	flex-direction: column;
+	gap: 8px;
+	padding: 0.8rem 0.75rem;
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	background: var(--surface);
+	box-shadow: var(--shadow-soft);
 	cursor: pointer;
 }
 
-.home-wl:last-child { border-bottom: none; }
-.home-wl-name { font-size: 0.95rem; font-weight: 700; color: var(--text-0); }
+/* 今天有訊號的方塊：橘框（橘＝需要注意；意思仍然由方塊裡的文字講，顏色只是強調） */
+.home-tile.is-hot { border-color: rgba(255, 159, 67, 0.5); }
+/* 按下去會縮一下：方塊沒有「›」，這是它可以點的唯一提示（另一個是清單上方那句說明） */
+.home-tile:active { transform: scale(0.985); }
+
+.home-tile-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
+
+.home-tile-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: 1rem;
+	font-weight: 700;
+	color: var(--text-0);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.home-tile-lead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; line-height: 1.15; }
+.home-tile-n { font-size: 1.2rem; font-weight: 800; color: var(--text-0); }
+.home-tile-when { font-size: 0.7rem; color: var(--text-muted); }
+.home-tile-calm { font-size: 0.88rem; font-weight: 600; color: var(--text-muted); }
+
+.home-tile-live {
+	font-size: 0.62rem;
+	font-weight: 700;
+	line-height: 1;
+	padding: 3px 5px;
+	border-radius: 6px;
+	color: var(--sig-orange);
+	border: 1px solid rgba(255, 159, 67, 0.55);
+	white-space: nowrap;
+}
+
+.home-tile-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	padding-top: 8px;
+	border-top: 1px solid rgba(146, 146, 163, 0.14);
+	font-size: 0.76rem;
+	color: var(--text-muted);
+}
+
+.home-tile-score { white-space: nowrap; }
+.home-tile-empty { grid-column: 1 / -1; padding: 0.9rem 0.2rem; font-size: 0.85rem; color: var(--text-muted); }
 
 .home-dir {
 	font-size: 0.72rem;
@@ -1876,17 +1934,17 @@ body.has-bottom-nav .qa-panel {
 .home-dir-flat,
 .home-dir-none { color: var(--text-muted); background: rgba(146, 146, 163, 0.14); }
 
-.home-strip { display: inline-flex; flex-direction: column; gap: 2px; margin-left: auto; }
-.home-strip-cells { display: inline-flex; gap: 3px; align-items: center; }
-.home-strip-dates { display: flex; justify-content: space-between; font-size: 0.58rem; line-height: 1; color: var(--text-muted); }
+/* 格子攤滿方塊寬度（grid-auto-columns 1fr，不寫死 10 格），比以前的 13px 方塊高、點得到 */
+.home-strip-cells { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; }
+.home-strip-dates { display: flex; justify-content: space-between; font-size: 0.6rem; line-height: 1; color: var(--text-muted); margin-top: -4px; }
 .home-strip-dates i { font-style: normal; }
 
 .home-cell {
-	width: 13px;
-	height: 13px;
-	border-radius: 3px;
+	min-width: 0;
+	height: 18px;
+	border-radius: 4px;
 	border: 1px solid rgba(146, 146, 163, 0.35);
-	display: inline-flex;
+	display: flex;
 	align-items: center;
 	justify-content: center;
 	font-style: normal;
@@ -1900,7 +1958,14 @@ body.has-bottom-nav .qa-panel {
 .home-cell.is-on  { background: var(--sig-blue);   border-color: var(--sig-blue); }
 .home-cell.is-today { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
 
-.home-dir-date { font-size: 0.66rem; color: var(--text-muted); margin-left: -3px; }
+/* 320px 的機器上一欄只剩 ~114px：格子縮到 8px 出頭，數字要跟著縮才不會爆出來 */
+@media (max-width: 359px) {
+	.home-tile { padding: 0.7rem 0.6rem; }
+	.home-strip-cells { gap: 2px; }
+	.home-cell { font-size: 0.54rem; }
+}
+
+.home-dir-date { font-size: 0.66rem; color: var(--text-muted); white-space: nowrap; }
 .home-ev {
 	cursor: pointer;
 	font-size: 0.66rem;
@@ -1912,11 +1977,11 @@ body.has-bottom-nav .qa-panel {
 	border: 1px solid rgba(255, 159, 67, 0.55);
 	white-space: nowrap;
 }
-.home-more { color: var(--text-muted); font-size: 0.9rem; }
-/* 範例列：虛線紫框＋「範例」籤，第二行說明它為什麼在這裡（沒有自己的歷史時才出現） */
-.home-wl.home-example { flex-wrap: wrap; border: 1px dashed rgba(139, 124, 255, 0.55); border-radius: 12px; padding: 0.55rem 0.6rem; margin-top: 0.4rem; background: rgba(139, 124, 255, 0.06); }
-.home-example-tag { font-size: 0.62rem; font-weight: 700; color: var(--accent); border: 1px solid rgba(139, 124, 255, 0.6); border-radius: 6px; padding: 2px 6px; line-height: 1; margin-right: 0.35rem; }
-.home-example-note { flex: 1 0 100%; font-size: 0.74rem; color: var(--text-1); line-height: 1.5; margin-top: 0.4rem; }
+/* 範例方塊：虛線紫框＋「範例」籤，橫跨兩欄，底下說明它為什麼在這裡（沒有自己的歷史時才出現） */
+.home-tile.home-example { grid-column: 1 / -1; border: 1px dashed rgba(139, 124, 255, 0.55); background: rgba(139, 124, 255, 0.06); }
+.home-example-tag { font-size: 0.62rem; font-weight: 700; color: var(--accent); border: 1px solid rgba(139, 124, 255, 0.6); border-radius: 6px; padding: 2px 6px; line-height: 1; white-space: nowrap; }
+.home-example-note { font-size: 0.74rem; color: var(--text-1); line-height: 1.5; }
+.rtl-example .home-example-tag { margin-right: 0.35rem; }
 .rtl-example { margin-top: 0.8rem; padding: 0.6rem 0.7rem; border: 1px dashed rgba(139, 124, 255, 0.55); border-radius: 12px; font-size: 0.8rem; color: var(--text-1); line-height: 1.6; background: rgba(139, 124, 255, 0.06); }
 .home-legend { font-size: 0.68rem; color: var(--text-muted); margin: -0.2rem 0 0.45rem; line-height: 1.6; }
 

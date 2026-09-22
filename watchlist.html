@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="141">
+  <meta name="app-version" content="142">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=141" rel="stylesheet">
+  <link href="watchlist.css?v=142" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -244,28 +244,27 @@
           onclick="togglePushSubscription()">啟用瀏覽器通知</button>
       </div>
 
-      <!-- 2026-09-20 首頁改版（Howard 定案）：
-           · 標題下一行市場狀態；一句話總結取代兩格大數字
-           · 自選清單永遠展開、是首頁的主內容。每列：名稱＋漲／平／跌文字籤（盤中即時，
-             漲跌為零才是平、不放股價與百分比）＋近 HOME_HISTORY_DAYS 個交易日的訊號格
-             （每格那天的則數，最右格是今天；點一格開那天的時間軸）＋第二行文字狀態。
-             不放縮寫籤：縮寫籤與當日時序是雷達分頁的，首頁講「脈絡＋今天狀態」，
-             兩頁不能同一顆粒度。訊號在首頁只出現這一次。
-           · 事件卡放今天的事件；「接下來 7 天」放 stock_events 裡的未來日程；
-             「統計」放報告的總分變化（只有數字、無評級），全部持平就整張不顯示
-           · 規則推薦降為最底一行 -->
+      <!-- 2026-09-22 首頁改版（Howard）：自選股從「一檔一列」改成「一檔一個方塊、兩欄並排」。
+           · 每個方塊：股名＋漲／平／跌籤 → 今天幾則訊號 → 近 HOME_HISTORY_DAYS 個交易日的訊號格
+             → 底部一行評分變化（對前一日，只有數字、沒有評級）與今日資料籤。
+             點方塊開時間軸（第二層，可在裡面切日期）；點某一格直接開那一天。
+           · 方塊裡就有評分變化，所以原本底下那張「每日評分變化」卡整張拿掉——
+             同一批資料不畫兩次（2026-09-20 加它是因為平靜日首頁沒東西，現在每塊都有）。
+           · 版面刻意寬鬆：重點在方塊裡一眼看完，細節一律點進第二層。
+           2026-09-20 的原則仍然有效：首頁不放股價與百分比（只有漲／平／跌、盤中即時、
+           漲跌為零才是平）、不放縮寫籤（那是雷達分頁的顆粒度），訊號在首頁只出現這一次。
+           · 事件卡放今天的事件；「接下來 7 天」放 stock_events 裡的未來日程；規則推薦降為最底一行 -->
       <div class="home-status" id="home-status"></div>
 
       <div class="card panel-card mb-3">
         <div class="card-body p-3" id="home-summary"></div>
       </div>
 
-      <div class="card panel-card mb-3">
-        <div class="card-body p-3">
-          <div class="home-sec-title">⭐ 我的自選 <span class="hs-link" onclick="switchTab('watch')">管理 →</span></div>
-          <div class="home-legend" id="home-watchlist-legend"></div>
-          <div id="home-watchlist"></div>
-        </div>
+      <!-- 方塊自己就是卡片，不再包一層 panel-card：少一層框、兩欄才有寬度 -->
+      <div class="home-sec mb-3">
+        <div class="home-sec-title">⭐ 我的自選 <span class="hs-link" onclick="switchTab('watch')">自選設定 →</span></div>
+        <div class="home-legend" id="home-watchlist-legend"></div>
+        <div class="home-grid" id="home-watchlist"></div>
       </div>
 
       <div class="card panel-card mb-3">
@@ -279,13 +278,6 @@
         <div class="card-body p-3">
           <div class="home-sec-title">📅 接下來 7 天</div>
           <div id="home-upcoming"></div>
-        </div>
-      </div>
-
-      <div class="card panel-card mb-3" id="home-scores-card" style="display:none">
-        <div class="card-body p-3">
-          <div class="home-sec-title"><span id="home-scores-title">📊 統計</span> <span class="hs-link" onclick="switchTab('scores')">看整理 →</span></div>
-          <div id="home-scores"></div>
         </div>
       </div>
 
@@ -3617,7 +3609,8 @@ function showcaseWanted(rows) {
   return !!showcase && (!rows.length || rows.every(r => r.total === 0));
 }
 
-function showcaseRowHtml(days) {
+// 範例方塊：橫跨兩欄（說明比一格塞得下的長），其餘結構與 homeTileHtml 一致
+function showcaseTileHtml(days) {
   const byDate = Object.fromEntries((showcase.days || []).map(d => [d.date, Number(d.n) || 0]));
   const last = days.length - 1;
   const cells = days.map((d, i) => {
@@ -3627,12 +3620,11 @@ function showcaseRowHtml(days) {
   }).join("");
   const top = showcase.top;
   const when = top.first_at && top.last_at && top.first_at !== top.last_at ? `${top.first_at} 到 ${top.last_at} 之間` : (top.first_at || "");
-  return `<div class="home-wl home-example" onclick="openShowcase()">
-      <span class="home-example-tag">範例</span>
-      <span class="home-wl-name">${escapeHtml(showcase.stock_name || showcase.stock_id)}</span>
-      <span class="home-strip"><span class="home-strip-cells">${cells}</span><span class="home-strip-dates"><i>${escapeHtml(_mdOf(days[0]))}</i><i>${escapeHtml(_mdOf(days[last]))}</i></span></span>
-      <span class="home-more">›</span>
-      <span class="home-example-note">這是一檔近期訊號很多的股票。你的自選股有事時，格子會像這樣亮起來；點進去看 ${escapeHtml(_mdOf(top.date))} 那天${when ? `（${escapeHtml(when)}有 ${top.n} 則）` : ""}的時間軸。</span>
+  return `<div class="home-tile home-example" onclick="openShowcase()">
+      <div class="home-tile-head"><span class="home-tile-name">${escapeHtml(showcase.stock_name || showcase.stock_id)}</span><span class="home-example-tag">範例</span></div>
+      <div class="home-strip-cells">${cells}</div>
+      <div class="home-strip-dates"><i>${escapeHtml(_mdOf(days[0]))}</i><i>${escapeHtml(_mdOf(days[last]))}</i></div>
+      <div class="home-example-note">這是一檔近期訊號很多的股票。你的自選股有事時，格子會像這樣亮起來；點進去看 ${escapeHtml(_mdOf(top.date))} 那天${when ? `（${escapeHtml(when)}有 ${top.n} 則）` : ""}的時間軸。</div>
     </div>`;
 }
 
@@ -5281,7 +5273,9 @@ function renderHome() {
   const statusEl = document.getElementById("home-status");
   if (statusEl) statusEl.textContent = homeStatusText();
 
-  // 每檔自選股：方向、近 N 日每天的則數（與雷達列同一個 radarStoryOf，只是不畫縮寫）、今天的狀態
+  // 每檔自選股一個方塊：方向、近 N 日每天的則數（與雷達列同一個 radarStoryOf，只是不畫縮寫）、
+  // 今天的狀態、今天的事件數，以及報告裡對前一日的評分變化（只有數字、沒有評級——COMPLIANCE.md）
+  const scoreMap = sharedReportData?.investment_scores || {};
   const rows = watchlistRows.map(row => {
     const sid = String(row.stock_id || "").trim();
     const name = getPreferredStockName(sid, row.stock_name) || sid;
@@ -5293,8 +5287,10 @@ function renderHome() {
     const todayCount = counts[counts.length - 1];
     const total = counts.reduce((a, b) => a + b, 0);
     const standout = (stockEvents[sid] || []).filter(isTodayEvent).length;   // 今天的事件數（不分階）
-    const q = getQuote(sid);
+    const chg = Number(scoreMap[sid]?.score_change);
+    const q = getQuote(sid);   // 只為了標這個漲跌是哪一個交易日的（週末看到的是上週五）
     return { sid, name, active, counts, todayCount, total, standout, dir: homeDirectionOf(sid),
+             scoreChange: Number.isFinite(chg) ? chg : null,
              quoteDate: q && q.tradeDate ? q.tradeDate : "" };
   });
   // 有事的排前面：進行中 → 今天則數 → 今天事件數 → 近 N 日累計 → 名稱
@@ -5321,19 +5317,20 @@ function renderHome() {
     }
   }
 
-  // 自選列
+  // 自選方塊（兩欄）
   const listEl = document.getElementById("home-watchlist");
   const example = showcaseWanted(rows);
   if (listEl) {
     listEl.innerHTML = (rows.length
-      ? rows.map(r => homeRowHtml(r, days, dayLabel)).join("")
-      : '<div class="view-empty py-2" style="padding:0.5rem">尚未加入自選股，到 ⭐ 自選 分頁新增</div>')
-      + (example ? showcaseRowHtml(days) : "");
+      ? rows.map(r => homeTileHtml(r, days, dayLabel)).join("")
+      : '<div class="home-tile-empty">尚未加入自選股，到 ⭐ 自選 分頁新增</div>')
+      + (example ? showcaseTileHtml(days) : "");
   }
   const legendEl = document.getElementById("home-watchlist-legend");
   if (legendEl) {
+    const scoreNote = sharedReportData?.date ? `；評分變化是 ${_mdOf(sharedReportData.date)} 的報告對前一日` : "";
     legendEl.textContent = rows.length || example
-      ? `每格是一個交易日的訊號數（近 ${days.length} 日），點一格看那天的時間軸。漲／平／跌對前一日收盤，盤中即時`
+      ? `每格是一個交易日的訊號數（近 ${days.length} 日）：點方塊看細節，點某一格直接開那天${scoreNote}`
       : "";
   }
 
@@ -5361,7 +5358,6 @@ function renderHome() {
   if (newsLink) newsLink.style.display = newsRows.length ? "" : "none";
 
   homeRenderUpcoming();
-  homeRenderScores();
   sendTodayImportantInfoNotification(newsRows);
 }
 
@@ -5374,8 +5370,10 @@ function homeDirectionOf(sid) {
   return q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
 }
 
-// 首頁自選列：名稱＋方向籤＋近 N 日格子（第一行），文字狀態（第二行）。點列開今天的時間軸，點格子開那天的
-function homeRowHtml(r, days, dayLabel) {
+// 首頁方塊（2026-09-22 改版）：一檔一塊、兩欄並排。由上而下——
+// 名稱＋漲／平／跌籤／近 N 日格子＋頭尾日期／底部評分變化與今日資料籤。
+// 點方塊開今天的時間軸（第二層，在裡面還能切日期）、點某一格直接開那天、點資料籤開事件面板。
+function homeTileHtml(r, days, dayLabel) {
   // 籤旁標這個漲跌是哪一天的（報價的交易日）：週末看到的是上週五的
   const dir = (r.dir
     ? `<span class="home-dir home-dir-${r.dir}">${HOME_DIR_LABEL[r.dir]}</span>`
@@ -5389,17 +5387,29 @@ function homeRowHtml(r, days, dayLabel) {
     const cls = ["home-cell", n ? "is-on" : "", i === last ? "is-today" : ""].filter(Boolean).join(" ");
     return `<i class="${cls}" onclick="event.stopPropagation(); openRadarTimeline('${jsAttr(r.sid)}', '${jsAttr(d)}')">${n || ""}</i>`;
   }).join("");
-  // 當天的則數看最右格就好（Howard 2026-09-20）：這一行只講近 N 日累計
-  // 第二行的「近 N 日有 x 則訊號」拿掉了（Howard 2026-09-20）：格子本身就是答案。事件籤留在名稱旁
+  // 主行：當天幾則（大字）＋是哪一天（淡字）＋進行中。沒有就一句「沒有訊號」，不留空白
+  const lead = r.todayCount
+    ? `<b class="home-tile-n">${r.todayCount} 則</b><span class="home-tile-when">${escapeHtml(dayLabel)}</span>${
+        r.active ? `<span class="home-tile-live">進行中</span>` : ""}`
+    : `<span class="home-tile-calm">沒有訊號</span><span class="home-tile-when">${escapeHtml(dayLabel)}</span>`;
   // 事件籤＝今天有幾件資料（與下方「今日資料」卡同一批）；點籤開事件面板，
-  // 點列開的是時間軸，兩者講不同的東西（Howard 2026-09-20：點進去看不到相關資訊）
+  // 點方塊開的是時間軸，兩者講不同的東西（Howard 2026-09-20：點進去看不到相關資訊）
   const ev = r.standout
     ? `<span class="home-ev" onclick="event.stopPropagation(); openEventsPanel('${jsAttr(r.sid)}')">${r.standout} 件資料</span>`
     : "";
-  return `<div class="home-wl" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
-      <span class="home-wl-name">${escapeHtml(r.name)}</span>${dir}${ev}
-      <span class="home-strip"><span class="home-strip-cells">${cells}</span><span class="home-strip-dates"><i>${escapeHtml(_mdOf(days[0]))}</i><i>${escapeHtml(lastLabel)}</i></span></span>
-      <span class="home-more">›</span>
+  // 評分變化＝報告總分對前一日，只有數字、沒有評級（COMPLIANCE.md）。
+  // 沒有報告就是「—」；差不到 0.05 寫「持平」而不是「—0.0」（fmtScoreDelta 的零值長那樣）
+  const chg = r.scoreChange;
+  const scoreTxt = chg === null ? `<span class="chg-flat">—</span>`
+    : Math.abs(chg) < 0.05 ? `<span class="chg-flat">持平</span>`
+    : fmtScoreDelta(chg);
+  const score = `<span class="home-tile-score">評分 ${scoreTxt}</span>`;
+  return `<div class="home-tile${r.todayCount ? " is-hot" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
+      <div class="home-tile-head"><span class="home-tile-name">${escapeHtml(r.name)}</span>${dir}</div>
+      <div class="home-tile-lead">${lead}</div>
+      <div class="home-strip-cells">${cells}</div>
+      <div class="home-strip-dates"><i>${escapeHtml(_mdOf(days[0]))}</i><i>${escapeHtml(lastLabel)}</i></div>
+      <div class="home-tile-foot">${score}${ev}</div>
     </div>`;
 }
 
@@ -5451,33 +5461,8 @@ function _eventTitleWithoutStock(title, sid, name) {
   return t;
 }
 
-// 統計：報告裡每檔自選股的總分較前一日的變化（只有數字、沒有評級——COMPLIANCE.md）。
-// Howard 2026-09-20：要放，但只在有變化時；全部持平或還沒有報告就整張不顯示
-function homeRenderScores() {
-  const card = document.getElementById("home-scores-card");
-  const el = document.getElementById("home-scores");
-  const titleEl = document.getElementById("home-scores-title");
-  if (!card || !el) return;
-  const scores = sharedReportData?.investment_scores || {};
-  const changed = [], flat = [];
-  for (const row of watchlistRows) {
-    const sid = String(row.stock_id || "").trim();
-    const s = scores[sid];
-    if (!s) continue;
-    const chg = Number(s.score_change);
-    if (!Number.isFinite(chg)) continue;
-    (Math.abs(chg) >= 0.05 ? changed : flat).push({ sid, name: getPreferredStockName(sid, row.stock_name) || sid, chg });
-  }
-  card.style.display = changed.length ? "" : "none";
-  if (!changed.length) return;
-  changed.sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg));
-  if (titleEl) titleEl.textContent = `📊 每日評分變化${sharedReportData?.date ? `（${_mdOf(sharedReportData.date)}）` : ""}`;
-  el.innerHTML = `<div class="home-feed">
-      <span class="home-feed-tm">總分</span>
-      <span class="home-feed-tx">${changed.map(x => `<b>${escapeHtml(x.name)}</b> ${fmtScoreDelta(x.chg)}`).join("、")}${flat.length ? `，其餘 ${flat.length} 檔持平` : ""}
-        <span class="k">與前一日的評分相比</span></span>
-    </div>`;
-}
+// 「每日評分變化」卡 2026-09-22 拿掉：每個方塊底部已經有自己的評分變化，同一批資料不該畫兩次。
+// （2026-09-20 加那張卡是因為平靜日首頁沒東西可看；改成方塊之後每塊都有，那個理由不在了。）
 
 // ── 持股資料層 ───────────────────────────────────────────────────
 // 持股不再是獨立分頁：資訊併進自選列（損益、距價位）與雷達列（「持」標記）。
