@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="143">
+  <meta name="app-version" content="144">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=143" rel="stylesheet">
+  <link href="watchlist.css?v=144" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -775,56 +775,56 @@
   </div>
 </div>
 
-<!-- ═══ 盤中時間軸（雷達列點進來）：09:00–13:30 的訊號序列，像在講當天盤中的故事 ═══ -->
+<!-- ═══ 個股字卡：三個分頁 ═══
+     盤中雷達（預設，09:00–13:30 的訊號序列）／歷史訊號（近 10 個交易日）／看 K 線。
+     2026-09-22 三版（Howard）：K 線本來是另一張 modal，同一檔股票被拆成兩張卡片、還會互相蓋掉；
+     現在併成一張——首頁方塊、雷達列、自選列的 K 線鈕都開這一張，只是進來時停在不同分頁。
+     K 線的圖表要有可見容器才量得到高度，所以切到那一頁才載（switchStockCardTab）。 -->
 <div class="modal fade" id="radarTimelineModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable rtl-dialog">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable rtl-dialog" id="rtl-dialog">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
         <div class="w-100">
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <h5 class="mb-0 fw-bold" id="rtl-name"></h5>
             <span id="rtl-tags"></span>
-            <button type="button" class="btn btn-sm btn-outline-light ms-auto" id="rtl-history-btn"
-                    onclick="toggleRadarHistory()">歷史訊號</button>
-            <button type="button" class="btn btn-sm btn-outline-info" onclick="openKLineFromRadarTimeline()">看 K 線</button>
           </div>
           <div class="rtl-sub" id="rtl-sub"></div>
+          <div class="rtl-tabs" role="tablist">
+            <button type="button" class="rtl-tab is-active" id="rtl-tab-radar" role="tab"
+                    onclick="switchStockCardTab('radar')">盤中雷達</button>
+            <button type="button" class="rtl-tab" id="rtl-tab-history" role="tab"
+                    onclick="switchStockCardTab('history')">歷史訊號</button>
+            <button type="button" class="rtl-tab" id="rtl-tab-kline" role="tab"
+                    onclick="switchStockCardTab('kline')">看 K 線</button>
+          </div>
         </div>
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-3">
-        <!-- 一進來看到的是「當日盤中雷達」；歷史收在這塊裡，按頂端的「歷史訊號」才展開
-             （2026-09-22 Howard：首頁方塊拿掉 10 小格，歷史移到這一層）。
-             清單一天一列：日期（週幾）、則數、那天的縮寫籤，點一列就換成那天的盤中（rtlDaysHtml） -->
-        <div class="rtl-history" id="rtl-history" style="display:none">
+
+        <!-- 分頁一：當日盤中雷達 -->
+        <div class="rtl-pane" id="rtl-pane-radar">
+          <div id="rtl-chart-wrap"></div>
+          <div class="rtl-story-head" id="rtl-story-head">盤中發生了什麼</div>
+          <div id="rtl-story"></div>
+        </div>
+
+        <!-- 分頁二：歷史訊號——一天一列（日期、則數、那天的縮寫籤），點一列回到分頁一看那天（rtlDaysHtml） -->
+        <div class="rtl-pane" id="rtl-pane-history" style="display:none">
           <div class="rtl-history-head">近 <span id="rtl-history-n"></span> 個交易日的訊號<span class="k">點一天看那天的盤中</span></div>
           <div class="rtl-days" id="rtl-days"></div>
         </div>
-        <div id="rtl-chart-wrap"></div>
-        <div class="rtl-story-head" id="rtl-story-head">盤中發生了什麼</div>
-        <div id="rtl-story"></div>
-      </div>
-    </div>
-  </div>
-</div>
 
-<div class="modal fade" id="klineModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:92vw;">
-    <div class="modal-content kline-modal-content">
-      <div class="modal-header py-2">
-        <div class="w-100">
-          <div class="d-flex align-items-center gap-2 flex-wrap">
-            <h5 class="mb-0 text-info fw-bold" id="kline-code"></h5>
-            <span class="fw-semibold" id="kline-name"></span>
-            <span class="badge bg-secondary" id="kline-industry" style="font-size:0.72rem;"></span>
-            <span class="ms-auto" style="font-size:0.85rem;">現價 <strong id="kline-price"></strong></span>
-            <span id="kline-ma" class="kline-ma-chip">MA —</span>
-          </div>
+        <!-- 分頁三：K 線（原本的 #klineModal 整組搬進來） -->
+        <div class="rtl-pane" id="rtl-pane-kline" style="display:none">
+        <div class="kline-head-row">
+          <span class="text-info fw-bold" id="kline-code"></span>
+          <span class="fw-semibold d-none" id="kline-name"></span>
+          <span class="badge bg-secondary" id="kline-industry" style="font-size:0.72rem;"></span>
+          <span class="ms-auto" style="font-size:0.85rem;">現價 <strong id="kline-price"></strong></span>
+          <span id="kline-ma" class="kline-ma-chip">MA —</span>
         </div>
-        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body p-2">
-        <div id="kline-signals" class="kline-signals" style="display:none;"></div>
         <div class="d-flex align-items-center flex-wrap gap-2 mb-2 kline-toolbar-row">
           <div class="kline-select-group">
             <label class="kline-select-label" for="kline-period-select">週期</label>
@@ -853,6 +853,8 @@
              空間留給 K 線本身（#kline-chart 的高度同時加大） -->
         <div id="kline-chart" style="width:100%;"></div>
         <div class="kline-hint" aria-hidden="true">長按顯示數值，按住左右滑動可逐根查看；拖曳平移、雙指縮放</div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -1019,7 +1021,6 @@ let klineTouchGlobalHandlers = null;
 let klineLastBuildArgs = null;   // 轉向／視窗變高時要用同一份資料重排版面（高度是像素算的）
 let klineLegendSelected = null;  // 使用者點過圖例後的開關狀態；切週期／籌碼重建圖表時帶回去，不要每次都重設
 let klineMaChipState = null;     // 表頭 MA 數字（{ ma, suffix }）：圖例切換時要重畫成同色＋淡化
-let klineSignalsExpanded = false;   // 今日訊號的通知清單預設收合，圖表才在第一屏
 let klineTouchStartedLocked = false; // 這次觸控開始時十字線已鎖定：不動就放開＝解除，滑動＝移動十字線
 let watchlistRows = [];
 let intradayQuoteMap = {};
@@ -5329,7 +5330,7 @@ function renderHome() {
   if (legendEl) {
     const scoreNote = sharedReportData?.date ? `；評分變化是 ${_mdOf(sharedReportData.date)} 的報告對前一日` : "";
     legendEl.textContent = rows.length || example
-      ? `點方塊看那一天的盤中：幾點發生什麼、離關卡多遠；裡面按「歷史訊號」可以翻近 ${days.length} 個交易日${scoreNote}`
+      ? `點方塊開個股字卡：盤中雷達（當天幾點發生什麼）、歷史訊號（近 ${days.length} 個交易日）、看 K 線${scoreNote}`
       : "";
   }
 
@@ -6265,38 +6266,55 @@ function _sessionMinutesOf(ts) {
   return (part("hour") - 9) * 60 + part("minute");
 }
 
-function openRadarTimeline(sid, date = null) {
+// ── 個股字卡（三個分頁：盤中雷達／歷史訊號／看 K 線）────────────────────────
+// 2026-09-22 三版（Howard）：K 線從獨立 modal 併進來當第三個分頁。所有入口都開這一張卡，
+// 差別只在停在哪一頁：首頁方塊與雷達列停在「盤中雷達」，自選列的 K 線鈕停在「看 K 線」。
+const STOCK_CARD_TABS = ["radar", "history", "kline"];
+let stockCardTab = "radar";
+
+function openStockCard(sid, opts = {}) {
   const sidKey = String(sid || "").trim();
   if (!sidKey) return;
+  const date = opts.date;
   radarTimelineSid = sidKey;
   radarTimelineDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) && date !== radarSessionDate() ? date : null;
   trackActivity("radar_timeline_open", { stock: sidKey, date: radarTimelineDate || "" });
-  toggleRadarHistory(false);     // 一進來看到的一定是當日盤中雷達，歷史要自己按開
   renderRadarTimeline(sidKey);   // 三個來源都在記憶體，畫面一開就有
   bootstrap.Modal.getOrCreateInstance(document.getElementById("radarTimelineModal")).show();
+  switchStockCardTab(STOCK_CARD_TABS.includes(opts.tab) ? opts.tab : "radar");
   // 過去的日子讀 signal_history：還沒抓過或抓太久就補一次，回來重畫（自帶限流）
   loadSignalHistory(false).then(() => refreshRadarTimelineIfOpen()).catch(() => {});
 }
 
-// 「歷史訊號」：同一層裡展開／收起近 HOME_HISTORY_DAYS 個交易日的清單。
-// 預設收起——點首頁方塊進來第一眼要是「當日盤中雷達」，不是一排日期（Howard 2026-09-22）
-function toggleRadarHistory(force = null) {
-  const panel = document.getElementById("rtl-history");
-  const btn = document.getElementById("rtl-history-btn");
-  if (!panel) return;
-  const open = force === null ? panel.style.display === "none" : !!force;
-  panel.style.display = open ? "" : "none";
-  if (btn) btn.textContent = open ? "收起歷史" : "歷史訊號";
-  if (open) trackActivity("radar_history_open", { stock: radarTimelineSid || "" });
+// 首頁方塊與雷達列的入口（名字沿用，呼叫的地方很多）：開卡片、停在「盤中雷達」
+function openRadarTimeline(sid, date = null) {
+  openStockCard(sid, { date });
 }
 
-// 清單裡點一天：收起清單、換成那天的盤中（雷達的交易日就是「今天」那列）
+// 換分頁。K 線只有切到那一頁才載——ECharts 要有可見的容器才量得到高度，
+// 而且多數人只看第一頁，沒必要每次開卡片都去下載 6MB 報告
+function switchStockCardTab(tab) {
+  if (!STOCK_CARD_TABS.includes(tab)) tab = "radar";
+  stockCardTab = tab;
+  for (const t of STOCK_CARD_TABS) {
+    const pane = document.getElementById(`rtl-pane-${t}`);
+    const btn = document.getElementById(`rtl-tab-${t}`);
+    if (pane) pane.style.display = t === tab ? "" : "none";
+    if (btn) btn.classList.toggle("is-active", t === tab);
+  }
+  // K 線那一頁在桌機要寬（圖才有解析度）；手機本來就滿版
+  document.getElementById("rtl-dialog")?.classList.toggle("is-kline", tab === "kline");
+  if (tab === "history") trackActivity("radar_history_open", { stock: radarTimelineSid || "" });
+  if (tab === "kline" && radarTimelineSid) loadKLineIntoCard(radarTimelineSid);
+}
+
+// 清單裡點一天：回到「盤中雷達」那一頁看那天（雷達的交易日就是「今天」那列）
 function rtlPickDate(date) {
   if (!radarTimelineSid) return;
   radarTimelineDate = date === radarSessionDate() ? null : date;
   trackActivity("radar_timeline_pick", { stock: radarTimelineSid, date });
-  toggleRadarHistory(false);
   renderRadarTimeline(radarTimelineSid);
+  switchStockCardTab("radar");
 }
 
 // 歷史清單：新到舊，一天一列——日期（週幾）、則數、那天的縮寫籤（與雷達列同一顆籤）。
@@ -6339,14 +6357,13 @@ function refreshRadarTimelineIfOpen() {
   if (el && el.classList.contains("show")) renderRadarTimeline(radarTimelineSid);
 }
 
-// 兩個 modal 疊在一起會搶 backdrop：先關時間軸再開 K 線／通知詳情
+// K 線現在是同一張卡的第三個分頁，不必再關掉這一張（2026-09-22 之前是兩個 modal 搶 backdrop）
 function openKLineFromRadarTimeline() {
-  const sid = radarTimelineSid;
-  if (!sid) return;
-  bootstrap.Modal.getInstance(document.getElementById("radarTimelineModal"))?.hide();
-  openKLineFromWatchlist(sid, { signalsExpanded: true });
+  if (!radarTimelineSid) return;
+  switchStockCardTab("kline");
 }
 
+// 通知詳情仍是另一個 modal：兩個疊在一起會搶 backdrop，先關這一張
 function openInboxDetailFromRadar(rowId) {
   bootstrap.Modal.getInstance(document.getElementById("radarTimelineModal"))?.hide();
   openInboxDetail(rowId);
@@ -7525,24 +7542,29 @@ async function loadSharedReportData(force = false) {
   }
 }
 
-// opts.signalsExpanded：盤中雷達點進來就是為了看訊號，通知清單直接展開；其他入口預設收合
-async function openKLineFromWatchlist(sid, opts = {}) {
+// 自選列、評分頁的「K 線」鈕：開同一張個股字卡，停在第三個分頁
+function openKLineFromWatchlist(sid, opts = {}) {
+  openStockCard(sid, { tab: "kline" });
+}
+
+// 把 K 線載進卡片的第三個分頁。切到那一頁才會呼叫（見 switchStockCardTab）；
+// 同一檔已經畫過就只要 resize——每次切分頁都重抓 6MB 報告是沒必要的
+async function loadKLineIntoCard(sid) {
   const sidKey = String(sid || "").trim();
+  if (!sidKey) return;
+  if (currentKLineSid === sidKey && klineChart && !klineChart.isDisposed()) {
+    requestAnimationFrame(() => { klineChart.resize(); relayoutKLineChart(); });
+    return;
+  }
   trackActivity("kline_open", { stock: sidKey });
-  const modalEl = document.getElementById("klineModal");
-  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
 
   document.getElementById("kline-code").textContent = sidKey;
   document.getElementById("kline-name").textContent = "載入中...";
   document.getElementById("kline-industry").textContent = universe[sidKey]?.i || "";
   document.getElementById("kline-price").textContent = _klinePriceText(sidKey, null);
   klineLegendSelected = null;      // 每檔股票從預設圖例開始
-  klineSignalsExpanded = !!opts.signalsExpanded;
-  renderKLineSignals(sidKey);   // 盤中狀態與今天的通知都在記憶體，不用等報告檔
   setKLineMaInfo("讀取共用報表資料中...");
   document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">讀取 K 線資料中...</div>';
-
-  modal.show();
 
   try {
     const data = await loadSharedReportData();
@@ -7638,71 +7660,12 @@ function _klinePriceText(sid, levels) {
   return Number.isFinite(cur) && cur > 0 ? fmtPrice(cur) : "—";
 }
 
-// K 線視窗頂端的「今日訊號」：現在的盤中狀態（intraday_state）＋今天發過的通知
-// （alert_history，點一則就開通知詳情）。雷達列點進來原本只剩 K 線，
-// 訊號時間與通知內容都看不到；兩個來源都已在記憶體，畫面一開就有。
-function renderKLineSignals(sid) {
-  const el = document.getElementById("kline-signals");
-  if (!el) return;
-  const iq = intradayQuoteMap[sid] || null;
-  const today = todaySignalsOf(sid);
-  if (!iq && !today.length) { el.innerHTML = ""; el.style.display = "none"; return; }
+// 「今日訊號」那一塊 2026-09-22 拿掉：K 線變成個股字卡的第三個分頁之後，
+// 同一張卡的第一個分頁（盤中雷達）本來就把當天的訊號與通知講得更完整，不必在圖上面再放一份。
 
-  let now = "";
-  if (iq) {
-    if (iq.signal && iq.signal !== "none") {
-      const lvl = _signalLevelLabel(iq.signal, iq.level);
-      const since = iq.signal_at ? ` · ${fmtTime(iq.signal_at, !isToday(iq.signal_at))} 起` : "";
-      now = `<span class="wl-signal-badge"><i class="sev-dot sev-${inferSeverity(iq)}"></i>${escapeHtml(alertTypeLabel(iq))}</span>` +
-            `${lvl ? ` ${escapeHtml(lvl)}` : ""}${since}`;
-    } else {
-      now = "目前無訊號";
-    }
-    if (iq.updated_at) now += `<span class="ks-at">報價 ${fmtTime(iq.updated_at, !isToday(iq.updated_at))}</span>`;
-  }
-
-  const items = today.map(r => {
-    const sev = inferSeverity(r);
-    const id = String(r.id);
-    return `
-      <div class="inbox-item ks-item" data-sev="${sev}" role="button" tabindex="0"
-           onclick="openInboxDetailFromKLine('${jsAttr(id)}')"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetailFromKLine('${jsAttr(id)}');}">
-        ${signalIconSvg(r, 26)}
-        <div class="ib-main">
-          <div class="ib-title">${escapeHtml(r.title || "")}</div>
-          <div class="ib-body">${escapeHtml(r.body || "")}</div>
-        </div>
-        <span class="ib-time">${fmtTime(r.sent_at)}</span>
-      </div>`;
-  }).join("");
-
-  // 通知清單預設收合：這一塊在圖表上方，通知一多就把 K 線推出第一屏，
-  // 開 K 線卻要先捲過通知。表頭留「目前狀態＋通知 N 則」，點了再展開。
-  const toggle = items
-    ? `<button type="button" class="ks-toggle${klineSignalsExpanded ? " is-open" : ""}" onclick="toggleKLineSignals()"
-         aria-expanded="${klineSignalsExpanded}" aria-controls="kline-signal-items">通知 ${today.length} 則<span class="ks-chev">▾</span></button>`
-    : `<span class="ks-empty">今天還沒有通知</span>`;
-  el.innerHTML = `
-    <div class="ks-head"><span class="ks-title">今日訊號</span>${now ? `<span class="ks-now">${now}</span>` : ""}${toggle}</div>
-    ${items ? `<div class="ks-items" id="kline-signal-items"${klineSignalsExpanded ? "" : ' style="display:none;"'}>${items}</div>` : ""}`;
-  el.style.display = "";
-}
-
-function toggleKLineSignals() {
-  klineSignalsExpanded = !klineSignalsExpanded;
-  const list = document.getElementById("kline-signal-items");
-  const btn = document.querySelector("#kline-signals .ks-toggle");
-  if (list) list.style.display = klineSignalsExpanded ? "" : "none";
-  if (btn) {
-    btn.classList.toggle("is-open", klineSignalsExpanded);
-    btn.setAttribute("aria-expanded", String(klineSignalsExpanded));
-  }
-}
-
-// 兩個 modal 疊在一起會搶 backdrop，先關 K 線再開通知詳情（詳情裡的「查看個股」會再開回來）
+// 通知詳情是另一個 modal，兩個疊在一起會搶 backdrop：先關個股字卡（詳情裡的「查看個股」會再開回來）
 function openInboxDetailFromKLine(rowId) {
-  bootstrap.Modal.getInstance(document.getElementById("klineModal"))?.hide();
+  bootstrap.Modal.getInstance(document.getElementById("radarTimelineModal"))?.hide();
   openInboxDetail(rowId);
 }
 
@@ -7737,7 +7700,7 @@ function setKLineMaInfo(text) {
 function openScoreDetailFromKLine() {
   const sid = currentKLineSid;
   if (!sid) return;
-  bootstrap.Modal.getOrCreateInstance(document.getElementById("klineModal")).hide();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("radarTimelineModal")).hide();
   // 等前一個 modal 的淡出跑完再開下一個，否則 Bootstrap 會把 body 的捲動鎖留著（同 openRulesFromPopup）
   setTimeout(() => openScoreDetail(sid), 220);
 }
@@ -7758,7 +7721,7 @@ function switchKLineChipsView(view) {
 }
 
 function renderKLineChartWhenVisible(sid, period) {
-  const modalEl = document.getElementById("klineModal");
+  const modalEl = document.getElementById("radarTimelineModal");
   const run = () => {
     renderKLineChart(sid, period);
     requestAnimationFrame(() => {
@@ -8478,9 +8441,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
 
 document.getElementById("radarTimelineModal").addEventListener("hidden.bs.modal", () => {
   radarTimelineSid = null;
-});
-
-document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => {
+  stockCardTab = "radar";
   detachKLineTouchInteraction();
   if (klineChart) {
     klineChart.dispose();
@@ -8495,7 +8456,7 @@ document.getElementById("klineModal").addEventListener("hidden.bs.modal", () => 
   currentKLineSid = null;
 });
 
-document.getElementById("klineModal").addEventListener("shown.bs.modal", () => {
+document.getElementById("radarTimelineModal").addEventListener("shown.bs.modal", () => {
   if (klineChart) { klineChart.resize(); relayoutKLineChart(); }
 });
 

@@ -1766,11 +1766,6 @@ body.has-bottom-nav .qa-panel {
 	margin-top: 1px;
 }
 
-.kline-signals .ks-item > .sig-ico {
-	width: 26px;
-	height: 26px;
-}
-
 .ib-main { flex: 1 1 auto; min-width: 0; }
 
 .ib-title {
@@ -2786,8 +2781,48 @@ body.has-bottom-nav .qa-panel {
 .radar-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 4px 0; font-size: 0.7rem; color: var(--text-muted); }
 .radar-legend span { display: inline-flex; align-items: center; gap: 5px; }
 
-/* ── 盤中時間軸：橫軸 09:00–13:30、縱軸價位；幾條參考橫線給相對位置，不畫價格路徑 ── */
+/* ── 個股字卡：三個分頁（盤中雷達／歷史訊號／看 K 線）──
+   2026-09-22：K 線從獨立 modal 併進來。K 線那一頁在桌機要寬，其餘兩頁維持 560px 的閱讀寬度。 */
 .rtl-dialog { max-width: 560px; }
+.rtl-dialog.is-kline { max-width: 92vw; }
+
+.rtl-tabs {
+	display: flex;
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.rtl-tab {
+	flex: 1 1 0;
+	min-width: 0;
+	padding: 7px 4px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: rgba(146, 146, 163, 0.08);
+	color: var(--text-1);
+	font-size: 0.82rem;
+	font-weight: 600;
+	line-height: 1.2;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.rtl-tab.is-active {
+	background: rgba(139, 124, 255, 0.18);
+	border-color: var(--accent);
+	color: var(--text-0);
+}
+
+/* K 線那一頁自己的表頭：代號／產業／現價／MA（原本在 K 線 modal 的 modal-header） */
+.kline-head-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-bottom: 0.5rem;
+}
+
+/* ── 盤中時間軸：橫軸 09:00–13:30、縱軸價位；幾條參考橫線給相對位置，不畫價格路徑 ── */
 .rtl-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .rtl-chart { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px 12px 8px; }
 /* 時間軸是一張 SVG（viewBox 360×272，寬度跟著容器）：線、刻度、標記全在向量座標裡，
@@ -2831,46 +2866,6 @@ body.has-bottom-nav .qa-panel {
 .rtl-divider { font-size: 0.72rem; color: var(--text-muted); margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
 .rtl-none { padding: 14px 6px; font-size: 0.85rem; color: var(--text-1); }
 .rtl-none span { font-size: 0.74rem; color: var(--text-muted); }
-
-/* ── K 線視窗頂端「今日訊號」：盤中狀態＋今天的通知（雷達列點進來要看得到時間） ── */
-.kline-signals {
-	border: 1px solid rgba(86, 168, 255, 0.3);
-	border-radius: 12px;
-	background: rgba(86, 168, 255, 0.07);
-	padding: 0.55rem 0.7rem 0.35rem;
-	margin-bottom: 0.6rem;
-}
-.kline-signals .ks-head {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	flex-wrap: wrap;
-	font-size: 0.8rem;
-	color: var(--text-1);
-	margin-bottom: 0.4rem;
-}
-.kline-signals .ks-title { font-weight: 700; color: var(--accent-2); }
-.kline-signals .ks-now { display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
-.kline-signals .ks-at { font-size: 0.7rem; color: var(--text-muted); margin-left: 0.25rem; }
-.kline-signals .ks-item { margin-bottom: 0.4rem; padding: 0.5rem 0.6rem; }
-.kline-signals .ks-item:last-child { margin-bottom: 0.2rem; }
-.kline-signals .ks-items { margin-top: 0.45rem; }
-.kline-signals .ks-empty { font-size: 0.74rem; color: var(--text-muted); margin-left: auto; }
-.kline-signals .ks-toggle {
-	margin-left: auto;
-	display: inline-flex;
-	align-items: center;
-	gap: 0.25rem;
-	padding: 0.15rem 0.5rem;
-	border: 1px solid rgba(86, 168, 255, 0.35);
-	border-radius: 999px;
-	background: transparent;
-	color: var(--accent-2);
-	font-size: 0.74rem;
-	line-height: 1.3;
-}
-.kline-signals .ks-toggle .ks-chev { display: inline-block; transition: transform 0.15s ease; }
-.kline-signals .ks-toggle.is-open .ks-chev { transform: rotate(180deg); }
 
 /* ── 通知詳情「為什麼通知你」 ── */
 .why-box {
