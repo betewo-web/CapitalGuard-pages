@@ -1629,7 +1629,14 @@ body.has-bottom-nav .qa-panel {
 	font-weight: 700;
 	color: var(--text-0);
 	margin: 0;
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
 }
+
+/* 頁標題的線條圖示（2026-09-23 起統計頁不用 emoji 當圖示），與區塊標題同一個語彙 */
+.view-title [data-icon] { display: inline-flex; color: var(--accent-2); }
+.view-title [data-icon] .ic { width: 19px; height: 19px; }
 
 .view-sub {
 	font-size: 0.86rem;

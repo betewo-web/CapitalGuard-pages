@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="169">
+  <meta name="app-version" content="170">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=169" rel="stylesheet">
+  <link href="watchlist.css?v=170" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -295,7 +295,7 @@
          併進自選列（損益、距價位）與雷達列（「持」標記）。 -->
     <section id="view-scores" class="app-view">
       <div class="view-head">
-        <h2 class="view-title">📊 統計整理</h2>
+        <h2 class="view-title"><i data-icon="chart"></i>統計整理</h2>
         <span class="view-sub" id="scores-date"></span>
       </div>
       <div class="disclaimer-note">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
@@ -340,7 +340,7 @@
       <div class="chip-row" id="inbox-filters">
         <button class="filter-chip active" data-f="all" onclick="setInboxFilter('all')">全部</button>
         <button class="filter-chip" data-f="unread" onclick="setInboxFilter('unread')">未讀</button>
-        <button class="filter-chip" data-f="important" onclick="setInboxFilter('important')">漲跌停／破撐／到價</button>
+        <button class="filter-chip" data-f="important" onclick="setInboxFilter('important')">強訊號</button>
         <button class="filter-chip" data-f="stocks" onclick="setInboxFilter('stocks')">持股</button>
       </div>
       <div id="inbox-migrate-hint" class="small mb-2" style="display:none;color:var(--sig-yellow)">
@@ -1137,6 +1137,7 @@ const ICON_SEARCH = _svg('<circle cx="6.9" cy="6.9" r="4.1"/><path d="M10 10 13.
 const ICON_RULES  = _svg('<path d="M2.6 5.2h10.8M2.6 10.8h10.8"/><circle cx="6" cy="5.2" r="1.7"/><circle cx="10.4" cy="10.8" r="1.7"/>', 14);
 const ICON_EDIT   = _svg('<path d="M11.1 2.6 13.4 4.9 5.6 12.7 2.6 13.4l0.7-3z"/>', 14);
 const ICON_WALLET = _svg('<rect x="2.4" y="4.2" width="11.2" height="8.2" rx="1.8"/><path d="M2.4 6.6h11.2"/><circle cx="11" cy="9.4" r="0.9"/>');
+const ICON_FILTER = _svg('<path d="M2.6 3.4h10.8l-4.2 4.9v4.4l-2.4-1.4V8.3z"/>');
 const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5"/><path d="M4.1 4.4l0.6 8.5h6.6l0.6-8.5"/><path d="M6.7 6.8v3.8M9.3 6.8v3.8"/>', 14);
 
 // 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
@@ -1149,7 +1150,8 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
   if (alertsBtn) alertsBtn.innerHTML = `${ICON_SIGNAL}<span>基礎訊號</span>`;
   // 底部導覽、首頁分頁、區塊標題的圖示：一律線條 SVG（2026-09-22 起不用 emoji 當圖示）
   const ICONS_BY_NAME = { home: ICON_HOME, chart: ICON_CHART, bell: ICON_BELL, star: ICON_STAR,
-                          news: ICON_EVENTS, calendar: ICON_CAL, moon: ICON_MOON, gear: ICON_GEAR };
+                          news: ICON_EVENTS, calendar: ICON_CAL, moon: ICON_MOON, gear: ICON_GEAR,
+                          filter: ICON_FILTER };
   document.querySelectorAll("[data-icon]").forEach(el => {
     const ic = ICONS_BY_NAME[el.dataset.icon];
     if (ic) el.innerHTML = ic;
@@ -5761,7 +5763,7 @@ function renderScores() {
     const strategies = data.strategies || [];
     html = strategies.length
       ? strategies.map(st => `
-        <div class="home-sec-title scr-strategy p-2 pb-0">${escapeHtml(st.emoji || "")} ${escapeHtml(st.name || "")}
+        <div class="home-sec-title scr-strategy p-2 pb-0"><i data-icon="filter">${ICON_FILTER}</i>${escapeHtml(st.name || "")}
           <span class="scr-strategy-desc">${escapeHtml(st.description || "")}</span></div>
         ${(st.rows || []).slice(0, 10).map(r => {
           const sid = String(r.stock_id || "").trim();
