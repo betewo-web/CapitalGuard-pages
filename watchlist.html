@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="160">
+  <meta name="app-version" content="161">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=160" rel="stylesheet">
+  <link href="watchlist.css?v=161" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -578,125 +578,121 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3">
-        <!-- 2026-09-22：通知從每一列抽到設定頁標題列，所以要能在這裡換股票。
-             每個開關都是按一下就存（onAlertSettingToggle → updateAlert），切換股票不會掉東西。 -->
+        <!-- 2026-09-22 改版（Howard）：
+             · 股票選單第一項是「全部股票」，一次把這次動到的開關套用到每一檔
+             · 改成草稿：開關只改暫存值，按「完成」才寫回去（只寫這次動過的欄位），「取消」直接關掉
+             · 標籤拿掉 emoji、細節改成灰色小字，價位輸入框的行內樣式收進 CSS -->
         <div class="alert-stock-row">
-          <label class="alert-stock-label" for="alert-stock-select">股票</label>
-          <select id="alert-stock-select" class="form-select form-select-sm alert-stock-select"
-                  onchange="openAlertSettings(this.value)"></select>
+          <label class="alert-stock-label" for="alert-stock-select">設定對象</label>
+          <select id="alert-stock-select" class="form-select alert-stock-select"
+                  onchange="onAlertScopeChange(this.value)"></select>
         </div>
-        <!-- 2026-09-22：入口從每一列改到標題列之後，有人以為這裡是「一次設定全部」。
-             這一句把它講明白：開關只影響上面選中的那一檔。 -->
-        <div class="alert-stock-hint">以下開關只影響上面選的這一檔；要設定別檔請用上面的選單切換。</div>
-        <div class="d-flex justify-content-end gap-2 mb-2">
-          <button type="button" class="btn btn-sm btn-outline-light" onclick="setAllAlertSettings(true)">全開</button>
-          <button type="button" class="btn btn-sm btn-outline-light" onclick="setAllAlertSettings(false)">全關</button>
+        <div class="alert-stock-hint" id="alert-scope-hint"></div>
+
+        <div class="alert-bulk">
+          <button type="button" class="alert-bulk-btn" onclick="setAllAlertSettings(true)">全部開啟</button>
+          <button type="button" class="alert-bulk-btn" onclick="setAllAlertSettings(false)">全部關閉</button>
         </div>
 
-        <!-- 盤中即時提醒 -->
-        <div class="alert-group-label">📡 盤中即時</div>
+        <div class="alert-group-label">盤中即時</div>
         <div class="wl-toggle-grid">
           <label class="alert-pill">
-            <span class="alert-label">⚠️ 跌破支撐</span>
+            <span class="alert-label">跌破支撐</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-break-support" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_break_support', this.checked)">
+              <input id="alert-break-support" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_break_support', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
-            <span class="alert-label">🟢 逼近支撐</span>
+            <span class="alert-label">逼近支撐</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-near-support" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_near_support', this.checked)">
+              <input id="alert-near-support" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_near_support', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
-            <span class="alert-label">⚡ 突破壓力</span>
+            <span class="alert-label">突破壓力</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-break-resistance" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_break_resistance', this.checked)">
+              <input id="alert-break-resistance" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_break_resistance', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
-            <span class="alert-label">🔴 逼近壓力</span>
+            <span class="alert-label">逼近壓力</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-near-resistance" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_near_resistance', this.checked)">
+              <input id="alert-near-resistance" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_near_resistance', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
-            <span class="alert-label">🚀 爆量（>均量3倍）</span>
+            <span class="alert-label">爆量<i class="alert-note">大於均量 3 倍</i></span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-volume-spike" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_volume_spike', this.checked)">
+              <input id="alert-volume-spike" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_volume_spike', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
-            <span class="alert-label">🔒 漲停</span>
+            <span class="alert-label">漲停</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-limit-up" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_limit_up', this.checked)">
+              <input id="alert-limit-up" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_limit_up', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
-            <span class="alert-label">💥 跌停</span>
+            <span class="alert-label">跌停</span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-limit-down" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_limit_down', this.checked)">
+              <input id="alert-limit-down" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_limit_down', this.checked)">
             </span>
           </label>
         </div>
 
-        <!-- 盤後每日提醒 -->
-        <div class="alert-group-label mt-2">🌙 盤後每日（15:30後）</div>
+        <div class="alert-group-label">盤後每日<i class="alert-note">15:30 之後</i></div>
         <div class="wl-toggle-grid">
           <label class="alert-pill">
-            <span class="alert-label">📈 法人連買（≥3日）</span>
+            <span class="alert-label">法人連買<i class="alert-note">3 日以上</i></span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-inst-buy" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_inst_buy', this.checked)">
+              <input id="alert-inst-buy" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_inst_buy', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
-            <span class="alert-label">📉 法人連賣（≥3日）</span>
+            <span class="alert-label">法人連賣<i class="alert-note">3 日以上</i></span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-inst-sell" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_inst_sell', this.checked)">
+              <input id="alert-inst-sell" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_inst_sell', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
-            <span class="alert-label">💳 融資暴增（>20%）</span>
+            <span class="alert-label">融資暴增<i class="alert-note">大於 20%</i></span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-margin-up" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_margin_up', this.checked)">
+              <input id="alert-margin-up" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_margin_up', this.checked)">
             </span>
           </label>
           <label class="alert-pill">
-            <span class="alert-label">💳 融資暴減（>20%）</span>
+            <span class="alert-label">融資暴減<i class="alert-note">大於 20%</i></span>
             <span class="toggle-wrap form-check form-switch mb-0">
-              <input id="alert-margin-down" class="form-check-input" type="checkbox" onchange="onAlertSettingToggle('alert_margin_down', this.checked)">
+              <input id="alert-margin-down" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_margin_down', this.checked)">
             </span>
           </label>
         </div>
 
-        <!-- 自訂價位提醒 -->
-        <div class="alert-group-label mt-2">🎯 自訂價位（盤中觸價，每日只通知一次）</div>
-        <div class="row g-2 mt-1">
-          <div class="col-6">
-            <label class="form-label mb-1" style="color:#f87171;font-size:.82rem;font-weight:600;letter-spacing:.02em;">📈 觸及上漲價格時通知</label>
+        <div class="alert-group-label">自訂價位<i class="alert-note">盤中觸價，每天只通知一次</i></div>
+        <div class="alert-price-grid">
+          <div class="alert-price-field">
+            <label class="alert-price-label is-up" for="inp-target-high">漲到這個價通知我</label>
             <div class="input-group input-group-sm">
-              <input id="inp-target-high" type="number" class="form-control" placeholder="如 150.0" step="0.01" min="0"
-                style="background:#1a2540;color:#e2eafc;border-color:#f87171;font-size:.95rem;">
-              <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('high')" title="清除" style="color:#8da1c6;border-color:#3a4a70;">✕</button>
+              <input id="inp-target-high" type="number" class="form-control alert-price-input" placeholder="如 150.0"
+                     step="0.01" min="0" oninput="onAlertDraftPrice('target_price_high', this.value)">
+              <button class="btn alert-price-clear" type="button" onclick="clearPriceTargetInput('high')" title="清除">✕</button>
             </div>
           </div>
-          <div class="col-6">
-            <label class="form-label mb-1" style="color:#4ade80;font-size:.82rem;font-weight:600;letter-spacing:.02em;">📉 觸及下跌價格時通知</label>
+          <div class="alert-price-field">
+            <label class="alert-price-label is-down" for="inp-target-low">跌到這個價通知我</label>
             <div class="input-group input-group-sm">
-              <input id="inp-target-low" type="number" class="form-control" placeholder="如 120.0" step="0.01" min="0"
-                style="background:#1a2540;color:#e2eafc;border-color:#8b7cff;font-size:.95rem;">
-              <button class="btn btn-outline-secondary" type="button" onclick="clearPriceTargetInput('low')" title="清除" style="color:#8da1c6;border-color:#3a4a70;">✕</button>
+              <input id="inp-target-low" type="number" class="form-control alert-price-input" placeholder="如 120.0"
+                     step="0.01" min="0" oninput="onAlertDraftPrice('target_price_low', this.value)">
+              <button class="btn alert-price-clear" type="button" onclick="clearPriceTargetInput('low')" title="清除">✕</button>
             </div>
           </div>
         </div>
-        <div class="d-flex justify-content-end mt-2">
-          <button type="button" class="btn btn-sm btn-primary" onclick="savePriceTargets()">儲存價位</button>
-        </div>
-
-        <!-- 持股（股數與平均成本）2026-09-22 搬到「🌙 盤後」的每張卡片（Howard）：
-             那是看損益的地方，不是設定通知的地方。 -->
 
         <div id="alert-settings-msg" class="small mt-2 text-muted"></div>
+        <div class="alert-actions">
+          <button type="button" class="btn alert-cancel" data-bs-dismiss="modal">取消</button>
+          <button type="button" class="btn alert-done" onclick="saveAlertDraft()">完成</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1062,7 +1058,6 @@ let intradayQuoteMap = {};
 let intradayQuotesLoadingPromise = null;
 let finmindQuoteMap = {};
 let finmindQuotesLoadingPromise = null;
-let alertModalRowId = null;
 let removeModalRowId = null;
 let stockEvents = {};   // sid → scored stock_events rows
 let brokerHoldings = [];     // broker_holdings rows（券商同步庫存；表未建或未同步時為空）
@@ -1112,6 +1107,7 @@ const ICON_CLOSE  = _svg('<path d="M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4"/>');
 const ICON_SEARCH = _svg('<circle cx="6.9" cy="6.9" r="4.1"/><path d="M10 10 13.6 13.6"/>', 14);
 const ICON_RULES  = _svg('<path d="M2.6 5.2h10.8M2.6 10.8h10.8"/><circle cx="6" cy="5.2" r="1.7"/><circle cx="10.4" cy="10.8" r="1.7"/>', 14);
 const ICON_EDIT   = _svg('<path d="M11.1 2.6 13.4 4.9 5.6 12.7 2.6 13.4l0.7-3z"/>', 14);
+const ICON_WALLET = _svg('<rect x="2.4" y="4.2" width="11.2" height="8.2" rx="1.8"/><path d="M2.4 6.6h11.2"/><circle cx="11" cy="9.4" r="0.9"/>');
 const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5"/><path d="M4.1 4.4l0.6 8.5h6.6l0.6-8.5"/><path d="M6.7 6.8v3.8M9.3 6.8v3.8"/>', 14);
 
 // 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
@@ -7103,7 +7099,7 @@ function renderPost() {
     // 事件條與 K 線同一列（2026-09-22）：有事件時事件條吃掉剩下的寬度，沒有就只有 K 線
     const evLine = r.events.length
       ? `<button type="button" class="post-ev" onclick="openEventsPanel('${jsAttr(r.sid)}')">
-           ${ICON_EVENTS}<span>今日 ${r.events.length} 件資料</span>
+           ${ICON_EVENTS}<span>今日資料</span>
          </button>`
       : "";
     return `<article class="post-row">
@@ -7116,7 +7112,7 @@ function renderPost() {
       <div class="post-actions">
         ${evLine}
         <button class="wl-icon-btn" title="持股與成本" aria-label="持股 ${escapeHtml(r.sid)}"
-                onclick="openHoldingsSheet('${jsAttr(r.sid)}')">💼<span class="wl-ic-label">持股</span></button>
+                onclick="openHoldingsSheet('${jsAttr(r.sid)}')">${ICON_WALLET}<span class="wl-ic-label">持股</span></button>
         <button class="wl-icon-btn post-kline" title="K線分析" aria-label="K線分析 ${escapeHtml(r.sid)}"
                 onclick="openKLineFromWatchlist('${jsAttr(r.sid)}')">${ICON_CHART}<span class="wl-ic-label">K 線</span></button>
       </div>
@@ -7144,176 +7140,174 @@ function openAlertSettingsPicker() {
   openAlertSettings(watchlistRows[0].id);
 }
 
-function openAlertSettings(rowId) {
-  const row = getWatchlistRowById(rowId);
-  if (!row) return;
+// 2026-09-22 改成「草稿」：開關與價位只改暫存值，按「完成」才寫回去；「取消」直接關掉。
+// 設定對象可以是單一檔，也可以是「全部股票」——那就把這次動過的欄位套用到每一檔。
+const ALERT_FIELDS = [
+  "alert_break_support", "alert_near_support",
+  "alert_break_resistance", "alert_near_resistance",
+  "alert_volume_spike", "alert_limit_up", "alert_limit_down",
+  "alert_inst_buy", "alert_inst_sell",
+  "alert_margin_up", "alert_margin_down",
+];
+const ALERT_FIELD_IDS = {
+  alert_break_support: "alert-break-support", alert_near_support: "alert-near-support",
+  alert_break_resistance: "alert-break-resistance", alert_near_resistance: "alert-near-resistance",
+  alert_volume_spike: "alert-volume-spike", alert_limit_up: "alert-limit-up",
+  alert_limit_down: "alert-limit-down", alert_inst_buy: "alert-inst-buy",
+  alert_inst_sell: "alert-inst-sell", alert_margin_up: "alert-margin-up",
+  alert_margin_down: "alert-margin-down",
+};
+const ALERT_SCOPE_ALL = "__all__";
+let alertScope = null;    // row id 或 ALERT_SCOPE_ALL
+let alertDraft = {};      // 這次動過的欄位（只寫這些回去）
 
-  alertModalRowId = rowId;
-  const sid = String(row.stock_id || "").trim();
-  const fallbackName = universe[sid]?.n || "";
-  const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
-  document.getElementById("alert-settings-title").textContent = `基礎訊號｜${displayName} ${sid}`;
-  // 股票下拉：每次開都重建（自選股可能剛增減），選中目前這一檔
+function openAlertSettings(scope) {
+  const useAll = String(scope) === ALERT_SCOPE_ALL;
+  const row = useAll ? null : getWatchlistRowById(scope);
+  if (!useAll && !row) return;
+  alertScope = useAll ? ALERT_SCOPE_ALL : scope;
+  alertDraft = {};
+
+  const titleEl = document.getElementById("alert-settings-title");
+  if (useAll) {
+    titleEl.textContent = `基礎訊號｜全部股票（${watchlistRows.length} 檔）`;
+  } else {
+    const sid = String(row.stock_id || "").trim();
+    const displayName = getPreferredStockName(sid, row.stock_name) || universe[sid]?.n || "未命名";
+    titleEl.textContent = `基礎訊號｜${displayName} ${sid}`;
+  }
+
+  // 設定對象下拉：每次開都重建（自選股可能剛增減）。第一項是「全部股票」
   const pick = document.getElementById("alert-stock-select");
   if (pick) {
-    pick.innerHTML = watchlistRows.map(r => {
-      const s2 = String(r.stock_id || "").trim();
-      const n2 = getPreferredStockName(s2, r.stock_name) || universe[s2]?.n || s2;
-      return `<option value="${jsAttr(String(r.id))}">${escapeHtml(`${n2} ${s2}`)}</option>`;
-    }).join("");
-    pick.value = String(rowId);
+    pick.innerHTML = `<option value="${ALERT_SCOPE_ALL}">全部股票（${watchlistRows.length} 檔）</option>`
+      + watchlistRows.map(r => {
+        const s2 = String(r.stock_id || "").trim();
+        const n2 = getPreferredStockName(s2, r.stock_name) || universe[s2]?.n || s2;
+        return `<option value="${jsAttr(String(r.id))}">${escapeHtml(`${n2} ${s2}`)}</option>`;
+      }).join("");
+    pick.value = useAll ? ALERT_SCOPE_ALL : String(scope);
+  }
+  const hintEl = document.getElementById("alert-scope-hint");
+  if (hintEl) {
+    hintEl.textContent = useAll
+      ? `按「完成」時，這一頁動過的項目會套用到全部 ${watchlistRows.length} 檔（沒動過的維持原樣）。`
+      : "這些設定只影響上面選的這一檔；換別檔請用上面的選單。";
   }
 
-  // 盤中即時
-  document.getElementById("alert-break-support").checked    = !!row.alert_break_support;
-  document.getElementById("alert-near-support").checked     = !!row.alert_near_support;
-  document.getElementById("alert-break-resistance").checked = !!row.alert_break_resistance;
-  document.getElementById("alert-near-resistance").checked  = !!row.alert_near_resistance;
-  document.getElementById("alert-volume-spike").checked     = !!row.alert_volume_spike;
-  document.getElementById("alert-limit-up").checked         = !!row.alert_limit_up;
-  document.getElementById("alert-limit-down").checked       = !!row.alert_limit_down;
-  // 盤後每日
-  document.getElementById("alert-inst-buy").checked         = !!row.alert_inst_buy;
-  document.getElementById("alert-inst-sell").checked        = !!row.alert_inst_sell;
-  document.getElementById("alert-margin-up").checked        = !!row.alert_margin_up;
-  document.getElementById("alert-margin-down").checked      = !!row.alert_margin_down;
-  // 自訂價位
-  const tHigh = row.target_price_high;
-  const tLow  = row.target_price_low;
-  document.getElementById("inp-target-high").value = (tHigh != null && tHigh !== "") ? tHigh : "";
-  document.getElementById("inp-target-low").value  = (tLow  != null && tLow  !== "") ? tLow  : "";
-  // 持股
-
+  // 開關的初值：單一檔＝那一檔的值；全部＝多數決（多數開就顯示開）
+  for (const f of ALERT_FIELDS) {
+    const el = document.getElementById(ALERT_FIELD_IDS[f]);
+    if (!el) continue;
+    el.checked = useAll
+      ? watchlistRows.filter(r => !!r[f]).length * 2 > watchlistRows.length
+      : !!row[f];
+  }
+  const hi = useAll ? null : row.target_price_high;
+  const lo = useAll ? null : row.target_price_low;
+  document.getElementById("inp-target-high").value = (hi != null && hi !== "") ? hi : "";
+  document.getElementById("inp-target-low").value  = (lo != null && lo !== "") ? lo : "";
+  // 價位是「這一檔的價」，全部股票時不開放
+  for (const id of ["inp-target-high", "inp-target-low"]) {
+    document.getElementById(id).disabled = useAll;
+  }
   document.getElementById("alert-settings-msg").textContent = "";
 
-  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("alertSettingsModal"));
-  modal.show();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("alertSettingsModal")).show();
 }
 
-async function onAlertSettingToggle(field, checked) {
-  if (!alertModalRowId) return;
-  const msgEl = document.getElementById("alert-settings-msg");
-  msgEl.innerHTML = '<span class="text-muted">更新中…</span>';
-
-  try {
-    await updateAlert(alertModalRowId, field, checked, false);
-    const row = getWatchlistRowById(alertModalRowId);
-    if (row) row[field] = checked;
-    msgEl.innerHTML = '<span class="text-success">✅ 已更新</span>';
-  } catch (e) {
-    const inputMap = {
-      alert_break_support:    "alert-break-support",
-      alert_near_support:     "alert-near-support",
-      alert_break_resistance: "alert-break-resistance",
-      alert_near_resistance:  "alert-near-resistance",
-      alert_volume_spike:     "alert-volume-spike",
-      alert_limit_up:         "alert-limit-up",
-      alert_limit_down:       "alert-limit-down",
-      alert_inst_buy:         "alert-inst-buy",
-      alert_inst_sell:        "alert-inst-sell",
-      alert_margin_up:        "alert-margin-up",
-      alert_margin_down:      "alert-margin-down",
-    };
-    const inputId = inputMap[field];
-    if (inputId) {
-      const inputEl = document.getElementById(inputId);
-      if (inputEl) inputEl.checked = !checked;
-    }
-    msgEl.innerHTML = `<span class="text-danger">❌ 更新失敗：${e.message}</span>`;
+// 換設定對象：這次還沒按「完成」的更動就不算數，講一句再重開
+function onAlertScopeChange(value) {
+  const dirty = Object.keys(alertDraft).length > 0;
+  openAlertSettings(value);
+  if (dirty) {
+    document.getElementById("alert-settings-msg").innerHTML =
+      '<span class="text-warning">已換設定對象，上一個還沒按「完成」的更動沒有保留</span>';
   }
 }
 
-async function setAllAlertSettings(enabled) {
-  if (!alertModalRowId) return;
-  const ALL_ALERT_FIELDS = [
-    "alert_break_support", "alert_near_support",
-    "alert_break_resistance", "alert_near_resistance",
-    "alert_volume_spike", "alert_limit_up", "alert_limit_down",
-    "alert_inst_buy", "alert_inst_sell",
-    "alert_margin_up", "alert_margin_down",
-  ];
-  const ALL_ALERT_IDS = [
-    "alert-break-support", "alert-near-support",
-    "alert-break-resistance", "alert-near-resistance",
-    "alert-volume-spike", "alert-limit-up", "alert-limit-down",
-    "alert-inst-buy", "alert-inst-sell",
-    "alert-margin-up", "alert-margin-down",
-  ];
+function onAlertDraftToggle(field, checked) {
+  alertDraft[field] = !!checked;
+  _markAlertDirty();
+}
 
-  ALL_ALERT_IDS.forEach(id => {
-    const el = document.getElementById(id);
+function onAlertDraftPrice(field, value) {
+  const raw = String(value || "").trim();
+  alertDraft[field] = raw === "" ? null : parseFloat(raw);
+  _markAlertDirty();
+}
+
+function _markAlertDirty() {
+  const msgEl = document.getElementById("alert-settings-msg");
+  if (msgEl) msgEl.innerHTML = '<span class="text-muted">尚未套用，按「完成」儲存</span>';
+}
+
+// 全部開啟／全部關閉：只動畫面與草稿，一樣要按「完成」
+function setAllAlertSettings(enabled) {
+  for (const f of ALERT_FIELDS) {
+    const el = document.getElementById(ALERT_FIELD_IDS[f]);
     if (el) el.checked = enabled;
-  });
-
-  const msgEl = document.getElementById("alert-settings-msg");
-  msgEl.innerHTML = '<span class="text-muted">批次更新中…</span>';
-  try {
-    const patch = {};
-    ALL_ALERT_FIELDS.forEach(f => { patch[f] = enabled; });
-    await sbPatch(
-      "watchlist",
-      { "id": `eq.${alertModalRowId}` },
-      patch,
-      state.accessToken,
-    );
-    const row = getWatchlistRowById(alertModalRowId);
-    if (row) ALL_ALERT_FIELDS.forEach(f => { row[f] = enabled; });
-    msgEl.innerHTML = `<span class="text-success">✅ 已全部${enabled ? "開啟" : "關閉"}</span>`;
-  } catch (e) {
-    // 還原 UI
-    const row = getWatchlistRowById(alertModalRowId);
-    if (row) {
-      ALL_ALERT_IDS.forEach((id, i) => {
-        const el = document.getElementById(id);
-        if (el) el.checked = !!row[ALL_ALERT_FIELDS[i]];
-      });
-    }
-    msgEl.innerHTML = `<span class="text-danger">❌ 批次更新失敗：${e.message}</span>`;
+    alertDraft[f] = enabled;
   }
+  _markAlertDirty();
 }
-
-document.getElementById("alertSettingsModal").addEventListener("hidden.bs.modal", () => {
-  alertModalRowId = null;
-});
 
 function clearPriceTargetInput(which) {
-  document.getElementById(which === "high" ? "inp-target-high" : "inp-target-low").value = "";
+  const id = which === "high" ? "inp-target-high" : "inp-target-low";
+  document.getElementById(id).value = "";
+  onAlertDraftPrice(which === "high" ? "target_price_high" : "target_price_low", "");
 }
 
-async function savePriceTargets() {
-  if (!alertModalRowId) return;
+async function saveAlertDraft() {
   const msgEl = document.getElementById("alert-settings-msg");
-  const hiRaw = document.getElementById("inp-target-high").value.trim();
-  const loRaw = document.getElementById("inp-target-low").value.trim();
-  const hi = hiRaw !== "" ? parseFloat(hiRaw) : null;
-  const lo = loRaw !== "" ? parseFloat(loRaw) : null;
-  if (hi !== null && (isNaN(hi) || hi <= 0)) {
-    msgEl.innerHTML = '<span class="text-danger">❌ 上限價位格式錯誤（需大於 0）</span>';
+  const fields = Object.keys(alertDraft);
+  if (!fields.length) {
+    bootstrap.Modal.getInstance(document.getElementById("alertSettingsModal"))?.hide();
     return;
   }
-  if (lo !== null && (isNaN(lo) || lo <= 0)) {
-    msgEl.innerHTML = '<span class="text-danger">❌ 下限價位格式錯誤（需大於 0）</span>';
+  // 價位驗證（只有單一檔會有價位）
+  const hi = alertDraft.target_price_high, lo = alertDraft.target_price_low;
+  const curHi = hi !== undefined ? hi : _alertCurrentPrice("target_price_high");
+  const curLo = lo !== undefined ? lo : _alertCurrentPrice("target_price_low");
+  for (const [v, label] of [[hi, "上漲價位"], [lo, "下跌價位"]]) {
+    if (v !== undefined && v !== null && (isNaN(v) || v <= 0)) {
+      msgEl.innerHTML = `<span class="text-danger">${label}要大於 0</span>`;
+      return;
+    }
+  }
+  if (curHi != null && curLo != null && curHi <= curLo) {
+    msgEl.innerHTML = '<span class="text-danger">上漲價位要大於下跌價位</span>';
     return;
   }
-  if (hi !== null && lo !== null && hi <= lo) {
-    msgEl.innerHTML = '<span class="text-danger">❌ 上限價須大於下限價</span>';
-    return;
-  }
+
+  const targets = alertScope === ALERT_SCOPE_ALL ? watchlistRows.slice() : [getWatchlistRowById(alertScope)].filter(Boolean);
+  if (!targets.length) return;
+  const patch = {};
+  for (const f of fields) patch[f] = alertDraft[f];
   msgEl.innerHTML = '<span class="text-muted">儲存中…</span>';
   try {
-    await sbPatch("watchlist", { "id": `eq.${alertModalRowId}` },
-      { target_price_high: hi, target_price_low: lo }, state.accessToken);
-    const row = getWatchlistRowById(alertModalRowId);
-    if (row) { row.target_price_high = hi; row.target_price_low = lo; }
-    const desc = [
-      hi != null ? `上限 ${hi}` : null,
-      lo != null ? `下限 ${lo}` : null,
-    ].filter(Boolean).join("，") || "已清除";
-    msgEl.innerHTML = `<span class="text-success">✅ 價位已儲存（${desc}）</span>`;
+    for (const row of targets) {
+      await sbPatch("watchlist", { "id": `eq.${row.id}` }, patch, state.accessToken);
+      Object.assign(row, patch);
+    }
+    alertDraft = {};
+    msgEl.innerHTML = `<span class="text-success">已儲存（${targets.length} 檔）</span>`;
+    renderCurrentTab();
+    setTimeout(() => bootstrap.Modal.getInstance(document.getElementById("alertSettingsModal"))?.hide(), 500);
   } catch (e) {
-    msgEl.innerHTML = `<span class="text-danger">❌ 儲存失敗：${e.message}</span>`;
+    msgEl.innerHTML = `<span class="text-danger">儲存失敗：${escapeHtml(e.message)}</span>`;
   }
 }
+
+function _alertCurrentPrice(field) {
+  if (alertScope === ALERT_SCOPE_ALL) return null;
+  const row = getWatchlistRowById(alertScope);
+  const v = row ? row[field] : null;
+  return (v == null || v === "") ? null : Number(v);
+}
+
+// savePriceTargets 2026-09-22 併進 saveAlertDraft（價位與開關一起按「完成」儲存）
+
 
 // ── 🌙 盤後：持股（股數與平均成本）──────────────────────────────
 // 2026-09-22 從「基礎訊號」搬過來（Howard）：那一頁在設定通知，持股是看損益用的。

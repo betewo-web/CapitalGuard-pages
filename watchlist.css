@@ -255,16 +255,79 @@ body.has-bottom-nav .page-shell {
 .wl-head-actions { display: flex; gap: 0.6rem; width: 100%; }
 .wl-head-actions .btn { flex: 1 1 0; min-height: 40px; font-size: 0.92rem; font-weight: 700; }
 
-/* 通知設定視窗頂端的股票下拉：通知改從標題列進來，要能在裡面換股票 */
+/* ── 基礎訊號面板（2026-09-22 整理）──
+   設定對象（含「全部股票」）→ 開關 → 價位 → 取消／完成。開關只改草稿，按「完成」才寫回去。 */
 .alert-stock-row {
 	display: flex;
 	align-items: center;
 	gap: 0.6rem;
-	margin-bottom: 0.9rem;
+	margin-bottom: 0.5rem;
 }
 
-.alert-stock-label { flex: 0 0 auto; font-size: 0.86rem; font-weight: 700; color: var(--text-1); }
-.alert-stock-select { flex: 1 1 auto; min-width: 0; font-size: 0.95rem; }
+.alert-stock-label { flex: 0 0 auto; font-size: 0.9rem; font-weight: 700; color: var(--text-0); }
+
+.alert-stock-select {
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 44px;
+	font-size: 1rem;
+	font-weight: 600;
+	color: var(--text-0);
+	background-color: rgba(146, 146, 163, 0.12);
+	border-color: var(--border);
+}
+
+.alert-bulk { display: flex; gap: 0.5rem; margin: 0.9rem 0 1.1rem; }
+
+.alert-bulk-btn {
+	flex: 1 1 0;
+	padding: 8px 4px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: rgba(146, 146, 163, 0.08);
+	color: var(--text-1);
+	font-size: 0.86rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+/* 條件的細節（大於均量 3 倍…）自己一行：塞在標籤後面會把每一格撐成不同高度 */
+.alert-pill .alert-note { display: block; margin-left: 0; margin-top: 2px; }
+.alert-note { font-style: normal; font-size: 0.74rem; font-weight: 400; color: var(--text-muted); margin-left: 0.4rem; }
+
+.alert-price-grid { display: flex; flex-direction: column; gap: 0.8rem; margin-top: 0.6rem; }
+.alert-price-label { display: block; font-size: 0.88rem; font-weight: 600; margin-bottom: 0.35rem; }
+.alert-price-label.is-up { color: var(--chg-up); }
+.alert-price-label.is-down { color: var(--chg-down); }
+
+.alert-price-input {
+	height: 44px;
+	font-size: 1rem;
+	color: var(--text-0);
+	background: rgba(146, 146, 163, 0.1);
+	border-color: var(--border);
+}
+
+.alert-price-input:focus { background: rgba(146, 146, 163, 0.14); color: var(--text-0); box-shadow: none; border-color: var(--accent); }
+.alert-price-input:disabled { opacity: 0.45; }
+.alert-price-clear { color: var(--text-muted); border: 1px solid var(--border); border-left: none; }
+
+/* 取消／完成：黏在面板底部，完成是實色 */
+.alert-actions {
+	position: sticky;
+	bottom: -1rem;
+	display: flex;
+	gap: 0.6rem;
+	margin: 1rem -0.25rem -0.25rem;
+	padding: 0.7rem 0.25rem 0.25rem;
+	background: linear-gradient(180deg, rgba(9, 16, 31, 0), rgba(9, 16, 31, 0.96) 35%);
+}
+
+.alert-cancel,
+.alert-done { flex: 1 1 0; min-height: 46px; font-size: 1rem; font-weight: 700; border-radius: 12px; }
+.alert-cancel { border: 1px solid var(--border); background: transparent; color: var(--text-1); }
+.alert-done { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+.alert-done:active { transform: scale(0.99); }
 
 .wl-panel-head-top {
 	display: flex;
@@ -723,19 +786,21 @@ body.has-bottom-nav .page-shell {
 }
 
 .alert-group-label {
-	font-size: 0.72rem;
-	font-weight: 600;
-	letter-spacing: 0.04em;
-	color: rgba(180, 200, 240, 0.65);
-	text-transform: uppercase;
-	margin-bottom: 0.35rem;
+	font-size: 0.88rem;
+	font-weight: 700;
+	color: var(--text-0);
+	margin: 1.2rem 0 0.5rem;
 	padding-left: 0.1rem;
 }
 
+.alert-group-label:first-of-type { margin-top: 0.2rem; }
+
 .alert-pill {
 	margin: 0;
-	padding: 0.52rem 0.6rem;
-	border-radius: 11px;
+	align-items: center;
+	min-height: 64px;
+	padding: 0.7rem 0.8rem;
+	border-radius: 12px;
 	border: 1px solid rgba(128, 154, 212, 0.35);
 	background: rgba(14, 22, 42, 0.72);
 	display: flex;
@@ -750,13 +815,14 @@ body.has-bottom-nav .page-shell {
 }
 
 .alert-label {
-	color: var(--text-1);
-	font-size: 0.81rem;
+	color: var(--text-0);
+	font-size: 0.95rem;
+	font-weight: 600;
 }
 
 .toggle-wrap .form-check-input {
-	width: 2.35em;
-	height: 1.22em;
+	width: 2.7em;
+	height: 1.4em;
 	margin-top: 0;
 	cursor: pointer;
 	background-color: rgba(24, 35, 63, 0.95);
@@ -1938,8 +2004,8 @@ body.has-bottom-nav .qa-panel {
 .hold-clear { color: var(--text-muted); border-color: #3a3a52; }
 .hold-hint { font-size: 0.78rem; color: var(--text-muted); }
 
-/* 基礎訊號面板：講明白這些開關只影響選中的那一檔 */
-.alert-stock-hint { font-size: 0.8rem; color: var(--text-muted); margin: -0.4rem 0 0.9rem; line-height: 1.5; }
+/* 設定對象底下那一行說明（單一檔／全部股票兩種說法） */
+.alert-stock-hint { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 0.2rem; line-height: 1.55; }
 
 /* 連結是紫（可點）不是金：金／橘留給「需要注意」（色彩語彙規則四，2026-09-20 改） */
 .home-sec-title .hs-link,
