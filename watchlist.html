@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="153">
+  <meta name="app-version" content="154">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=153" rel="stylesheet">
+  <link href="watchlist.css?v=154" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -256,10 +256,10 @@
       <!-- 方塊自己就是卡片，不再包一層 panel-card：少一層框 -->
       <div class="home-sec mb-3">
         <div class="home-sec-title">⭐ 我的自選
-          <!-- 兩個入口都沒有底部導覽鈕：盤後＝收盤價／事件／持股，自選設定＝加股、價位與通知 -->
+          <!-- 兩個入口都沒有底部導覽鈕：盤後＝收盤價／持股／事件／K 線，設定＝加股、價位與通知 -->
           <span class="home-sec-actions">
             <button type="button" class="home-manage-btn" onclick="switchTab('post')">🌙 盤後</button>
-            <button type="button" class="home-manage-btn is-ghost" onclick="switchTab('watch')">⚙ 自選設定</button>
+            <button type="button" class="home-manage-btn is-ghost" onclick="switchTab('watch')">⚙ 設定</button>
           </span>
         </div>
         <div class="home-grid" id="home-watchlist"></div>
@@ -349,7 +349,7 @@
     <!-- ═══ ⭐ 自選 ═══ -->
     <!-- ═══ 🌙 盤後 ═══
          收盤後要看的三件事：收盤價與漲跌幅、今天有哪些事件、持股的損益與距自訂價位。
-         2026-09-22 從「自選設定」搬過來（那一頁只留設定）。資料全部已經在記憶體裡：
+         2026-09-22 從「設定」頁搬過來（那一頁只留設定）。K 線也在這裡。資料全部已經在記憶體裡：
          getCloseQuote（日線／報告／intraday_state 收盤後的最後一筆）、stockEvents、holdingEntries。 -->
     <section id="view-post" class="app-view">
       <div class="view-head">
@@ -1087,7 +1087,7 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
 }
 
 // ── PWA v2: App Shell 狀態 ──
-// post 與 watch 都沒有底部導覽鈕：入口是首頁標題列那兩顆（🌙 盤後／⚙ 自選設定，2026-09-22）。
+// post 與 watch 都沒有底部導覽鈕：入口是首頁標題列那兩顆（🌙 盤後／⚙ 設定，2026-09-22）。
 // 留在這裡是為了 switchTab 認得它們、#post／#watch 的 hash 也還能路由回來
 const APP_TABS = ["home", "scores", "inbox", "watch", "post"];
 let currentTab = null;
@@ -7028,7 +7028,7 @@ function renderWatchlist(rows) {
     item.dataset.id = row.id;
     item.dataset.sid = sid;
     // 2026-09-22：字與按鈕都放大、上下更寬鬆；由上而下＝名稱＋代號／（超出方案）／
-    // 三顆帶文字的按鈕。收盤價、事件、持股都在「🌙 盤後」那一頁。
+    // 兩顆帶文字的按鈕。收盤價、事件、持股與 K 線都在「🌙 盤後」那一頁。
     item.innerHTML = `
       <div class="wl-row-head">
         <div class="wl-ident">
@@ -7038,7 +7038,6 @@ function renderWatchlist(rows) {
       </div>
       ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
       <div class="wl-row-actions">
-        <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(sid)}" onclick="openKLineFromWatchlist('${jsAttr(sid)}')">${ICON_CHART}<span class="wl-ic-label">K 線</span></button>
         <button class="wl-icon-btn" title="通知設定" aria-label="通知設定 ${escapeHtml(sid)}" onclick="openAlertSettings('${jsAttr(row.id)}')">${ICON_BELL}<span class="wl-ic-label">通知</span></button>
         <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}<span class="wl-ic-label">移除</span></button>
       </div>
@@ -7048,7 +7047,7 @@ function renderWatchlist(rows) {
 }
 
 // ── 🌙 盤後（view-post）─────────────────────────────────────────────
-// 2026-09-22：收盤價、今日事件、持股三塊從「自選設定」搬到這裡（Howard）。
+// 2026-09-22：收盤價、今日事件、持股與 K 線都從「設定」頁搬到這裡（Howard）。
 // 那一頁是設定，這一頁是收盤後看一次的東西。資料都在記憶體，不需要新的請求。
 // 排序：持股的排前面（最在意），再來漲跌幅由大到小；沒有報價的排最後。
 function renderPost() {
@@ -7087,7 +7086,7 @@ function renderPost() {
 
   if (emptyEl) {
     emptyEl.style.display = rows.length ? "none" : "";
-    emptyEl.textContent = "尚未加入自選股，到首頁的「⚙ 自選設定」新增";
+    emptyEl.textContent = "尚未加入自選股，到首頁的「⚙ 設定」新增";
   }
 
   listEl.innerHTML = rows.map(r => {
@@ -7124,6 +7123,10 @@ function renderPost() {
       </div>
       ${facts.length ? `<div class="post-facts">${facts.join("")}</div>` : ""}
       ${evLine}
+      <div class="post-actions">
+        <button class="wl-icon-btn" title="K線分析" aria-label="K線分析 ${escapeHtml(r.sid)}"
+                onclick="openKLineFromWatchlist('${jsAttr(r.sid)}')">${ICON_CHART}<span class="wl-ic-label">看 K 線</span></button>
+      </div>
     </article>`;
   }).join("");
 }

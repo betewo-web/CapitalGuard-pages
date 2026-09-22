@@ -1857,6 +1857,9 @@ body.has-bottom-nav .qa-panel {
 .post-ev-go { margin-left: auto; color: var(--accent); font-weight: 700; white-space: nowrap; }
 .post-ev:active { transform: scale(0.99); }
 
+/* K 線 2026-09-22 從設定頁搬來這裡：卡片底部一顆整寬的按鈕，樣式與設定頁那兩顆同一套 */
+.post-actions { display: flex; }
+
 /* 連結是紫（可點）不是金：金／橘留給「需要注意」（色彩語彙規則四，2026-09-20 改） */
 .home-sec-title .hs-link,
 .hs-link {
