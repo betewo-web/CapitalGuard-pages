@@ -1775,34 +1775,54 @@ body.has-bottom-nav .qa-panel {
 /* ── 首頁的三個分頁（2026-09-22）：總覽／盤後／設定 ──
    三個各自是一個 view，這一條在三頁都有一份，所以看起來像同一個畫面在換分頁。
    樣式與個股字卡的分頁列（.rtl-tabs）同一套，使用者只要學一次。 */
+/* 分段控制（2026-09-22 改）：一整條容器、三段連在一起、段與段之間只有一條細線，
+   只有選中的那一段有底色。三個各自有框的圓角方塊看起來就是三顆按鈕——Howard 反應「還是按鈕」，
+   那不是 PWA 的限制，是樣式選錯了。 */
 .home-tabs {
 	display: flex;
-	gap: 6px;
-	margin: -0.2rem 0 0.9rem;
+	margin: -0.2rem 0 1rem;
+	padding: 4px;
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	background: rgba(146, 146, 163, 0.1);
 }
 
 .home-tab {
+	position: relative;
 	flex: 1 1 0;
 	min-width: 0;
 	padding: 9px 4px;
-	border: 1px solid var(--border);
-	border-radius: 12px;
-	background: rgba(146, 146, 163, 0.08);
-	color: var(--text-1);
+	border: none;
+	border-radius: 10px;
+	background: transparent;
+	color: var(--text-muted);
 	font-size: 0.9rem;
-	font-weight: 700;
+	font-weight: 600;
 	line-height: 1.2;
 	cursor: pointer;
 	white-space: nowrap;
+	transition: color 0.15s ease, background 0.15s ease;
 }
+
+/* 段與段之間的細線：相鄰兩段都沒被選中時才畫，選中的那一段自己有底色 */
+.home-tab + .home-tab::before {
+	content: "";
+	position: absolute;
+	left: -1px;
+	top: 20%;
+	height: 60%;
+	border-left: 1px solid rgba(146, 146, 163, 0.28);
+}
+
+.home-tab.is-active::before,
+.home-tab.is-active + .home-tab::before { border-left-color: transparent; }
 
 .home-tab.is-active {
-	background: rgba(139, 124, 255, 0.2);
-	border-color: var(--accent);
-	color: var(--text-0);
+	background: var(--accent);
+	color: #fff;
+	font-weight: 700;
+	box-shadow: 0 2px 8px rgba(139, 124, 255, 0.35);
 }
-
-.home-tab:active { transform: scale(0.98); }
 
 /* 「自選設定」：底部導覽拿掉自選分頁之後，這是加／刪自選股、設定價位與通知的唯一入口，
    所以不再是一條細連結，而是看得見的按鈕（紫框實底、字級比清單標題還大一點）。 */
@@ -2879,31 +2899,50 @@ body.has-bottom-nav .qa-panel {
 .rtl-dialog { max-width: 560px; }
 .rtl-dialog.is-kline { max-width: 92vw; }
 
+/* 個股字卡的分頁：與首頁同一種分段控制（2026-09-22 一起改），App 裡的分頁只有一種長相 */
 .rtl-tabs {
 	display: flex;
-	gap: 6px;
 	margin-top: 10px;
+	padding: 3px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: rgba(146, 146, 163, 0.1);
 }
 
 .rtl-tab {
+	position: relative;
 	flex: 1 1 0;
 	min-width: 0;
 	padding: 7px 4px;
-	border: 1px solid var(--border);
-	border-radius: 10px;
-	background: rgba(146, 146, 163, 0.08);
-	color: var(--text-1);
+	border: none;
+	border-radius: 9px;
+	background: transparent;
+	color: var(--text-muted);
 	font-size: 0.82rem;
 	font-weight: 600;
 	line-height: 1.2;
 	cursor: pointer;
 	white-space: nowrap;
+	transition: color 0.15s ease, background 0.15s ease;
 }
 
+.rtl-tab + .rtl-tab::before {
+	content: "";
+	position: absolute;
+	left: -1px;
+	top: 22%;
+	height: 56%;
+	border-left: 1px solid rgba(146, 146, 163, 0.28);
+}
+
+.rtl-tab.is-active::before,
+.rtl-tab.is-active + .rtl-tab::before { border-left-color: transparent; }
+
 .rtl-tab.is-active {
-	background: rgba(139, 124, 255, 0.18);
-	border-color: var(--accent);
-	color: var(--text-0);
+	background: var(--accent);
+	color: #fff;
+	font-weight: 700;
+	box-shadow: 0 2px 8px rgba(139, 124, 255, 0.35);
 }
 
 /* K 線那一頁自己的表頭：代號／產業／現價／MA（原本在 K 線 modal 的 modal-header） */
