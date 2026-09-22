@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="168">
+  <meta name="app-version" content="169">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=168" rel="stylesheet">
+  <link href="watchlist.css?v=169" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -791,10 +791,10 @@
       </div>
       <div class="modal-body p-3">
         <div class="d-flex align-items-center gap-2 mb-2">
-          <span class="badge bg-secondary" id="alert-history-detail-source" style="font-size:.72rem"></span>
-          <span class="text-muted" id="alert-history-detail-time" style="font-size:.75rem"></span>
+          <span class="badge bg-secondary" id="alert-history-detail-source" style="font-size:.82rem"></span>
+          <span class="text-muted" id="alert-history-detail-time" style="font-size:.85rem"></span>
         </div>
-        <div id="alert-history-detail-body" class="text-light" style="white-space:pre-wrap;line-height:1.5;font-size:.9rem"></div>
+        <div id="alert-history-detail-body" class="text-light" style="white-space:pre-wrap;line-height:1.6;font-size:1rem"></div>
         <div id="alert-history-why" style="display:none"></div>
       </div>
       <div class="modal-footer py-2">
@@ -5131,14 +5131,14 @@ function renderInbox() {
   document.getElementById("inbox-migrate-hint").style.display = inboxSupportsRead ? "none" : "";
 
   if (inboxLoadError) {
-    listEl.innerHTML = `<div class="inbox-empty text-danger">載入失敗：${escapeHtml(inboxLoadError)}<br><span class="text-muted" style="font-size:.75rem">若為 404，請先在 Supabase 執行 migrate_alert_history.sql</span></div>`;
+    listEl.innerHTML = `<div class="inbox-empty text-danger">載入失敗：${escapeHtml(inboxLoadError)}<br><span class="text-muted" style="font-size:.85rem">若為 404，請先在 Supabase 執行 migrate_alert_history.sql</span></div>`;
     return;
   }
 
   const rows = filteredInboxRows();
   if (!rows.length) {
     const hints = {
-      all: "尚無通知<br><span style='font-size:.75rem;opacity:.7'>監控觸發的警報會自動保存在這裡</span>",
+      all: "尚無通知<br><span style='font-size:.85rem;opacity:.7'>監控觸發的警報會自動保存在這裡</span>",
       unread: inboxSupportsRead ? "沒有未讀通知 🎉" : "已讀功能需先執行 migrate_pwa_v2.sql",
       important: "沒有漲跌停、跌破支撐或到價的通知",
       stocks: "你的持股／自選股尚無通知",
@@ -5162,7 +5162,7 @@ function renderInbox() {
       <div class="inbox-item${unread ? " unread" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
            onclick="openInboxDetail('${jsAttr(String(r.id))}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetail('${jsAttr(String(r.id))}');}">
-        ${signalIconSvg(r, 30)}
+        ${signalIconSvg(r, 34)}
         <div class="ib-main">
           <div class="ib-title">${escapeHtml(_titleWithoutSid(r.title, sid))}</div>
           <div class="ib-body">${escapeHtml(r.body || "")}</div>
@@ -5701,7 +5701,7 @@ function scoreRowHtml(sid, s, opts = {}) {
   const total = s?.total_score != null && Number.isFinite(Number(s.total_score)) ? Number(s.total_score) : null;
   const chg = s?.score_change != null && Number.isFinite(Number(s.score_change)) ? Number(s.score_change) : null;
   const chgHtml = chg == null ? "" :
-    `<span class="${chg > 0.05 ? "chg-up" : chg < -0.05 ? "chg-down" : "chg-flat"}" style="font-size:.72rem">${chg > 0.05 ? "▲" : chg < -0.05 ? "▼" : "—"}${Math.abs(chg).toFixed(1)}</span>`;
+    `<span class="${chg > 0.05 ? "chg-up" : chg < -0.05 ? "chg-down" : "chg-flat"}" style="font-size:.82rem">${chg > 0.05 ? "▲" : chg < -0.05 ? "▼" : "—"}${Math.abs(chg).toFixed(1)}</span>`;
   const q = getQuote(sid);
   const sub = [s?.industry_category, opts.note].filter(Boolean).map(escapeHtml).join(" · ");
   const inWatch = watchlistRows.some(r => String(r.stock_id || "").trim() === sid);
@@ -5761,8 +5761,8 @@ function renderScores() {
     const strategies = data.strategies || [];
     html = strategies.length
       ? strategies.map(st => `
-        <div class="home-sec-title p-2 pb-0">${escapeHtml(st.emoji || "")} ${escapeHtml(st.name || "")}
-          <span class="text-muted" style="font-size:.72rem;font-weight:400">${escapeHtml(st.description || "")}</span></div>
+        <div class="home-sec-title scr-strategy p-2 pb-0">${escapeHtml(st.emoji || "")} ${escapeHtml(st.name || "")}
+          <span class="scr-strategy-desc">${escapeHtml(st.description || "")}</span></div>
         ${(st.rows || []).slice(0, 10).map(r => {
           const sid = String(r.stock_id || "").trim();
           const s = scores[sid] || { stock_name: r.stock_name, industry_category: r.industry_category };
