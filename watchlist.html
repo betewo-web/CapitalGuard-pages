@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="155">
+  <meta name="app-version" content="156">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=155" rel="stylesheet">
+  <link href="watchlist.css?v=156" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -372,19 +372,15 @@
       </div>
       <div id="add-msg" class="wl-add-msg"></div>
 
-      <!-- 自選股清單。篩選籤（全部／有訊號／上漲／下跌／持股）2026-09-22 整行拿掉（Howard）：
-           它們篩的是股價與訊號，而那些值已經不在這一頁上了。
-           「通知」也從每一列抽出來放到這裡——一次設定完幾檔比一列一列點快。 -->
+      <!-- 自選股清單。2026-09-22（Howard）：篩選籤整行、「我的自選股 N」標題都拿掉，
+           標題列只剩兩顆並排的按鈕——標準訊號（每檔要收哪些內建通知）與進階訊號（條件組合的自訂規則）。 -->
       <div class="card panel-card">
         <div class="card-header wl-panel-head">
-          <div class="wl-panel-head-top">
-            <span class="fw-semibold panel-title">我的自選股 <span id="wl-count" class="badge count-badge ms-1">0</span></span>
-            <span class="wl-head-actions">
-              <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-alerts-btn" onclick="openAlertSettingsPicker()"
-                      title="設定每一檔要收哪些通知">🔔 通知</button>
-              <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-rules-btn" onclick="openRulesModal()"
-                      title="用條件組合自訂通知，全部成立才發送">自訂規則</button>
-            </span>
+          <div class="wl-head-actions">
+            <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-alerts-btn" onclick="openAlertSettingsPicker()"
+                    title="每一檔要收哪些內建訊號的通知">🔔 標準訊號</button>
+            <button type="button" class="btn btn-sm btn-outline-light btn-ghost" id="wl-rules-btn" onclick="openRulesModal()"
+                    title="用條件組合自訂通知，全部成立才發送">進階訊號</button>
           </div>
         </div>
         <div class="card-body p-0">
@@ -465,7 +461,7 @@
             <path d="M9.8 3.2 5 8l4.8 4.8"/>
           </svg><span>規則清單</span>
         </button>
-        <h5 class="mb-0" id="rules-modal-title">自訂通知規則</h5>
+        <h5 class="mb-0" id="rules-modal-title">進階訊號</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
 
@@ -558,7 +554,7 @@
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
-        <h5 class="mb-0" id="alert-settings-title">通知設定</h5>
+        <h5 class="mb-0" id="alert-settings-title">標準訊號</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3">
@@ -1089,7 +1085,7 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
   const searchIcon = document.querySelector(".wl-addbar-icon");
   if (searchIcon) searchIcon.innerHTML = ICON_SEARCH;
   const rulesBtn = document.getElementById("wl-rules-btn");
-  if (rulesBtn) rulesBtn.innerHTML = `${ICON_RULES}<span>自訂規則</span>`;
+  if (rulesBtn) rulesBtn.innerHTML = `${ICON_RULES}<span>進階訊號</span>`;
 }
 
 // ── PWA v2: App Shell 狀態 ──
@@ -1817,14 +1813,9 @@ function limitPromptHtml(kind, err) {
   return `<span class="text-warning">⚠️ ${escapeHtml(text)}</span> ${btn}`;
 }
 
-function renderWatchCount(n) {
-  const el = document.getElementById("wl-count");
-  if (!el) return;
-  const limit = planLimitOf("watchlist");
-  el.textContent = limit === null ? n : `${n}/${limit}`;
-  el.classList.toggle("is-full", limit !== null && n >= limit);
-  el.title = limit === null ? "" : `目前方案最多 ${limit} 檔自選股`;
-}
+// 「我的自選股 N/上限」那顆計數籤 2026-09-22 隨標題一起拿掉（Howard）；
+// 方案用量仍然看得到——右上角使用者 chip 的「方案與用量」面板裡有一整組 meter。
+
 
 function rulesCountLabel() {
   const n = alertRules.length;
@@ -6963,7 +6954,6 @@ function renderWatchlist(rows) {
   const grid = document.getElementById("wl-grid");
   if (!grid) return;
   grid.innerHTML = "";
-  renderWatchCount(rows.length);
   const visible = rows;
   const emptyEl = document.getElementById("wl-empty");
   emptyEl.style.display = visible.length ? "none" : "";
@@ -7075,7 +7065,7 @@ function renderPost() {
     // 事件條與 K 線同一列（2026-09-22）：有事件時事件條吃掉剩下的寬度，沒有就只有 K 線
     const evLine = r.events.length
       ? `<button type="button" class="post-ev" onclick="openEventsPanel('${jsAttr(r.sid)}')">
-           ${ICON_EVENTS}<span>今日 ${r.events.length} 件資料</span><span class="post-ev-go">查看 →</span>
+           ${ICON_EVENTS}<span>今日 ${r.events.length} 件資料</span>
          </button>`
       : "";
     return `<article class="post-row">
@@ -7122,7 +7112,7 @@ function openAlertSettings(rowId) {
   const sid = String(row.stock_id || "").trim();
   const fallbackName = universe[sid]?.n || "";
   const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
-  document.getElementById("alert-settings-title").textContent = `通知設定｜${displayName} ${sid}`;
+  document.getElementById("alert-settings-title").textContent = `標準訊號｜${displayName} ${sid}`;
   // 股票下拉：每次開都重建（自選股可能剛增減），選中目前這一檔
   const pick = document.getElementById("alert-stock-select");
   if (pick) {
