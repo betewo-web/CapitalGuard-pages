@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="187">
+  <meta name="app-version" content="188">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=187" rel="stylesheet">
+  <link href="watchlist.css?v=188" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -8411,18 +8411,25 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   const sliderH = mobile ? 16 : 18;   // 下方時間軸縮放條
   const sliderBottom = 4;
   const dateLabelH = 18;              // 最下面那排日期
-  const gridGap = 8;                  // 主圖與副圖之間
+  const gridGap = 6;                  // 主圖與副圖之間
   const subCount = hasChips ? 2 : 1;
   const usable = Math.max(120, chartH - legendH - (sliderBottom + sliderH + dateLabelH) - gridGap * subCount);
-  const subH = Math.max(38, Math.round(usable * (hasChips ? 0.16 : 0.20)));
-  const mainH = Math.max(110, usable - subH * subCount);
+  // 兩個副圖分開算（2026-09-24 Howard：買賣超要看得更清楚，K 棒也要更長）。
+  // 以前兩格一樣高，等於把高度平均分給「看得懂的」與「看不太出來的」：
+  // 成交量是密集的正值長條，矮一點照樣讀得出相對高低；三大合計淨買超要跨 0 軸、
+  // 正負都要畫，同樣的高度只剩一半可用，最需要空間的是它。
+  const volH = Math.max(36, Math.round(usable * (hasChips ? 0.13 : 0.20)));
+  const chipsH = hasChips ? Math.max(48, Math.round(usable * 0.19)) : 0;
+  const mainH = Math.max(110, usable - volH - chipsH);
   // 左邊 52px 是價格刻度要的（四位數帶小數，如 1234.5，在 12px 字下就要 40px 以上，
   // 再扣 ECharts 預設 8px 的標籤間距——再縮就會把高價股的數字切掉）。
+  // 2026-09-24 試過連字一起縮到 10.5 換得 left=44，但那會把 2026-09-23「圖上的字太小」
+  // 那次的修正整個倒回去，而且只多 8px 寬；Howard 選擇維持字級。
   // 右邊原本 18px 純粹是留白：關卡標籤畫在格線內（insideEndTop／Bottom），沒東西要放，收到 8px。
   const gridBox = { left: 52, right: 8 };
   const grids = [{ ...gridBox, top: legendH, height: mainH }];
-  grids.push({ ...gridBox, top: legendH + mainH + gridGap, height: subH });
-  if (hasChips) grids.push({ ...gridBox, top: legendH + mainH + gridGap + subH + gridGap, height: subH });
+  grids.push({ ...gridBox, top: legendH + mainH + gridGap, height: volH });
+  if (hasChips) grids.push({ ...gridBox, top: legendH + mainH + gridGap + volH + gridGap, height: chipsH });
   // 副圖 y 軸：成交量原始值是「股」，六位數在 46px 內放不下、也跟圖例的「(張)」對不上；
   // 統一換算成張、超過一萬張用「萬」，籌碼（本來就是張）同一個格式
   const fmtLots = lots => {
