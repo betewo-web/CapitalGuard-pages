@@ -136,7 +136,13 @@ body.has-bottom-nav .page-shell {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.55rem;
+	flex-wrap: wrap;
+	justify-content: flex-end;
 }
+
+/* 字級調大（設定頁的「文字大小」）之後這一排會擠：讓它整顆換行，
+   而不是把「安裝」「登出」從字中間拆成兩行（2026-09-24 在 375px／特大 實測到的） */
+.nav-user-actions > * { white-space: nowrap; }
 
 /* 手動重新整理鈕：正方形圖示鈕，轉動時表示正在抓資料 */
 .nav-refresh {
@@ -3262,8 +3268,11 @@ body.has-bottom-nav .page-shell {
 	.wl-name { -webkit-line-clamp: 3; }
 }
 
+/* 2026-09-24：這裡原本還有一條 `.view-title { font-size: 1.1rem; }`——螢幕越小、標題越小。
+   方向是反的：小螢幕本來就更難讀，何況 iPhone 使用者沒有任何放大的辦法
+   （Safari 的文字大小不套用到 rem，裝成主畫面 App 之後連 aA 選單都沒有）。
+   要調大小改用「設定」頁的文字大小（setAppFontSize），那個動的是根字級，整頁一起縮放。 */
 @media (max-width: 576px) {
-	.view-title { font-size: 1.1rem; }
 	.holding-summary { gap: 1rem; padding: 0.85rem 0.9rem; }
 	.holding-summary .hd-block .hd-value { font-size: 1.15rem; }
 }
