@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="172">
+  <meta name="app-version" content="173">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=172" rel="stylesheet">
+  <link href="watchlist.css?v=173" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -264,20 +264,25 @@
 
       <!-- 方塊自己就是卡片，不再包一層 panel-card：少一層框 -->
       <div class="home-sec mb-3">
-        <div class="home-sec-title"><i data-icon="star"></i>我的自選</div>
+        <!-- 標題與右邊的入口要各自是一個 flex 項目：圖示與文字不包起來的話，
+             文字會變成另一個匿名項目，被 justify-content: space-between 推到右邊 -->
+        <div class="home-sec-title">
+          <span class="hs-label"><i data-icon="star"></i>我的自選</span>
+          <button type="button" class="hs-btn" onclick="switchTab('watch')">新增自選股</button>
+        </div>
         <div class="home-grid" id="home-watchlist"></div>
       </div>
 
       <div class="card panel-card mb-3">
         <div class="card-body p-3">
-          <div class="home-sec-title"><i data-icon="news"></i>今日資料 <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
+          <div class="home-sec-title"><span class="hs-label"><i data-icon="news"></i>今日資料</span> <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
           <div id="home-news"></div>
         </div>
       </div>
 
       <div class="card panel-card mb-3" id="home-upcoming-card" style="display:none">
         <div class="card-body p-3">
-          <div class="home-sec-title"><i data-icon="calendar"></i>接下來 7 天</div>
+          <div class="home-sec-title"><span class="hs-label"><i data-icon="calendar"></i>接下來 7 天</span></div>
           <div id="home-upcoming"></div>
         </div>
       </div>

@@ -1983,6 +1983,32 @@ body.has-bottom-nav .qa-panel {
 .hold-clear { color: var(--text-muted); border-color: #3a3a52; }
 .hold-hint { font-size: 0.78rem; color: var(--text-muted); }
 
+/* 標題那一欄（圖示＋字）自己是一個 flex 項目。不包起來的話，文字會是另一個匿名
+   flex 項目，被 space-between 推到右邊——標題就不靠左了（2026-09-23 Howard）。 */
+.home-sec-title .hs-label {
+	display: inline-flex;
+	align-items: center;
+	min-width: 0;
+}
+
+/* 標題右邊的入口鈕（例：我的自選 → 新增自選股）。跟 .hs-link 一樣是紫的「可點」，
+   但這是要按的東西，所以給它框與可按的面積（色彩語彙規則：橘留給需要注意的事）。 */
+.hs-btn {
+	flex: 0 0 auto;
+	padding: 0.28rem 0.7rem;
+	border: 1px solid rgba(139, 124, 255, 0.45);
+	border-radius: 999px;
+	background: rgba(139, 124, 255, 0.12);
+	color: var(--accent);
+	font-family: inherit;
+	font-size: 0.84rem;
+	font-weight: 600;
+	line-height: 1.3;
+	cursor: pointer;
+}
+
+.hs-btn:active { background: rgba(139, 124, 255, 0.24); }
+
 /* 連結是紫（可點）不是金：金／橘留給「需要注意」（色彩語彙規則四，2026-09-20 改） */
 .home-sec-title .hs-link,
 .hs-link {
@@ -2970,11 +2996,38 @@ body.has-bottom-nav .qa-panel {
 	border-radius: 0;
 }
 
+/* 高度：圖吃掉卡片剩下的空間，不再用固定的 72vh（2026-09-23，Howard 回報「上下拉桿不見了、
+   下方畫面看不到」）。固定 vh 加上標題列與工具列一定超過一個畫面，圖的下緣——也就是那條
+   時間軸縮放條——就被推到畫面外，還得先捲動才找得到。改成卡片撐滿高度、圖 flex 吃剩下的，
+   縮放條永遠在畫面內。真的擠不下（min-height 擋著）時 .modal-body 仍會捲。 */
+.rtl-dialog.is-kline .modal-content { height: 100%; }
+
+.rtl-dialog.is-kline .rtl-body {
+	display: flex;
+	flex-direction: column;
+}
+
+.rtl-dialog.is-kline #rtl-pane-kline {
+	display: flex;          /* 分頁切換是改 inline 的 display（""／none），這裡的值只在顯示時生效 */
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.rtl-dialog.is-kline #kline-chart {
+	flex: 1 1 auto;
+	height: auto;
+	min-height: 240px;
+}
+
 @media (max-width: 860px) {
 	/* --bs-modal-margin：.modal-dialog 的 margin 與 centered／scrollable 的高度都讀這個變數，
-	   直接寫 margin: 0 會讓高度算式少扣一邊，變數才是一致的改法 */
+	   直接寫 margin: 0 會讓高度算式少扣一邊，變數才是一致的改法。
+	   單位不能省：Bootstrap 是 calc(100% - var(--bs-modal-margin) * 2)，寫 0 會變成
+	   calc(100% - 0 * 2)——百分比減無單位數是無效的 calc，整條 height 失效退回 auto，
+	   卡片就變成內容高度、modal-body 不再受限、圖的下緣掉到畫面外（v172 就是這樣壞的）。 */
 	.rtl-dialog.is-kline {
-		--bs-modal-margin: 0;
+		--bs-modal-margin: 0px;
 		max-width: 100%;
 	}
 
