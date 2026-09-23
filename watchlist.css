@@ -2942,7 +2942,48 @@ body.has-bottom-nav .qa-panel {
 /* ── 個股字卡：三個分頁（盤中雷達／歷史訊號／看 K 線）──
    2026-09-22：K 線從獨立 modal 併進來。K 線那一頁在桌機要寬，其餘兩頁維持 560px 的閱讀寬度。 */
 .rtl-dialog { max-width: 560px; }
-.rtl-dialog.is-kline { max-width: 92vw; }
+.rtl-dialog.is-kline { max-width: 96vw; }
+
+/* 卡片的內距自己給（原本是 Bootstrap 的 p-3，是 !important 蓋不掉）：
+   K 線那一頁要把圖脫出左右內距。 */
+.rtl-body { padding: 1rem; }
+
+/* K 線滿版（Howard 2026-09-23）──
+   原本左右被吃掉的：modal-dialog 的 0.5rem 邊界（16px）、.rtl-body 的 1rem 內距（32px）、
+   圖自己的左右框線（2px），390px 的手機等於 13% 的螢幕拿去畫留白，K 棒擠在中間。
+   這一頁改成：卡片頂到螢幕邊（手機）、圖再脫開 body 的內距；標題列／工具列／提示
+   自己補回內距，所以「滿版」的只有圖，文字不會貼著螢幕邊緣。
+   其餘兩頁（盤中雷達、歷史訊號）維持 560px 的閱讀寬度不動。 */
+.rtl-dialog.is-kline .rtl-body {
+	padding-left: 0;
+	padding-right: 0;
+}
+
+.rtl-dialog.is-kline #rtl-pane-kline > :not(#kline-chart) {
+	padding-left: 0.85rem;
+	padding-right: 0.85rem;
+}
+
+.rtl-dialog.is-kline #kline-chart {
+	border-left: 0;
+	border-right: 0;
+	border-radius: 0;
+}
+
+@media (max-width: 860px) {
+	/* --bs-modal-margin：.modal-dialog 的 margin 與 centered／scrollable 的高度都讀這個變數，
+	   直接寫 margin: 0 會讓高度算式少扣一邊，變數才是一致的改法 */
+	.rtl-dialog.is-kline {
+		--bs-modal-margin: 0;
+		max-width: 100%;
+	}
+
+	.rtl-dialog.is-kline .modal-content {
+		border-left: 0;
+		border-right: 0;
+		border-radius: 0;
+	}
+}
 
 /* 個股字卡的分頁：與首頁同一種分段控制（2026-09-22 一起改），App 裡的分頁只有一種長相 */
 .rtl-tabs {

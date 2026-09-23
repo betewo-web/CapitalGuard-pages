@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="171">
+  <meta name="app-version" content="172">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=171" rel="stylesheet">
+  <link href="watchlist.css?v=172" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -852,7 +852,9 @@
         </div>
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body p-3">
+      <!-- 內距自己給（.rtl-body），不用 p-3：K 線那一頁要把圖脫出左右內距做滿版，
+           而 Bootstrap 的 p-3 是 !important，覆蓋不掉 -->
+      <div class="modal-body rtl-body">
 
         <!-- 分頁一：當日盤中雷達 -->
         <div class="rtl-pane" id="rtl-pane-radar">
@@ -8280,7 +8282,10 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   const usable = Math.max(120, chartH - legendH - (sliderBottom + sliderH + dateLabelH) - gridGap * subCount);
   const subH = Math.max(38, Math.round(usable * (hasChips ? 0.16 : 0.20)));
   const mainH = Math.max(110, usable - subH * subCount);
-  const gridBox = { left: 52, right: 18 };
+  // 左邊 52px 是價格刻度要的（四位數帶小數，如 1234.5，在 12px 字下就要 40px 以上，
+  // 再扣 ECharts 預設 8px 的標籤間距——再縮就會把高價股的數字切掉）。
+  // 右邊原本 18px 純粹是留白：關卡標籤畫在格線內（insideEndTop／Bottom），沒東西要放，收到 8px。
+  const gridBox = { left: 52, right: 8 };
   const grids = [{ ...gridBox, top: legendH, height: mainH }];
   grids.push({ ...gridBox, top: legendH + mainH + gridGap, height: subH });
   if (hasChips) grids.push({ ...gridBox, top: legendH + mainH + gridGap + subH + gridGap, height: subH });
@@ -8434,7 +8439,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
       },
     },
     legend: {
-      type: "scroll", data: legendData, top: 4, left: 46, right: 18, itemWidth: 12, itemGap: 8,
+      type: "scroll", data: legendData, top: 4, left: 46, right: 8, itemWidth: 12, itemGap: 8,
       textStyle: { fontSize: 12, color: "#dce7ff" }, pageIconSize: 11, pageTextStyle: { color: "#a6badf" },
       // 手機預設只畫 MA20／MA60：四條均線疊在 K 棒上太滿，點圖例可以再開；
       // 開過之後切週期／籌碼不重設（klineLegendSelected）
@@ -8468,7 +8473,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
         type: "slider",
         xAxisIndex: gridIndexes,
         left: 46,
-        right: 18,
+        right: 8,
         bottom: sliderBottom,
         height: sliderH,
         realtime: true,
