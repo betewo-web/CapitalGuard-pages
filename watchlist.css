@@ -3192,7 +3192,6 @@ body.has-bottom-nav .qa-panel {
 .rtl-svg text.rtl-line-label { font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
 /* 標籤被錯開時連回自己那條線的那一小段 */
 .rtl-lead { stroke-width: 1; stroke-dasharray: none; opacity: 0.75; fill: none; }
-.rtl-future { fill: rgba(146, 146, 163, 0.07); }
 .rtl-now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .rtl-svg text.rtl-now-label { fill: var(--accent); font-size: 12.5px; font-weight: 700; }
 .rtl-axis { stroke: rgba(146, 146, 163, 0.4); stroke-width: 2.5; stroke-linecap: round; }

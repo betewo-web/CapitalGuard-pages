@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="174">
+  <meta name="app-version" content="175">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=174" rel="stylesheet">
+  <link href="watchlist.css?v=175" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -6443,13 +6443,22 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   const x1 = RTL_VB_W - gutter;
 
   const n = marks.length;
+  // 「現在」那條虛線固定畫在繪圖區的最右邊（Howard 2026-09-23）。它的意思是「到這裡為止」，
+  // 以前擺在最後一顆標記右邊 RTL_NOW_GAP 處：只有一則訊號時就落在正中央，看起來像某個時間點；
+  // 訊號多的日子又反過來被最後一顆標記壓到、兩者黏在一起。
+  // 現在改成線釘在右邊、標記只鋪到 x1 - RTL_NOW_GAP，間距自然留得出來——
+  // 除非那則訊號就發生在這一分鐘，那本來就該貼著線，不必硬留空隙。
+  const nowAt = new Date();
+  const showNow = _isMarketOpenNow() && n > 0 && !opts.past;
+  const lastAtNow = showNow && fmtTime(marks[n - 1].e.at) === fmtTime(nowAt);
+  const mx1 = showNow && !lastAtNow ? x1 - RTL_NOW_GAP : x1;
   // 橫向：依發生順序等距排開，不照真實時間比例。台股訊號多半集中在開盤那半小時，
   // 照比例畫會把三四顆擠在最左邊一團（Howard：先顧閱讀體驗）；順序與各自的時間仍看得到
-  const xOf = i => x0 + rtlSlotPct(i, n) / 100 * (x1 - x0);
+  const xOf = i => x0 + rtlSlotPct(i, n) / 100 * (mx1 - x0);
   const midY = (y0 + y1) / 2;
   // 一天十則訊號時一格只剩 25 單位、圖示 34 單位——不縮就是疊在一起看不清楚。
   // 圖示跟著格子縮（有下限），縮寫的字級跟著圖示走；還是撞在一起的往上下找空位。
-  const slot = n > 1 ? (x1 - x0) * (rtlSlotPct(1, n) - rtlSlotPct(0, n)) / 100 : x1 - x0;
+  const slot = n > 1 ? (mx1 - x0) * (rtlSlotPct(1, n) - rtlSlotPct(0, n)) / 100 : mx1 - x0;
   const icon = Math.max(RTL_ICON_MIN, Math.min(RTL_ICON, slot - 4));
   // 縮寫的字級：不超過圖示的比例，也不讓最長的那個縮寫（「MACD↑」「RSI高」）寬過一格
   const maxEm = Math.max(1, ...marks.map(m => rtlTextWidth(String(m.e.abbr || ""), 1)));
@@ -6498,16 +6507,14 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
       + (show ? `<text class="rtl-tick-label" x="${x.toFixed(1)}" y="${(axisY + RTL_FONT.tick + 7).toFixed(1)}" text-anchor="middle">${text}</text>` : "");
   }).join("");
   let nowSvg = "";
-  if (_isMarketOpenNow() && n && !opts.past) {
-    // 盤中：最後一顆標記之後就是「現在」，右邊那段還沒發生。橫軸是發生順序、不是時間比例，
-    // 所以這條線只說「到這裡為止」——標籤寫「現在 11:44」，光寫一個時間沒人看得懂
-    // （Howard 2026-09-22 晶宏）。
-    const x = Math.min(x1, xOf(n - 1) + RTL_NOW_GAP);
-    const label = `現在 ${fmtTime(new Date())}`;
+  if (showNow) {
+    // 橫軸是發生順序、不是時間比例，所以這條線只說「到這裡為止」——標籤寫「現在 11:44」，
+    // 光寫一個時間沒人看得懂（Howard 2026-09-22 晶宏）。線就在繪圖區右緣（見上面 mx1），
+    // 右邊沒有「還沒發生」的那塊了，原本的 .rtl-future 灰底一併拿掉。
+    const label = `現在 ${fmtTime(nowAt)}`;
     const lw = rtlTextWidth(label, RTL_FONT.now);
-    const lx = Math.min(x1 - lw / 2, Math.max(x0 + lw / 2, x));
-    nowSvg = (x1 - x > 4 ? `<rect class="rtl-future" x="${x.toFixed(1)}" y="${y0}" width="${(x1 - x).toFixed(1)}" height="${y1 - y0}"/>` : "")
-      + `<line class="rtl-now" x1="${x.toFixed(1)}" y1="${y0 - 2}" x2="${x.toFixed(1)}" y2="${axisY}"/>`
+    const lx = Math.min(x1 - lw / 2, Math.max(x0 + lw / 2, x1));
+    nowSvg = `<line class="rtl-now" x1="${x1.toFixed(1)}" y1="${y0 - 2}" x2="${x1.toFixed(1)}" y2="${axisY}"/>`
       + `<text class="rtl-now-label" x="${lx.toFixed(1)}" y="${(y0 - 8).toFixed(1)}" text-anchor="middle">${escapeHtml(label)}</text>`;
   }
   let emptySvg = "";
@@ -6538,7 +6545,7 @@ const RTL_GUTTER_MIN = 58, RTL_GUTTER_MAX = 124;
 const RTL_AXIS_GAP = 13;    // 橫軸離繪圖區下緣
 const RTL_ICON = 34;        // 標記圖示邊長（訊號少的日子）
 const RTL_ICON_MIN = 24;    // 訊號多到一格塞不下時，圖示最小縮到這麼大
-const RTL_NOW_GAP = 32;     // 「現在」游標離最後一顆標記多遠
+const RTL_NOW_GAP = 32;     // 最後一顆標記與右緣那條「現在」虛線之間至少留這麼寬
 const RTL_MAX_LINES = 5;    // 最多幾條參考橫線
 const RTL_LINE_MERGE = 13;  // 兩條線靠得比這個近就當成同一條，只留優先序高的
 const RTL_LABEL_GAP = 15;   // 兩個標籤至少差這麼多，否則往下錯開＋接線
