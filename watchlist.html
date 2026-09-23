@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="185">
+  <meta name="app-version" content="186">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=185" rel="stylesheet">
+  <link href="watchlist.css?v=186" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -8198,57 +8198,129 @@ function aggWatchlist(raw, freq) {
   };
 }
 
-function computeWatchlistLevels(raw, ma5, ma10, ma20, ma60) {
-  const w = 5;
-  const res = [];
-  const sup = [];
-  const n = raw.length;
-  const current = n ? raw[n - 1].close : 0;
+// <cg-levels-js> 由 analysis/levels_js.py 產生，請用 sync_levels_js.py 同步
+// ── 關卡計算：analysis/levels.py 的忠實移植（單一來源 analysis/levels_js.py）──
+// raw: [{high, low, close, volume}, ...]，由舊到新。回傳與後端相同的欄位。
+function cgComputeLevels(raw) {
+  var SR_BARS = 120, N_LEVELS = 3;
+  var empty = { support: [], support_strengths: [], support_touches: [], support_ages: [],
+                resistance: [], resistance_strengths: [], resistance_touches: [], resistance_ages: [],
+                current: raw && raw.length ? raw[raw.length - 1].close : 0 };
+  if (!raw || raw.length < 25) return empty;
 
-  for (let i = w; i < n - w; i++) {
-    let h = raw[i].high;
-    let l = raw[i].low;
-    let maxH = h;
-    let minL = l;
-    for (let j = i - w; j <= i + w; j++) {
-      maxH = Math.max(maxH, raw[j].high);
-      minL = Math.min(minL, raw[j].low);
+  var d = raw.slice(Math.max(0, raw.length - SR_BARS));
+  var n = d.length;
+  var current = d[n - 1].close;
+  if (!(current > 0)) return empty;
+
+  // ATR-14：True Range 含跳空，14 根簡單平均（與 _average_true_range 一致）
+  var tr = [];
+  for (var i = 0; i < n; i++) {
+    var h = d[i].high, l = d[i].low;
+    if (i === 0) { tr.push(h - l); }
+    else {
+      var pc = d[i - 1].close;
+      tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(pc - l)));
     }
-    if (h >= maxH) res.push(h);
-    if (l <= minL) sup.push(l);
+  }
+  var atr = null;
+  if (n >= 14) {
+    var acc = 0;
+    for (var k = n - 14; k < n; k++) acc += tr[k];
+    atr = acc / 14;
+  }
+  if (!atr || !(atr > 0)) atr = current * 0.025;
+
+  var tol = Math.max(0.01, Math.min(0.05, atr / current));
+  var w = (atr / current > 0.03) ? 7 : ((atr / current > 0.015) ? 5 : 3);
+
+  // 量能倍數的分母是「**當時**的 20 日均量」（rolling(20, min_periods=10)）——
+  // 拿最後 20 日均量去標準化 100 天前的 swing，誤差中位 +51%。
+  var tailMA = 0, tailN = 0;
+  for (var t = Math.max(0, n - 20); t < n; t++) { tailMA += d[t].volume; tailN++; }
+  tailMA = tailN ? tailMA / tailN : 0;
+  var volRatio = [];
+  for (var i2 = 0; i2 < n; i2++) {
+    var sum = 0, cnt = 0;
+    for (var j = Math.max(0, i2 - 19); j <= i2; j++) { sum += d[j].volume; cnt++; }
+    var ma = (cnt >= 10) ? (sum / cnt) : tailMA;
+    volRatio.push(ma > 0 ? Math.max(0.1, d[i2].volume / ma) : 1.0);
   }
 
-  function clusterLevels(list) {
-    if (!list.length) return [];
-    const sorted = list
-      .map(v => Math.round(v * 100) / 100)
-      .sort((a, b) => a - b)
-      .filter((v, i, arr) => i === 0 || v !== arr[i - 1]);
-    const out = [];
-    let group = [sorted[0]];
-    for (let i = 1; i < sorted.length; i++) {
-      if (sorted[i] <= group[group.length - 1] * 1.025) group.push(sorted[i]);
-      else {
-        out.push(Math.round((group.reduce((a, b) => a + b, 0) / group.length) * 100) / 100);
-        group = [sorted[i]];
+  var resPts = [], supPts = [];
+  for (var i3 = w; i3 < n - w; i3++) {
+    var mx = -Infinity, mn = Infinity;
+    for (var j3 = i3 - w; j3 <= i3 + w; j3++) {
+      if (d[j3].high > mx) mx = d[j3].high;
+      if (d[j3].low < mn) mn = d[j3].low;
+    }
+    if (d[i3].high >= mx) resPts.push({ price: d[i3].high, vol: volRatio[i3], age: n - 1 - i3 });
+    if (d[i3].low <= mn) supPts.push({ price: d[i3].low, vol: volRatio[i3], age: n - 1 - i3 });
+  }
+
+  function clusterSwings(pts) {
+    if (!pts.length) return [];
+    var ordered = pts.slice().sort(function (a, b) { return a.price - b.price; });
+    var groups = [[ordered[0]]];
+    for (var i4 = 1; i4 < ordered.length; i4++) {
+      var last = groups[groups.length - 1];
+      if (ordered[i4].price / last[last.length - 1].price - 1 <= tol) last.push(ordered[i4]);
+      else groups.push([ordered[i4]]);
+    }
+    return groups.map(function (g) {
+      var p = 0, v = 0, age = Infinity;
+      for (var i5 = 0; i5 < g.length; i5++) {
+        p += g[i5].price; v += g[i5].vol;
+        if (g[i5].age < age) age = g[i5].age;
       }
-    }
-    out.push(Math.round((group.reduce((a, b) => a + b, 0) / group.length) * 100) / 100);
-    return out;
+      var avgVol = v / g.length;
+      return {
+        price: Math.round((p / g.length) * 100) / 100,
+        touches: g.length,
+        vol: avgVol,
+        age: age,
+        strength: Math.round(g.length * avgVol * 100) / 100
+      };
+    });
   }
 
+  function pick(all, keep, ascending) {
+    var f = all.filter(keep);
+    f.sort(function (a, b) { return b.strength - a.strength; });
+    f = f.slice(0, N_LEVELS);
+    f.sort(function (a, b) { return ascending ? a.price - b.price : b.price - a.price; });
+    return f;
+  }
+
+  var supSel = pick(clusterSwings(supPts), function (c) { return c.price < current * 1.02; }, false);
+  var resSel = pick(clusterSwings(resPts), function (c) { return c.price > current * 0.98; }, true);
+
+  function col(list, key) { return list.map(function (c) { return c[key]; }); }
+  return {
+    support: col(supSel, "price"),
+    support_strengths: col(supSel, "strength").map(function (s) { return Math.min(s, 5.0); }),
+    support_touches: col(supSel, "touches"),
+    support_ages: col(supSel, "age"),
+    resistance: col(resSel, "price"),
+    resistance_strengths: col(resSel, "strength").map(function (s) { return Math.min(s, 5.0); }),
+    resistance_touches: col(resSel, "touches"),
+    resistance_ages: col(resSel, "age"),
+    current: Math.round(current * 100) / 100
+  };
+}// </cg-levels-js>
+
+// 自選／K 線備援的關卡：一律走上面那份與後端逐字對應的實作，另外補均線。
+// 正常路徑讀的是後端算好的 intraday_state.levels，這裡只有在那份缺席時才會用到。
+function computeWatchlistLevels(raw, ma5, ma10, ma20, ma60) {
+  const lv = cgComputeLevels(raw);
+  const n = raw.length;
   const ma = {};
   if (ma5[n - 1]) ma.MA5 = ma5[n - 1];
   if (ma10[n - 1]) ma.MA10 = ma10[n - 1];
   if (ma20[n - 1]) ma.MA20 = ma20[n - 1];
   if (ma60[n - 1]) ma.MA60 = ma60[n - 1];
-
-  return {
-    support: clusterLevels(sup).filter(v => v < current * 1.02).reverse().slice(0, 3),
-    resistance: clusterLevels(res).filter(v => v > current * 0.98).slice(0, 3),
-    ma,
-    current: Math.round(current * 100) / 100,
-  };
+  lv.ma = ma;
+  return lv;
 }
 
 // 均線顏色的單一來源：圖表 series、圖例、tooltip 圓點、表頭的 MA 數字都讀這裡
