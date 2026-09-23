@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="181">
+  <meta name="app-version" content="182">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=181" rel="stylesheet">
+  <link href="watchlist.css?v=182" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -318,19 +318,26 @@
         <span class="view-sub" id="scores-date"></span>
       </div>
       <div class="disclaimer-note">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
-      <!-- 2026-09-23（Howard）：「我的自選」移到最右邊，另外兩顆改名。
-           預設仍是「我的自選」（進分頁、換分頁回來都是它），只是位置在右邊。 -->
+      <!-- 2026-09-23（Howard）：「我的自選」移到最右邊、另外兩顆改名；
+           同日再改：預設進來是「統計結果」（原本是我的自選）。 -->
       <div class="chip-row" id="scores-filters">
-        <button class="filter-chip" data-f="screen" onclick="setScoresFilter('screen')">統計結果</button>
+        <button class="filter-chip active" data-f="screen" onclick="setScoresFilter('screen')">統計結果</button>
         <button class="filter-chip" data-f="picks" onclick="setScoresFilter('picks')">篩選示範</button>
-        <button class="filter-chip active" data-f="mine" onclick="setScoresFilter('mine')">我的自選</button>
+        <button class="filter-chip" data-f="mine" onclick="setScoresFilter('mine')">我的自選</button>
       </div>
-      <!-- 統計結果：排序與條件全由使用者設定，前端只做排序／過濾，不計算分數（COMPLIANCE.md） -->
+      <!-- 統計結果：排序與條件全由使用者設定，前端只做排序／過濾，不計算分數（COMPLIANCE.md）。
+           2026-09-23（Howard）：四個控制項預設收起來，標題那行仍寫出目前套用的條件，
+           收著也知道下面那份清單是怎麼篩出來的。免責那句留在摺疊外面，永遠看得到。 -->
       <div id="scores-screen-tools" class="screen-tools" style="display:none">
-        <label>排序<select id="scr-sort" onchange="updateScreen()"></select></label>
-        <label>產業<select id="scr-industry" onchange="updateScreen()"><option value="">全部</option></select></label>
-        <label>總分 ≥<input id="scr-min" type="number" inputmode="numeric" min="0" max="100" step="5" onchange="updateScreen()"></label>
-        <label>筆數<select id="scr-limit" onchange="updateScreen()"><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+        <details class="screen-fold">
+          <summary class="screen-fold-head">篩選條件設定<span class="screen-fold-sum" id="scr-summary"></span></summary>
+          <div class="screen-fold-body">
+            <label>排序<select id="scr-sort" onchange="updateScreen()"></select></label>
+            <label>產業<select id="scr-industry" onchange="updateScreen()"><option value="">全部</option></select></label>
+            <label>總分 ≥<input id="scr-min" type="number" inputmode="numeric" min="0" max="100" step="5" onchange="updateScreen()"></label>
+            <label>筆數<select id="scr-limit" onchange="updateScreen()"><option value="20">20</option><option value="50" selected>50</option><option value="100">100</option></select></label>
+          </div>
+        </details>
         <div class="screen-note">依你設定的條件排序與過濾，不是推薦名單。</div>
       </div>
       <div class="card panel-card">
@@ -1217,7 +1224,7 @@ let intradaySupportsLevels = true;   // migrate_intraday_levels.sql 未執行時
 let intradayOptionalCols = ["levels", "quote_at", "signals_today"];
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
-let scoresFilter = "mine";      // mine / screen / picks
+let scoresFilter = "screen";    // screen / picks / mine（2026-09-23 預設改成統計結果）
 // 首頁「只列持股」撥片：打開只留有部位的自選股。記在本機——換分頁、重開 App 都維持
 // （2026-09-23 Howard：這個不要跟著分頁回預設，統計／通知那兩排篩選籤才要）
 const HOLDINGS_ONLY_KEY = "cg-home-holdings-only";
@@ -3484,7 +3491,7 @@ function switchTab(tab, silent = false) {
   // 換到別的分頁再回來，篩選籤回到預設（Howard，2026-09-23）：統計＝我的自選、通知＝全部。
   // 上次留在「統計結果」或「未讀」，隔一陣子回來會以為那就是全部資料。只改變數與籤的
   // 外觀，畫面交給下面的 renderCurrentTab()，免得同一次切換畫兩遍。
-  if (changed && tab === "scores") { scoresFilter = "mine"; syncFilterChips("scores-filters", "mine"); }
+  if (changed && tab === "scores") { scoresFilter = "screen"; syncFilterChips("scores-filters", "screen"); }
   if (changed && tab === "inbox") { inboxFilter = "all"; syncFilterChips("inbox-filters", "all"); }
   // 首頁的「只列持股」撥片刻意不在這裡重設：Howard 2026-09-23 要它記住，換分頁、
   // 重開 App 都維持（存在 localStorage，見 HOLDINGS_ONLY_KEY）
@@ -5568,7 +5575,7 @@ const SCREEN_SORTS = {
   fundamental_change: "基本面變化", technical_change: "技術量能變化",
 };
 const SCREEN_KEY = "cg-screen";
-const SCREEN_DEFAULT = { sort: "total_score", industry: "", min: 0, limit: 20 };
+const SCREEN_DEFAULT = { sort: "total_score", industry: "", min: 0, limit: 50 };
 let screenState = loadScreenState();
 let _screenIndustriesReady = false;
 
@@ -5608,6 +5615,16 @@ function syncScreenTools(scores) {
   if (minEl) minEl.value = screenState.min;
   const limEl = document.getElementById("scr-limit");
   if (limEl) limEl.value = String(screenState.limit);
+  // 收合狀態下也要看得出這份清單是怎麼篩出來的
+  const sumEl = document.getElementById("scr-summary");
+  if (sumEl) {
+    sumEl.textContent = [
+      SCREEN_SORTS[screenState.sort] || screenState.sort,
+      screenState.industry || "全部產業",
+      screenState.min > 0 ? `總分 ≥ ${screenState.min}` : null,
+      `${screenState.limit} 筆`,
+    ].filter(Boolean).join("・");
+  }
 }
 
 function updateScreen() {
