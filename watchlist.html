@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="180">
+  <meta name="app-version" content="181">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=180" rel="stylesheet">
+  <link href="watchlist.css?v=181" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -1125,13 +1125,13 @@ const BILLING_CONTACT_MAILTO = "mailto:howard.chen@betewo.com?subject=CapitalGua
 // 同意勾選旁的條款連結：官網的服務條款（五、7 日解除權）與退款政策
 const BILLING_TERMS_URL = "https://betewo-web.github.io/betewo-site/terms.html#t5";
 const BILLING_REFUND_URL = "https://betewo-web.github.io/betewo-site/pricing.html#refund";
-// AI 事件解讀／AI 問答尚未完成：方案表照列（專業版功能），但標「開發中」
+// AI 事件解讀／AI 問答尚未完成：方案表照列（旗艦版功能），但標「開發中」
 const AI_FEATURES_LIVE = false;
-// 官網（分享與深連結的另一端）。專業版在 AI 上線前不開放訂閱（Howard 2026-09-21）：
+// 官網（分享與深連結的另一端）。旗艦版在 AI 上線前不開放訂閱（Howard 2026-09-21）：
 // plans.is_public=false 讓卡片從面板消失，這一句告訴使用者它去哪了
 const SITE_BASE_URL = "https://betewo-web.github.io/betewo-site/";
-const PLAN_COMING_SOON_NOTE = "專業版（AI 資料白話）開發中，上線後才開放訂閱。";
-const PLAN_NAME_FALLBACK = { free: "免費版", basic: "基本版", pro: "專業版" };   // 付款紀錄裡非公開方案的名字
+const PLAN_COMING_SOON_NOTE = "旗艦版（AI 資料白話）開發中，上線後才開放訂閱。";
+const PLAN_NAME_FALLBACK = { free: "免費版", basic: "專業版", pro: "旗艦版" };   // 付款紀錄裡非公開方案的名字
 let planState = {
   ready: false,          // false = plans 表不存在或載入失敗 → 前端不做任何限制
   plan: null,            // plans 列（code / name / watch_limit / rule_limit / ai_*）
@@ -1983,7 +1983,7 @@ function renderPlanModal(focus) {
     ? planState.plans.find(x => x.code === _planFocusCode) || null : null;
   const pitch = target && target.price_twd > 0 ? planPitch(target) : "";
   let focusHint = {
-    ai:          "🤖 AI 事件解讀與 AI 問答是專業版功能。",
+    ai:          "🤖 AI 事件解讀與 AI 問答是旗艦版功能。",
     ai_limit:    "🤖 今日 AI 使用次數已達上限，明天會重置。",
     watchlist:   "⭐ 自選股已達目前方案上限，升級即可加入更多。",
     alert_rules: "📐 進階訊號已達目前方案上限，升級即可新增更多。",
@@ -2037,7 +2037,7 @@ function renderPlanModal(focus) {
       </tbody></table>`
     : `<div class="text-muted small">尚無付款紀錄</div>`;
 
-  // 公開方案裡沒有含 AI 的＝專業版收起來了：說一句它去哪了，別讓人以為功能消失
+  // 公開方案裡沒有含 AI 的＝旗艦版收起來了：說一句它去哪了，別讓人以為功能消失
   const comingSoon = planState.plans.some(x => x.ai_enabled) ? "" : `<div class="plan-coming-soon">${PLAN_COMING_SOON_NOTE}</div>`;
 
   body.innerHTML = `
