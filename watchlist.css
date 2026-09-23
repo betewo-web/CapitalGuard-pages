@@ -1460,6 +1460,80 @@ body.has-bottom-nav .qa-panel {
 	touch-action: pan-y;
 }
 
+/* ── 長按數值列（2026-09-23 Howard）──────────────────────────────
+   以前長按跳一個浮動小方塊，剛好蓋住正在看的那幾根 K 棒，而且位置每次都不一樣。
+   改成圖最上面一條固定的橫排：位置固定、只有一列、放開長按就整條消失。
+   絕對定位疊在圖上（壓過 ECharts 的圖例列），所以出現與消失都不會改變版面。 */
+.kline-chart-wrap {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.kline-readout {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 3;
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	overflow: hidden;
+	padding: 0.34rem 0.5rem;
+	border-bottom: 1px solid rgba(121, 157, 255, 0.28);
+	background: rgba(9, 16, 31, 0.96);
+	color: var(--text-0);
+	font-size: 0.86rem;                   /* 原本那個浮動方塊是 13px，這條不能比它小 */
+	font-variant-numeric: tabular-nums;   /* 逐根滑動時數字不要左右跳動 */
+	line-height: 1.25;
+	white-space: nowrap;
+	pointer-events: none;                 /* 長按中手指在圖上，這條不能吃掉觸控 */
+}
+
+.kline-readout[hidden] { display: none; }
+
+.kline-readout .kr-date {
+	font-weight: 700;
+	color: var(--text-1);
+}
+
+.kline-readout .kr-k {
+	color: var(--text-muted);
+	margin-right: 0.12rem;
+}
+
+.kline-readout .kr-i {
+	display: inline-flex;
+	align-items: baseline;
+}
+
+.kline-readout .kr-ma {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.kline-readout .kr-v { font-weight: 600; }
+.kline-readout .kr-up { color: #ef5350; }     /* 紅漲綠跌，與 K 棒同一組顏色 */
+.kline-readout .kr-down { color: #26a69a; }
+
+.kline-readout .kr-ma-dot {
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	margin-right: 0.2rem;
+	border-radius: 50%;
+	vertical-align: middle;
+}
+
+/* 窄螢幕（390px 這一級）放得下的就是日期＋開高低收＋量，均線整組收起來——
+   切一半的數字比沒有更糟，而且均線的值在表頭那顆 MA 籤本來就有 */
+@media (max-width: 520px) {
+	.kline-readout .kr-ma { display: none; }
+}
+
 .kline-loading,
 .kline-empty {
 	height: 100%;
@@ -2985,7 +3059,7 @@ body.has-bottom-nav .qa-panel {
 	padding-right: 0;
 }
 
-.rtl-dialog.is-kline #rtl-pane-kline > :not(#kline-chart) {
+.rtl-dialog.is-kline #rtl-pane-kline > :not(.kline-chart-wrap) {
 	padding-left: 0.85rem;
 	padding-right: 0.85rem;
 }
@@ -3014,10 +3088,13 @@ body.has-bottom-nav .qa-panel {
 	min-height: 0;
 }
 
-.rtl-dialog.is-kline #kline-chart {
+.rtl-dialog.is-kline .kline-chart-wrap {
 	flex: 1 1 auto;
-	height: auto;
 	min-height: 240px;
+}
+
+.rtl-dialog.is-kline #kline-chart {
+	height: 100%;
 }
 
 @media (max-width: 860px) {

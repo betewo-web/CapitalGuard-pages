@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="173">
+  <meta name="app-version" content="174">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=173" rel="stylesheet">
+  <link href="watchlist.css?v=174" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -909,7 +909,13 @@
         </div>
         <!-- 圖下方以前還有壓力／支撐區間兩張卡片（完整關卡清單），2026-09-14 拿掉：圖上已畫最近一支撐一壓力，
              空間留給 K 線本身（#kline-chart 的高度同時加大） -->
-        <div id="kline-chart" style="width:100%;"></div>
+        <!-- 長按時的數值改寫進圖上方這一條固定的橫排，不再用會蓋住 K 棒的浮動方塊
+             （2026-09-23 Howard）。放在 wrap 裡用絕對定位：進出畫面不改變版面高度，
+             ECharts 就不必為了一次長按重排。放開長按整條消失。 -->
+        <div class="kline-chart-wrap">
+          <div id="kline-chart" style="width:100%;"></div>
+          <div class="kline-readout" id="kline-readout" hidden></div>
+        </div>
         <div class="kline-hint" aria-hidden="true">長按顯示數值，按住左右滑動可逐根查看；拖曳平移、雙指縮放</div>
         </div>
 
@@ -7818,6 +7824,7 @@ function renderKLineChart(sid, period) {
   const el = document.getElementById("kline-chart");
   klineMobileTooltipLocked = false;
   clearKLineLongPressTimer();
+  hideKLineReadout();          // 換股票／週期／籌碼＝上一根的數字不再成立
   // 同一個實例換 option 就好：每次切週期／籌碼都 dispose 再 init 會整張閃一下、觸控監聽也要重綁。
   // 只有實例不存在、已 dispose、或容器被「載入中」placeholder 覆蓋過（canvas 不見了）才重建。
   if (!klineChart || klineChart.isDisposed() || klineChart.getDom() !== el || !el.querySelector("canvas")) {
@@ -7883,7 +7890,57 @@ function clearKLineLongPressTimer() {
   }
 }
 
+// 長按數值列（2026-09-23 Howard）：以前長按跳一個浮動小方塊，剛好蓋住正在看的那幾根 K 棒，
+// 位置還每次都不一樣。改成把同一份數字寫進圖最上面那條固定的橫排。
+// 資料就是 tooltip 的 params，所以值與以前完全一致，只是換個地方呈現。
+function fillKLineReadout(params) {
+  const el = document.getElementById("kline-readout");
+  if (!el) return;
+  const cell = (label, value, cls) =>
+    `<span class="kr-i"><span class="kr-k">${label}</span>` +
+    `<span class="kr-v${cls ? ` ${cls}` : ""}">${escapeHtml(String(value))}</span></span>`;
+  const out = [`<span class="kr-date">${escapeHtml(String(params[0].axisValue ?? ""))}</span>`];
+
+  const k = params.find(p => p.seriesName === "K線" && Array.isArray(p.data));
+  if (k) {
+    // candlestick 的 data 是 [index, 開, 收, 低, 高]
+    const [, open, close, low, high] = k.data;
+    out.push(cell("開", open), cell("高", high), cell("低", low),
+             cell("收", close, Number(close) >= Number(open) ? "kr-up" : "kr-down"));
+  }
+
+  // 成交量在另一個 grid，trigger: "axis" 的 params 收不到它（以前那個浮動方塊也一樣，
+  // 手機上從來沒顯示過量）。改用 dataIndex 直接回原始資料拿：ohlcv = [開, 高, 低, 收, 量]
+  const row = klineLastBuildArgs?.[0]?.ohlcv?.[params[0].dataIndex];
+  if (row && row[4] !== null && row[4] !== undefined) {
+    // 一萬張以上用「萬」，與成交量副圖的 y 軸同一種寫法；寫成 25,537張 這一整排在 390px 會被切掉
+    const lots = Math.round(row[4] / 1000);
+    out.push(cell("量", lots >= 10000 ? `${(lots / 10000).toFixed(1)}萬張` : `${lots.toLocaleString()}張`));
+  }
+
+  // 均線在 520px 以下由 CSS 收起來（見 .kr-ma）：切一半的數字比沒有更糟，
+  // 而且表頭那顆 MA 籤本來就有均線的值
+  const mas = params.filter(p => /^MA\d+$/.test(p.seriesName) && p.data !== null && p.data !== undefined);
+  if (mas.length) {
+    out.push(`<span class="kr-ma">${mas.map(p =>
+      `<span class="kr-i"><i class="kr-ma-dot" style="background:${KLINE_MA_STYLE[p.seriesName]?.color || p.color};"></i>` +
+      `<span class="kr-k">${p.seriesName}</span><span class="kr-v">${escapeHtml(String(p.data))}</span></span>`
+    ).join("")}</span>`);
+  }
+
+  el.innerHTML = out.join("");
+  el.hidden = false;
+}
+
+function hideKLineReadout() {
+  const el = document.getElementById("kline-readout");
+  if (!el) return;
+  el.hidden = true;
+  el.innerHTML = "";
+}
+
 function hideKLineMobileTooltip() {
+  hideKLineReadout();
   if (!klineChart) return;
   klineChart.dispatchAction({ type: "hideTip" });
   klineChart.dispatchAction({ type: "updateAxisPointer", currTrigger: "leave" });
@@ -8427,8 +8484,15 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
 
         return [left, top];
       },
+      // 手機的數值改寫進圖上方那條固定的橫排（.kline-readout），方塊本身不畫。
+      // tooltip 不能整個關掉——十字線是 axisPointer，跟著 tooltip 的 showTip 走
+      backgroundColor: mobile ? "transparent" : undefined,
+      borderWidth: mobile ? 0 : undefined,
+      padding: mobile ? 0 : undefined,
+      extraCssText: mobile ? "box-shadow:none;" : undefined,
       formatter: params => {
         if (!params?.length) return "";
+        if (mobile) { fillKLineReadout(params); return ""; }
         let h = `<div style="font-size:13px;padding:5px;"><b>${params[0].axisValue}</b><br/>`;
         params.forEach(p => {
           if (p.seriesName === "K線" && Array.isArray(p.data)) {
@@ -8517,6 +8581,7 @@ document.getElementById("radarTimelineModal").addEventListener("hidden.bs.modal"
     klineChart = null;
   }
   clearKLineLongPressTimer();
+  hideKLineReadout();
   klineMobileTooltipLocked = false;
   klineTouchStartPoint = null;
   klineLastBuildArgs = null;
