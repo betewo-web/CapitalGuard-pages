@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="179">
+  <meta name="app-version" content="180">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=179" rel="stylesheet">
+  <link href="watchlist.css?v=180" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -318,12 +318,14 @@
         <span class="view-sub" id="scores-date"></span>
       </div>
       <div class="disclaimer-note">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
+      <!-- 2026-09-23（Howard）：「我的自選」移到最右邊，另外兩顆改名。
+           預設仍是「我的自選」（進分頁、換分頁回來都是它），只是位置在右邊。 -->
       <div class="chip-row" id="scores-filters">
+        <button class="filter-chip" data-f="screen" onclick="setScoresFilter('screen')">統計結果</button>
+        <button class="filter-chip" data-f="picks" onclick="setScoresFilter('picks')">篩選示範</button>
         <button class="filter-chip active" data-f="mine" onclick="setScoresFilter('mine')">我的自選</button>
-        <button class="filter-chip" data-f="screen" onclick="setScoresFilter('screen')">自訂篩選</button>
-        <button class="filter-chip" data-f="picks" onclick="setScoresFilter('picks')">條件範本</button>
       </div>
-      <!-- 自訂篩選：排序與條件全由使用者設定，前端只做排序／過濾，不計算分數（COMPLIANCE.md） -->
+      <!-- 統計結果：排序與條件全由使用者設定，前端只做排序／過濾，不計算分數（COMPLIANCE.md） -->
       <div id="scores-screen-tools" class="screen-tools" style="display:none">
         <label>排序<select id="scr-sort" onchange="updateScreen()"></select></label>
         <label>產業<select id="scr-industry" onchange="updateScreen()"><option value="">全部</option></select></label>
@@ -3480,7 +3482,7 @@ function switchTab(tab, silent = false) {
   });
   document.querySelectorAll(".home-tab").forEach(b => b.classList.toggle("is-active", b.dataset.tab === tab));
   // 換到別的分頁再回來，篩選籤回到預設（Howard，2026-09-23）：統計＝我的自選、通知＝全部。
-  // 上次留在「自訂篩選」或「未讀」，隔一陣子回來會以為那就是全部資料。只改變數與籤的
+  // 上次留在「統計結果」或「未讀」，隔一陣子回來會以為那就是全部資料。只改變數與籤的
   // 外觀，畫面交給下面的 renderCurrentTab()，免得同一次切換畫兩遍。
   if (changed && tab === "scores") { scoresFilter = "mine"; syncFilterChips("scores-filters", "mine"); }
   if (changed && tab === "inbox") { inboxFilter = "all"; syncFilterChips("inbox-filters", "all"); }
@@ -5532,8 +5534,8 @@ function holdingEntries() {
 // 資料全在 sharedReportData（登入後載入的每日報告 JSON）：
 //   investment_scores[sid] → total_score / score_change / fundamental_score_v2 /
 //                            technical_volume_score / fundamental_change / technical_change / industry_category
-//   strategies[].rows → 兩個條件範本的前 N 檔
-// 沒有 S–E 字母評級、沒有後端排行榜：「自訂篩選」由使用者自己選排序欄位與條件，
+//   strategies[].rows → 兩組「篩選示範」的前 N 檔
+// 沒有 S–E 字母評級、沒有後端排行榜：「統計結果」由使用者自己選排序欄位與條件，
 // 前端只做排序與過濾，不計算分數（COMPLIANCE.md）。
 // 這頁只放摘要與「跟我有關的」；完整報告仍是 report.html，避免同一份報告渲染兩次而漂移。
 function setScoresFilter(f) {
@@ -5559,7 +5561,7 @@ function syncHomeHoldingsSwitch() {
   el.setAttribute("aria-checked", homeHoldingsOnly ? "true" : "false");
 }
 
-// ── 自訂篩選（使用者條件，存在本機） ──
+// ── 統計結果（使用者自己設的排序與條件，存在本機） ──
 const SCREEN_SORTS = {
   total_score: "總分", score_change: "總分變化",
   fundamental_score_v2: "基本面", technical_volume_score: "技術量能",
@@ -5701,9 +5703,9 @@ function renderScores() {
         ${(st.rows || []).slice(0, 10).map(r => {
           const sid = String(r.stock_id || "").trim();
           const s = scores[sid] || { stock_name: r.stock_name, industry_category: r.industry_category };
-          return scoreRowHtml(sid, s, { note: `範本分 ${Number(r.composite_score || 0).toFixed(0)}`, allowAdd: true });
+          return scoreRowHtml(sid, s, { note: `篩選分 ${Number(r.composite_score || 0).toFixed(0)}`, allowAdd: true });
         }).join("")}`).join("")
-      : `<div class="view-empty">本期沒有符合範本條件的股票</div>`;
+      : `<div class="view-empty">本期沒有符合這組示範條件的股票</div>`;
   }
   listEl.innerHTML = html;
 }
