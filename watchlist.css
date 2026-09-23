@@ -2212,7 +2212,7 @@ body.has-bottom-nav .page-shell {
 .home-example-tag { font-size: 0.62rem; font-weight: 700; color: var(--accent); border: 1px solid rgba(139, 124, 255, 0.6); border-radius: 6px; padding: 2px 6px; line-height: 1; white-space: nowrap; }
 .home-example-note { font-size: 0.74rem; color: var(--text-1); line-height: 1.5; }
 .rtl-example .home-example-tag { margin-right: 0.35rem; }
-.rtl-example { margin-top: 0.8rem; padding: 0.7rem 0.8rem; border: 1px dashed rgba(139, 124, 255, 0.55); border-radius: 12px; font-size: 0.88rem; color: var(--text-1); line-height: 1.6; background: rgba(139, 124, 255, 0.06); }
+.rtl-example { margin-top: 0.8rem; padding: 0.7rem 0.8rem; border: 1px dashed rgba(139, 124, 255, 0.55); border-radius: 12px; font-size: 14.08px; color: var(--text-1); line-height: 1.6; background: rgba(139, 124, 255, 0.06); }
 
 .home-feed {
 	display: flex;
@@ -3224,25 +3224,30 @@ body.has-bottom-nav .page-shell {
 .rtl-svg text.rtl-abbr { fill: var(--text-0); font-size: 12.5px; font-weight: 700; }
 .rtl-svg .rtl-src-auto text.rtl-abbr { fill: var(--text-1); font-weight: 600; }
 .rtl-svg text.rtl-empty { font-size: 14px; }
-.rtl-story-head { font-size: 0.9rem; color: var(--text-muted); margin: 16px 0 8px; font-weight: 600; }
+/* ── 盤中雷達那一頁的字級刻意用 px，不跟著「設定」頁的文字大小放大（Howard 2026-09-24）──
+   上面的時間軸是 SVG，字級寫在 viewBox 座標裡（px），只跟著圖的寬度縮放、不理根字級。
+   下面的故事列若跟著放大，圖上的字與清單的字就對不起來，整頁也會被撐得很長。
+   這裡的數值是 v183 的 rem × 16 原樣換算，外觀完全沒變。
+   卡片的分頁列（.rtl-tab）、副標（.rtl-sub）與「歷史訊號」那一頁仍用 rem，會跟著放大。 */
+.rtl-story-head { font-size: 14.4px; color: var(--text-muted); margin: 16px 0 8px; font-weight: 600; }
 .rtl-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 6px; border-radius: 12px; border-left: 3px solid transparent; }
 .rtl-item.is-link { cursor: pointer; }
 .rtl-item.is-link:hover { background: var(--surface); }
 .rtl-item[data-sev="orange"] { border-left-color: var(--sig-orange); }
 .rtl-item[data-sev="blue"]   { border-left-color: var(--sig-blue); }
 .rtl-item.is-target { animation: inbox-target-flash 3s ease-out; }
-.rtl-time { width: 46px; flex: 0 0 auto; font-size: 0.88rem; color: var(--text-1); font-variant-numeric: tabular-nums; padding-top: 9px; font-weight: 600; }
+.rtl-time { width: 46px; flex: 0 0 auto; font-size: 14.08px; color: var(--text-1); font-variant-numeric: tabular-nums; padding-top: 9px; font-weight: 600; }
 .rtl-item > .sig-ico { flex: 0 0 auto; width: 38px; height: 38px; }
 .rtl-text { flex: 1 1 auto; min-width: 0; padding-top: 2px; }
-.rtl-title { font-weight: 700; font-size: 1rem; }
-.rtl-lvl { font-weight: 500; font-size: 0.88rem; color: var(--text-1); margin-left: 6px; }
-.rtl-desc { font-size: 0.86rem; color: var(--text-1); margin-top: 3px; line-height: 1.5; white-space: pre-wrap; }
-.rtl-src { display: inline-block; margin-top: 5px; font-size: 0.74rem; color: var(--text-muted); padding: 2px 7px; border-radius: 5px; background: rgba(146, 146, 163, 0.14); }
+.rtl-title { font-weight: 700; font-size: 16px; }
+.rtl-lvl { font-weight: 500; font-size: 14.08px; color: var(--text-1); margin-left: 6px; }
+.rtl-desc { font-size: 13.76px; color: var(--text-1); margin-top: 3px; line-height: 1.5; white-space: pre-wrap; }
+.rtl-src { display: inline-block; margin-top: 5px; font-size: 11.84px; color: var(--text-muted); padding: 2px 7px; border-radius: 5px; background: rgba(146, 146, 163, 0.14); }
 .rtl-src-rule { border: 1px dashed rgba(146, 146, 163, 0.6); }
 .rtl-src-auto { background: transparent; border: 1px solid rgba(146, 146, 163, 0.35); }
-.rtl-divider { font-size: 0.82rem; color: var(--text-muted); margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
-.rtl-none { padding: 14px 6px; font-size: 0.95rem; color: var(--text-1); }
-.rtl-none span { font-size: 0.84rem; color: var(--text-muted); }
+.rtl-divider { font-size: 13.12px; color: var(--text-muted); margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+.rtl-none { padding: 14px 6px; font-size: 15.2px; color: var(--text-1); }
+.rtl-none span { font-size: 13.44px; color: var(--text-muted); }
 
 /* ── 通知詳情「為什麼通知你」 ── */
 .why-box {
