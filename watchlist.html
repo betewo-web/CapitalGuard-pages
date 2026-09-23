@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="176">
+  <meta name="app-version" content="177">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=176" rel="stylesheet">
+  <link href="watchlist.css?v=177" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -269,14 +269,14 @@
         <div class="home-sec-title">
           <span class="hs-head">
             <span class="hs-label"><i data-icon="star"></i>我的自選</span>
-            <!-- 打開＝只看持股，關閉＝全部自選股。與設定頁的通知開關同一種撥片（App 裡的開關只有一種長相） -->
-            <label class="hs-switch" title="只顯示有持股的自選股">
-              <span class="toggle-wrap form-check form-switch mb-0">
-                <input id="home-holdings-only" class="form-check-input" type="checkbox"
-                       onchange="setHomeHoldingsOnly(this.checked)">
-              </span>
-              <span class="hs-switch-text">持股</span>
-            </label>
+            <!-- 打開＝只看持股，關閉＝全部自選股。撥片裡直接寫「開／關」（2026-09-23 Howard），
+                 所以沒有沿用設定頁那顆 Bootstrap 的 form-switch——那一顆塞不進文字 -->
+            <button type="button" class="hs-switch" id="home-holdings-only" role="switch"
+                    aria-checked="false" title="只顯示有持股的自選股"
+                    onclick="setHomeHoldingsOnly(!homeHoldingsOnly)">
+              <span class="hs-switch-label">只列持股</span>
+              <span class="hs-switch-track"><span class="hs-switch-state"></span><span class="hs-switch-knob"></span></span>
+            </button>
           </span>
           <button type="button" class="hs-btn" onclick="switchTab('watch')">新增自選股</button>
         </div>
@@ -1212,7 +1212,12 @@ let intradayOptionalCols = ["levels", "quote_at", "signals_today"];
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
 let scoresFilter = "mine";      // mine / screen / picks
-let homeHoldingsOnly = false;   // 首頁「持股」撥片：打開只留有部位的自選股
+// 首頁「只列持股」撥片：打開只留有部位的自選股。記在本機——換分頁、重開 App 都維持
+// （2026-09-23 Howard：這個不要跟著分頁回預設，統計／通知那兩排篩選籤才要）
+const HOLDINGS_ONLY_KEY = "cg-home-holdings-only";
+let homeHoldingsOnly = (() => {
+  try { return localStorage.getItem(HOLDINGS_ONLY_KEY) === "1"; } catch { return false; }
+})();
 
 // ── 事件彙整功能（Feature 2）────────────────────────────────────
 // 查詢抓「近 90 天 + 未來」的事件窗口；「今日事件」只呈現
@@ -3612,12 +3617,8 @@ function switchTab(tab, silent = false) {
   // 外觀，畫面交給下面的 renderCurrentTab()，免得同一次切換畫兩遍。
   if (changed && tab === "scores") { scoresFilter = "mine"; syncFilterChips("scores-filters", "mine"); }
   if (changed && tab === "inbox") { inboxFilter = "all"; syncFilterChips("inbox-filters", "all"); }
-  // 首頁的「持股」撥片同一個規則：離開再回來就是預設（關閉＝全部）
-  if (changed && tab === "home") {
-    homeHoldingsOnly = false;
-    const sw = document.getElementById("home-holdings-only");
-    if (sw) sw.checked = false;
-  }
+  // 首頁的「只列持股」撥片刻意不在這裡重設：Howard 2026-09-23 要它記住，換分頁、
+  // 重開 App 都維持（存在 localStorage，見 HOLDINGS_ONLY_KEY）
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
   // 盤後頁要收盤價：主機沒寫到收盤時向 FinMind 補一次（那支自己限流），回來重畫
@@ -5397,7 +5398,8 @@ function renderHome() {
   // 頁面層級再數一次「幾檔有訊號」只是重複；狀態（盤中／收盤、資料時間、自選檔數）留在上面那一行。
 
   // 自選方塊：一檔一列（2026-09-22 Howard）。
-  // 「持股」撥片打開就只留有部位的那幾檔（2026-09-23 Howard）——排序與內容完全一樣，只是少幾列。
+  // 「只列持股」撥片打開就只留有部位的那幾檔（2026-09-23 Howard）——排序與內容完全一樣，只是少幾列。
+  syncHomeHoldingsSwitch();
   const held = homeHoldingsOnly ? holdingBySid() : null;
   const shown = held ? rows.filter(r => held.has(r.sid)) : rows;
   const listEl = document.getElementById("home-watchlist");
@@ -5674,13 +5676,21 @@ function setScoresFilter(f) {
   renderScores();
 }
 
-// 首頁的「持股」撥片（2026-09-23 Howard）：打開只顯示有部位的自選股，關閉顯示全部
+// 首頁的「只列持股」撥片（2026-09-23 Howard）：打開只顯示有部位的自選股，關閉顯示全部
 function setHomeHoldingsOnly(on) {
   homeHoldingsOnly = !!on;
-  const el = document.getElementById("home-holdings-only");
-  if (el) el.checked = homeHoldingsOnly;
+  try { localStorage.setItem(HOLDINGS_ONLY_KEY, homeHoldingsOnly ? "1" : "0"); } catch {}
+  syncHomeHoldingsSwitch();
   trackActivity("home_holdings_filter", { on: homeHoldingsOnly ? 1 : 0 });
   renderHome();
+}
+
+// 撥片的外觀跟著變數走。renderHome 每次都叫一次，開 App 時記住的狀態才會顯示在撥片上
+function syncHomeHoldingsSwitch() {
+  const el = document.getElementById("home-holdings-only");
+  if (!el) return;
+  el.classList.toggle("is-on", homeHoldingsOnly);
+  el.setAttribute("aria-checked", homeHoldingsOnly ? "true" : "false");
 }
 
 // ── 自訂篩選（使用者條件，存在本機） ──

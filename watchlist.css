@@ -1882,6 +1882,8 @@ body.has-bottom-nav .qa-panel {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	flex-wrap: wrap;          /* 窄螢幕：標題＋撥片＋入口鈕擠不下時讓入口鈕換行，不要溢出 */
+	row-gap: 0.4rem;
 	font-size: 1.05rem;
 	font-weight: 700;
 	color: var(--text-0);
@@ -2073,39 +2075,76 @@ body.has-bottom-nav .qa-panel {
 	min-width: 0;
 }
 
-/* 「持股」撥片：撥片本體沿用設定頁那一種（.toggle-wrap.form-switch），
-   只是小一號——這裡是標題列不是設定列 */
+/* 「只列持股」撥片（2026-09-23 Howard 三版）：撥片裡直接寫「開／關」，字在撥片沒佔到的那半邊
+   ——關＝撥片在左、字在右；開＝撥片在右、字在左。設定頁那顆 Bootstrap form-switch 塞不進文字，
+   所以這裡自己畫。整顆都用 inline-flex + align-items: center 對齊，撥片不會比字高。 */
 .hs-switch {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.3rem;
+	gap: 0.4rem;
 	margin: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	line-height: 1;
 	cursor: pointer;
 }
 
-.hs-switch .form-check {
-	min-height: 0;
-	padding-left: 0;
-}
-
-.hs-switch .form-check-input {
-	width: 2.1em;
-	height: 1.1em;
-	margin: 0;
-	float: none;
-}
-
-.hs-switch-text {
+.hs-switch-label {
 	font-size: 0.82rem;
 	font-weight: 500;
+	line-height: 1;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.hs-switch-track {
+	position: relative;
+	flex: 0 0 auto;
+	width: 56px;
+	height: 26px;
+	border: 1px solid rgba(128, 154, 212, 0.6);
+	border-radius: 999px;
+	background: rgba(24, 35, 63, 0.95);
+	transition: background 0.15s, border-color 0.15s;
+}
+
+.hs-switch-knob {
+	position: absolute;
+	top: 50%;
+	left: 3px;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	background: var(--text-1);
+	transform: translateY(-50%);
+	transition: left 0.15s, background 0.15s;
+}
+
+.hs-switch-state {
+	position: absolute;
+	top: 50%;
+	right: 8px;                /* 關：撥片在左，字靠右 */
+	transform: translateY(-50%);
+	font-size: 0.76rem;
+	font-weight: 700;
+	line-height: 1;
 	color: var(--text-muted);
 }
 
-/* 打開時「持股」兩個字也亮起來。input 包在 .toggle-wrap 裡、不是文字的兄弟節點，
-   所以只能用 :has()；萬一瀏覽器不支援，最多是字維持灰的，撥片本身照樣看得出開關 */
-.hs-switch:has(.form-check-input:checked) .hs-switch-text {
-	color: var(--text-0);
+.hs-switch-state::after { content: "關"; }
+
+.hs-switch.is-on .hs-switch-label { color: var(--text-0); }
+.hs-switch.is-on .hs-switch-track { border-color: var(--accent); background: var(--accent); }
+.hs-switch.is-on .hs-switch-knob { left: calc(100% - 23px); background: #fff; }
+
+.hs-switch.is-on .hs-switch-state {
+	right: auto;
+	left: 8px;                 /* 開：撥片移到右邊，字換到左邊 */
+	color: #fff;
 }
+
+.hs-switch.is-on .hs-switch-state::after { content: "開"; }
 
 /* 標題右邊的入口鈕（例：我的自選 → 新增自選股）。跟 .hs-link 一樣是紫的「可點」，
    但這是要按的東西，所以給它框與可按的面積（色彩語彙規則：橘留給需要注意的事）。 */
