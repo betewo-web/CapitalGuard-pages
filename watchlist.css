@@ -2256,12 +2256,12 @@ body.has-bottom-nav .page-shell {
 /* 標題一句話講完：原本用 space-between 把「每天各發生過什麼」推到最右邊，
    中間空一大段看起來像少了什麼（Howard 2026-09-23）。 */
 .rtl-history-head {
-	font-size: 0.95rem;
+	font-size: 15.2px;
 	font-weight: 700;
 	margin-bottom: 10px;
 }
 
-.rtl-history-head .k { font-size: 0.86rem; font-weight: 400; color: var(--text-muted); }
+.rtl-history-head .k { font-size: 13.76px; font-weight: 400; color: var(--text-muted); }
 
 /* 一天一列，列與列之間只有一條分隔線：框起來＋一顆顆藍底的籤看起來都像可以按，
    但這一頁純粹是一份可以讀的清單（Howard 2026-09-23）。 */
@@ -2276,9 +2276,9 @@ body.has-bottom-nav .page-shell {
 .rtl-day:last-child { border-bottom: none; }
 
 .rtl-day-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.rtl-day-d { font-size: 1rem; font-weight: 700; }
-.rtl-day-n { font-size: 0.86rem; color: var(--text-muted); white-space: nowrap; }
-.rtl-day-sigs { margin-top: 5px; font-size: 0.9rem; line-height: 1.6; color: var(--text-1); }
+.rtl-day-d { font-size: 16px; font-weight: 700; }
+.rtl-day-n { font-size: 13.76px; color: var(--text-muted); white-space: nowrap; }
+.rtl-day-sigs { margin-top: 5px; font-size: 14.4px; line-height: 1.6; color: var(--text-1); }
 .rtl-day-more { color: var(--text-muted); }
 .rtl-sub-gap { margin-left: 0.55rem; }
 
@@ -3042,7 +3042,7 @@ body.has-bottom-nav .page-shell {
    個股字卡的副標還用它畫「進行中」那顆籤。 */
 .sig-chip {
 	display: inline-block;
-	font-size: 0.82rem;
+	font-size: 13.12px;
 	line-height: 1;
 	padding: 5px 9px;
 	border-radius: 7px;
@@ -3155,7 +3155,7 @@ body.has-bottom-nav .page-shell {
 	border-radius: 9px;
 	background: transparent;
 	color: var(--text-muted);
-	font-size: 0.9rem;
+	font-size: 14.4px;
 	font-weight: 600;
 	line-height: 1.2;
 	cursor: pointer;
@@ -3192,7 +3192,10 @@ body.has-bottom-nav .page-shell {
 }
 
 /* ── 盤中時間軸：橫軸 09:00–13:30、縱軸價位；幾條參考橫線給相對位置，不畫價格路徑 ── */
-.rtl-sub { font-size: 0.86rem; color: var(--text-muted); margin-top: 5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* 股名是 <h5>，字級來自 Bootstrap 的 1.25rem——不明寫就會跟著「文字大小」放大，
+   而卡片其餘部分已經釘成 px（見下面 .rtl-story-head 那段的說明）。 */
+#rtl-name { font-size: 20px; }
+.rtl-sub { font-size: 13.76px; color: var(--text-muted); margin-top: 5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rtl-chart { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 8px 6px; }
 /* 時間軸是一張 SVG（viewBox 320×284，寬度跟著容器）：線、刻度、標記全在向量座標裡，
    不再是 HTML 疊圖——那樣在手機上會被光柵化成糊糊的「截圖」。文字用 CSS 上色，字體跟頁面同一套。
@@ -3228,7 +3231,9 @@ body.has-bottom-nav .page-shell {
    上面的時間軸是 SVG，字級寫在 viewBox 座標裡（px），只跟著圖的寬度縮放、不理根字級。
    下面的故事列若跟著放大，圖上的字與清單的字就對不起來，整頁也會被撐得很長。
    這裡的數值是 v183 的 rem × 16 原樣換算，外觀完全沒變。
-   卡片的分頁列（.rtl-tab）、副標（.rtl-sub）與「歷史訊號」那一頁仍用 rem，會跟著放大。 */
+   2026-09-24 第二輪：第一次只釘了故事列，卡片頭部（股名 #rtl-name、副標 .rtl-sub、
+   訊號籤 .sig-chip、分頁列 .rtl-tab）與「歷史訊號」那一頁還是 rem，所以看起來仍然放大。
+   整張卡現在一律 px——同一張卡混用兩種單位就是上一輪沒修好的原因。 */
 .rtl-story-head { font-size: 14.4px; color: var(--text-muted); margin: 16px 0 8px; font-weight: 600; }
 .rtl-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 6px; border-radius: 12px; border-left: 3px solid transparent; }
 .rtl-item.is-link { cursor: pointer; }
