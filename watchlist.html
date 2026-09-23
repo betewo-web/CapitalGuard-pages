@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="177">
+  <meta name="app-version" content="178">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=177" rel="stylesheet">
+  <link href="watchlist.css?v=178" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -48,7 +48,9 @@
     <div class="ug-title" id="dg-title">使用前請先確認</div>
     <div class="ug-msg dg-msg">
       <p>CapitalGuard 是公開市場資料的整理與統計工具。所有分數、訊號、事件、篩選結果與 AI 說明，都是資料計算的呈現，<b>不是投資建議</b>，也不對任何股票做買賣、持有或進出場的推介。</p>
-      <p>本服務並非證券投資顧問事業，不提供個別化投資諮詢。資料可能延遲、缺漏或有誤，推播不保證即時送達。投資決策請自行判斷並承擔全部風險。</p>
+      <!-- 「不提供買賣建議」原本只寫在 AI 問答面板的footer，那個面板 2026-09-23 移除了。
+           這句是 COMPLIANCE.md 要求的聲明，不能跟著功能一起消失，移進這裡的免責聲明。 -->
+      <p>本服務並非證券投資顧問事業，不提供個別化投資諮詢，也不提供買賣建議。資料可能延遲、缺漏或有誤，推播不保證即時送達。投資決策請自行判斷並承擔全部風險。</p>
     </div>
     <label class="dg-check"><input type="checkbox" id="dg-agree" onchange="document.getElementById('dg-btn').disabled=!this.checked"> 我已閱讀並了解上述說明</label>
     <button type="button" id="dg-btn" class="btn btn-sm btn-outline-light mt-3" disabled onclick="acceptDisclaimer()">開始使用</button>
@@ -1503,12 +1505,13 @@ function renderEventCard(sid, ev, options = {}) {
   const sidName = universe[sid]?.n || sid;
   const titlePrefix = options.showStock ? `${escapeHtml(sid)} ${escapeHtml(sidName)} · ` : "";
   const linkHtml = eventSourceHtml(sid, ev);
-  // AI 按鈕用 data 屬性帶事件身分（dedupe_key），不把標題塞進 inline onclick：標題含引號會炸
+  // 「AI 說明資料」那顆按鈕 2026-09-23 移除（Howard）：AI 目前還不支援。
+  // 已經產生過的說明還是照顯示——那是既有的資料，不該因為入口收起來就消失。
   const actionHtml = options.todayMode
     ? (options.grouped ? "" : `<button class="btn btn-xs btn-outline-secondary" onclick="openEventsPanel('${jsAttr(sid)}')">查看此股事件</button>`)
     : (ev.ai_analysis
       ? `<div class="event-ai-text"><span class="event-ai-tag">🤖 AI 說明</span>${escapeHtml(ev.ai_analysis)}</div>`
-      : `<button class="btn btn-xs btn-outline-info" data-ev-key="${escapeHtml(ev.dedupe_key || "")}" data-ev-title="${escapeHtml(ev.title || "")}" onclick="requestAiAnalysis('${jsAttr(sid)}', this)">AI 說明資料</button>`);
+      : "");
   const newToday = isNewToday(ev);
   const newBadge = newToday ? `<span class="event-new-badge">新</span>` : "";
   // 事件日＝資料本身的日期（季報是季底、籌碼是前一交易日、除息是未來日）；
@@ -1669,140 +1672,13 @@ async function refreshEvents(sid) {
   openEventsPanel(sid);
 }
 
-// Feature 3: AI 解讀
+// Edge Function 的位址（方案、登入、報告都用它）。
+// 原本這裡還有 requestAiAnalysis()——事件卡的「AI 說明資料」按鈕，2026-09-23 隨按鈕一起移除
+// （Howard：AI 目前還不支援）。interpret-event Edge Function 留著。
 const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 
-async function requestAiAnalysis(sid, btnEl) {
-  if (!state.accessToken) {
-    alert("請先登入");
-    return;
-  }
-  if (!aiAllowed()) { openPlanModal("ai"); return; }
-  // 事件身分從按鈕的 data 屬性拿：dedupe_key 是後端的唯一鍵，Edge Function 靠它讀寫快取。
-  // 以前只送標題、快取用「今天」當 event_date 去查，季報／籌碼／除息的日期都不是今天，永遠查不到也寫不回。
-  const evKey = btnEl?.dataset?.evKey || "";
-  const evTitle = btnEl?.dataset?.evTitle || "";
-  const ev = (stockEvents[sid] || []).find(e => evKey ? e.dedupe_key === evKey : e.title === evTitle) || { title: evTitle };
-  const eventTitle = ev.title || evTitle;
-  btnEl.textContent = "⏳ AI 分析中…";
-  btnEl.disabled = true;
-  trackActivity("ai_interpret", { stock: sid });
-  try {
-    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/interpret-event`, {
-      method: "POST",
-      headers: billingHeaders(),
-      body: JSON.stringify({
-        stock_id: sid,
-        event_title: eventTitle,
-        event_type: ev.event_type || null,
-        event_date: ev.event_date || null,
-        dedupe_key: ev.dedupe_key || null,
-      }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (handleUpdateRequired(data)) return;
-    if (data.code === "plan_required" || data.code === "ai_limit") {
-      btnEl.textContent = "AI 說明資料";
-      btnEl.disabled = false;
-      openPlanModal(data.code === "ai_limit" ? "ai_limit" : "ai");
-      return;
-    }
-    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-    const { analysis, error } = data;
-    if (error) throw new Error(error);
-    // 取代按鈕為 AI 分析結果
-    const container = btnEl.parentElement;
-    const div = document.createElement("div");
-    div.className = "event-ai-text";
-    div.textContent = analysis;
-    container.replaceChild(div, btnEl);
-    ev.ai_analysis = analysis;   // 重新渲染時直接顯示，不再出現按鈕
-  } catch (e) {
-    btnEl.textContent = "✨ AI 解讀";
-    btnEl.disabled = false;
-    alert(`AI 解讀失敗：${e.message}`);
-  }
-}
-
-// Feature 4: AI 問答（浮動聊天框）
-let qaVisible = false;
-let qaCurrentSid = null;
-
-function toggleQaPanel(sid) {
-  const panel = document.getElementById("qa-panel");
-  // 開啟前先看方案（關閉永遠放行）；伺服器端另有一道閘，這裡只是少一次必失敗的請求
-  if (!qaVisible && !aiAllowed()) { openPlanModal("ai"); return; }
-  if (qaVisible && qaCurrentSid === sid) {
-    panel.style.display = "none";
-    qaVisible = false;
-    qaCurrentSid = null;
-    return;
-  }
-  qaCurrentSid = sid || null;
-  document.getElementById("qa-stock-hint").textContent =
-    sid ? `詢問：${universe[sid]?.n || sid}` : "詢問自選股相關問題";
-  panel.style.display = "flex";
-  qaVisible = true;
-  document.getElementById("qa-input").focus();
-}
-
-async function sendQaQuestion() {
-  if (!state.accessToken) { alert("請先登入"); return; }
-  const input = document.getElementById("qa-input");
-  const question = input.value.trim();
-  if (!question) return;
-  trackActivity("ai_qa");
-
-  const messages = document.getElementById("qa-messages");
-  // 新增用戶訊息
-  const userDiv = document.createElement("div");
-  userDiv.className = "qa-msg qa-user";
-  userDiv.textContent = question;
-  messages.appendChild(userDiv);
-  input.value = "";
-  messages.scrollTop = messages.scrollHeight;
-
-  // AI 回答佔位
-  const aiDiv = document.createElement("div");
-  aiDiv.className = "qa-msg qa-ai";
-  aiDiv.textContent = "⏳ 思考中…";
-  messages.appendChild(aiDiv);
-  messages.scrollTop = messages.scrollHeight;
-
-  try {
-    const body = { question };
-    if (qaCurrentSid) body.stock_id = qaCurrentSid;
-    const resp = await fetch(`${SUPABASE_FUNCTIONS_URL}/stock-qa`, {
-      method: "POST",
-      headers: billingHeaders(),
-      body: JSON.stringify(body),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (handleUpdateRequired(data)) return;
-    if (data.code === "plan_required" || data.code === "ai_limit") {
-      aiDiv.className = "qa-msg qa-ai qa-error";
-      aiDiv.textContent = data.error || "AI 問答為專業版功能";
-      openPlanModal(data.code === "ai_limit" ? "ai_limit" : "ai");
-      return;
-    }
-    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-    const { answer, error } = data;
-    if (error) throw new Error(error);
-    aiDiv.textContent = answer;
-  } catch (e) {
-    aiDiv.className = "qa-msg qa-ai qa-error";
-    aiDiv.textContent = `❌ 失敗：${e.message}`;
-  }
-  messages.scrollTop = messages.scrollHeight;
-}
-
-document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && qaVisible) {
-    document.getElementById("qa-panel").style.display = "none";
-    qaVisible = false;
-    qaCurrentSid = null;
-  }
-});
+// AI 問答（浮動聊天框）2026-09-23 移除（Howard）：AI 目前還不支援。右下角那顆 🤖 與面板一起拿掉，
+// stock-qa Edge Function 留著；要回來時連 .qa-* 樣式一起接回來。
 // ═══════════════════════════════════════════════════════════════
 // 方案與用量（BILLING.md）
 // 這裡的所有檢查都只是 UX：真正的上限在 Supabase 的 trigger／view，
@@ -1827,7 +1703,6 @@ async function loadPlanState() {
     planState = { ...planState, ready: false };
   }
   renderPlanBadge();
-  renderQaLock();
   // 方案變了（管理員指派、到期降級）：重抓自選股，超出方案的標記與計數才會跟著換。
   // loadWatchlist 會再叫一次 loadPlanState，但那時代碼已相同，不會循環。
   if (prevCode && planState.ready && planState.plan.code !== prevCode) {
@@ -1856,10 +1731,8 @@ function isRuleActive(rule) {
   return !planState.ready || !planState.activeRuleIds || planState.activeRuleIds.has(String(rule.id));
 }
 
-function aiAllowed() {
-  // 方案功能未啟用時放行，由 Edge Function 決定
-  return !planState.ready || !!(planState.plan && planState.plan.ai_enabled);
-}
+// aiAllowed() 2026-09-23 一併移除：兩個呼叫它的地方（事件卡的 AI 按鈕、浮動 AI 問答）
+// 都收起來了。plans 表的 ai_enabled 仍在，方案面板照樣列這項功能。
 
 function planLimitOf(kind) {
   if (!planState.ready) return null;
@@ -1935,14 +1808,6 @@ function renderPlanBadge() {
     ? `<span class="${planBadgeClass(planState.plan.code)}">${escapeHtml(planState.plan.name)}</span>`
     : "";
   el.innerHTML = `👤 ${escapeHtml(state.displayName || "")}${badge}`;
-}
-
-function renderQaLock() {
-  const btn = document.getElementById("qa-float-btn");
-  if (!btn) return;
-  const locked = !aiAllowed();
-  btn.classList.toggle("is-locked", locked);
-  btn.title = locked ? "AI 問答（專業版功能）" : "AI 問答";
 }
 
 // ── 方案面板 ──
@@ -5040,7 +4905,6 @@ function _dismissOverlaysForAlertJump() {
       try { inst.hide(); } catch { done(); }
     }));
   });
-  if (typeof qaVisible !== "undefined" && qaVisible) toggleQaPanel(qaCurrentSid);   // AI 問答面板
   return Promise.all(waits).then(() => {
     // 兩層 modal 一起收時 Bootstrap 會把 body 的捲動鎖留著（方案面板踩過），這裡強制清乾淨
     if (waits.length && !document.querySelector(".modal.show")) {
@@ -8928,14 +8792,14 @@ async function initPushUI() {
   const icon = document.getElementById('push-status-icon');
   const txt  = document.getElementById('push-status-text');
   // 首頁的 .view-head（「今日總覽」標題）2026-09-22 拿掉了，改用狀態列當錨點：
-  // 沒有錨點時 placeBar 什麼都不做，通知列就會永遠留在「通知」分頁裡回不來
+  // 沒有錨點時 placeBar 什麼都不做，通知列就會永遠留在原地
   const homeHead  = document.querySelector('#view-home .view-head') || document.getElementById('home-status');
-  const inboxHead = document.querySelector('#view-inbox .view-head');
 
   if (!bar) return;
   bar.style.display = '';
 
-  // 尚未啟用/被封鎖時顯示在首頁（提醒去啟用）；已啟用後移到「通知」分頁（首頁不再顯示）
+  // 這一行只會出現在首頁，而且只在通知還沒開的時候（2026-09-23 起已啟用就整條收起來，
+  // 所以也不再需要「移到通知分頁」那條路）
   function placeBar(afterEl) {
     if (afterEl && bar.previousElementSibling !== afterEl) {
       afterEl.insertAdjacentElement('afterend', bar);
@@ -8981,24 +8845,20 @@ async function initPushUI() {
     const reg = await _swReadyOrNull();
     const sub = reg && await reg.pushManager.getSubscription();
     _pushSubscribed = !!sub;
+    // 已經開了就整條收起來（2026-09-23 Howard）：這一行的工作是「提醒你去開」，
+    // 開完就沒事了，不必再佔著「通知」頁最上面一行講一件使用者已經知道的事。
+    // 要關通知走系統／瀏覽器的通知設定——那裡本來就永遠關得掉。
+    if (sub) { bar.style.display = 'none'; return; }
     btn.style.display = '';
     btn.onclick = togglePushSubscription;   // 封鎖狀態換過 handler，這裡換回來
-    if (sub) {
-      placeBar(inboxHead);
-      icon.textContent  = '🔔';
-      txt.textContent   = '推播通知已啟用';
-      btn.innerHTML     = '<span class="d-none d-sm-inline">停用通知</span><span class="d-sm-none">停用</span>';
-      btn.className     = 'btn btn-sm btn-outline-danger';
-    } else {
-      placeBar(homeHead);
-      // 內建瀏覽器按下去一定失敗，與其讓他撞牆，不如先講怎麼跳出去（按鈕留著讓他仍可試）
-      icon.textContent  = _inAppBrowser ? '🌐' : '🔇';
-      txt.textContent   = _inAppBrowser
-        ? `${_inAppBrowser} 內建瀏覽器無法啟用通知，請用「以其他瀏覽器開啟」改用 Chrome`
-        : '尚未啟用推播通知';
-      btn.innerHTML     = '<span class="d-none d-sm-inline">啟用瀏覽器通知</span><span class="d-sm-none">啟用通知</span>';
-      btn.className     = 'btn btn-sm btn-outline-light';
-    }
+    placeBar(homeHead);
+    // 內建瀏覽器按下去一定失敗，與其讓他撞牆，不如先講怎麼跳出去（按鈕留著讓他仍可試）
+    icon.textContent  = _inAppBrowser ? '🌐' : '🔇';
+    txt.textContent   = _inAppBrowser
+      ? `${_inAppBrowser} 內建瀏覽器無法啟用通知，請用「以其他瀏覽器開啟」改用 Chrome`
+      : '尚未啟用推播通知';
+    btn.innerHTML     = '<span class="d-none d-sm-inline">啟用瀏覽器通知</span><span class="d-sm-none">啟用通知</span>';
+    btn.className     = 'btn btn-sm btn-outline-light';
   } catch (e) {
     txt.textContent = '推播狀態未知';
   }
@@ -9541,22 +9401,8 @@ function _showPwaInstructionsModal(afterWait = false) {
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
-<!-- Feature 4: 浮動 AI 問答面板 -->
-<button id="qa-float-btn" class="qa-float-btn" onclick="toggleQaPanel(null)" title="AI 問答">
-  <span>🤖</span>
-</button>
-<div id="qa-panel" class="qa-panel" style="display:none;">
-  <div class="qa-header">
-    <span id="qa-stock-hint" class="qa-hint">詢問自選股相關問題</span>
-    <button class="qa-close-btn" onclick="toggleQaPanel(null)">✕</button>
-  </div>
-  <div id="qa-messages" class="qa-messages"></div>
-  <div class="qa-input-row">
-    <input id="qa-input" class="qa-input" type="text" placeholder="例：營收年增是怎麼算的？" maxlength="200"
-      onkeydown="if(event.key==='Enter')sendQaQuestion()">
-    <button class="qa-send-btn" onclick="sendQaQuestion()">送出</button>
-  </div>
-  <div class="qa-footer-hint">AI 只解釋公開資料的意思，不提供買賣建議、不預測股價；回答可能有誤，僅供參考</div>
-</div>
+<!-- 右下角那顆 🤖 浮動 AI 問答鈕與它的面板 2026-09-23 移除（Howard）：AI 目前還不支援。
+     stock-qa Edge Function 留著，要回來時把按鈕、面板、toggleQaPanel／sendQaQuestion
+     與 .qa-* 樣式一起接回來就行。 -->
 </body>
 </html>

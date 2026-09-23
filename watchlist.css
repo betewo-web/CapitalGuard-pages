@@ -1201,131 +1201,8 @@ body.has-bottom-nav .page-shell {
 	-webkit-overflow-scrolling: touch;
 }
 
-/* ── Feature 4: 浮動 AI 問答 ─────────────────────────────────── */
-.qa-float-btn {
-	position: fixed;
-	bottom: 1.5rem;
-	right: 1.5rem;
-	z-index: 1050;
-}
-
-body.has-bottom-nav .qa-float-btn {
-	bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 1rem);
-}
-
-body.has-bottom-nav .qa-panel {
-	bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 4.6rem);
-}
-
-.qa-float-btn {
-	width: 3.2rem;
-	height: 3.2rem;
-	border-radius: 50%;
-	border: none;
-	background: linear-gradient(135deg, #3c8ef8, #7b4fe8);
-	box-shadow: 0 4px 16px rgba(60, 142, 248, 0.45);
-	cursor: pointer;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	font-size: 1.4rem;
-	transition: transform 0.15s;
-}
-.qa-float-btn:hover { transform: scale(1.1); }
-
-.qa-panel {
-	position: fixed;
-	bottom: 5.5rem;
-	right: 1.5rem;
-	z-index: 1049;
-	width: min(360px, 92vw);
-	max-height: 70vh;
-	border-radius: 16px;
-	border: 1px solid var(--border);
-	background: rgba(9, 16, 31, 0.97);
-	box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-	display: flex;
-	flex-direction: column;
-	overflow: hidden;
-}
-.qa-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 0.6rem 0.8rem;
-	background: linear-gradient(160deg, rgba(60,100,248,0.22), rgba(60,100,248,0.06));
-	border-bottom: 1px solid rgba(121,157,255,0.22);
-}
-.qa-hint { font-size: 0.77rem; color: #90b8f8; font-weight: 600; }
-.qa-close-btn {
-	background: none; border: none; color: rgba(200,220,255,0.6);
-	cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 0.2rem;
-}
-.qa-messages {
-	flex: 1;
-	overflow-y: auto;
-	padding: 0.6rem 0.7rem;
-	display: flex;
-	flex-direction: column;
-	gap: 0.45rem;
-	min-height: 120px;
-	max-height: 350px;
-}
-.qa-msg {
-	max-width: 88%;
-	padding: 0.4rem 0.65rem;
-	border-radius: 10px;
-	font-size: 0.82rem;
-	line-height: 1.45;
-	white-space: pre-wrap;
-}
-.qa-user {
-	align-self: flex-end;
-	background: rgba(60, 100, 248, 0.35);
-	border: 1px solid rgba(60,142,248,0.4);
-	color: #e0edff;
-}
-.qa-ai {
-	align-self: flex-start;
-	background: rgba(14, 28, 54, 0.85);
-	border: 1px solid rgba(121,157,255,0.25);
-	color: #c4d2ee;
-}
-.qa-ai.qa-error { border-color: rgba(255,80,80,0.35); color: #f87878; }
-.qa-input-row {
-	display: flex;
-	gap: 0.4rem;
-	padding: 0.5rem 0.7rem;
-	border-top: 1px solid rgba(121,157,255,0.18);
-}
-.qa-input {
-	flex: 1;
-	background: rgba(14,28,54,0.9);
-	border: 1px solid rgba(121,157,255,0.35);
-	border-radius: 8px;
-	color: var(--text-0);
-	padding: 0.35rem 0.6rem;
-	font-size: 0.81rem;
-	outline: none;
-}
-.qa-input:focus { border-color: rgba(60,142,248,0.7); }
-.qa-send-btn {
-	padding: 0.35rem 0.7rem;
-	border-radius: 8px;
-	border: none;
-	background: rgba(60,100,248,0.75);
-	color: #fff;
-	font-size: 0.8rem;
-	cursor: pointer;
-	white-space: nowrap;
-}
-.qa-send-btn:hover { background: rgba(60,100,248,0.95); }
-.qa-footer-hint {
-	font-size: 0.65rem;
-	color: rgba(140,170,220,0.45);
-	text-align: center;
-	padding: 0.25rem;
-}
+/* 浮動 AI 問答（右下角那顆 🤖 與它的面板）2026-09-23 移除（Howard）：AI 目前還不支援。
+   .qa-* 整組樣式一起拿掉，要回來時與 markup、toggleQaPanel／sendQaQuestion 一起接。 */
 
 .kline-modal-content .modal-header {
 	border-bottom: 1px solid rgba(121, 157, 255, 0.24);
@@ -3580,7 +3457,6 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .rule-card.is-inactive .rule-conds { opacity: 0.55; }
 /* 自選已滿是方案上限的狀態，不是個股需要注意——跟 .wl-tag-locked 同一類，一起讓出橘色。 */
 .count-badge.is-full { background: linear-gradient(145deg, #8a8a9b, #b8b8c6); color: #1b1b26; }
-.qa-float-btn.is-locked { filter: grayscale(1); opacity: 0.55; }
 
 /* 統計頁：分數明細 modal（點一列）。數字用等寬對齊，前期分數降一階 */
 .sd-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
