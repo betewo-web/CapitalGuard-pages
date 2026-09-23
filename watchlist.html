@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="178">
-  <title>台股監控 — 個人投資助手</title>
+  <meta name="app-version" content="179">
+  <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=178" rel="stylesheet">
+  <link href="watchlist.css?v=179" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -22,7 +22,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="台股監控">
+  <meta name="apple-mobile-web-app-title" content="股市雷達">
   <!-- iOS 不支援 SVG 的 apple-touch-icon，給 SVG 主畫面會拿不到圖，
        而 iOS 的推播通知正是用這張圖當通知圖示。 -->
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180.png">
@@ -84,8 +84,8 @@
     <div class="ug-title" id="mobile-install-title">手機請先安裝，再登入</div>
     <div class="ug-msg">
       <ol class="ob-ol" id="mobile-install-steps">
-        <li>將「台股監控」安裝到主畫面</li>
-        <li>若未自動開啟，回到手機主畫面點「台股監控」圖示</li>
+        <li>將「CapitalGuard-股市雷達」安裝到主畫面</li>
+        <li>若未自動開啟，回到手機主畫面點「股市雷達」圖示</li>
         <li>回 LINE 點「複製登入碼」，再到 App 按貼上圖示</li>
       </ol>
     </div>
@@ -129,7 +129,9 @@
   <div class="container-lg py-1 py-md-3">
     <span class="navbar-brand app-brand mb-0">
       <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 512 512"><g fill="none" stroke-linecap="round"><circle cx="256" cy="256" r="139" stroke="#8b7cff" stroke-width="25"/><circle cx="256" cy="256" r="84" stroke="#c4b5fd" stroke-width="22"/><path stroke="#f5c542" stroke-width="13" d="M256 70V49M442 256h21M256 442v21M70 256H49"/><path stroke="#f5c542" stroke-width="20" d="M227 256h58M256 227v58"/></g></svg></span>
-      <span class="brand-title">台股監控</span>
+      <!-- 與官網同一組品牌鎖定：英文主名＋中文副名。整串寫成「CapitalGuard-股市雷達」
+           在 390px 的列上會把右邊的使用者與重新整理擠掉（量過） -->
+      <span class="brand-title">CapitalGuard<span class="brand-sub">股市雷達</span></span>
     </span>
     <div class="nav-user-actions">
       <!-- 手動重新整理：iOS 的 standalone PWA 沒有下拉重新整理、也沒有網址列，
@@ -1872,10 +1874,10 @@ function planNameOf(code) {
 // ── 邀請朋友（B3）：台灣的傳播在 LINE 群組，App 裡以前沒有任何可以分享出去的入口 ──
 async function shareInvite() {
   const url = `${SITE_BASE_URL}?ref=app`;
-  const text = "CapitalGuard 台股監控：自選股跌破支撐、帶量上漲、漲跌停，訊號推到手機。加 LINE 好友就能免費開始。";
+  const text = "CapitalGuard-股市雷達：自選股跌破支撐、帶量上漲、漲跌停，訊號推到手機。加 LINE 好友就能免費開始。";
   trackActivity("invite_share", { via: navigator.share ? "share" : "copy" });
   try {
-    if (navigator.share) { await navigator.share({ title: "CapitalGuard 台股監控", text, url }); return; }
+    if (navigator.share) { await navigator.share({ title: "CapitalGuard-股市雷達", text, url }); return; }
     await navigator.clipboard.writeText(`${text}\n${url}`);
     setPlanMsg("已複製介紹文字與連結，貼給朋友即可。");
   } catch (e) {
@@ -2615,14 +2617,14 @@ function showMobileInstallGate() {
       <svg aria-label="分享" role="img" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-5px;margin:0 3px">
         <path d="M12 15V3m0 0L8 7m4-4 4 4"/><path d="M7 10H5.5A1.5 1.5 0 0 0 4 11.5v7A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H17"/>
       </svg>「分享」，選「<b>加入主畫面</b>」（不是「加入書籤」）</li>
-      <li>若未自動開啟，回到手機主畫面點「台股監控」圖示</li>
+      <li>若未自動開啟，回到手機主畫面點「股市雷達」圖示</li>
       ${lastStep}`;
     actions.innerHTML = "";
     actions.style.display = "none";
   } else {
     title.textContent = autoLogin ? "Android 請先把 App 裝到桌面" : "Android 請先安裝，再登入";
-    steps.innerHTML = `<li>將「台股監控」安裝到主畫面</li>
-      <li>若未自動開啟，回到手機主畫面點「台股監控」圖示</li>
+    steps.innerHTML = `<li>將「CapitalGuard-股市雷達」安裝到主畫面</li>
+      <li>若未自動開啟，回到手機主畫面點「股市雷達」圖示</li>
       ${lastStep}`;
     actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" id="mobile-install-btn" onclick="installPwa('mobile-gate')">安裝 App</button>`;
     actions.style.display = "";
@@ -2719,7 +2721,7 @@ async function renderOnboarding() {
   } else if (s.stage === "installed") {
     icon.textContent = "✅";
     title.textContent = "安裝成功！";
-    body.innerHTML = `<p>「台股監控」已經在你的桌面上。</p>
+    body.innerHTML = `<p>「股市雷達」已經在你的桌面上。</p>
       <p class="ob-note">從桌面圖示打開 App，就會接著完成最後一步：開啟通知。</p>`;
     actions.innerHTML = `<button type="button" class="btn btn-sm btn-primary" onclick="_openInstalledApp()">開啟 App</button>`;
   } else if (s.stage === "push") {
@@ -2831,14 +2833,14 @@ function _attemptOpenInstalledApp(automatic) {
   if (!opened) {
     _showPwaLaunchFallback(automatic
       ? '瀏覽器阻擋了自動開啟，請點下方按鈕開啟 App。'
-      : '仍無法開啟，請回到手機主畫面點「台股監控」圖示。');
+      : '仍無法開啟，請回到手機主畫面點「股市雷達」圖示。');
     return;
   }
   _pwaLaunchWatchTimer = setTimeout(() => {
     if (!document.hidden) {
       _showPwaLaunchFallback(automatic
         ? '未能確認 App 已開啟，請點下方按鈕再試一次。'
-        : '如果 App 沒有開啟，請回到手機主畫面點「台股監控」圖示。');
+        : '如果 App 沒有開啟，請回到手機主畫面點「股市雷達」圖示。');
     }
   }, 1500);
 }
@@ -2882,14 +2884,14 @@ function _pushBlockedCopy() {
 // 封鎖之後只能從系統／瀏覽器設定打開，路徑每個平台都不一樣
 function _pushUnblockSteps() {
   if (_isIOS) return [
-    "打開 iPhone 的「<b>設定</b>」→「<b>通知</b>」，找到「<b>台股監控</b>」，打開「允許通知」",
+    "打開 iPhone 的「<b>設定</b>」→「<b>通知</b>」，找到「<b>股市雷達</b>」，打開「允許通知」",
     "<b>把 App 從多工列滑掉、完全關閉</b>，再從主畫面重新開啟",
     "回到這裡，按「<b>啟用通知</b>」",
   ];
   // 裝成 WebAPK 之後 App 裡沒有網址列，只能走系統設定；但「網站層級」的封鎖是記在
   // Chrome 裡的，系統那邊看起來是開的、網站仍然被擋，所以第二條路一定要給。
   if (_isAndroid && _pwaIsStandalone) return [
-    "<b>長按</b>桌面的「台股監控」圖示 →「<b>應用程式資訊</b>」→「<b>通知</b>」，把它打開",
+    "<b>長按</b>桌面的「股市雷達」圖示 →「<b>應用程式資訊</b>」→「<b>通知</b>」，把它打開",
     "<b>把 App 從多工列滑掉、完全關閉</b>，再從桌面重新開啟",
     "回到這裡，按「<b>啟用通知</b>」",
   ];
@@ -2997,7 +2999,7 @@ async function _showSetupDoneNotification() {
     const reg = await _swReadyOrNull();
     if (!reg) return;
     await reg.showNotification("設定完成 ✅", {
-      body: "台股監控的通知已經開啟，之後的提醒會像這樣跳出來。",
+      body: "股市雷達的通知已經開啟，之後的提醒會像這樣跳出來。",
       icon: "icons/icon-192.png",
       badge: "icons/badge-96.png",
       tag: "setup-done",
@@ -9345,13 +9347,13 @@ function _showPwaInstructionsModal(afterWait = false) {
         </svg>
         <strong class="text-light">加入主畫面（Add to Home Screen）</strong>
       </div>
-      <p class="text-muted" style="font-size:.8rem">安裝後，桌面會出現「台股監控」圖示，可離線使用基本功能。</p>`;
+      <p class="text-muted" style="font-size:.8rem">安裝後，桌面會出現「股市雷達」圖示，可離線使用基本功能。</p>`;
   } else {
     content = `
       <p class="mb-3 text-muted" style="font-size:.9rem">
         在 Chrome 或 Edge 瀏覽器中，點選網址列右側的
         <strong class="text-info">安裝</strong> 圖示（⊕），或使用選單中的
-        <strong class="text-info">「安裝台股監控」</strong>選項。
+        <strong class="text-info">「安裝 CapitalGuard-股市雷達」</strong>選項。
       </p>
       <p class="mb-2 text-muted" style="font-size:.9rem">Android 裝置會自動出現安裝橫幅，或可至瀏覽器選單中找到「加入主畫面」。</p>
       ${afterWait ? `<div class="alert alert-warning py-2 mt-2 mb-0" style="font-size:.8rem;background:rgba(255,193,7,.12);border-color:rgba(255,193,7,.35);color:#ffe08a">

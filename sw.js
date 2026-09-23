@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────
-   台股監控 — Service Worker
+   CapitalGuard-股市雷達 — Service Worker
    Strategy:
      • HTML navigation  → Network-first (always fetch latest,
                             fall back to cache when offline)
@@ -10,7 +10,7 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v178';
+const CACHE_VERSION = 'tw-stock-v179';
 
 // 訂閱輪換用的 Cache：不隨版本清掉，否則升級 SW 就把待同步的訂閱弄丟了。
 const PUSH_SYNC_CACHE = 'push-sync';
@@ -133,7 +133,7 @@ self.addEventListener('push', event => {
   let data = {};
   try { data = event.data?.json() || {}; } catch {}
 
-  const title = data.title || '台股監控';
+  const title = data.title || '股市雷達';
   const options = {
     // 圖示必須是 PNG：Chromium 的通知圖片解碼器不支援 SVG（桌機與 Android 皆然），
     // 給 SVG 等於整塊圖示空白。iOS 兩個都忽略，直接用主畫面的 App 圖示。

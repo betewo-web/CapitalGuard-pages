@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="178">
-  <title>管理儀表板 — 台股監控</title>
+  <meta name="app-version" content="179">
+  <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
@@ -915,7 +915,7 @@ async function loadStats(force) {
   if (_loading) return;
   const token = sessionToken();
   if (!token) {
-    showGate(`<div style="font-size:2rem">🔐</div><h1>請先登入 App</h1><p>儀表板沿用 App 的登入狀態。請先在 <a href="watchlist.html">台股監控</a> 登入，再回到這一頁。</p>`);
+    showGate(`<div style="font-size:2rem">🔐</div><h1>請先登入 App</h1><p>儀表板沿用 App 的登入狀態。請先在 <a href="watchlist.html">CapitalGuard-股市雷達</a> 登入，再回到這一頁。</p>`);
     return;
   }
   if (!force && Date.now() - _lastLoadAt < 30000) return;

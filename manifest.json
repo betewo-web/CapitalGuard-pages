@@ -1,6 +1,6 @@
 {
-  "name": "台股監控",
-  "short_name": "台股監控",
+  "name": "CapitalGuard-股市雷達",
+  "short_name": "股市雷達",
   "description": "台股自選股追蹤與 LINE 即時價格通知",
   "start_url": "./watchlist.html",
   "scope": "./",
