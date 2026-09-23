@@ -864,7 +864,7 @@ body.has-bottom-nav .page-shell {
 	margin-bottom: 0.4rem;
 }
 .events-empty-desc {
-	font-size: 0.78rem;
+	font-size: 0.86rem;
 	color: var(--text-muted);
 	margin-bottom: 0.5rem;
 }
@@ -874,14 +874,14 @@ body.has-bottom-nav .page-shell {
 	border: 1px solid rgba(100, 140, 255, 0.35);
 	border-radius: 6px;
 	padding: 0.3rem 0.8rem;
-	font-size: 0.82rem;
+	font-size: 0.84rem;
 	font-family: monospace;
 	color: #7eb0f8;
 	margin-bottom: 0.5rem;
 	user-select: all;
 }
 .events-empty-tip {
-	font-size: 0.72rem;
+	font-size: 0.8rem;
 	color: rgba(160, 190, 240, 0.82);
 	max-width: 280px;
 	margin: 0 auto 0.6rem;
@@ -908,7 +908,7 @@ body.has-bottom-nav .page-shell {
 
 /* 事件彈窗頂部的一行圖例。以前整個彈窗沒有任何一句話解釋顏色或分組是什麼意思。 */
 .event-legend {
-	font-size: 0.68rem;
+	font-size: 0.76rem;
 	color: var(--text-muted);
 	line-height: 1.5;
 	padding: 0.4rem 0.5rem;
@@ -941,12 +941,12 @@ body.has-bottom-nav .page-shell {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: 0.9rem;
+	font-size: 0.98rem;
 	color: var(--text-0);
 }
 .today-event-count {
 	flex-shrink: 0;
-	font-size: 0.68rem;
+	font-size: 0.76rem;
 	color: var(--text-muted);
 }
 .today-event-stock-link {
@@ -955,7 +955,7 @@ body.has-bottom-nav .page-shell {
 	border: 0;
 	color: var(--accent-2);
 	background: transparent;
-	font-size: 0.72rem;
+	font-size: 0.8rem;
 }
 .today-event-stock-link:hover {
 	color: var(--accent);
@@ -964,14 +964,14 @@ body.has-bottom-nav .page-shell {
 	margin-bottom: 0;
 }
 .event-type-badge {
-	font-size: 0.7rem;
+	font-size: 0.78rem;
 	font-weight: 600;
 	color: rgba(160, 190, 240, 0.7);
 }
 /* 「新」＝今天第一次入庫，跟顯著度無關，所以不能跟強調色同一個顏色。
    以前它是金色，跟「重要事件」的金色一模一樣，使用者只會以為新＝重要。改成資訊藍。 */
 .event-new-badge {
-	font-size: 0.66rem;
+	font-size: 0.72rem;
 	font-weight: 800;
 	padding: 0.08rem 0.3rem;
 	border-radius: 4px;
@@ -980,7 +980,7 @@ body.has-bottom-nav .page-shell {
 	border: 1px solid rgba(86, 168, 255, 0.42);
 }
 .event-date-chip {
-	font-size: 0.66rem;
+	font-size: 0.74rem;
 	color: var(--text-muted);
 	white-space: nowrap;
 }
@@ -992,7 +992,7 @@ body.has-bottom-nav .page-shell {
 	margin-bottom: 0.2rem;
 }
 .event-direction {
-	font-size: 0.66rem;
+	font-size: 0.74rem;
 	font-weight: 700;
 	padding: 0.08rem 0.3rem;
 	border: 1px solid rgba(128, 154, 212, 0.3);
@@ -1002,18 +1002,18 @@ body.has-bottom-nav .page-shell {
 
 /* 2026-09-20：卡片上的分階小籤拿掉了（分組標題已經說了同一件事），.event-standout 不再使用 */
 .event-title {
-	font-size: 0.84rem;
+	font-size: 0.95rem;
 	color: var(--text-0);
 	line-height: 1.4;
 	overflow-wrap: anywhere;
 }
 /* 事件說明文字：以前只掛 Bootstrap 的 .text-muted，而 5.3 的 .text-muted 是淺色主題的
    rgba(33,37,41,.75)——近黑字印在深色卡片上，等於看不見（對比 1.1:1）。這裡明確給亮度。 */
-.event-content { font-size: 0.76rem; color: var(--text-1) !important; line-height: 1.45; }
-.event-source { font-size: 0.7rem; color: var(--text-muted); }
+.event-content { font-size: 0.86rem; color: var(--text-1) !important; line-height: 1.45; }
+.event-source { font-size: 0.78rem; color: var(--text-muted); }
 /* 整段「來源：⋯ ↗」現在是同一個連結，長度比原本那截目的地文字長，
    窄螢幕要讓它換行（↗ 用 &nbsp; 黏住最後一個字，不會自己掉到下一行）。 */
-.event-source-link { font-size: 0.72rem; color: #7eb0f8; }
+.event-source-link { font-size: 0.8rem; color: #7eb0f8; }
 .event-actions {
 	display: flex;
 	align-items: center;
@@ -1028,7 +1028,7 @@ body.has-bottom-nav .page-shell {
 }
 .event-score-details summary {
 	color: rgba(160, 190, 240, 0.72);
-	font-size: 0.7rem;
+	font-size: 0.78rem;
 	cursor: pointer;
 	list-style-position: inside;
 }
@@ -1039,7 +1039,7 @@ body.has-bottom-nav .page-shell {
 	margin-top: 0.3rem;
 }
 .event-score-part {
-	font-size: 0.65rem;
+	font-size: 0.74rem;
 	color: #a9badb;
 	background: rgba(35, 52, 86, 0.55);
 	border: 1px solid rgba(128, 154, 212, 0.18);
@@ -1053,7 +1053,7 @@ body.has-bottom-nav .page-shell {
 /* AI 說明以前是綠字綠底。台股紅漲綠跌，一個綠底的框第一眼會被讀成「跌」——
    但它只是文字說明，跟漲跌無關。紅綠只留給漲跌幅，這裡改中性底，用前綴標明是誰講的。 */
 .event-ai-text {
-	font-size: 0.78rem;
+	font-size: 0.86rem;
 	color: var(--text-1);
 	background: rgba(255, 255, 255, 0.045);
 	border: 1px solid rgba(146, 146, 163, 0.22);
@@ -1064,7 +1064,7 @@ body.has-bottom-nav .page-shell {
 }
 .event-ai-text .event-ai-tag {
 	display: block;
-	font-size: 0.66rem;
+	font-size: 0.72rem;
 	font-weight: 700;
 	color: var(--text-muted);
 	margin-bottom: 0.15rem;
@@ -1072,7 +1072,7 @@ body.has-bottom-nav .page-shell {
 /* 顯著度明細展開後的第一行：把「這個數字是什麼」寫在手指點得到的地方。
    以前只寫在分數徽章的 title 屬性裡，而這是 PWA，title 在觸控裝置上永遠不會浮出來。 */
 .event-sig-note {
-	font-size: 0.68rem;
+	font-size: 0.76rem;
 	color: var(--text-muted);
 	line-height: 1.45;
 	margin-bottom: 0.25rem;
@@ -3560,7 +3560,7 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	flex-wrap: wrap;
 	gap: 0.15rem 0.7rem;
 	margin: 0.2rem 0 0.1rem;
-	font-size: 0.74rem;
+	font-size: 0.82rem;
 	color: var(--text-muted, #9aa6c4);
 }
 .event-metric b { font-weight: 600; color: var(--text, #e6ecff); }
