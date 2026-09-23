@@ -2065,6 +2065,48 @@ body.has-bottom-nav .qa-panel {
 	min-width: 0;
 }
 
+/* 標題左半（文字＋「持股」撥片）是一個 flex 項目，右邊的入口鈕才靠得住最右邊 */
+.hs-head {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.6rem;
+	min-width: 0;
+}
+
+/* 「持股」撥片：撥片本體沿用設定頁那一種（.toggle-wrap.form-switch），
+   只是小一號——這裡是標題列不是設定列 */
+.hs-switch {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	margin: 0;
+	cursor: pointer;
+}
+
+.hs-switch .form-check {
+	min-height: 0;
+	padding-left: 0;
+}
+
+.hs-switch .form-check-input {
+	width: 2.1em;
+	height: 1.1em;
+	margin: 0;
+	float: none;
+}
+
+.hs-switch-text {
+	font-size: 0.82rem;
+	font-weight: 500;
+	color: var(--text-muted);
+}
+
+/* 打開時「持股」兩個字也亮起來。input 包在 .toggle-wrap 裡、不是文字的兄弟節點，
+   所以只能用 :has()；萬一瀏覽器不支援，最多是字維持灰的，撥片本身照樣看得出開關 */
+.hs-switch:has(.form-check-input:checked) .hs-switch-text {
+	color: var(--text-0);
+}
+
 /* 標題右邊的入口鈕（例：我的自選 → 新增自選股）。跟 .hs-link 一樣是紫的「可點」，
    但這是要按的東西，所以給它框與可按的面積（色彩語彙規則：橘留給需要注意的事）。 */
 .hs-btn {

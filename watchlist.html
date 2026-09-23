@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="175">
+  <meta name="app-version" content="176">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=175" rel="stylesheet">
+  <link href="watchlist.css?v=176" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -267,7 +267,17 @@
         <!-- 標題與右邊的入口要各自是一個 flex 項目：圖示與文字不包起來的話，
              文字會變成另一個匿名項目，被 justify-content: space-between 推到右邊 -->
         <div class="home-sec-title">
-          <span class="hs-label"><i data-icon="star"></i>我的自選</span>
+          <span class="hs-head">
+            <span class="hs-label"><i data-icon="star"></i>我的自選</span>
+            <!-- 打開＝只看持股，關閉＝全部自選股。與設定頁的通知開關同一種撥片（App 裡的開關只有一種長相） -->
+            <label class="hs-switch" title="只顯示有持股的自選股">
+              <span class="toggle-wrap form-check form-switch mb-0">
+                <input id="home-holdings-only" class="form-check-input" type="checkbox"
+                       onchange="setHomeHoldingsOnly(this.checked)">
+              </span>
+              <span class="hs-switch-text">持股</span>
+            </label>
+          </span>
           <button type="button" class="hs-btn" onclick="switchTab('watch')">新增自選股</button>
         </div>
         <div class="home-grid" id="home-watchlist"></div>
@@ -1202,6 +1212,7 @@ let intradayOptionalCols = ["levels", "quote_at", "signals_today"];
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
 let scoresFilter = "mine";      // mine / screen / picks
+let homeHoldingsOnly = false;   // 首頁「持股」撥片：打開只留有部位的自選股
 
 // ── 事件彙整功能（Feature 2）────────────────────────────────────
 // 查詢抓「近 90 天 + 未來」的事件窗口；「今日事件」只呈現
@@ -3601,6 +3612,12 @@ function switchTab(tab, silent = false) {
   // 外觀，畫面交給下面的 renderCurrentTab()，免得同一次切換畫兩遍。
   if (changed && tab === "scores") { scoresFilter = "mine"; syncFilterChips("scores-filters", "mine"); }
   if (changed && tab === "inbox") { inboxFilter = "all"; syncFilterChips("inbox-filters", "all"); }
+  // 首頁的「持股」撥片同一個規則：離開再回來就是預設（關閉＝全部）
+  if (changed && tab === "home") {
+    homeHoldingsOnly = false;
+    const sw = document.getElementById("home-holdings-only");
+    if (sw) sw.checked = false;
+  }
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
   // 盤後頁要收盤價：主機沒寫到收盤時向 FinMind 補一次（那支自己限流），回來重畫
@@ -5379,13 +5396,22 @@ function renderHome() {
   // 「今日總覽」標題與總覽卡 2026-09-22 都拿掉了（Howard）：每一列自己就有兩格數字，
   // 頁面層級再數一次「幾檔有訊號」只是重複；狀態（盤中／收盤、資料時間、自選檔數）留在上面那一行。
 
-  // 自選方塊：一檔一列（2026-09-22 Howard）
+  // 自選方塊：一檔一列（2026-09-22 Howard）。
+  // 「持股」撥片打開就只留有部位的那幾檔（2026-09-23 Howard）——排序與內容完全一樣，只是少幾列。
+  const held = homeHoldingsOnly ? holdingBySid() : null;
+  const shown = held ? rows.filter(r => held.has(r.sid)) : rows;
   const listEl = document.getElementById("home-watchlist");
-  const example = showcaseWanted(rows);
+  // 範例列是給「完全沒有歷史格子」的新帳號看的，照全部自選股判斷；
+  // 篩到只剩持股時不放——那時的空白是篩選造成的，不是沒資料
+  const example = !homeHoldingsOnly && showcaseWanted(rows);
   if (listEl) {
-    listEl.innerHTML = (rows.length
-      ? rows.map(r => homeTileHtml(r)).join("")
-      : '<div class="home-tile-empty">尚未加入自選股，到 ⭐ 自選 分頁新增</div>')
+    const empty = held
+      ? (rows.length ? "自選股裡沒有持股部位。持股在「設定」分頁填股數，或連券商同步。"
+                     : "尚未加入自選股，到「設定」分頁新增")
+      : "尚未加入自選股，到「設定」分頁新增";
+    listEl.innerHTML = (shown.length
+      ? shown.map(r => homeTileHtml(r)).join("")
+      : `<div class="home-tile-empty">${empty}</div>`)
       + (example ? showcaseTileHtml() : "");
   }
   // 今日資料：自選股今天的事件（2026-09-20 起不分階，全部列、最多 6 件）——
@@ -5646,6 +5672,15 @@ function setScoresFilter(f) {
   scoresFilter = f;
   syncFilterChips("scores-filters", f);
   renderScores();
+}
+
+// 首頁的「持股」撥片（2026-09-23 Howard）：打開只顯示有部位的自選股，關閉顯示全部
+function setHomeHoldingsOnly(on) {
+  homeHoldingsOnly = !!on;
+  const el = document.getElementById("home-holdings-only");
+  if (el) el.checked = homeHoldingsOnly;
+  trackActivity("home_holdings_filter", { on: homeHoldingsOnly ? 1 : 0 });
+  renderHome();
 }
 
 // ── 自訂篩選（使用者條件，存在本機） ──
@@ -6513,7 +6548,10 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     // 右邊沒有「還沒發生」的那塊了，原本的 .rtl-future 灰底一併拿掉。
     const label = `現在 ${fmtTime(nowAt)}`;
     const lw = rtlTextWidth(label, RTL_FONT.now);
-    const lx = Math.min(x1 - lw / 2, Math.max(x0 + lw / 2, x1));
+    // 標籤壓在線的正上方（2026-09-23 Howard；以前整塊靠在線的左邊，看起來像在說左邊那一段）。
+    // 它畫在繪圖區上方 y0-8，那個高度右邊是空的——參考線的標籤都在 y0~y1 之間，不會撞到。
+    // 只有在 SVG 右緣真的放不下時才往左收。
+    const lx = Math.min(RTL_VB_W - lw / 2 - 2, x1);
     nowSvg = `<line class="rtl-now" x1="${x1.toFixed(1)}" y1="${y0 - 2}" x2="${x1.toFixed(1)}" y2="${axisY}"/>`
       + `<text class="rtl-now-label" x="${lx.toFixed(1)}" y="${(y0 - 8).toFixed(1)}" text-anchor="middle">${escapeHtml(label)}</text>`;
   }
