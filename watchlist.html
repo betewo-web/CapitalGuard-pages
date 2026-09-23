@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="170">
+  <meta name="app-version" content="171">
   <title>台股監控 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=170" rel="stylesheet">
+  <link href="watchlist.css?v=171" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
@@ -3583,6 +3583,11 @@ function switchTab(tab, silent = false) {
     btn.classList.toggle("active", t === tab || (t === "home" && HOME_GROUP.includes(tab)));
   });
   document.querySelectorAll(".home-tab").forEach(b => b.classList.toggle("is-active", b.dataset.tab === tab));
+  // 換到別的分頁再回來，篩選籤回到預設（Howard，2026-09-23）：統計＝我的自選、通知＝全部。
+  // 上次留在「自訂篩選」或「未讀」，隔一陣子回來會以為那就是全部資料。只改變數與籤的
+  // 外觀，畫面交給下面的 renderCurrentTab()，免得同一次切換畫兩遍。
+  if (changed && tab === "scores") { scoresFilter = "mine"; syncFilterChips("scores-filters", "mine"); }
+  if (changed && tab === "inbox") { inboxFilter = "all"; syncFilterChips("inbox-filters", "all"); }
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
   // 盤後頁要收盤價：主機沒寫到收盤時向 FinMind 補一次（那支自己限流），回來重畫
@@ -5104,10 +5109,15 @@ function updateInboxBadge() {
   el.textContent = n > 99 ? "99+" : String(n);
 }
 
+// 一排篩選籤裡只有一顆亮著。switchTab 回到預設時也要同一組外觀，所以抽出來共用
+function syncFilterChips(rowId, f) {
+  document.querySelectorAll(`#${rowId} .filter-chip`).forEach(c =>
+    c.classList.toggle("active", c.dataset.f === f));
+}
+
 function setInboxFilter(f) {
   inboxFilter = f;
-  document.querySelectorAll("#inbox-filters .filter-chip").forEach(c =>
-    c.classList.toggle("active", c.dataset.f === f));
+  syncFilterChips("inbox-filters", f);
   renderInbox();
 }
 
@@ -5621,8 +5631,7 @@ function holdingEntries() {
 // 這頁只放摘要與「跟我有關的」；完整報告仍是 report.html，避免同一份報告渲染兩次而漂移。
 function setScoresFilter(f) {
   scoresFilter = f;
-  document.querySelectorAll("#scores-filters .filter-chip").forEach(c =>
-    c.classList.toggle("active", c.dataset.f === f));
+  syncFilterChips("scores-filters", f);
   renderScores();
 }
 
