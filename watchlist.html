@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="193">
+  <meta name="app-version" content="194">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=193" rel="stylesheet">
+  <link href="watchlist.css?v=194" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -295,7 +295,7 @@
         </div>
 
         <!-- 進階訊號推薦：規則數未達 RULE_NUDGE_TARGET 條時顯示一行，內容由 renderRuleNudge() 畫；
-             達標、沒有自選股、或按過「稍後再說」（7 天）就收起。
+             達標、沒有自選股、按過「稍後」或剛新增過一條（都是 7 天）就收起。
              2026-09-24 Howard 把它從首頁最底下搬到這裡——排在標題列與自選清單之間，
              一進首頁不必捲動就看得到「新增進階訊號」那顆。 -->
         <div class="home-nudge" id="home-rule-nudge" style="display:none">
@@ -4279,10 +4279,20 @@ function noteRuleAdded() {
 // ── 彈出視窗 ──
 // 刻意「不」用 Web Push 做這件事：推播權限是盤中訊號的命脈，拿它推銷功能，
 // 使用者一旦嫌吵關掉就很難拿回來（MONITOR_MAX_RULE_ALERTS_PER_STOCK 也是同一個考量）。
-// 所以主動提醒最多做到「開 App 時跳一次視窗」，而且有三重節流：
-//   1. 最多跳 RULE_NUDGE_POPUP_MAX 次；2. 兩次至少隔 RULE_NUDGE_POPUP_GAP_DAYS 天；
-//   3. 按「稍後再說」走 7 天靜音、「不再提醒」永久靜音。
-// 達到 3 條規則後永遠不再跳，首頁卡片也同步消失。
+// 所以主動提醒最多做到「開 App 時跳一次視窗」，而且有四重節流：
+//   1. 一輩子最多跳 RULE_NUDGE_POPUP_MAX 次——只要「顯示過」就記一次，用完永不再跳；
+//   2. 兩次至少隔 RULE_NUDGE_POPUP_GAP_DAYS 天；
+//   3. 按「稍後」靜音 RULE_NUDGE_SNOOZE_DAYS 天（與首頁那一行同一把鑰匙）；
+//   4. 新增任何一條規則就靜音同樣天數（noteRuleAdded）。
+// 達到 ruleNudgeTarget() 條之後永遠不再跳，首頁那一行也同步消失。
+//
+// 2026-09-24（Howard）拿掉「不再提醒」：彈窗改成擋不掉的提醒，只留
+// 「新增進階訊號」與「稍後」兩顆。代價寫在這裡，免得日後看不出來——
+// 永久靜音的開關一起沒了。彈窗本身無所謂（3 次的硬上限在），但首頁那一行
+// 沒有次數上限：有自選股、規則不到 3 條的人，每 7 天還是會再看到它一次。
+//
+// 兩把鑰匙都存在 localStorage，所以是「這台裝置」的狀態：換手機、清網站資料、
+// iOS 把 App 從桌面刪掉重裝，次數都會從頭算。
 const RULE_NUDGE_POPUP_KEY = "cg-rule-nudge-popup";
 const RULE_NUDGE_POPUP_MAX = 3;
 const RULE_NUDGE_POPUP_GAP_DAYS = 3;
