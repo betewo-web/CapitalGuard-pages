@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="192">
+  <meta name="app-version" content="193">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=192" rel="stylesheet">
+  <link href="watchlist.css?v=193" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -491,36 +491,63 @@
      再淡入下層——中間那一格沒有任何 modal，畫面會閃一下自選清單。
      改成同一個面板換內容，就沒有那個空檔了。 -->
 <!-- 進階訊號推薦彈窗：開啟 App 時主動跳出，條件與首頁卡片相同，另外再加頻率上限。
-     內容由 renderRuleNudgePopup() 畫；不用 Web Push 是刻意的，見 maybeShowRuleNudgePopup() 註解。 -->
-<div class="modal fade sheet-modal" id="ruleNudgeModal" tabindex="-1" aria-hidden="true">
+     內容由 renderRuleNudgePopup() 畫；不用 Web Push 是刻意的，見 maybeShowRuleNudgePopup() 註解。
+     2026-09-24 Howard 改成「擋住畫面」的提醒：blocking-modal ＋ static backdrop ＋ 不吃 Esc、
+     也沒有 ✕——點旁邊就關掉等於沒看到，使用者只能選「新增進階訊號」或「稍後」。
+     「不再提醒」同時拿掉：一輩子最多跳 RULE_NUDGE_POPUP_MAX 次，本來就不會變成騷擾。 -->
+<div class="modal fade sheet-modal blocking-modal" id="ruleNudgeModal" tabindex="-1" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
         <h5 class="mb-0">📐 設定你的通知規則</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3" id="rule-nudge-popup-body"></div>
       <div class="modal-footer py-2">
-        <button type="button" class="btn btn-sm btn-outline-light btn-ghost" onclick="dismissRuleNudgeForever()">不再提醒</button>
-        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">稍後再說</button>
+        <button type="button" class="btn btn-sm btn-outline-light" onclick="snoozeRuleNudgeFromPopup()">稍後</button>
+        <button type="button" class="btn btn-sm btn-success btn-accent-sm" onclick="openRulesFromPopup()">新增進階訊號</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- 每日提醒開啟推播：沒訂閱的人每個台北日曆日跳一次，內容由 renderPushNudgePopup() 畫。
-     「啟用通知」直接呼叫 togglePushSubscription()（權限請求必須在手勢的同一個 tick 內）。 -->
-<div class="modal fade sheet-modal" id="pushNudgeModal" tabindex="-1" aria-hidden="true">
+<!-- 提醒開啟推播：兩個時機——① 沒訂閱的人每個台北日曆日跳一次；
+     ② 剛新增訊號卻沒開通知時立刻跳（promptPushAfterSignalAdded，不吃每日上限）。
+     內容由 renderPushNudgePopup() 畫。
+     「啟用通知」直接呼叫 togglePushSubscription()（權限請求必須在手勢的同一個 tick 內）。
+     與規則提醒同為 blocking-modal：設了訊號卻收不到通知是最糟的狀態，不能讓人點旁邊跳過。 -->
+<div class="modal fade sheet-modal blocking-modal" id="pushNudgeModal" tabindex="-1" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
         <h5 class="mb-0">🔔 開啟推播通知</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3" id="push-nudge-popup-body"></div>
       <div class="modal-footer py-2">
-        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">今天先不要</button>
-        <button type="button" class="btn btn-sm btn-success btn-accent-sm" id="push-nudge-enable-btn" onclick="enablePushFromNudge()">啟用通知</button>
+        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">稍後</button>
+        <button type="button" class="btn btn-sm btn-success btn-accent-sm" id="push-nudge-enable-btn" onclick="enablePushFromNudge()">開啟通知</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 基礎訊號／進階訊號都是「對自選股做的設定」：一檔都沒有時點進去只會看到空面板，
+     使用者分不出是壞了還是自己少做一步。先跳這個小視窗講清楚，並給一鍵過去新增。 -->
+<div class="modal fade sheet-modal" id="needWatchlistModal" tabindex="-1" aria-hidden="true"
+     aria-labelledby="need-watchlist-title">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="need-watchlist-title">還沒有自選股</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body p-3">
+        <p class="need-watch-text mb-0" id="need-watchlist-text"></p>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">知道了</button>
+        <button type="button" class="btn btn-sm btn-success btn-accent-sm" onclick="goAddStockFromGuard()">新增自選股</button>
       </div>
     </div>
   </div>
@@ -4233,12 +4260,20 @@ function snoozeRuleNudge() {
   renderRuleNudge();
 }
 
-// 「不再提醒」＝把 snooze 推到很遠的未來。用同一把鑰匙，首頁卡片與彈窗一起靜音，
-// 不要為了永久關閉再開一個 key——兩個開關各自記狀態遲早會出現「關了還跳」。
-function dismissRuleNudgeForever() {
-  try { localStorage.setItem(RULE_NUDGE_SNOOZE_KEY, String(Date.now() + 36500 * 86400e3)); } catch {}
+// 彈窗的「稍後」：與首頁那一行的「稍後」同一把鑰匙、同樣 7 天，
+// 不要為了彈窗再開一個 key——兩個開關各自記狀態遲早會出現「關了還跳」。
+function snoozeRuleNudgeFromPopup() {
   hideRuleNudgePopup();
-  renderRuleNudge();
+  snoozeRuleNudge();
+}
+
+// 使用者真的加了一條規則之後就別再催（Howard 2026-09-24）：
+// 目標是 3 條，但「剛存好一條、回到首頁那一行還掛在那裡」讀起來像沒存成功，
+// 而且他當下已經做過這件事了。走同一把 snooze 鑰匙靜音 7 天——
+// 還是只有 1 條的人一週後會再看到一次，不是永久關掉。
+function noteRuleAdded() {
+  hideRuleNudgePopup();
+  snoozeRuleNudge();   // 裡面會重畫首頁那一行
 }
 
 // ── 彈出視窗 ──
@@ -4263,6 +4298,16 @@ function noteRuleNudgePopupShown() {
       JSON.stringify({ n: Number(st.n || 0) + 1, last: Date.now() }));
   } catch {}
 }
+
+// 擋住畫面的提醒（.blocking-modal）背景要霧得比一般面板更明顯：一般面板是
+// 「我正在操作」，這兩個是「你得先回答」。純 CSS 做不到——backdrop 是 Bootstrap
+// 插在 body 底下的兄弟節點，選不到「上面那個 modal 是哪一種」，所以掛 body class。
+document.addEventListener("show.bs.modal", e => {
+  if (e.target && e.target.classList.contains("blocking-modal")) document.body.classList.add("modal-blocking");
+});
+document.addEventListener("hidden.bs.modal", () => {
+  if (!document.querySelector(".blocking-modal.show")) document.body.classList.remove("modal-blocking");
+});
 
 // 已經有別的視窗佔著畫面時不要疊上去：免責聲明閘、強制更新閘都是全螢幕 div，
 // Bootstrap modal 疊兩層則會把背景鎖住解不開（方案面板已經踩過一次）。
@@ -4299,7 +4344,7 @@ function openRulesFromPopup() {
 // openRulesModal 會先切到清單並非同步拉規則；緊接著切到編輯 pane，
 // 清單回來只更新清單 pane 的內容，不會把使用者切回去。
 function openRuleEditorFromNudge() {
-  openRulesModal();
+  if (!openRulesModal()) return;   // 沒有自選股：守門的小視窗已經接手
   openRuleEditor(null);
 }
 
@@ -4372,10 +4417,10 @@ function renderPushNudgePopup() {
   if (btn) btn.style.display = (install || inApp) ? "none" : "";
   body.innerHTML = install
     ? `<div class="rule-nudge-lead">iPhone 需先用 Safari 的「分享 → 加入主畫面」安裝，才能開啟推播通知。</div>
-       <div class="small text-secondary">安裝後從主畫面開啟，再到首頁按「啟用通知」。</div>`
+       <div class="small text-muted">安裝後從主畫面開啟，再到首頁按「啟用通知」。</div>`
     : inApp
     ? `<div class="rule-nudge-lead">${_inAppBrowser} 的內建瀏覽器不支援推播通知。</div>
-       <div class="small text-secondary">請點右上角的「⋮」或「⋯」→「以其他瀏覽器開啟」，
+       <div class="small text-muted">請點右上角的「⋮」或「⋯」→「以其他瀏覽器開啟」，
        用 Chrome 登入後點「⋮ → 加到主畫面」裝起來，再按首頁的「啟用通知」。</div>`
     : `<div class="rule-nudge-lead">你尚未開啟推播通知。</div>
        <ul class="small ps-3 mb-2">
@@ -4383,7 +4428,52 @@ function renderPushNudgePopup() {
          <li>盤後報告完成、自選股有新事件時也會提醒</li>
          <li>未開啟時，這些資訊只能打開 App 才看得到</li>
        </ul>
-       <div class="small text-secondary">每天提醒一次；開啟後不再出現。</div>`;
+       <div class="small text-muted">每天最多提醒一次，新增訊號時也會確認一次；開啟後就不再出現。</div>`;
+}
+
+// ── 新增訊號之後的推播提醒（Howard 2026-09-24）──
+// 設了訊號卻沒開通知，是這個 App 最糟的狀態：條件成立了也沒人告訴他，
+// 而他以為自己設好了。所以「剛新增訊號」這一刻一定要問，而且不吃每日上限——
+// 這次不開，下次再新增訊號時照樣問（週期性）。開了之後條件就不成立，自然不再出現。
+//
+// 面板還開著的時候不能疊上去（Bootstrap 疊兩層會把 body 的捲動鎖留著），
+// 所以先排隊，等 modal 關掉的那一刻再問。
+let _pushPromptQueued = false;
+
+function queuePushPromptAfterSignal() {
+  _pushPromptQueued = true;
+  _flushPushPromptWhenFree();
+}
+
+function _flushPushPromptWhenFree() {
+  if (!_pushPromptQueued || _screenIsBusy()) return;
+  _pushPromptQueued = false;
+  promptPushAfterSignalAdded();
+}
+
+// 規則面板／推薦彈窗關掉之後接著問。Bootstrap 的 modal 事件會冒泡到 document；
+// 等一小段時間讓 backdrop 收乾淨，_screenIsBusy() 才量得準。
+document.addEventListener("hidden.bs.modal", () => setTimeout(_flushPushPromptWhenFree, 280));
+
+async function promptPushAfterSignalAdded() {
+  // 和每日提醒同一組前提，只差不看「今天問過了沒」：
+  // 權限被封鎖（denied）時跳出來也沒有按鈕能救，那種情況留給設定頁的說明
+  if (!pushNudgeNeedsInstall()) {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+    if (typeof Notification === "undefined" || Notification.permission === "denied") return false;
+    if (!VAPID_PUBLIC_KEY) return false;
+    try {
+      const reg = await _swReadyOrNull();
+      if (!reg) return false;
+      _pushSubscribed = !!(await reg.pushManager.getSubscription());
+    } catch { return false; }
+    if (_pushSubscribed) return false;
+  }
+  if (_screenIsBusy()) { _pushPromptQueued = true; return false; }   // 又有別的視窗開著：排回佇列
+  renderPushNudgePopup();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("pushNudgeModal")).show();
+  notePushNudgeShown();   // 剛問過，今天的例行提醒就不必再跳一次
+  return true;
 }
 
 function renderRuleNudgePopup() {
@@ -4403,10 +4493,8 @@ function renderRuleNudgePopup() {
       全部成立才通知你，不用整天盯盤。
     </div>
     <div class="rule-nudge-progress" title="已設定 ${n}/${target} 條">${dots}<span class="rule-nudge-meta">${n}/${target}${planLine ? "・" + planLine : ""}</span></div>
-    <button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center rule-nudge-cta"
-            onclick="openRulesFromPopup()">＋ 自己設定條件</button>
     ${tpls.length ? `
-      <div class="rule-nudge-or"><span>或一鍵加入範本（套用到全部自選股，之後可改門檻）</span></div>
+      <div class="rule-nudge-or"><span>或一鍵加入範本（套用到全部自選股）</span></div>
       <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "popup")}</div>` : ""}
     <div id="rule-popup-msg" class="small mt-2"></div>`;
 }
@@ -4494,6 +4582,10 @@ async function addRuleTemplate(idx, ctx, btn) {
   }
   await loadRuleNudgeState();
   loadPlanState().catch(() => {});   // 方案面板的用量計數跟著更新
+  // 與 saveRule() 同一條規矩：加了就別再催，並接著確認他收得到通知。
+  // 先做這件事，下面 popup 那一支才會因為 ruleNudgeShouldPrompt() 轉 false 而收起來
+  noteRuleAdded();
+  queuePushPromptAfterSignal();
   if (ctx === "modal") {
     setRulesMsg(`已加入「${t.name}」`);
     refreshRules();
@@ -5334,14 +5426,24 @@ function renderHome() {
   // 範例列是給「完全沒有歷史格子」的新帳號看的，照全部自選股判斷；
   // 篩到只剩持股時不放——那時的空白是篩選造成的，不是沒資料
   const example = !homeHoldingsOnly && showcaseWanted(rows);
+  // 一檔自選股都沒有＝新帳號進來的第一個畫面。只留一行灰字的話，他要自己找到
+  // 標題列右上那顆小按鈕；改成置中的大按鈕（Howard 2026-09-24），同時把右上那顆
+  // 與「只列持股」撥片收起來（.home-sec.is-empty），免得同一句話出現兩次、
+  // 而且小的那顆反而更顯眼。篩選造成的空白不算——那時要講的是篩選，不是新增。
+  const noWatchlist = rows.length === 0;
+  const secEl = listEl && listEl.closest(".home-sec");
+  if (secEl) secEl.classList.toggle("is-empty", noWatchlist);
   if (listEl) {
-    const empty = held
-      ? (rows.length ? "自選股裡沒有持股部位。持股在「設定」分頁填股數，或連券商同步。"
-                     : "尚未加入自選股，到「設定」分頁新增")
-      : "尚未加入自選股，到「設定」分頁新增";
+    const emptyHtml = noWatchlist
+      ? `<div class="home-empty-cta">
+           <div class="hec-title">還沒有自選股</div>
+           <button type="button" class="btn-cta-lg" onclick="focusAddStock()">＋ 新增自選股</button>
+           <div class="hec-sub">加入之後，這裡會顯示每一檔今天有沒有事。</div>
+         </div>`
+      : `<div class="home-tile-empty">自選股裡沒有持股部位。持股在「設定」分頁填股數，或連券商同步。</div>`;
     listEl.innerHTML = (shown.length
       ? shown.map(r => homeTileHtml(r)).join("")
-      : `<div class="home-tile-empty">${empty}</div>`)
+      : emptyHtml)
       + (example ? showcaseTileHtml() : "");
   }
   // 今日資料：自選股今天的事件（2026-09-20 起不分階，全部列、最多 6 件）——
@@ -6699,8 +6801,10 @@ function showRulesPane(pane) {
 }
 
 function openRulesModal() {
+  if (!requireWatchlist("進階訊號")) return false;
   showRulesPane("list");   // 這裡面已經會拉一次清單，不用再 await 一次
   bootstrap.Modal.getOrCreateInstance(document.getElementById("rulesModal")).show();
+  return true;
 }
 
 async function refreshRules() {
@@ -7017,9 +7121,12 @@ async function saveRule() {
     }
     trackActivity("rule_save", { mode: editingRuleId ? "edit" : "new", n: editorConditions.length,
                                  types: editorConditions.map(c => c.type).join(",") });
-    const saved = editingRuleId ? "已更新" : "已新增";
+    const isNew = !editingRuleId;
+    const saved = isNew ? "已新增" : "已更新";
     showRulesPane("list");   // 這裡面會重新拉一次清單
     setRulesMsg(saved);
+    // 新增（不是修改）才算「做過這件事」：停掉推薦，並確認他收得到這條訊號
+    if (isNew) { noteRuleAdded(); queuePushPromptAfterSignal(); }
   } catch (e) {
     if (isLimitError(e, "alert_rules")) {
       msgEl.innerHTML = limitPromptHtml("alert_rules", e);
@@ -7204,9 +7311,13 @@ function renderWatchlist(rows) {
   const visible = rows;
   const emptyEl = document.getElementById("wl-empty");
   emptyEl.style.display = visible.length ? "none" : "";
-  emptyEl.textContent = rows.length
+  emptyEl.innerHTML = rows.length
     ? "沒有符合篩選條件的股票"
-    : "尚未加入任何股票，從上方搜尋並加入吧！";
+    : `<div class="home-empty-cta">
+         <div class="hec-title">還沒有自選股</div>
+         <button type="button" class="btn-cta-lg" onclick="focusAddStock()">＋ 新增自選股</button>
+         <div class="hec-sub">在上面的搜尋列輸入代號或名稱，例如 2330／台積電。</div>
+       </div>`;
   grid.style.display = visible.length ? "block" : "none";
 
   // 收盤價、事件、持股都在「🌙 盤後」：這一頁不再讀任何報價。
@@ -7334,12 +7445,37 @@ function getWatchlistRowById(rowId) {
 }
 
 // 設定頁標題列的「🔔 通知」：通知不再掛在每一列上，從這裡挑股票設定（2026-09-22 Howard）
+// ── 沒有自選股時的守門（Howard 2026-09-24）──
+// 基礎訊號與進階訊號都是「套在自選股上」的設定。一檔都沒有就點進去，面板是空的，
+// 使用者分不出是功能壞了還是自己少做一步。本來只在設定頁寫一行小字（#add-msg），
+// 人在首頁按進來根本看不到那行字；改成小視窗，並且把下一步（新增自選股）直接給他。
+function requireWatchlist(what) {
+  if (watchlistRows.length) return true;
+  const el = document.getElementById("need-watchlist-text");
+  if (el) el.textContent = `${what}是套用在自選股上的設定，你目前一檔都還沒有。要先去新增自選股嗎？`;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("needWatchlistModal")).show();
+  return false;
+}
+
+function goAddStockFromGuard() {
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("needWatchlistModal")).hide();
+  // 等前一個 modal 的淡出跑完再切分頁，否則 Bootstrap 會把 body 的捲動鎖留著
+  setTimeout(focusAddStock, 220);
+}
+
+// 「新增自選股」的唯一落點：切到設定分頁、捲到搜尋列並聚焦，游標就在該打字的地方
+function focusAddStock() {
+  switchTab("watch");
+  setTimeout(() => {
+    const inp = document.getElementById("inp-stock");
+    if (!inp) return;
+    inp.scrollIntoView({ block: "center", behavior: "smooth" });
+    try { inp.focus({ preventScroll: true }); } catch { inp.focus(); }
+  }, 80);
+}
+
 function openAlertSettingsPicker() {
-  if (!watchlistRows.length) {
-    const msgEl = document.getElementById("add-msg");
-    if (msgEl) msgEl.innerHTML = '<span class="text-warning">還沒有自選股，先用上面的「新增」加一檔</span>';
-    return;
-  }
+  if (!requireWatchlist("基礎訊號")) return;
   openAlertSettings(ALERT_SCOPE_ALL);   // 預設「全部股票」，要單獨調某一檔再按「設定個股」
 }
 
@@ -7513,9 +7649,12 @@ async function saveAlertDraft() {
       await sbPatch("watchlist", { "id": `eq.${row.id}` }, patch, state.accessToken);
       Object.assign(row, patch);
     }
+    // 這次有把任何一項基礎訊號「打開」也算新增訊號：沒開推播的話接著問一次
+    const turnedOn = ALERT_FIELDS.some(f => patch[f] === true);
     alertDraft = {};
     msgEl.innerHTML = `<span class="alert-msg-ok">已儲存（${targets.length} 檔）</span>`;
     renderCurrentTab();
+    if (turnedOn) queuePushPromptAfterSignal();
     setTimeout(() => bootstrap.Modal.getInstance(document.getElementById("alertSettingsModal"))?.hide(), 500);
   } catch (e) {
     msgEl.innerHTML = `<span class="alert-msg-bad">儲存失敗：${escapeHtml(e.message)}</span>`;
