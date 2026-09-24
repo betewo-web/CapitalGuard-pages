@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="195">
+  <meta name="app-version" content="196">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=195" rel="stylesheet">
+  <link href="watchlist.css?v=196" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -9227,9 +9227,13 @@ async function initPushUI() {
   }
 
   // 被封鎖時每日提醒不會跳（跳了也沒用），首頁這條就是他唯一的入口：
-  // 與其只丟一句「請到瀏覽器設定」，不如給這台裝置的實際步驟。
+  // 與其只丟一句「請到瀏覽器設定」，不如給這台裝置的實際步驟——那些步驟在
+  // 旁邊的「如何啟用通知」裡（_showPushUnblockHelp，依平台給不同路徑）。
+  // 這一行只講狀態就好（Howard 2026-09-24）：後半句「要到系統設定才能開回來」
+  // 是同一件事的殘缺版，而且 .push-bar-msg 是 nowrap + ellipsis，
+  // 窄螢幕上本來就會被切掉——切掉之後反而看不出按鈕是幹嘛的。
   if (Notification.permission === 'denied') {
-    showHint('🔇', '通知已被封鎖，要到系統設定才能開回來');
+    showHint('🔇', '通知已被封鎖');
     return;
   }
 
