@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="196">
+  <meta name="app-version" content="197">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=196" rel="stylesheet">
+  <link href="watchlist.css?v=197" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -456,14 +456,15 @@
       <div class="card panel-card mt-3">
         <div class="card-body p-3">
           <div class="home-sec-title">
-            <span class="hs-label"><i data-icon="gear"></i>文字大小</span>
+            <span class="hs-label"><i data-icon="gear"></i>文字大小設定</span>
           </div>
+          <!-- 說明那一行 2026-09-24 拿掉（Howard）：三顆籤按下去當場整頁就變了，
+               「會放大」不必用文字講。標題寫「設定」已經說明這是可調的東西。 -->
           <div class="chip-row" id="font-size-chips">
             <button type="button" class="filter-chip" data-f="base" onclick="setAppFontSize('base')">標準</button>
             <button type="button" class="filter-chip" data-f="large" onclick="setAppFontSize('large')">大</button>
             <button type="button" class="filter-chip" data-f="xlarge" onclick="setAppFontSize('xlarge')">特大</button>
           </div>
-          <div class="view-hint p-0 mt-2">整個 App 的字與間距一起放大，設定只存在這支手機上。</div>
         </div>
       </div>
 
