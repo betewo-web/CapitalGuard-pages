@@ -4111,11 +4111,14 @@ const RULE_CATALOG = [
     params: [{ k: "value", label: "漲幅 %", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
   { type: "change_pct_below", tier: "intraday", name: "跌幅超過", preview: true,
     params: [{ k: "value", label: "跌幅 %（填正數）", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
-  // 缺口以昨日最高／最低價為基準：開盤高於昨收但仍在昨日區間內的不算跳空
+  // 缺口以昨日最高／最低價為基準：開盤高於昨收但仍在昨日區間內的不算跳空。
+  // 上限 9%：台股漲跌幅 ±10%，開盤價最多就是昨收 ×1.1，而昨高 >= 昨收，
+  // 所以缺口的理論極大值正好是 10%（昨天收在最高價、今天開漲停）。門檻設到
+  // 10% 以上等於給一個永遠不會成立的選項，9% 再留一點安全邊際。
   { type: "gap_up", tier: "intraday", name: "向上跳空", preview: true,
-    params: [{ k: "value", label: "缺口 %（高於昨高）", type: "number", def: 1, min: 0.1, max: 20, step: 0.1 }] },
+    params: [{ k: "value", label: "缺口 %（高於昨高）", type: "number", def: 1, min: 0.1, max: 9, step: 0.1 }] },
   { type: "gap_down", tier: "intraday", name: "向下跳空", preview: true,
-    params: [{ k: "value", label: "缺口 %（低於昨低）", type: "number", def: 1, min: 0.1, max: 20, step: 0.1 }] },
+    params: [{ k: "value", label: "缺口 %（低於昨低）", type: "number", def: 1, min: 0.1, max: 9, step: 0.1 }] },
   // 可本地預覽：用日線的成交量比日線均量（都在 sharedReportData 裡），
   // 不需要 MIS 的當日累計量——前端已不再取那個欄位（見 loadIntradayQuotes）。
   { type: "volume_vs_ma", tier: "intraday", name: "量能對比均量", preview: true,
@@ -6886,6 +6889,21 @@ function onConditionTypeChange(i, type) {
   renderRuleConditions();
 }
 
+// input 的 min／max 只是 HTML 屬性：鍵盤打進去的超範圍數字照樣存得下去
+// （稽核 I10）。目錄既然標了範圍，存進條件的值就要真的落在範圍內——
+// 例如跳空的缺口上限 9%，台股漲跌幅 ±10% 讓更大的門檻永遠不會成立。
+function clampRuleParam(p, v) {
+  if (p.min !== undefined) v = Math.max(p.min, v);
+  if (p.max !== undefined) v = Math.min(p.max, v);
+  return v;
+}
+
+// 失焦時把輸入框拉回真正存下的值，否則畫面顯示 50、條件裡其實是 9
+function syncRuleParamInput(i, key, el) {
+  const v = (editorConditions[i] || {})[key];
+  if (v !== undefined) el.value = v;
+}
+
 function onConditionParamChange(i, key, raw) {
   const spec = RULE_CATALOG_BY_TYPE[editorConditions[i].type];
   const p = spec && spec.params.find(x => x.k === key);
@@ -6893,6 +6911,7 @@ function onConditionParamChange(i, key, raw) {
   if (p && p.type === "number") {
     v = Number(raw);
     if (!isFinite(v)) return;
+    v = clampRuleParam(p, v);
   } else if (p && p.type === "select" && (p.def === 5 || p.def === 20)) {
     v = Number(raw);
   }
@@ -6927,7 +6946,8 @@ function renderRuleConditions() {
                ${p.min !== undefined ? `min="${p.min}"` : ""}
                ${p.max !== undefined ? `max="${p.max}"` : ""}
                step="${p.step || 1}"
-               oninput="onConditionParamChange(${i}, '${jsAttr(p.k)}', this.value)"></label>`;
+               oninput="onConditionParamChange(${i}, '${jsAttr(p.k)}', this.value)"
+               onchange="syncRuleParamInput(${i}, '${jsAttr(p.k)}', this)"></label>`;
     }).join("");
 
     // 只剩一條時不給刪：刪掉會被補回預設條件，等於沒動，按鈕只會讓人困惑
