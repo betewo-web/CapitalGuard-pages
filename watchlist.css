@@ -2243,6 +2243,11 @@ body.has-bottom-nav .page-shell {
 	margin-bottom: 0.9rem;
 }
 
+/* 搬進「我的自選」區塊後（2026-09-24 Howard），它夾在標題列與自選清單之間。
+   上下間距都取 0.7rem（＝標題列的 margin-bottom），三者才像同一塊，
+   而不是浮在中間的另一張卡。 */
+.home-sec > .home-nudge { margin-bottom: 0.7rem; }
+
 .home-nudge > div { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 8px; }
 .home-nudge-actions { display: inline-flex; align-items: center; gap: 12px; white-space: nowrap; }
 .home-nudge-later { color: var(--text-muted); }
