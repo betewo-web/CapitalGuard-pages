@@ -3006,10 +3006,16 @@ body.has-bottom-nav .page-shell {
 	line-height: 1.55;
 	color: var(--text-1);
 }
-.dg-box { max-width: 380px; text-align: left; }
-.dg-msg p { margin: 0 0 0.6rem; }
-.dg-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--text-0); margin-top: 0.4rem; }
-.dg-check input { width: 1.05rem; height: 1.05rem; }
+/* 免責同意、安裝精靈這幾頁是新使用者第一次看到的說明，多半在手機上一邊看一邊照著做。
+   App 內部的資訊區要密（一列塞得下越多越好），這裡剛好相反：只看一次、看懂最重要，
+   字級統一比內部高一階（2026-09-24 Howard）。
+   .dg-msg 同時掛 .ug-msg，兩者同權重而 .ug-msg 寫在後面會贏 → 選擇器要多一層 .dg-box。 */
+.dg-box { max-width: 400px; text-align: left; }
+.dg-box .ug-title { font-size: 1.22rem; }
+.dg-box .ug-msg { font-size: 0.98rem; line-height: 1.75; }
+.dg-msg p { margin: 0 0 0.75rem; }
+.dg-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.95rem; color: var(--text-0); margin-top: 0.6rem; }
+.dg-check input { width: 1.15rem; height: 1.15rem; flex-shrink: 0; }
 
 /* ── 分數明細：趨勢分的原料（四條均線的位置） ── */
 .sd-ma {
@@ -3519,6 +3525,15 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	color: var(--text-1) !important;
 }
 #login-section .form-label { font-weight: 600; }
+/* 登入頁整頁都是「照著做」的指引：Bootstrap 的 .small（0.875em，而且巢狀會再乘一次）
+   在手機上看不清楚，統一抬到 0.95rem。右上角的「Sign-In」只是裝飾副標，不跟著放大。 */
+#login-section .small,
+#login-section .form-label { font-size: 0.95rem; line-height: 1.7; }
+#login-section .card-header .small { font-size: 0.8rem; line-height: 1.4; }
+/* 短碼列是「輸入框＋貼上＋登入」三個並排：375px 上「登入」會被擠成直排兩個字（量過）。
+   讓輸入框去吸收剩餘寬度，兩顆按鈕不折行。 */
+#short-code-wrap .btn { white-space: nowrap; }
+#short-code-wrap .form-control { min-width: 0; }
 #login-section .btn-link { font-weight: 600; text-decoration-color: rgba(245, 245, 247, 0.55); }
 #short-code-msg:empty,
 #manual-login-msg:empty,
@@ -3606,15 +3621,16 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 }
 
 /* ── 零掃碼上線（ONBOARDING.md）：瀏覽器閘、iPhone 先安裝閘、安裝精靈 ── */
-.ob-box { max-width: 360px; text-align: left; }
+.ob-box { max-width: 380px; text-align: left; }
 .ob-box > div:first-child { text-align: center; }
-.ob-box .ug-title { text-align: center; }
-.ob-box .ug-msg p { margin: 0 0 0.55rem; }
-.ob-note { font-size: 0.74rem; color: var(--text-2, #8da1c6); }
+.ob-box .ug-title { text-align: center; font-size: 1.22rem; }
+.ob-box .ug-msg { font-size: 1rem; line-height: 1.7; }
+.ob-box .ug-msg p { margin: 0 0 0.7rem; }
+.ob-note { font-size: 0.88rem; line-height: 1.6; color: var(--text-2, #8da1c6); }
 /* 解除封鎖的步驟是「照著做」的清單，不是說明文：行距與項目間距要拉開，
    動作的關鍵字用粗體提亮，眼睛才掃得到下一步要按哪裡。 */
-.ob-ol { padding-left: 1.35rem; margin: 0.45rem 0 0.7rem; }
-.ob-ol li { margin-bottom: 0.6rem; line-height: 1.7; }
+.ob-ol { padding-left: 1.4rem; margin: 0.5rem 0 0.8rem; }
+.ob-ol li { margin-bottom: 0.7rem; line-height: 1.75; }
 .ob-ol li:last-child { margin-bottom: 0; }
 .ob-ol b { color: var(--text-0); font-weight: 700; }
 .ob-lead-sm { margin-bottom: 0.25rem !important; }
@@ -3624,16 +3640,18 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	border-top: 1px solid rgba(146, 146, 163, 0.22);
 }
 .ob-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-top: 0.9rem; }
-.ob-actions .btn { min-width: 8.5rem; }
-.ob-skip { display: block; margin: 0.6rem auto 0; color: var(--text-2, #8da1c6); font-size: 0.78rem; text-decoration: none; }
+/* min-width 維持 8.5rem：375px 上閘的內容寬只有 282px，兩顆並排（136×2＋gap 8）剛好塞得下，
+   再寬一點「用 Chrome 開啟／複製連結」就會各自折成一行。 */
+.ob-actions .btn { min-width: 8.5rem; font-size: 0.95rem; padding: 0.45rem 0.8rem; }
+.ob-skip { display: block; margin: 0.6rem auto 0; color: var(--text-2, #8da1c6); font-size: 0.9rem; text-decoration: none; }
 /* 次要選項自己一行，不跟主按鈕並排搶注意力 */
 .ob-actions .ob-skip { flex: 0 0 100%; background: none; border: 0; padding: 0; }
 .ob-steps { list-style: none; padding: 0; margin: 0.6rem 0 0.9rem; display: flex; gap: 0.4rem; justify-content: center; }
 .ob-steps li {
 	flex: 1;
-	font-size: 0.72rem;
+	font-size: 0.8rem;
 	text-align: center;
-	padding: 0.4rem 0.2rem;
+	padding: 0.45rem 0.2rem;
 	border-radius: 10px;
 	border: 1px solid rgba(146, 146, 163, 0.25);
 	color: var(--text-2, #8da1c6);

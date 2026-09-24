@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="191">
+  <meta name="app-version" content="192">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=191" rel="stylesheet">
+  <link href="watchlist.css?v=192" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -121,7 +121,7 @@
   border-top:1px solid rgba(139,124,255,.35);padding:12px 16px;
   display:none;align-items:center;gap:10px;backdrop-filter:blur(10px);">
   <img src="icons/icon.svg" width="36" height="36" style="border-radius:8px;flex-shrink:0" alt="">
-  <span style="color:#c4d2ee;font-size:.875rem;line-height:1.4;flex:1">
+  <span style="color:#c4d2ee;font-size:1rem;line-height:1.55;flex:1">
     點選瀏覽器底部的
     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#f5c542" viewBox="0 0 16 16" style="vertical-align:-2px;margin:0 2px">
       <path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6-.096.087L1.5 7.5a.5.5 0 0 0 .707.707l.147-.147V13.5A1.5 1.5 0 0 0 3.854 15h8.292A1.5 1.5 0 0 0 13.646 13.5V8.06l.147.147A.5.5 0 0 0 14.5 7.5l-.05-.267L8.354 1.146zM8 7a.5.5 0 0 1 .5.5V9h1a.5.5 0 0 1 0 1h-1v1.5a.5.5 0 0 1-1 0V10h-1a.5.5 0 0 1 0-1h1V7.5A.5.5 0 0 1 8 7z"/>
@@ -9527,7 +9527,7 @@ function _showPwaInstructionsModal(afterWait = false) {
   let content = '';
   if (isIos) {
     content = `
-      <p class="mb-3 text-muted" style="font-size:.9rem">
+      <p class="mb-3 text-muted" style="font-size:1rem;line-height:1.7">
         在 Safari 瀏覽器中，點選下方工具列的<strong class="text-info"> 分享 </strong>按鈕：
       </p>
       <div class="text-center mb-3" style="font-size:2rem">
@@ -9535,25 +9535,25 @@ function _showPwaInstructionsModal(afterWait = false) {
           <path d="M8.354 1.146a.5.5 0 0 0-.708 0l-3 3a.5.5 0 1 0 .708.708L7.5 2.707V11.5a.5.5 0 0 0 1 0V2.707l2.146 2.147a.5.5 0 0 0 .708-.708l-3-3zM1 13.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6a.5.5 0 0 0-1 0v6H2v-6a.5.5 0 0 0-1 0v6z"/>
         </svg>
       </div>
-      <p class="mb-2 text-muted" style="font-size:.9rem">然後向下捲動，點選：</p>
+      <p class="mb-2 text-muted" style="font-size:1rem;line-height:1.7">然後向下捲動，點選：</p>
       <div class="d-flex align-items-center gap-2 mb-3 p-2 rounded" style="background:rgba(255,255,255,.06)">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#8b7cff" viewBox="0 0 16 16">
           <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v13.5a.5.5 0 0 1-.777.416L8 13.101l-5.223 2.815A.5.5 0 0 1 2 15.5V2zm2-1a1 1 0 0 0-1 1v12.566l4.723-2.482a.5.5 0 0 1 .554 0L13 14.566V2a1 1 0 0 0-1-1H4z"/>
         </svg>
         <strong class="text-light">加入主畫面（Add to Home Screen）</strong>
       </div>
-      <p class="text-muted" style="font-size:.8rem">安裝後，桌面會出現「股市雷達」圖示，可離線使用基本功能。</p>`;
+      <p class="text-muted" style="font-size:.9rem;line-height:1.65">安裝後，桌面會出現「股市雷達」圖示，可離線使用基本功能。</p>`;
   } else {
     content = `
-      <p class="mb-3 text-muted" style="font-size:.9rem">
+      <p class="mb-3 text-muted" style="font-size:1rem;line-height:1.7">
         在 Chrome 或 Edge 瀏覽器中，點選網址列右側的
         <strong class="text-info">安裝</strong> 圖示（⊕），或使用選單中的
         <strong class="text-info">「安裝 CapitalGuard-股市雷達」</strong>選項。
       </p>
-      <p class="mb-2 text-muted" style="font-size:.9rem">Android 裝置會自動出現安裝橫幅，或可至瀏覽器選單中找到「加入主畫面」。</p>
-      ${afterWait ? `<div class="alert alert-warning py-2 mt-2 mb-0" style="font-size:.8rem;background:rgba(255,193,7,.12);border-color:rgba(255,193,7,.35);color:#ffe08a">
+      <p class="mb-2 text-muted" style="font-size:1rem;line-height:1.7">Android 裝置會自動出現安裝橫幅，或可至瀏覽器選單中找到「加入主畫面」。</p>
+      ${afterWait ? `<div class="alert alert-warning py-2 mt-2 mb-0" style="font-size:.9rem;line-height:1.65;background:rgba(255,193,7,.12);border-color:rgba(255,193,7,.35);color:#ffe08a">
         <strong>移除後重新安裝？</strong>請先<strong>重新整頁（F5 或下拉重整）</strong>，瀏覽器需重新載入頁面後才會再次觸發安裝機制。
-      </div>` : `<p class="text-muted" style="font-size:.8rem">若使用 Firefox 或 Safari（非 iOS），請直接為此頁面建立書籤。</p>`}`;
+      </div>` : `<p class="text-muted" style="font-size:.9rem;line-height:1.65">若使用 Firefox 或 Safari（非 iOS），請直接為此頁面建立書籤。</p>`}`;
   }
 
   // Reuse a simple dynamic modal
