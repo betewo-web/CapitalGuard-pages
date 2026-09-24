@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="194">
+  <meta name="app-version" content="195">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=194" rel="stylesheet">
+  <link href="watchlist.css?v=195" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -1286,6 +1286,11 @@ let scoresFilter = "screen";    // screen / picks / mine（2026-09-23 預設改�
 // 首頁「只列持股」撥片：打開只留有部位的自選股。記在本機——換分頁、重開 App 都維持
 // （2026-09-23 Howard：這個不要跟著分頁回預設，統計／通知那兩排篩選籤才要）
 const HOLDINGS_ONLY_KEY = "cg-home-holdings-only";
+// 今日資料預設收合，只留第一條（Howard 2026-09-24）。刻意不寫進 localStorage：
+// 「只列持股」是使用者對清單的長期偏好，這個只是「這一次想不想多看幾條」，
+// 重開 App 回到收合才對——不然某天展開過，之後每天一進首頁都是一長串事件。
+let homeNewsExpanded = false;
+
 let homeHoldingsOnly = (() => {
   try { return localStorage.getItem(HOLDINGS_ONLY_KEY) === "1"; } catch { return false; }
 })();
@@ -5468,12 +5473,24 @@ function renderHome() {
   newsRows.sort((a, b) => _compareEvents(a.ev, b.ev));
   const newsEl = document.getElementById("home-news");
   if (newsEl) {
+    // 預設只畫第一條，其餘收起來（Howard 2026-09-24）：首頁第一眼要留給自選清單，
+    // 事件多的那幾天本來會把清單整個推到螢幕外。展開就全部畫出來——
+    // 本來的 6 條上限會讓「還有 N 件」對不上實際展開的條數，不如不設限，
+    // 使用者是自己按開的，而且「查看明細 →」仍然在。
+    const shownNews = homeNewsExpanded ? newsRows : newsRows.slice(0, 1);
+    const hiddenNews = newsRows.length - shownNews.length;
     newsEl.innerHTML = newsRows.length
-      ? newsRows.slice(0, 6).map(({ sid, ev }) => `
+      ? shownNews.map(({ sid, ev }) => `
           <div class="home-feed" onclick="openEventsPanel('${jsAttr(sid)}')">
             <span class="home-feed-tm">${escapeHtml((_EVENT_TYPE_LABEL[ev.event_type] || "").replace(/^\S+\s/, "") || "事件")}</span>
             <span class="home-feed-tx"><b>${escapeHtml(stockNameOf(sid) || sid)}</b> ${escapeHtml(_eventTitleWithoutStock(ev.title, sid, stockNameOf(sid)))}</span>
           </div>`).join("")
+        + (newsRows.length > 1 ? `
+          <div class="home-feed home-feed-more" role="button" tabindex="0" aria-expanded="${homeNewsExpanded}"
+               onclick="toggleHomeNews()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHomeNews();}">
+            <span class="home-feed-tx">${homeNewsExpanded ? "收合" : `還有 ${hiddenNews} 件`}</span>
+            <span class="home-feed-caret${homeNewsExpanded ? " is-open" : ""}" aria-hidden="true"></span>
+          </div>` : "")
       : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無資料</div>';
   }
   const newsLink = document.getElementById("home-news-link");
@@ -5754,6 +5771,15 @@ function setHomeHoldingsOnly(on) {
   try { localStorage.setItem(HOLDINGS_ONLY_KEY, homeHoldingsOnly ? "1" : "0"); } catch {}
   syncHomeHoldingsSwitch();
   trackActivity("home_holdings_filter", { on: homeHoldingsOnly ? 1 : 0 });
+  renderHome();
+}
+
+// 今日資料的展開／收合。整頁重畫與「只列持股」同一個做法：這一區的內容
+// （包含 sendTodayImportantInfoNotification 的判斷）全在 renderHome 裡算出來，
+// 只改這一塊 innerHTML 反而要把那段邏輯抄第二份。
+function toggleHomeNews() {
+  homeNewsExpanded = !homeNewsExpanded;
+  trackActivity("home_news_toggle", { on: homeNewsExpanded ? 1 : 0 });
   renderHome();
 }
 

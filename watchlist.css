@@ -2289,6 +2289,33 @@ body.modal-blocking .modal-backdrop.show {
 .home-feed-tx b { font-weight: 700; }
 .home-feed-tx .k { font-size: 0.86rem; color: var(--text-muted); }
 
+/* 今日資料預設只留第一條，其餘收在這一列裡（Howard 2026-09-24）。
+   它是清單的最後一列、不是另一張卡：沿用 .home-feed 的列高與分隔線
+   （:last-child 會把下緣那條去掉），只把文字換成可點的紫，
+   並補一個會轉的箭頭——沒有箭頭的話，「還有 N 件」看起來像純文字說明。 */
+.home-feed-more {
+	justify-content: space-between;
+	align-items: center;
+	color: var(--accent);
+	font-size: 0.9rem;
+	font-weight: 600;
+}
+.home-feed-more .home-feed-tx { flex: 0 1 auto; color: var(--accent); }
+.home-feed-caret {
+	flex: 0 0 auto;
+	width: 0.45rem;
+	height: 0.45rem;
+	margin-right: 0.2rem;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	transform: translateY(-2px) rotate(45deg);
+	transition: transform 0.16s ease;
+}
+.home-feed-caret.is-open { transform: translateY(1px) rotate(-135deg); }
+@media (prefers-reduced-motion: reduce) {
+	.home-feed-caret { transition: none; }
+}
+
 .home-nudge {
 	display: flex;
 	justify-content: space-between;
