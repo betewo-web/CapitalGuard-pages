@@ -2244,8 +2244,13 @@ body.has-bottom-nav .page-shell {
 }
 
 .home-nudge > div { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 8px; }
-.home-nudge-actions { display: inline-flex; gap: 12px; white-space: nowrap; }
+.home-nudge-actions { display: inline-flex; align-items: center; gap: 12px; white-space: nowrap; }
 .home-nudge-later { color: var(--text-muted); }
+
+/* 左邊那段是「圖示＋條數」。SVG 是 inline 元素，直接放進文字流會被基線頂高半格，
+   所以整段用 inline-flex 對齊；圖示不跟著字級縮放（14px 以下線條會糊）。 */
+.home-nudge-text { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.home-nudge-text .ic { flex: 0 0 auto; width: 15px; height: 15px; }
 
 /* ── 字卡分頁二「歷史訊號」（2026-09-22 四版）──
    純清單：一天一列，不是按鈕、不跳分頁、今天那列也不框起來（Howard）。

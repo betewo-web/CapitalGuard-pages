@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="188">
+  <meta name="app-version" content="189">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=188" rel="stylesheet">
+  <link href="watchlist.css?v=189" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -4437,10 +4437,13 @@ function renderRuleNudge() {
   if (!show) return;
   // 一行就好（2026-09-20 把大卡拿掉）：新用戶第一眼要看到的是自己的股票，不是設定教學。
   // 範本一鍵加入仍在規則編輯器與開機彈窗（renderRuleNudgePopup）裡
+  // 動作鈕改成 .hs-btn，與「我的自選」旁的「新增自選股」同一顆（Howard 2026-09-24）：
+  // 原本那顆只寫「設定」，看不出按下去會發生什麼。左邊只留條數，名稱交給按鈕講——
+  // 左右都寫一次在 390px 手機上會擠成兩行。圖示用 ICON_RULES，不用已淘汰的 emoji。
   body.innerHTML = `
-    <span class="home-nudge-text">📐 進階訊號 ${n}／${target} 條 · 條件由你決定</span>
+    <span class="home-nudge-text">${ICON_RULES}已設定 ${n}／${target} 條</span>
     <span class="home-nudge-actions">
-      <span class="hs-link" onclick="openRuleEditorFromNudge()">設定 →</span>
+      <button type="button" class="hs-btn" onclick="openRuleEditorFromNudge()">新增進階訊號</button>
       <span class="hs-link home-nudge-later" onclick="snoozeRuleNudge()" title="7 天內不再顯示">稍後</span>
     </span>`;
 }
@@ -6579,7 +6582,9 @@ function rtlTextWidth(text, fontSize) {
 function radarStoryListHtml(story, opts = {}) {
   const intraday = story.filter(e => e.src !== "post");
   const post = story.filter(e => e.src === "post");
-  const srcLabel = { builtin: "內建訊號", target: "自訂價位", auto: "自動偵測 · 未推播", rule: "📐 進階訊號", post: "盤後提醒" };
+  // 五個來源籤都只寫字：進階訊號原本多一個 📐，在同一排裡只有它有圖示，
+  // 而且 emoji 當圖示 2026-09-22 起已全站淘汰（Howard 2026-09-24）
+  const srcLabel = { builtin: "內建訊號", target: "自訂價位", auto: "自動偵測 · 未推播", rule: "進階訊號", post: "盤後提醒" };
   const item = (e, i) => {
     const link = e.rowId ? ` role="button" tabindex="0" onclick="openInboxDetailFromRadar('${jsAttr(e.rowId)}')"` : "";
     const lvl = (e.src === "builtin" || e.src === "target") ? _signalLevelLabel(e.key, e.level, true)
