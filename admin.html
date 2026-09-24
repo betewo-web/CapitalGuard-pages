@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="190">
+  <meta name="app-version" content="191">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -397,6 +397,8 @@ const RULE_TYPE_INFO = {
   break_52w_low:    ["intraday", "跌破 52 週低"],
   change_pct_above: ["intraday", "漲幅超過"],
   change_pct_below: ["intraday", "跌幅超過"],
+  gap_up:           ["intraday", "向上跳空"],
+  gap_down:         ["intraday", "向下跳空"],
   volume_vs_ma:     ["intraday", "量能對比均量"],
   ma_cross:         ["technical", "均線交叉"],
   price_vs_ma:      ["technical", "股價站上／跌破均線"],

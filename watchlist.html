@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="190">
+  <meta name="app-version" content="191">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=190" rel="stylesheet">
+  <link href="watchlist.css?v=191" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
@@ -3971,6 +3971,13 @@ function _icoPct(up) {
   const g = `<g ${_ICO_W2}><circle cx="15" cy="16" r="4.5"/><circle cx="33" cy="32" r="4.5"/><line x1="34" y1="10" x2="14" y2="38"/></g>`;
   return g + (up ? `<path d="M38 5 L44 5 L44 11" ${_ICO_W}/>` : `<path d="M4 43 L10 43 L4 37" ${_ICO_W}/>`);
 }
+// 跳空：昨天那根（淡）與今天那根（實）之間留一條空白，虛線畫出缺口本身
+function _icoGap(up) {
+  const bars = up
+    ? '<rect x="8" y="27" width="8" height="14" rx="2" fill="#fff" opacity=".55"/><rect x="32" y="7" width="8" height="14" rx="2" fill="#fff"/>'
+    : '<rect x="8" y="7" width="8" height="14" rx="2" fill="#fff" opacity=".55"/><rect x="32" y="27" width="8" height="14" rx="2" fill="#fff"/>';
+  return bars + _icoLevel(24, true, ".75");
+}
 function _icoMaCross(up) {
   return up
     ? `<path d="M6 16 C16 18, 26 28, 42 38" ${_ICO_W} opacity=".6"/><path d="M6 38 C16 36, 26 24, 42 10" ${_ICO_W}/>` + _ICO_HEAD_UP
@@ -4011,6 +4018,8 @@ const SIGNAL_ICON_ART = {
   break_52w_low:        { inner: _ico52w(false) },
   change_pct_above:     { inner: _icoPct(true) },
   change_pct_below:     { inner: _icoPct(false) },
+  gap_up:               { inner: _icoGap(true) },
+  gap_down:             { inner: _icoGap(false) },
   "volume_vs_ma:above": { inner: _icoBars(true) },
   "volume_vs_ma:below": { inner: _icoBars(false) },
   "ma_cross:up":        { inner: _icoMaCross(true) },
@@ -4102,6 +4111,11 @@ const RULE_CATALOG = [
     params: [{ k: "value", label: "漲幅 %", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
   { type: "change_pct_below", tier: "intraday", name: "跌幅超過", preview: true,
     params: [{ k: "value", label: "跌幅 %（填正數）", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
+  // 缺口以昨日最高／最低價為基準：開盤高於昨收但仍在昨日區間內的不算跳空
+  { type: "gap_up", tier: "intraday", name: "向上跳空", preview: true,
+    params: [{ k: "value", label: "缺口 %（高於昨高）", type: "number", def: 1, min: 0.1, max: 20, step: 0.1 }] },
+  { type: "gap_down", tier: "intraday", name: "向下跳空", preview: true,
+    params: [{ k: "value", label: "缺口 %（低於昨低）", type: "number", def: 1, min: 0.1, max: 20, step: 0.1 }] },
   // 可本地預覽：用日線的成交量比日線均量（都在 sharedReportData 裡），
   // 不需要 MIS 的當日累計量——前端已不再取那個欄位（見 loadIntradayQuotes）。
   { type: "volume_vs_ma", tier: "intraday", name: "量能對比均量", preview: true,
@@ -4517,6 +4531,7 @@ const SIGNAL_ABBR = {
   limit_up: "漲停", limit_down: "跌停", volume_spike: "爆量", target_high: "達上", target_low: "達下",
   break_prior_high: "破高", break_prior_low: "破低", break_52w_high: "年高", break_52w_low: "年低",
   change_pct_above: "漲逾", change_pct_below: "跌逾",
+  gap_up: "跳漲", gap_down: "跳跌",
   "volume_vs_ma:above": "放量", "volume_vs_ma:below": "量縮",
   "ma_cross:up": "金叉", "ma_cross:down": "死叉",
   "price_vs_ma:up": "站月", "price_vs_ma:down": "破月",
@@ -4528,6 +4543,7 @@ const AUTO_SIGNAL_LABELS = {
   break_prior_high: "突破 20 日高", break_prior_low: "跌破 20 日低",
   break_52w_high: "突破 52 週高", break_52w_low: "跌破 52 週低",
   change_pct_above: "漲幅超過 5%", change_pct_below: "跌幅超過 5%",
+  gap_up: "向上跳空 1%", gap_down: "向下跳空 1%",
   "volume_vs_ma:above": "量能高於 20 日均量 2 倍", "volume_vs_ma:below": "量能低於 20 日均量一半",
   "ma_cross:up": "MA5 黃金交叉 MA20", "ma_cross:down": "MA5 死亡交叉 MA20",
   "price_vs_ma:up": "站上月線", "price_vs_ma:down": "跌破月線",
@@ -6187,6 +6203,7 @@ const RTL_LEVEL_LABEL = {
   near_res: "壓", break_res: "壓", near_sup: "撐", break_sup: "撐", reclaim_sup: "撐",
   limit_up: "漲停", limit_down: "跌停", target_high: "目標", target_low: "目標",
   break_prior_high: "前高", break_prior_low: "前低", break_52w_high: "年高", break_52w_low: "年低",
+  gap_up: "昨高", gap_down: "昨低",
   "price_vs_ma:up": "月", "price_vs_ma:down": "月", "ma_cross:up": "月", "ma_cross:down": "月",
 };
 
@@ -7077,6 +7094,17 @@ function previewCondition(sid, c) {
       return c.type === "change_pct_above"
         ? chg >= Number(c.value || 0)
         : chg <= -Math.abs(Number(c.value || 0));
+    }
+    case "gap_up":
+    case "gap_down": {
+      // 基準棒的開盤價 vs 前一根的最高／最低價。除權息當天前端看不出來
+      // （日線倉庫存的是原始價），所以預覽可能比正式判定多算一天——
+      // 正式判定會跳過除權息日，見 monitor/rules.py 的 _gap_open。
+      const open = Number(last[0]);
+      const ref = c.type === "gap_up" ? highs[highs.length - 1] : lows[lows.length - 1];
+      if (!isFinite(open) || !(ref > 0)) return false;
+      const gap = (c.type === "gap_up" ? open - ref : ref - open) / ref * 100;
+      return gap >= Math.abs(Number(c.value ?? 1));
     }
     case "volume_vs_ma": {
       // 基準棒的成交量 vs 其前 N 根的均量。兩邊都是日線的「股」，單位相消，
