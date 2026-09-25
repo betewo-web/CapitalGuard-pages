@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="197">
+  <meta name="app-version" content="198">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,15 +14,18 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=197" rel="stylesheet">
+  <link href="watchlist.css?v=198" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
-       對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。 -->
+       對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
+       **沒存過偏好時也要套上 base**：2026-09-24 標準從 16px 下修到 14px 之後，
+       「不套用」等於留在瀏覽器預設的 16px（＝我們的「大」），而設定頁的籤
+       卻亮在「標準」——使用者一進設定頁畫面就會突然縮一階。 -->
   <script>
-    try {
-      var _fs = { base: "16px", large: "18px", xlarge: "20px" }[localStorage.getItem("cg-font-size")];
-      if (_fs) document.documentElement.style.fontSize = _fs;
-    } catch (e) { /* 無痕模式讀不到 localStorage，用預設就好 */ }
+    var _fsMap = { base: "14px", large: "16px", xlarge: "18px" }, _fsKey = "base";
+    try { _fsKey = localStorage.getItem("cg-font-size") || "base"; }
+    catch (e) { /* 無痕模式讀不到 localStorage，用預設就好 */ }
+    document.documentElement.style.fontSize = _fsMap[_fsKey] || _fsMap.base;
   </script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <!-- PWA -->
@@ -5742,7 +5745,10 @@ function setScoresFilter(f) {
 // Safari 的「文字大小」不套用到 rem，而且加到主畫面之後連 aA 選單都沒有。
 // 所以 iPhone 使用者原本完全沒有辦法調，我們給多大就是多大。
 const APP_FONT_KEY = "cg-font-size";
-const APP_FONT_SIZES = { base: "16px", large: "18px", xlarge: "20px" };   // 與 head 那段同一份
+// 2026-09-24 Howard 整排下修一階（原 16／18／20）：全站字級與間距都是 rem，
+// 所以三個等級各自等比縮小，版面比例不變。「標準」刻意比瀏覽器預設的 16px 小一階——
+// 這個 App 一列要塞的東西多，16px 起跳在 390px 手機上換行太頻繁。
+const APP_FONT_SIZES = { base: "14px", large: "16px", xlarge: "18px" };   // 與 head 那段同一份
 
 function appFontSize() {
   try {
