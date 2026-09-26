@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="200">
+  <meta name="app-version" content="201">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=200" rel="stylesheet">
+  <link href="watchlist.css?v=201" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1051,6 +1051,21 @@ async function sbGet(table, params, accessToken) {
   const r = await fetch(url, { headers: sbHeaders(accessToken) });
   if (!r.ok) throw new Error(`GET ${table}: ${r.status}`);
   return r.json();
+}
+
+// 只要總數不要資料：Prefer: count=exact 把總數放在 Content-Range 標頭（PostgREST 有曝露給 CORS），
+// select=id&limit=1 讓本文只有一列。通知匣用它對「別台裝置清空／伺服器清理」，不必抓整段。
+async function sbCount(table, params, accessToken) {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
+  url.searchParams.set("select", "id");
+  url.searchParams.set("limit", "1");
+  for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
+  const headers = sbHeaders(accessToken);
+  headers["Prefer"] = "count=exact";
+  const r = await fetch(url, { headers });
+  if (!r.ok) throw new Error(`COUNT ${table}: ${r.status}`);
+  const m = /\/(\d+)\s*$/.exec(r.headers.get("content-range") || "");
+  return m ? Number(m[1]) : null;
 }
 
 async function sbPost(table, body, accessToken, minimal = false) {
@@ -3309,6 +3324,7 @@ async function showMain() {
 function logout() {
   trackActivity("logout");
   flushActivity();   // keepalive：重載後仍會送達
+  if (state.userId) _reportCacheDelete(_inboxCacheKey()).catch(() => {});   // 通知匣是個人資料，登出就刪
   localStorage.removeItem("sma_session");
   location.reload();
 }
@@ -3318,20 +3334,22 @@ function logout() {
 // 與其讓新鮮度取決於平台手勢，這裡統一排程，三個平台看到的資料一樣新。
 //
 //   • 只在分頁位於前景時輪詢（document.hidden 就停），省電也省 Supabase 用量
-//   • 盤中報價所有分頁一律每 15 秒拉一次（後端每 5 秒固定節奏寫一輪，
-//     端到端落後壓在 15 秒內）；Inbox 較重，維持雷達 30 秒、
-//     其他分頁 90 秒的節奏，不跟著報價一起抓
+//   • 盤中報價只在首頁與個股字卡開著時拉，每 60 秒一次（2026-09-26；以前所有分頁
+//     每 15 秒）：訊號由推播即時插進雷達，這條只更新漲平跌與停更判斷。從別的分頁回到
+//     首頁、或打開字卡時，上次拉的太舊就馬上補一次（_refreshQuotesIfStale）
+//   • Inbox 每 5 分鐘只抓新列（本機快取＋游標，見 refreshInbox），不再每 30／90 秒抓 30 天
 //   • 收盤後只每 5 分鐘拉一次 Inbox（盤後提醒與每日報告會在這時候進來）
 //   • 從背景切回前景時無條件更新一次——手機把 PWA 凍結在背景是常態，
 //     回來的那一刻資料往往已經過期好幾個小時
-const QUOTE_MS_MARKET   = 15000;   // 監控每 5 秒寫一輪，手機 15 秒拉一次就夠（A5）：訊號由推播即時插進雷達（F1），這條只負責漲平跌與心跳
-const INBOX_MS_LIVE_TAB = 30000;
-const INBOX_MS_MARKET   = 90000;
+const QUOTE_MS_MARKET   = 60000;   // 訊號由推播即時插進雷達（F1），這條只負責漲平跌與停更判斷：60 秒夠（2026-09-26，原 15 秒）
+const INBOX_MS_LIVE_TAB = 300000;  // 推播一到就插進通知匣，輪詢只是補漏：5 分鐘（原首頁 30 秒）
+const INBOX_MS_MARKET   = 300000;  // 其他分頁同 5 分鐘（原 90 秒）
 const REFRESH_MS_CLOSED = 300000;
 
 let _refreshTimer  = null;
 let _lastRefreshAt = 0;
 let _lastInboxRefreshAt = 0;
+let _lastQuoteRefreshAt = 0;   // 上次拉 intraday_state 的時刻：回到首頁／開字卡時判斷要不要馬上補一次
 
 function _refreshIntervalMs() {
   return _isMarketOpenNow() ? QUOTE_MS_MARKET : REFRESH_MS_CLOSED;
@@ -3340,6 +3358,20 @@ function _refreshIntervalMs() {
 function _inboxIntervalMs() {
   // 首頁現在就是盤中那一頁（每檔一列＋兩格數字），所以快的那個間隔給首頁
   return currentTab === "home" ? INBOX_MS_LIVE_TAB : INBOX_MS_MARKET;
+}
+
+// 盤中報價有人在看才拉：首頁（漲平跌格子與停更提示）與個股字卡（雷達時間軸、K 線的關卡備援）。
+// 評分／通知匣／設定／盤後分頁不用盤中價（盤後頁要的是收盤價，收盤後另外補一次）。
+function _intradayViewOpen() {
+  return currentTab === "home" || !!radarTimelineSid;
+}
+
+// 從別的分頁回到首頁、或打開字卡：上次拉的已超過一個輪詢間隔就馬上補一次，不等下一輪
+function _refreshQuotesIfStale() {
+  if (!state.userId || !_isMarketOpenNow()) return;
+  if (Date.now() - _lastQuoteRefreshAt < QUOTE_MS_MARKET) return;
+  _lastQuoteRefreshAt = Date.now();
+  loadIntradayQuotes(true).then(() => { renderCurrentTab(); refreshRadarTimelineIfOpen(); }).catch(() => {});
 }
 
 // 自動更新只抓輕量資料：盤中每一輪都拉報價，Inbox 到期才拉。
@@ -3357,8 +3389,9 @@ async function _autoRefreshOnce() {
   }
   // 盤中每輪拉報價。收盤後自選頁要換上當天收盤價：還沒拿齊就每輪（5 分鐘）再拉一次
   // intraday_state（監控 13:35 前寫完最後一輪），主機沒寫到的再問 FinMind（那支自己限流）。
-  if (marketOpen) tasks.push(loadIntradayQuotes(true));
-  else if (_isSessionOverToday() && _closeQuoteMissing()) {
+  if (marketOpen) {
+    if (_intradayViewOpen()) { _lastQuoteRefreshAt = Date.now(); tasks.push(loadIntradayQuotes(true)); }
+  } else if (_isSessionOverToday() && _closeQuoteMissing()) {
     tasks.push(loadIntradayQuotes(true).then(() => (_closeQuoteMissing() ? loadFinMindCloseQuotes() : null)));
   }
   // 首頁格子的過去日子：自帶 10 分鐘限流（今天那格走 intraday_state，不靠它）
@@ -3566,6 +3599,7 @@ function switchTab(tab, silent = false) {
   // 重開 App 都維持（存在 localStorage，見 HOLDINGS_ONLY_KEY）
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
+  if (changed && tab === "home") _refreshQuotesIfStale();   // 盤中報價只在首頁與字卡輪詢：回來時太舊就補一次
   // 盤後頁要收盤價：主機沒寫到收盤時向 FinMind 補一次（那支自己限流），回來重畫
   if (tab === "post" && _isSessionOverToday() && _closeQuoteMissing()) {
     loadFinMindCloseQuotes().then(() => renderCurrentTab()).catch(() => {});
@@ -5024,22 +5058,101 @@ function _titleWithoutSid(title, sid) {
   return code && t.startsWith(code + " ") ? t.slice(code.length + 1) : t;
 }
 
+// ── 通知匣：本機快取＋增量抓取（2026-09-26）────────────────────────────
+// alert_history 的列寫進去之後內容不會變。會變的只有三種：read_at（自己點的本機早知道，
+// 別台裝置點的要同步）、整個清空（自己按的，或別台裝置按的）、伺服器的保留期清理。
+// 以前每 30／90 秒把 30 天全抓一遍（通知多的人一次 8 KB）。現在：
+//   1. 列存 IndexedDB（同報告那個庫，鍵 inbox:<userId>），開機先從本機還原
+//   2. 以本機最新一列的 sent_at 當游標，只抓 sent_at 比它新的（往回多看 INBOX_OVERLAP_MS，
+//      sent_at 是倉庫寫入時刻、各列不保證依序到達）；別台裝置的已讀用 read_at 游標同一個請求帶回
+//   3. 刪除靠總數：sbCount（Prefer: count=exact，只回標頭與一列）對不上才整段重抓
+// 按日期抓而不是「最近 200 則」：首頁近 10 個交易日的格子要數每一天的規則命中與自訂價位（2026-09-20）
+const INBOX_OVERLAP_MS = 10 * 60 * 1000;
+let _inboxCacheLoaded = false;
+let _inboxCursor = null;       // 本機最新一列（倉庫列，不含暫存列）的 sent_at
+let _inboxReadCursor = null;   // 本機最新的 read_at
+
+function _inboxCacheKey() { return `inbox:${state.userId}`; }
+function _inboxWindowStart(now = Date.now()) { return new Date(now - INBOX_HISTORY_DAYS * 864e5).toISOString(); }
+function _inboxTs(v) { const t = new Date(v || 0).getTime(); return Number.isFinite(t) ? t : 0; }
+
+// 純函式：組查詢參數。沒有游標＝整段（登入後第一次、或總數對不上時）。
+function _inboxQueryParams(cursor, readCursor, windowStart) {
+  const p = { order: "sent_at.desc", sent_at: `gte.${windowStart}`, limit: String(INBOX_HISTORY_LIMIT) };
+  if (!cursor) return p;
+  const since = new Date(Math.max(_inboxTs(cursor) - INBOX_OVERLAP_MS, _inboxTs(windowStart))).toISOString();
+  p.or = readCursor ? `(sent_at.gt.${since},read_at.gt.${readCursor})` : `(sent_at.gt.${since})`;
+  return p;
+}
+
+// 純函式：倉庫回來的列併進本機的。同 id 以倉庫為準（read_at 可能在別台裝置變了）、掉出
+// 30 天窗口的丟掉、暫存列（推播先到）在倉庫列出現後讓位。回傳 sent_at 由新到舊、暫存列在前。
+function _inboxMergeRows(local, fresh, windowStart) {
+  const byId = new Map();
+  for (const r of local || []) if (!r.pending && r.id) byId.set(String(r.id), r);
+  for (const r of fresh || []) if (r.id) byId.set(String(r.id), r);
+  const floor = _inboxTs(windowStart);
+  const rows = [...byId.values()].filter(r => _inboxTs(r.sent_at) >= floor);
+  rows.sort((a, b) => _inboxTs(b.sent_at) - _inboxTs(a.sent_at));
+  const keys = new Set(rows.map(r => r.event_key).filter(Boolean));
+  const pending = (local || []).filter(r => r.pending && !(r.event_key && keys.has(r.event_key)));
+  return pending.concat(rows);
+}
+
+function _inboxCursorsOf(rows) {
+  let cursor = null, read = null;
+  for (const r of rows || []) {
+    if (r.pending) continue;
+    if (r.sent_at && _inboxTs(r.sent_at) > _inboxTs(cursor)) cursor = r.sent_at;
+    if (r.read_at && _inboxTs(r.read_at) > _inboxTs(read)) read = r.read_at;
+  }
+  return { cursor, read };
+}
+
+async function _inboxRestoreCache() {
+  _inboxCacheLoaded = true;
+  const saved = await _reportCacheGet(_inboxCacheKey()).catch(() => null);
+  if (!saved || !Array.isArray(saved.rows)) return;
+  inboxRows = _inboxMergeRows(inboxRows, saved.rows, _inboxWindowStart());   // 開機時已推播進來的暫存列留著
+  const c = _inboxCursorsOf(inboxRows);
+  _inboxCursor = c.cursor; _inboxReadCursor = c.read;
+}
+
+// 列有變（抓回來、點開標已讀、全部已讀、清空）就叫：游標跟著本機列走，暫存列不存
+function _inboxSaveCache() {
+  if (!state.userId) return;
+  const c = _inboxCursorsOf(inboxRows);
+  _inboxCursor = c.cursor; _inboxReadCursor = c.read;
+  _reportCachePut(_inboxCacheKey(), { savedAt: Date.now(), rows: inboxRows.filter(r => !r.pending) }).catch(() => {});
+}
+
 async function refreshInbox(force = true) {
   if (!state.userId) return;
-  if (!force && Date.now() - inboxLoadedAt < 60000) return;   // 60 秒內不重抓
+  if (!force && Date.now() - inboxLoadedAt < 60000) return;   // 切到通知頁那次：60 秒內不重抓
   try {
-    // 按日期抓而不是「最近 200 則」：首頁近 10 個交易日的格子要數每一天的規則命中與
-    // 自訂價位，多檔多規則的用戶 200 則可能撐不到兩週（2026-09-20）
-    const rows = await sbGet("alert_history", {
-      order: "sent_at.desc",
-      sent_at: `gte.${new Date(Date.now() - INBOX_HISTORY_DAYS * 864e5).toISOString()}`,
-      limit: String(INBOX_HISTORY_LIMIT),
-    }, state.accessToken);
-    // F1：推播先到、倉庫那列還沒寫進來的暫存列留著，倉庫已有的就讓位
-    const fresh = rows || [];
-    const stillPending = inboxRows.filter(r => r.pending && !fresh.some(x => x.event_key && x.event_key === r.event_key));
-    inboxRows = stillPending.concat(fresh);
+    if (!_inboxCacheLoaded) await _inboxRestoreCache();
+    const windowStart = _inboxWindowStart();
+    const params = _inboxQueryParams(_inboxCursor, _inboxReadCursor, windowStart);
+    const fresh = (await sbGet("alert_history", params, state.accessToken)) || [];
+    let rows;
+    if (params.or) {
+      rows = _inboxMergeRows(inboxRows, fresh, windowStart);
+      // 別台裝置清空／伺服器清理：總數對不上就整段重抓。本機已抓滿上限時對不了（伺服器可能更多），略過
+      const localN = rows.filter(r => !r.pending).length;
+      const total = localN < INBOX_HISTORY_LIMIT
+        ? await sbCount("alert_history", { sent_at: `gte.${windowStart}` }, state.accessToken).catch(() => null)
+        : null;
+      if (total !== null && total !== localN) {
+        const all = (await sbGet("alert_history", _inboxQueryParams(null, null, windowStart), state.accessToken)) || [];
+        rows = _inboxMergeRows(inboxRows.filter(r => r.pending), all, windowStart);
+      }
+    } else {
+      rows = _inboxMergeRows(inboxRows.filter(r => r.pending), fresh, windowStart);
+    }
+    // F1：推播先到、倉庫那列還沒寫進來的暫存列留著，倉庫已有的就讓位（在 _inboxMergeRows 裡）
+    inboxRows = rows;
     _prunePendingSignalsCache(fresh.map(x => x.event_key).filter(Boolean)).catch(() => {});
+    _inboxSaveCache();
     inboxLoadedAt = Date.now();
     inboxSupportsRead = inboxRows.length === 0 || ("read_at" in inboxRows[0]);
     inboxLoadError = null;
@@ -5276,6 +5389,7 @@ function openInboxDetail(rowId) {
     row.read_at = new Date().toISOString();
     sbPatch("alert_history", { "id": `eq.${row.id}` }, { read_at: row.read_at }, state.accessToken)
       .catch(() => {});
+    _inboxSaveCache();
     updateInboxBadge();
     if (currentTab === "inbox") renderInbox();
   }
@@ -5368,6 +5482,7 @@ async function markAllRead() {
       { read_at: now }, state.accessToken);
     trackActivity("inbox_read_all");
     inboxRows.forEach(r => { if (!r.read_at) r.read_at = now; });
+    _inboxSaveCache();
     updateInboxBadge();
     renderInbox();
   } catch (e) {
@@ -5389,6 +5504,7 @@ async function clearAlertHistory() {
   try {
     await sbDelete("alert_history", { "user_id": `eq.${state.userId}` }, state.accessToken);
     inboxRows = [];
+    _inboxSaveCache();       // 本機清掉、游標歸零；不需要再抓回來（倉庫已空）
     updateInboxBadge();
     renderInbox();
   } catch (e) {
@@ -6393,6 +6509,7 @@ function openStockCard(sid, opts = {}) {
   if (!sidKey) return;
   const date = opts.date;
   radarTimelineSid = sidKey;
+  _refreshQuotesIfStale();      // 在別的分頁待了一陣子才開字卡：報價可能是幾分鐘前的
   radarTimelineDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) && date !== radarSessionDate() ? date : null;
   trackActivity("radar_timeline_open", { stock: sidKey, date: radarTimelineDate || "" });
   renderRadarTimeline(sidKey);   // 三個來源都在記憶體，畫面一開就有
@@ -7875,6 +7992,20 @@ async function _reportCachePut(key, value) {
   });
 }
 
+async function _reportCacheDelete(key) {
+  const db = await _reportDb();
+  if (!db) return false;
+  return new Promise(resolve => {
+    try {
+      const tx = db.transaction(REPORT_DB_STORE, "readwrite");
+      tx.objectStore(REPORT_DB_STORE).delete(key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    } catch { resolve(false); }
+  });
+}
+
 async function _fetchReportJson(url) {
   const r = await fetch(url, { cache: "no-store" });   // 快取由上面的 IndexedDB 管，不靠 HTTP 快取
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -7967,11 +8098,12 @@ async function ensureShard(xx) {
   if (!_shardLoading[xx]) {
     _shardLoading[xx] = (async () => {
       let shard = await _reportCacheGet("shard:" + xx);
-      if (!shard || !shard.json || shard.date !== data.date) {
+      const ver = data.layers.version || 1;
+      if (!shard || !shard.json || shard.date !== data.date || shard.ver !== ver) {
         const url = await reportSignedUrl("latest", "shard", xx);
         if (!url) return;
         const json = await _fetchReportJson(url);
-        shard = { date: json.date, json };
+        shard = { date: json.date, ver, json };
         _reportCachePut("shard:" + xx, shard).catch(() => {});
       }
       if (sharedReportData !== data) return;              // 等待期間換了一份報告
