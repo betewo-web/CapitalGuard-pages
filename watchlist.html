@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="198">
+  <meta name="app-version" content="199">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=198" rel="stylesheet">
+  <link href="watchlist.css?v=199" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -3274,6 +3274,7 @@ async function showMain() {
   trackActivity("app_open", { tab: currentTab });
   // 網址上沒有參數：可能是 iOS 忽略了 openWindow 的網址，改問 SW 留在 Cache 的目標
   if (!bootAlert) _consumePendingAlertFromCache();
+  _consumePendingSignalsFromCache();   // F1：視窗沒開時到的推播，先插進通知匣與雷達
   loadAdminFlag();
 
   await loadWatchlist();
@@ -3317,13 +3318,13 @@ function logout() {
 // 與其讓新鮮度取決於平台手勢，這裡統一排程，三個平台看到的資料一樣新。
 //
 //   • 只在分頁位於前景時輪詢（document.hidden 就停），省電也省 Supabase 用量
-//   • 盤中報價所有分頁一律每 5 秒拉一次（後端每 5 秒固定節奏寫一輪，
+//   • 盤中報價所有分頁一律每 15 秒拉一次（後端每 5 秒固定節奏寫一輪，
 //     端到端落後壓在 15 秒內）；Inbox 較重，維持雷達 30 秒、
 //     其他分頁 90 秒的節奏，不跟著報價一起抓
 //   • 收盤後只每 5 分鐘拉一次 Inbox（盤後提醒與每日報告會在這時候進來）
 //   • 從背景切回前景時無條件更新一次——手機把 PWA 凍結在背景是常態，
 //     回來的那一刻資料往往已經過期好幾個小時
-const QUOTE_MS_MARKET   = 5000;    // 監控每 5 秒寫一次 intraday_state，前端跟著 5 秒拉（一次輕量 REST）
+const QUOTE_MS_MARKET   = 15000;   // 監控每 5 秒寫一輪，手機 15 秒拉一次就夠（A5）：訊號由推播即時插進雷達（F1），這條只負責漲平跌與心跳
 const INBOX_MS_LIVE_TAB = 30000;
 const INBOX_MS_MARKET   = 90000;
 const REFRESH_MS_CLOSED = 300000;
@@ -3508,6 +3509,7 @@ function _onAppResume() {
   // 視窗在背景被系統凍結時點了通知：SW 的 postMessage 可能沒送到（iOS 常見），
   // 但它在 focus 前已把目標寫進 Cache——回前景時補撿一次，訊息有到的話會被時間戳擋掉
   _consumePendingAlertFromCache();
+  _consumePendingSignalsFromCache();
 
   _scheduleAutoRefresh();
 }
@@ -5032,7 +5034,11 @@ async function refreshInbox(force = true) {
       sent_at: `gte.${new Date(Date.now() - INBOX_HISTORY_DAYS * 864e5).toISOString()}`,
       limit: String(INBOX_HISTORY_LIMIT),
     }, state.accessToken);
-    inboxRows = rows || [];
+    // F1：推播先到、倉庫那列還沒寫進來的暫存列留著，倉庫已有的就讓位
+    const fresh = rows || [];
+    const stillPending = inboxRows.filter(r => r.pending && !fresh.some(x => x.event_key && x.event_key === r.event_key));
+    inboxRows = stillPending.concat(fresh);
+    _prunePendingSignalsCache(fresh.map(x => x.event_key).filter(Boolean)).catch(() => {});
     inboxLoadedAt = Date.now();
     inboxSupportsRead = inboxRows.length === 0 || ("read_at" in inboxRows[0]);
     inboxLoadError = null;
@@ -5265,7 +5271,7 @@ function openInboxDetail(rowId) {
   trackActivity("inbox_open", { source: row.source || "" });
 
   // 標記已讀（fire-and-forget）
-  if (inboxSupportsRead && !row.read_at) {
+  if (inboxSupportsRead && !row.read_at && !row.pending) {
     row.read_at = new Date().toISOString();
     sbPatch("alert_history", { "id": `eq.${row.id}` }, { read_at: row.read_at }, state.accessToken)
       .catch(() => {});
@@ -6005,8 +6011,9 @@ function maExplainHtml(sid, s) {
   </div>`;
 }
 
-function openScoreDetail(sid) {
+async function openScoreDetail(sid) {
   const sidKey = String(sid || "").trim();
+  await ensureStockDetail(sidKey);                       // A3：變化原因／子項變化／走勢在分片裡
   const s = sharedReportData?.investment_scores?.[sidKey];
   const name = getPreferredStockName(sidKey, s?.stock_name) || sidKey;
   document.getElementById("score-detail-title").innerHTML =
@@ -6115,6 +6122,14 @@ function _taipeiMinutesNow() {
   const part = type => Number(parts.find(item => item.type === type)?.value);
   const hour = part("hour") % 24, minute = part("minute");
   return (Number.isFinite(hour) && Number.isFinite(minute)) ? hour * 60 + minute : 0;
+}
+
+// 某個報告日期在此刻算不算「舊的」：比台北今天舊、且今天的應該已經產出（A1 的快取也用它）
+function _reportDateIsStale(date) {
+  const d = String(date || "");
+  if (!d) return true;                                   // 沒有日期就當舊的
+  if (d >= taipeiDateKey(new Date())) return false;      // 已是今天的
+  return _taipeiMinutesNow() >= REPORT_READY_MINUTES;    // 今天的報告應該產出了才重抓
 }
 
 function reportDataIsStale() {
@@ -6454,7 +6469,7 @@ function _mdOf(dateKey) {
   return m && d ? `${Number(m)}/${Number(d)}` : String(dateKey || "");
 }
 
-// 盤中每 5 秒拉一次 intraday_state：時間軸開著就跟著重畫
+// 盤中每 15 秒拉一次 intraday_state（推播到的訊號另由 ingestPushedAlert 即時插入）：時間軸開著就跟著重畫
 function refreshRadarTimelineIfOpen() {
   if (!radarTimelineSid) return;
   const el = document.getElementById("radarTimelineModal");
@@ -7336,6 +7351,7 @@ async function loadWatchlist() {
       stock_name: getPreferredStockName(sid, row.stock_name) || String(row.stock_name || "").trim(),
     };
   });
+  prefetchWatchlistDetail();   // A3：自選股所在的報告分片先抓（沒有分層就是 no-op）
   renderCurrentTab();
   scheduleQuoteHydration();
   // 非同步載入事件（不阻塞卡片渲染）
@@ -7790,11 +7806,14 @@ async function confirmRemoveStock() {
 }
 
 // 向 report-data 換 10 分鐘簽名網址；未登入、function 未部署、檔案不存在都回 null
-async function reportSignedUrl(name = "latest") {
+async function reportSignedUrl(name = "latest", part = null, shard = null) {
   if (!state.accessToken) return null;
   try {
+    const req = { name };
+    if (part) req.part = part;            // "core"／"shard"（A2／A3）；不帶＝整份
+    if (shard) req.shard = shard;
     const r = await fetch(`${SUPABASE_FUNCTIONS_URL}/report-data`, {
-      method: "POST", headers: billingHeaders(), body: JSON.stringify({ name }),
+      method: "POST", headers: billingHeaders(), body: JSON.stringify(req),
     });
     const data = await r.json().catch(() => ({}));
     if (handleUpdateRequired(data)) return null;
@@ -7804,11 +7823,92 @@ async function reportSignedUrl(name = "latest") {
   }
 }
 
+// ── 報告的本機快取（A1）與分層載入（A2／A3）────────────────────────────
+// 報告一天只換一次（06:15），以前每次冷啟動都重抓整份（壓縮後 1.6 MB，佔每位使用者
+// 九成的流量）：存進 IndexedDB，日期還是「今天該有的那一份」就不下載——手動重整也
+// 一樣。分層：先抓核心檔（全部股票的數值欄，壓縮後約 0.5 MB），四個說明欄位與 K 線
+// 依股號前兩碼分片、點進那一檔才抓（ensureStockDetail）。report-data 還沒部署新版時
+// 退回整份，行為與以前相同。SCALING_PLAN.md A1–A3。
+const REPORT_DB_NAME  = "cg-report";
+const REPORT_DB_STORE = "reports";
+let _reportDbPromise = null;
+
+function _reportDb() {
+  if (_reportDbPromise) return _reportDbPromise;
+  _reportDbPromise = new Promise(resolve => {
+    if (!("indexedDB" in window)) return resolve(null);
+    try {
+      const req = indexedDB.open(REPORT_DB_NAME, 1);
+      req.onupgradeneeded = () => { try { req.result.createObjectStore(REPORT_DB_STORE); } catch { /* 已存在 */ } };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    } catch { resolve(null); }
+  });
+  return _reportDbPromise;
+}
+
+async function _reportCacheGet(key) {
+  const db = await _reportDb();
+  if (!db) return null;
+  return new Promise(resolve => {
+    try {
+      const rq = db.transaction(REPORT_DB_STORE, "readonly").objectStore(REPORT_DB_STORE).get(key);
+      rq.onsuccess = () => resolve(rq.result || null);
+      rq.onerror = () => resolve(null);
+    } catch { resolve(null); }
+  });
+}
+
+async function _reportCachePut(key, value) {
+  const db = await _reportDb();
+  if (!db) return false;
+  return new Promise(resolve => {
+    try {
+      const tx = db.transaction(REPORT_DB_STORE, "readwrite");
+      tx.objectStore(REPORT_DB_STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    } catch { resolve(false); }
+  });
+}
+
+async function _fetchReportJson(url) {
+  const r = await fetch(url, { cache: "no-store" });   // 快取由上面的 IndexedDB 管，不靠 HTTP 快取
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 async function loadSharedReportData(force = false) {
   if (!force && sharedReportData) return sharedReportData;
   if (!force && sharedDataLoadingPromise) return sharedDataLoadingPromise;
 
   sharedDataLoadingPromise = (async () => {
+    // A1：本機那份還是「今天該有的」就直接用——手動重整也一樣，報告一天只換一次
+    const cached = await _reportCacheGet("core");
+    if (cached && cached.json && !_reportDateIsStale(cached.date)) {
+      _applySharedReport(cached.json);
+      return sharedReportData;
+    }
+
+    const attempts = [];
+    // A2：先試核心檔（report-data 新版 part=core）；沒有就退回整份
+    const coreUrl = await reportSignedUrl("latest", "core");
+    if (coreUrl) {
+      try {
+        const json = await _fetchReportJson(coreUrl);
+        if (json && json.layers && json.investment_scores) {
+          _applySharedReport(json);
+          _reportCachePut("core", { date: json.date, json }).catch(() => {});
+          return sharedReportData;
+        }
+        attempts.push(`${coreUrl} -> 不是核心檔`);
+      } catch (e) {
+        attempts.push(`${coreUrl} -> ${e.message || "fetch failed"}`);
+      }
+    }
+
     // 報告 JSON 在私有 Storage，用登入 token 向 report-data 換簽名網址（SECURITY.md S7）。
     // function 尚未部署或檔案還沒上傳時退回舊的公開路徑——過渡期用，
     // migration 跑完、reporter 重啟後公開副本就不存在了。
@@ -7823,17 +7923,12 @@ async function loadSharedReportData(force = false) {
       withCacheBust(datedPath),
     ];
 
-    const attempts = [];
     for (const url of candidates) {
       try {
-        const r = await fetch(url, { cache: "no-store" });
-        if (!r.ok) {
-          attempts.push(`${url} -> HTTP ${r.status}`);
-          continue;
-        }
-        const json = await r.json();
+        const json = await _fetchReportJson(url);
         if (json && json.stock_data) {
-          sharedReportData = json;
+          _applySharedReport(json);
+          _reportCachePut("core", { date: json.date, json }).catch(() => {});
           return sharedReportData;
         }
         attempts.push(`${url} -> JSON 缺少 stock_data`);
@@ -7849,6 +7944,58 @@ async function loadSharedReportData(force = false) {
   } finally {
     sharedDataLoadingPromise = null;
   }
+}
+
+// 換一份報告物件：分片合併的紀錄跟著清（新物件裡沒有合併過的東西）
+const _detailLoadedShards = new Set();
+const _shardLoading = {};
+function _applySharedReport(json) {
+  if (!json.stock_data) json.stock_data = {};          // 核心檔沒有 K 線；既有讀法 data.stock_data?.[sid] 照常
+  _detailLoadedShards.clear();
+  sharedReportData = json;
+  prefetchWatchlistDetail();
+}
+
+// A3：一個分片（股號前兩碼）的說明欄位與 K 線併進 sharedReportData；IndexedDB 有今天的就不下載
+async function ensureShard(xx) {
+  const data = sharedReportData;
+  if (!data || !data.layers) return;
+  const known = Array.isArray(data.layers.shards) ? data.layers.shards : null;
+  if (known && !known.includes(xx)) return;             // 這一組沒有任何評分股／進榜股
+  if (_detailLoadedShards.has(xx)) return;
+  if (!_shardLoading[xx]) {
+    _shardLoading[xx] = (async () => {
+      let shard = await _reportCacheGet("shard:" + xx);
+      if (!shard || !shard.json || shard.date !== data.date) {
+        const url = await reportSignedUrl("latest", "shard", xx);
+        if (!url) return;
+        const json = await _fetchReportJson(url);
+        shard = { date: json.date, json };
+        _reportCachePut("shard:" + xx, shard).catch(() => {});
+      }
+      if (sharedReportData !== data) return;              // 等待期間換了一份報告
+      for (const [s, entry] of Object.entries(shard.json.stocks || {})) {
+        if (entry.scores && data.investment_scores?.[s]) Object.assign(data.investment_scores[s], entry.scores);
+        if (entry.stock) data.stock_data[s] = entry.stock;
+      }
+      _detailLoadedShards.add(xx);
+    })().catch(() => {}).finally(() => { delete _shardLoading[xx]; });
+  }
+  await _shardLoading[xx];
+}
+
+// 這一檔的說明欄位與 K 線要用之前呼叫。整份檔（沒有 layers）本來就都在，直接回。
+async function ensureStockDetail(sid) {
+  const sidKey = String(sid || "").trim();
+  if (sharedReportData?.layers && sidKey.length >= 2) await ensureShard(sidKey.slice(0, 2));
+  return sharedReportData;
+}
+
+// 自選股所在的分片先抓好（幾個小檔），點進 K 線與評分明細時就不用等
+function prefetchWatchlistDetail() {
+  if (!sharedReportData?.layers) return;
+  const xs = new Set((watchlistRows || []).map(r => String(r.stock_id || "").trim().slice(0, 2)).filter(x => x.length === 2));
+  for (const xx of xs) ensureShard(xx).catch(() => {});
 }
 
 // 自選列、評分頁的「K 線」鈕：開同一張個股字卡，停在第三個分頁
@@ -7877,6 +8024,7 @@ async function loadKLineIntoCard(sid) {
 
   try {
     const data = await loadSharedReportData();
+    await ensureStockDetail(sidKey);                     // A3：K 線在分片裡
     const stock = data.stock_data?.[sidKey];
     currentKLineSid = sidKey;
 
@@ -9346,6 +9494,83 @@ function _requestNotificationPermission() {
 const PUSH_SYNC_CACHE = 'push-sync';
 const PUSH_SYNC_URL   = './__push_sync__';
 const PUSH_KEY_URL    = './__push_key__';
+const PENDING_SIGNALS_URL = './__pending_signals__';   // 守門員收到推播時存下的訊號（F1）
+
+// ── F1：推播到的訊號直接插進通知匣與雷達 ────────────────────────────
+// 守門員（sw.js）收到推播就把 payload（key／sid／kind／sev／src／at／price／level）
+// 存進 Cache 並丟給開著的視窗；頁面把它當「倉庫那列還沒到之前的暫存」——用 event_key
+// 去重，倉庫那份（refreshInbox／loadIntradayQuotes）回來就讓位。倉庫仍是唯一的真相。
+function _pushedAlertToInboxRow(a) {
+  return {
+    id: "pending:" + a.key, event_key: a.key, pending: true,
+    title: String(a.title || ""), body: String(a.body || ""),
+    stock_id: a.sid ? String(a.sid) : null, severity: a.sev ? String(a.sev) : null,
+    source: a.src === "rule" ? "rule" : "monitor",
+    sent_at: a.at ? String(a.at) : new Date().toISOString(), read_at: null,
+  };
+}
+
+function ingestPushedAlert(a) {
+  if (!a || !a.key) return false;
+  let changed = false;
+  if (!inboxRows.some(r => r.event_key === a.key)) {
+    inboxRows.unshift(_pushedAlertToInboxRow(a));
+    changed = true;
+  }
+  // 雷達時間軸只記內建訊號與自動偵測（規則命中只進通知匣）
+  const sid = String(a.sid || "");
+  const iq = sid ? intradayQuoteMap[sid] : null;
+  if (iq && a.kind && a.at && a.src !== "rule") {
+    if (!Array.isArray(iq.signals)) iq.signals = [];
+    if (!iq.signals.some(s => s.kind === String(a.kind) && s.at === String(a.at))) {
+      iq.signals.push({
+        kind: String(a.kind), at: String(a.at),
+        price: a.price == null ? null : Number(a.price),
+        level: a.level == null ? null : Number(a.level),
+        text: String(a.body || ""), src: "builtin", sev: String(a.sev || ""),
+      });
+      changed = true;
+    }
+  }
+  if (changed) {
+    updateInboxBadge();
+    renderCurrentTab();
+    refreshRadarTimelineIfOpen();
+  }
+  return changed;
+}
+
+// 開機／回前景：視窗沒開時收到的推播，守門員存在 Cache 裡，這裡撿回來（只認兩天內的）
+async function _consumePendingSignalsFromCache() {
+  if (!('caches' in window)) return;
+  try {
+    const cache = await caches.open(PUSH_SYNC_CACHE);
+    const res = await cache.match(PENDING_SIGNALS_URL);
+    if (!res) return;
+    const list = await res.json();
+    if (!Array.isArray(list)) return;
+    const cutoff = Date.now() - 2 * 864e5;
+    for (const a of list) if (a && (a.receivedAt || 0) >= cutoff) ingestPushedAlert(a);
+  } catch { /* 沒有 Cache API 或讀取失敗就算了 */ }
+}
+
+// 倉庫已經有的就從暫存區拿掉，兩天前的也丟
+async function _prunePendingSignalsCache(knownKeys) {
+  if (!('caches' in window)) return;
+  try {
+    const cache = await caches.open(PUSH_SYNC_CACHE);
+    const res = await cache.match(PENDING_SIGNALS_URL);
+    if (!res) return;
+    const list = await res.json();
+    if (!Array.isArray(list)) return;
+    const known = new Set(knownKeys || []);
+    const cutoff = Date.now() - 2 * 864e5;
+    const keep = list.filter(a => a && a.key && !known.has(a.key) && (a.receivedAt || 0) >= cutoff);
+    if (keep.length === list.length) return;
+    if (!keep.length) { await cache.delete(PENDING_SIGNALS_URL); return; }
+    await cache.put(PENDING_SIGNALS_URL, new Response(JSON.stringify(keep), { headers: { 'Content-Type': 'application/json' } }));
+  } catch { /* noop */ }
+}
 
 // SW 重新訂閱時需要 VAPID 公鑰，但它讀不到頁面的常數，先寄放在 Cache
 async function _rememberVapidKeyForSw() {
@@ -9408,6 +9633,10 @@ if ('serviceWorker' in navigator) {
     // 視窗已開時點了手機通知：SW 只能 focus，跳到哪一則由頁面自己處理
     if (e.data && e.data.type === 'notification-click') {
       _handleNotificationClickUrl(e.data.url);
+    }
+    // 推播在視窗開著時到達：守門員把內容丟過來，先插進通知匣與雷達，不等下一輪讀倉庫（F1）
+    if (e.data && e.data.type === 'push-received') {
+      ingestPushedAlert(e.data.alert);
     }
   });
   // addEventListener（而非 onmessage）不會隱式啟動訊息佇列，SW 送的訊息會一直排隊，

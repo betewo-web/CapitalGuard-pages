@@ -10,13 +10,14 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v198';
+const CACHE_VERSION = 'tw-stock-v199';
 
 // 訂閱輪換用的 Cache：不隨版本清掉，否則升級 SW 就把待同步的訂閱弄丟了。
 const PUSH_SYNC_CACHE = 'push-sync';
 const PUSH_SYNC_URL   = './__push_sync__';   // 假 URL，只當 Cache 的 key 用
 const PUSH_KEY_URL    = './__push_key__';    // 頁面訂閱時寫入的 VAPID 公鑰
 const PENDING_ALERT_URL = './__pending_alert__'; // 點通知後要跳去的位置（冷啟動備援）
+const PENDING_SIGNALS_URL = './__pending_signals__'; // 收到的推播內容（頁面開機時撿回，插進通知匣與雷達；F1）
 
 // Static assets cached for offline CSS/icon support.
 // watchlist.html is NOT listed here — it is handled by network-first navigation.
@@ -145,10 +146,34 @@ self.addEventListener('push', event => {
     renotify: true,
     vibrate:  [200, 100, 200],
   };
-  event.waitUntil(
-    self.registration.showNotification(title, options)
-  );
+  // 通知一定要跳（userVisibleOnly）；順手把內容存進 Cache、丟給開著的視窗，
+  // 頁面就能立刻把這則插進通知匣與雷達，不必等下一輪讀倉庫（F1）。
+  // 存與丟任一失敗都不影響通知。
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    _stashPushedAlert(data).catch(() => {}),
+    _broadcast({ type: 'push-received', alert: data }).catch(() => {}),
+  ]));
 });
+
+async function _stashPushedAlert(data) {
+  if (!data || !data.key) return;
+  const cache = await caches.open(PUSH_SYNC_CACHE);
+  const res = await cache.match(PENDING_SIGNALS_URL);
+  let list = [];
+  if (res) { try { list = await res.json(); } catch { list = []; } }
+  if (!Array.isArray(list)) list = [];
+  const cutoff = Date.now() - 2 * 864e5;
+  list = list.filter(x => x && x.key && x.key !== data.key && (x.receivedAt || 0) >= cutoff);
+  list.push({ ...data, receivedAt: Date.now() });
+  await cache.put(PENDING_SIGNALS_URL, new Response(JSON.stringify(list.slice(-200)),
+                                                    { headers: { 'Content-Type': 'application/json' } }));
+}
+
+async function _broadcast(msg) {
+  const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  for (const c of list) { try { c.postMessage(msg); } catch { /* 頁面已不在 */ } }
+}
 
 // ── Web Push: 訂閱輪換 ────────────────────────────────────────
 // Safari / iOS 會定期換掉 push 訂閱，Chrome 在還原資料或權限異動時也會。
