@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="199">
+  <meta name="app-version" content="200">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=199" rel="stylesheet">
+  <link href="watchlist.css?v=200" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -3813,6 +3813,7 @@ async function loadIntradayQuotes(force = false) {
           signals:    _intradaySignals(row.signals_today),
         };
       }
+      _reapplyPushedSignals(map);   // F1：推播先到、倉庫那列還沒寫到的訊號不能被重建蓋掉
       intradayQuoteMap = map;
       return intradayQuoteMap;
     } catch {
@@ -9510,6 +9511,28 @@ function _pushedAlertToInboxRow(a) {
   };
 }
 
+// 推播到、還在等倉庫那列的雷達訊號：{sid: [entry]}；只留雷達交易日當天的
+const _pushedSignals = {};
+
+function _applyPushedSignal(iq, entry) {
+  if (!iq) return false;
+  if (!Array.isArray(iq.signals)) iq.signals = [];
+  if (iq.signals.some(s => s.kind === entry.kind)) return false;   // 倉庫已經有這一種
+  iq.signals.push(entry);
+  return true;
+}
+
+// loadIntradayQuotes 用倉庫的列整個重建 map 之後呼叫：把倉庫還沒寫到的推播訊號套回去
+function _reapplyPushedSignals(map) {
+  const today = taipeiDateKey(new Date());
+  for (const sid of Object.keys(_pushedSignals)) {
+    const kept = _pushedSignals[sid].filter(e => taipeiDateKey(e.at) === today);
+    if (!kept.length) { delete _pushedSignals[sid]; continue; }
+    _pushedSignals[sid] = kept;
+    for (const e of kept) _applyPushedSignal(map[sid], e);
+  }
+}
+
 function ingestPushedAlert(a) {
   if (!a || !a.key) return false;
   let changed = false;
@@ -9517,20 +9540,22 @@ function ingestPushedAlert(a) {
     inboxRows.unshift(_pushedAlertToInboxRow(a));
     changed = true;
   }
-  // 雷達時間軸只記內建訊號與自動偵測（規則命中只進通知匣）
+  // 雷達時間軸只記內建訊號與自動偵測（規則命中只進通知匣）。
+  // 寫倉庫與推播現在都是背景作業、沒有先後保證：推播可能比 intraday_state 那列先到手機。
+  // 所以推播到的訊號另外留一份（_pushedSignals），每次用倉庫重建雷達後再套回去
+  // （_reapplyPushedSignals），倉庫那一刻還沒寫到也不會從雷達消失。
+  // signals_today 每種訊號每天只記第一次，所以用「種類」去重就夠，時間戳不必相同。
   const sid = String(a.sid || "");
-  const iq = sid ? intradayQuoteMap[sid] : null;
-  if (iq && a.kind && a.at && a.src !== "rule") {
-    if (!Array.isArray(iq.signals)) iq.signals = [];
-    if (!iq.signals.some(s => s.kind === String(a.kind) && s.at === String(a.at))) {
-      iq.signals.push({
-        kind: String(a.kind), at: String(a.at),
-        price: a.price == null ? null : Number(a.price),
-        level: a.level == null ? null : Number(a.level),
-        text: String(a.body || ""), src: "builtin", sev: String(a.sev || ""),
-      });
-      changed = true;
-    }
+  if (sid && a.kind && a.at && a.src !== "rule") {
+    const entry = {
+      kind: String(a.kind), at: String(a.at),
+      price: a.price == null ? null : Number(a.price),
+      level: a.level == null ? null : Number(a.level),
+      text: String(a.body || ""), src: "builtin", sev: String(a.sev || ""),
+    };
+    const kept = _pushedSignals[sid] || (_pushedSignals[sid] = []);
+    if (!kept.some(s => s.kind === entry.kind)) kept.push(entry);
+    if (_applyPushedSignal(intradayQuoteMap[sid], entry)) changed = true;
   }
   if (changed) {
     updateInboxBadge();
