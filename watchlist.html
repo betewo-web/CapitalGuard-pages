@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="201">
+  <meta name="app-version" content="202">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=201" rel="stylesheet">
+  <link href="watchlist.css?v=202" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -689,7 +689,7 @@
             <div class="alert-group-head">盤中即時</div>
             <div class="alert-list">
             <label class="alert-item">
-              <span class="alert-item-text"><span class="alert-item-label">跌破支撐</span></span>
+              <span class="alert-item-text"><span class="alert-item-label">跌破關鍵價位</span></span>
               <span class="toggle-wrap form-check form-switch mb-0">
                 <input id="alert-break-support" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_break_support', this.checked)">
               </span>
@@ -701,7 +701,7 @@
               </span>
             </label>
             <label class="alert-item">
-              <span class="alert-item-text"><span class="alert-item-label">突破壓力</span></span>
+              <span class="alert-item-text"><span class="alert-item-label">突破關鍵價位</span></span>
               <span class="toggle-wrap form-check form-switch mb-0">
                 <input id="alert-break-resistance" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_break_resistance', this.checked)">
               </span>
@@ -713,7 +713,7 @@
               </span>
             </label>
             <label class="alert-item">
-              <span class="alert-item-text"><span class="alert-item-label">爆量</span><span class="alert-item-note">成交量大於均量 3 倍</span></span>
+              <span class="alert-item-text"><span class="alert-item-label">成交量異常</span><span class="alert-item-note">成交量大於均量 3 倍</span></span>
               <span class="toggle-wrap form-check form-switch mb-0">
                 <input id="alert-volume-spike" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_volume_spike', this.checked)">
               </span>
@@ -1965,7 +1965,7 @@ function planNameOf(code) {
 // ── 邀請朋友（B3）：台灣的傳播在 LINE 群組，App 裡以前沒有任何可以分享出去的入口 ──
 async function shareInvite() {
   const url = `${SITE_BASE_URL}?ref=app`;
-  const text = "CapitalGuard-股市雷達：自選股跌破支撐、帶量上漲、漲跌停，訊號推到手機。加 LINE 好友就能免費開始。";
+  const text = "CapitalGuard-股市雷達：自選股跌破關鍵價位、帶量上漲、漲跌停，訊號推到手機。加 LINE 好友就能免費開始。";
   trackActivity("invite_share", { via: navigator.share ? "share" : "copy" });
   try {
     if (navigator.share) { await navigator.share({ title: "CapitalGuard-股市雷達", text, url }); return; }
@@ -4178,8 +4178,8 @@ const RULE_CATALOG = [
     params: [{ k: "window", label: "回看天數", type: "number", def: 20, min: 2, max: 250 }] },
   { type: "break_prior_low", tier: "intraday", name: "跌破前低", preview: true,
     params: [{ k: "window", label: "回看天數", type: "number", def: 20, min: 2, max: 250 }] },
-  { type: "break_52w_high", tier: "intraday", name: "突破 52 週高", preview: true, params: [] },
-  { type: "break_52w_low", tier: "intraday", name: "跌破 52 週低", preview: true, params: [] },
+  { type: "break_52w_high", tier: "intraday", name: "創 52 週新高", preview: true, params: [] },
+  { type: "break_52w_low", tier: "intraday", name: "創 52 週新低", preview: true, params: [] },
   { type: "change_pct_above", tier: "intraday", name: "漲幅超過", preview: true,
     params: [{ k: "value", label: "漲幅 %", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
   { type: "change_pct_below", tier: "intraday", name: "跌幅超過", preview: true,
@@ -4216,9 +4216,9 @@ const RULE_CATALOG = [
         options: [["up", "站上（向上穿越）"], ["down", "跌破（向下穿越）"]] },
     ] },
   { type: "rsi_above", tier: "technical", name: "RSI 高於",
-    params: [{ k: "value", label: "RSI", type: "number", def: 70, min: 1, max: 99 }] },
+    params: [{ k: "value", label: "RSI 設定值", type: "number", def: 70, min: 1, max: 99 }] },
   { type: "rsi_below", tier: "technical", name: "RSI 低於",
-    params: [{ k: "value", label: "RSI", type: "number", def: 30, min: 1, max: 99 }] },
+    params: [{ k: "value", label: "RSI 設定值", type: "number", def: 30, min: 1, max: 99 }] },
   { type: "macd_cross", tier: "technical", name: "MACD 交叉",
     params: [{ k: "dir", label: "方向", type: "select", def: "up",
       options: [["up", "黃金交叉"], ["down", "死亡交叉"]] }] },
@@ -4660,16 +4660,16 @@ async function addRuleTemplate(idx, ctx, btn) {
 }
 
 const SIGNAL_LABEL_MAP = {
-  break_sup:   "跌破支撐",
+  break_sup:   "跌破關鍵價位",
   near_sup:    "逼近支撐",
   reclaim_sup: "收復支撐",
-  break_res:   "突破壓力",
+  break_res:   "突破關鍵價位",
   near_res:    "逼近壓力",
   limit_up:    "漲停",
   limit_down:  "跌停",
-  volume_spike:"爆量",
-  target_high: "觸及上漲目標",
-  target_low:  "觸及下跌目標",
+  volume_spike:"成交量異常",
+  target_high: "達到設定價格（上漲）",
+  target_low:  "達到設定價格（下跌）",
 };
 
 // ── 雷達縮寫表：訊號 key → 兩個字（RSI／MACD 例外）─────────────────────────
@@ -4692,7 +4692,7 @@ const SIGNAL_ABBR = {
 // 自動偵測條件的全名（門檻是 AUTO_CATALOG 的預設值；內建訊號的全名在 SIGNAL_LABEL_MAP）
 const AUTO_SIGNAL_LABELS = {
   break_prior_high: "突破 20 日高", break_prior_low: "跌破 20 日低",
-  break_52w_high: "突破 52 週高", break_52w_low: "跌破 52 週低",
+  break_52w_high: "創 52 週新高", break_52w_low: "創 52 週新低",
   change_pct_above: "漲幅超過 5%", change_pct_below: "跌幅超過 5%",
   gap_up: "向上跳空 1%", gap_down: "向下跳空 1%",
   "volume_vs_ma:above": "量能高於 20 日均量 2 倍", "volume_vs_ma:below": "量能低於 20 日均量一半",
@@ -5342,7 +5342,7 @@ function renderInbox() {
     const hints = {
       all: "尚無通知<br><span style='font-size:.85rem;opacity:.7'>監控觸發的警報會自動保存在這裡</span>",
       unread: inboxSupportsRead ? "沒有未讀通知 🎉" : "已讀功能需先執行 migrate_pwa_v2.sql",
-      important: "沒有漲跌停、跌破支撐或到價的通知",
+      important: "沒有漲跌停、跌破關鍵價位或達到設定價格的通知",
       stocks: "你的持股／自選股尚無通知",
     };
     listEl.innerHTML = `<div class="inbox-empty">${hints[inboxFilter] || hints.all}</div>`;
@@ -5433,11 +5433,11 @@ function buildWhyHtml(row) {
   const name = getPreferredStockName(sid, wl.stock_name);
 
   const condMap = [
-    [/跌破支撐/, "⚠️ 跌破支撐", wl.alert_break_support],
+    [/跌破支撐/, "⚠️ 跌破關鍵價位", wl.alert_break_support],
     [/逼近支撐/, "🟢 逼近支撐", wl.alert_near_support],
-    [/突破壓力/, "⚡ 突破壓力", wl.alert_break_resistance],
+    [/突破壓力/, "⚡ 突破關鍵價位", wl.alert_break_resistance],
     [/逼近壓力/, "🔴 逼近壓力", wl.alert_near_resistance],
-    [/爆量/,     "🚀 爆量",     wl.alert_volume_spike],
+    [/爆量/,     "🚀 成交量異常",     wl.alert_volume_spike],
     [/漲停/,     "🔒 漲停",     wl.alert_limit_up],
     [/跌停/,     "💥 跌停",     wl.alert_limit_down],
     [/法人連買/, "📈 法人連買", wl.alert_inst_buy],
@@ -5449,8 +5449,8 @@ function buildWhyHtml(row) {
   for (const [re, label] of condMap) {
     if (re.test(t)) { lines.push(`已開啟「${label}」通知條件`); break; }
   }
-  if (/上漲價位/.test(t) && wl.target_price_high != null) lines.push(`自訂上漲目標價：${wl.target_price_high}`);
-  if (/下跌價位/.test(t) && wl.target_price_low != null)  lines.push(`自訂下跌目標價：${wl.target_price_low}`);
+  if (/上漲價位/.test(t) && wl.target_price_high != null) lines.push(`設定的上漲價格：${wl.target_price_high}`);
+  if (/下跌價位/.test(t) && wl.target_price_low != null)  lines.push(`設定的下跌價格：${wl.target_price_low}`);
   if (String(row.source || "").startsWith("daily_report")) lines.push("已訂閱每日分析報告推播");
   return `<div class="why-box"><div class="why-title">為什麼通知你？</div>${lines.map(l => `・${l}`).join("<br>")}</div>`;
 }
@@ -6338,7 +6338,7 @@ function _signalLevelLabel(signal, level, compact = false) {
   if (compact) return p;
   if (["break_sup", "near_sup", "reclaim_sup"].includes(signal)) return `支撐 ${p}`;
   if (["break_res", "near_res"].includes(signal)) return `壓力 ${p}`;
-  if (["target_high", "target_low"].includes(signal)) return `目標價 ${p}`;
+  if (["target_high", "target_low"].includes(signal)) return `設定價格 ${p}`;
   if (signal === "limit_up") return `漲停價 ${p}`;
   if (signal === "limit_down") return `跌停價 ${p}`;
   return `關卡 ${p}`;
@@ -7277,7 +7277,7 @@ function renderRuleSummary() {
     <div class="rp-title">這條規則的意思</div>
     <div class="rs-line">「${escapeHtml(name)}」：<b>${escapeHtml(scope)}</b> 出現 ${chips} 時通知你。</div>
     <div class="rs-meta">評估時機：${RULE_TIERS[tier].label}（${RULE_TIERS[tier].note}）。
-      通知等級依條件自動判定：下跌方向的條件（跌破、跌幅、向下交叉）為 🟠（與漲跌停、跌破支撐、到價同一級），其餘為 🔵 其他盤中訊號。</div>`;
+      通知等級依條件自動判定：下跌方向的條件（跌破、跌幅、向下交叉）為 🟠（與漲跌停、跌破關鍵價位、達到設定價格同一級），其餘為 🔵 其他盤中訊號。</div>`;
 }
 
 async function saveRule() {

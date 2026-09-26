@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="201">
+  <meta name="app-version" content="202">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -394,8 +394,8 @@ const TIER_COLORS = { intraday: "var(--series-1)", technical: "var(--series-2)",
 const RULE_TYPE_INFO = {
   break_prior_high: ["intraday", "突破前高"],
   break_prior_low:  ["intraday", "跌破前低"],
-  break_52w_high:   ["intraday", "突破 52 週高"],
-  break_52w_low:    ["intraday", "跌破 52 週低"],
+  break_52w_high:   ["intraday", "創 52 週新高"],
+  break_52w_low:    ["intraday", "創 52 週新低"],
   change_pct_above: ["intraday", "漲幅超過"],
   change_pct_below: ["intraday", "跌幅超過"],
   gap_up:           ["intraday", "向上跳空"],
@@ -420,12 +420,12 @@ const SOURCE_LABELS = {
   daily_report: "每日報告", daily_report_web_push: "每日報告", daily_report_line: "每日報告（LINE，已停用）",
 };
 const KIND_LABELS = {
-  near_sup: "逼近支撐", break_sup: "跌破支撐", reclaim_sup: "收復支撐", near_res: "逼近壓力", break_res: "突破壓力",
-  volume_spike: "爆量", vol_spike: "爆量", limit_up: "漲停", limit_down: "跌停", target_high: "目標價（上）", target_low: "目標價（下）",
+  near_sup: "逼近支撐", break_sup: "跌破關鍵價位", reclaim_sup: "收復支撐", near_res: "逼近壓力", break_res: "突破關鍵價位",
+  volume_spike: "成交量異常", vol_spike: "成交量異常", limit_up: "漲停", limit_down: "跌停", target_high: "達到設定價格（上）", target_low: "達到設定價格（下）",
 };
 const FLAG_LABELS = {
-  break_support: "跌破支撐", near_support: "逼近支撐", break_resistance: "突破壓力", near_resistance: "逼近壓力",
-  volume_spike: "爆量", limit_up: "漲停", limit_down: "跌停", inst_buy: "法人連買", inst_sell: "法人連賣",
+  break_support: "跌破關鍵價位", near_support: "逼近支撐", break_resistance: "突破關鍵價位", near_resistance: "逼近壓力",
+  volume_spike: "成交量異常", limit_up: "漲停", limit_down: "跌停", inst_buy: "法人連買", inst_sell: "法人連賣",
   margin_up: "融資暴增", margin_down: "融資暴減",
 };
 const EVENT_TYPE_LABELS = {
@@ -763,7 +763,7 @@ function renderAll(s) {
   document.getElementById("watch-tiles").innerHTML = [
     tile("有自選股的人", fmtInt(w.users), { text: `占註冊 ${fmtPct(w.users, u.total)}` }),
     tile("期間新增", fmtInt(w.added_range)),
-    tile("設了目標價", fmtInt(w.with_target_price), { text: `占自選 ${fmtPct(w.with_target_price, w.total)}` }),
+    tile("有設定價格", fmtInt(w.with_target_price), { text: `占自選 ${fmtPct(w.with_target_price, w.total)}` }),
     tile("填了持股", fmtInt(w.with_shares), { text: `券商同步 ${fmtInt(w.holdings_rows)} 筆／${fmtInt(u.with_holdings)} 人` }),
     tile("超出方案", fmtInt(w.over_limit), { text: "保留資料、暫停通知", cls: w.over_limit ? "warn" : "" }),
   ].join("");
