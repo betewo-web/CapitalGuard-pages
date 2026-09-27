@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="206">
+  <meta name="app-version" content="207">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=206" rel="stylesheet">
+  <link href="watchlist.css?v=207" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -258,7 +258,10 @@
            首頁一開就直接是自選股。#home-date 還留著（隱藏），renderHome 仍然會寫，不必改邏輯 -->
       <span id="home-date" style="display:none"></span>
 
-      <!-- 瀏覽器推播通知列（精簡單行）：未啟用時顯示於首頁，啟用後由 initPushUI() 移到「通知」分頁 -->
+      <!-- 瀏覽器推播通知列：只在「收不到通知」時出現（已訂閱就整條隱藏），
+           由 placePushBar() 搬到目前這一頁——盤中頁在狀態列下面，通知頁在標題下面
+           （2026-09-27 Howard：通知頁沒開通知時也要看到這一行）。
+           字級與上下留白都比別的列大，它講的是「你現在收不到盤中訊號變化」。 -->
       <div id="push-notify-bar" class="push-bar" style="display:none">
         <div class="push-bar-msg">
           <span id="push-status-icon">&#128276;</span>
@@ -308,7 +311,7 @@
         <div class="home-grid" id="home-watchlist"></div>
       </div>
 
-      <!-- 「今日資料」那張卡 2026-09-27 搬到「盤後」分頁的最上面（Howard）：內容全部來自
+      <!-- 「今日股票資訊彙整」那張卡 2026-09-27 搬到「盤後」分頁的最上面（Howard）：內容全部來自
            16:30 的 fetch-events（籌碼、融資、技術量能、月營收、重大訊息都是收盤後才有的資料），
            盤中進來這一區幾乎永遠是「今日尚無資料」。見 renderTodayNews()。 -->
 
@@ -407,12 +410,12 @@
 
       <!-- 標題「🌙 盤後」2026-09-22 拿掉（Howard）：上面的分頁列已經寫著「盤後」，不必再說一次 -->
 
-      <!-- 今日資料：2026-09-27 從首頁搬到這一頁的最上面（Howard）。事件是 16:30 的
+      <!-- 今日股票資訊彙整（2026-09-27 前叫「今日資料」）：同日從首頁搬到這一頁的最上面（Howard）。事件是 16:30 的
            fetch-events 寫進 stock_events 的（籌碼 T86、融資、技術量能、月營收、季財報、重大訊息），
            盤中那段時間這一區本來就沒有內容——收盤後要看的第一件事才是它。內容由 renderTodayNews() 畫。 -->
       <div class="card panel-card mb-3">
         <div class="card-body p-3">
-          <div class="home-sec-title"><span class="hs-label"><i data-icon="news"></i>今日資料</span> <span class="hs-link" id="post-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
+          <div class="home-sec-title"><span class="hs-label"><i data-icon="news"></i>今日股票資訊彙整</span> <span class="hs-link" id="post-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
           <div id="post-news"></div>
         </div>
       </div>
@@ -1313,7 +1316,7 @@ let scoresFilter = "screen";    // screen / picks / mine（2026-09-23 預設改�
 // 首頁「只列持股」撥片：打開只留有部位的自選股。記在本機——換分頁、重開 App 都維持
 // （2026-09-23 Howard：這個不要跟著分頁回預設，統計／通知那兩排篩選籤才要）
 const HOLDINGS_ONLY_KEY = "cg-home-holdings-only";
-// 今日資料預設收合，只留第一條（Howard 2026-09-24）。刻意不寫進 localStorage：
+// 今日股票資訊彙整預設收合，只留第一條（Howard 2026-09-24）。刻意不寫進 localStorage：
 // 「只列持股」是使用者對清單的長期偏好，這個只是「這一次想不想多看幾條」，
 // 重開 App 回到收合才對——不然某天展開過，之後每天一進來都是一長串事件。
 // （2026-09-27 這一區從首頁搬到盤後分頁，變數跟著改名）
@@ -3621,6 +3624,8 @@ function switchTab(tab, silent = false) {
   if (tab === "scores" || tab === "home") refreshReportIfStale();
   // 輪詢間隔跟分頁有關（盤中雷達要快一點），換分頁就重排
   if (changed) _scheduleAutoRefresh();
+  // 通知關著的那一行跟著分頁走：盤中頁與通知頁都要看得到（2026-09-27 Howard）
+  placePushBar();
   renderCurrentTab();
   if (changed) window.scrollTo({ top: 0 });
 }
@@ -4803,17 +4808,17 @@ function alertTypeLabel(row) {
     try {
       const reg = await _swReadyOrNull();
       if (!reg) return;
-      await reg.showNotification(`今日資料：${newsRows.length} 則`, {
+      await reg.showNotification(`今日股票資訊彙整：${newsRows.length} 則`, {
         body: topRows.join("\n"),
         icon: NOTIFICATION_ICON,
         badge: NOTIFICATION_BADGE,
         tag: `home-important-info-${taipeiDateKey(new Date())}`,
-        // 點通知要落在看得到這幾則的那一頁：2026-09-27 起「今日資料」在盤後分頁
+        // 點通知要落在看得到這幾則的那一頁：2026-09-27 起這一區在盤後分頁
         data: { url: new URL("watchlist.html#post", window.location.href).toString() },
       });
       localStorage.setItem(key, "1");
     } catch (e) {
-      console.warn("[Notification] 無法發送今日資料通知:", e);
+      console.warn("[Notification] 無法發送今日股票資訊彙整通知:", e);
     }
   }
 
@@ -5599,7 +5604,7 @@ function renderHome() {
       + (example ? showcaseTileHtml() : "");
   }
   homeRenderUpcoming();
-  // 「今日資料」那一區 2026-09-27 搬到盤後分頁（見 renderTodayNews()）。這一句留在首頁：
+  // 「今日股票資訊彙整」那一區 2026-09-27 搬到盤後分頁（見 renderTodayNews()）。這一句留在首頁：
   // 當日事件的本機通知一天只發一次，而使用者多半停在這一頁——只在盤後頁發的話，
   // 沒點進盤後就永遠收不到。
   sendTodayImportantInfoNotification(_collectTodayEvents());
@@ -5635,7 +5640,7 @@ function homeTileHtml(r) {
   const stat = (n, label, cls) =>
     `<span class="home-tile-stat"><b class="${n ? cls : "hs-zero"}">${n}</b><i>${label}</i></span>`;
   const lead = stat(r.todayCount, "⚡ 訊號", "sev-orange") + stat(r.nearCount, "🎯 逼近關卡", "sev-blue");
-  // 事件籤 2026-09-22 從方塊上拿掉（Howard）：方塊只講訊號，事件在下面那張「今日資料」卡
+  // 事件籤 2026-09-22 從方塊上拿掉（Howard）：方塊只講訊號，事件在下面那張「今日股票資訊彙整」卡
   // 與「🌙 盤後」頁。r.standout 仍用於排序（今天有事的排前面）。
   // 評分 2026-09-22 從方塊上拿掉（Howard）：首頁只講「今天誰有事」，評分變化在 📊 統計 分頁。
   // 沒有事件就連第二行都不畫，一列就是一行
@@ -5882,7 +5887,7 @@ function setHomeHoldingsOnly(on) {
   renderHome();
 }
 
-// 今日資料的展開／收合（2026-09-27 起這一區在盤後分頁）。只重畫這一區就夠——
+// 今日股票資訊彙整的展開／收合（2026-09-27 起這一區在盤後分頁）。只重畫這一區就夠——
 // 它的內容全在 renderTodayNews() 裡算出來，不必連整頁的收盤清單一起重畫。
 // 埋點名稱沿用 home_news_toggle：改了名，admin 儀表板上以前的資料就對不到標籤。
 function togglePostNews() {
@@ -7577,11 +7582,13 @@ function renderPost() {
           plPct >= 0 ? "+" : ""}${plPct.toFixed(1)}%</b></span>`);
       }
     }
-    // 事件：有幾件寫幾件，點整塊開事件面板（與首頁的「N 件資料」同一個面板）
+    // 事件：點整塊開這一檔的資訊彙整面板（近 90 天）。標題上面那張卡叫「今日股票資訊彙整」
+    // ——那是今天、全部自選股；這顆在某一檔的卡片裡，所以不重複「今日」與「股票」
+    // （2026-09-27 Howard 改名時一起定的；八個字塞進這一列會折成兩行）
     // 事件條與 K 線同一列（2026-09-22）：有事件時事件條吃掉剩下的寬度，沒有就只有 K 線
     const evLine = r.events.length
       ? `<button type="button" class="post-ev" onclick="openEventsPanel('${jsAttr(r.sid)}')">
-           ${ICON_EVENTS}<span>今日資料</span>
+           ${ICON_EVENTS}<span>資訊彙整</span>
          </button>`
       : "";
     return `<article class="post-row">
@@ -7602,7 +7609,7 @@ function renderPost() {
   }).join("");
 }
 
-// 今日資料：自選股今天的事件（2026-09-20 起不分階，全部列）。
+// 今日股票資訊彙整（Howard 2026-09-27 從「今日資料」改名）：自選股今天的事件（2026-09-20 起不分階，全部列）。
 // 2026-09-27 從首頁搬到盤後分頁的最上面（Howard）：來源是 16:30 的 fetch-events——
 // 籌碼 T86、融資、技術量能、月營收、季財報、重大訊息全是收盤後才算出來的，盤中看這一區
 // 只會看到「今日尚無資料」；收盤後它反而是第一件要讀的事。
@@ -9491,30 +9498,45 @@ const _inAppBrowser = (() => {
 // 否則權限請求前面會多出 await，Safari 會判定已經脫離使用者手勢。
 let _pushSubscribed = false;
 
+// 通知列要放在「目前這一頁」的最上面。只有一個元素、在兩頁之間搬（同時只有一頁是
+// .active，所以不必畫兩份）：盤中頁接在狀態列後面（首頁的 .view-head 2026-09-22 拿掉了），
+// 通知頁接在標題後面——2026-09-27 Howard：通知分頁沒開通知時也要看到這一行，
+// 那一頁本來只有一份空清單，看不出「是沒有通知，還是根本收不到」。
+function _pushBarAnchor() {
+  if (currentTab === 'inbox') return document.querySelector('#view-inbox .view-head');
+  return document.querySelector('#view-home .view-head') || document.getElementById('home-status');
+}
+
+// 換分頁時呼叫（switchTab）：整條收起來時不動它，免得白搬。
+// 找不到錨點就什麼都不做，通知列會留在原地而不是消失。
+function placePushBar() {
+  const bar = document.getElementById('push-notify-bar');
+  if (!bar || bar.style.display === 'none') return;
+  const anchor = _pushBarAnchor();
+  if (anchor && bar.previousElementSibling !== anchor) {
+    anchor.insertAdjacentElement('afterend', bar);
+  }
+}
+
 async function initPushUI() {
   const bar  = document.getElementById('push-notify-bar');
   const btn  = document.getElementById('push-notify-btn');
   const icon = document.getElementById('push-status-icon');
   const txt  = document.getElementById('push-status-text');
-  // 首頁的 .view-head（「今日總覽」標題）2026-09-22 拿掉了，改用狀態列當錨點：
-  // 沒有錨點時 placeBar 什麼都不做，通知列就會永遠留在原地
-  const homeHead  = document.querySelector('#view-home .view-head') || document.getElementById('home-status');
 
   if (!bar) return;
   bar.style.display = '';
 
-  // 這一行只會出現在首頁，而且只在通知還沒開的時候（2026-09-23 起已啟用就整條收起來，
-  // 所以也不再需要「移到通知分頁」那條路）
-  function placeBar(afterEl) {
-    if (afterEl && bar.previousElementSibling !== afterEl) {
-      afterEl.insertAdjacentElement('afterend', bar);
-    }
+  // 這一行只在通知還沒開的時候出現（2026-09-23 起已啟用就整條收起來）；
+  // 放在哪一頁由 placePushBar() 依目前的分頁決定
+  function placeBar() {
+    placePushBar();
   }
 
   // 通知是關著的每一種狀態，都要留一條「接下來我該做什麼」——只丟一句說明就是死路。
   // 唯一沒有按鈕的情況是這個瀏覽器真的不支援推播，那確實無事可做。
   function showHint(emoji, message, hasHelp = true) {
-    placeBar(homeHead);
+    placeBar();
     icon.textContent = emoji;
     txt.textContent  = message;
     btn.style.display = hasHelp ? '' : 'none';
@@ -9539,14 +9561,14 @@ async function initPushUI() {
     return;
   }
 
-  // 被封鎖時每日提醒不會跳（跳了也沒用），首頁這條就是他唯一的入口：
+  // 被封鎖時每日提醒不會跳（跳了也沒用），這條就是他唯一的入口：
   // 與其只丟一句「請到瀏覽器設定」，不如給這台裝置的實際步驟——那些步驟在
   // 旁邊的「如何啟用通知」裡（_showPushUnblockHelp，依平台給不同路徑）。
-  // 這一行只講狀態就好（Howard 2026-09-24）：後半句「要到系統設定才能開回來」
-  // 是同一件事的殘缺版，而且 .push-bar-msg 是 nowrap + ellipsis，
-  // 窄螢幕上本來就會被切掉——切掉之後反而看不出按鈕是幹嘛的。
+  // 2026-09-27（Howard）：「通知已被封鎖」只講了狀態，沒講代價——改成把後果寫出來
+  // （收不到盤中訊號變化）。訊息變長了，所以 .push-bar-msg 不再 nowrap + ellipsis
+  // 而是換行，字級與上下留白也一起放大（2026-09-24 那次拿掉後半句就是因為會被切掉）。
   if (Notification.permission === 'denied') {
-    showHint('🔇', '通知已被封鎖');
+    showHint('🔇', '通知關閉，無法收到盤中訊號變化');
     return;
   }
 
@@ -9560,12 +9582,14 @@ async function initPushUI() {
     if (sub) { bar.style.display = 'none'; return; }
     btn.style.display = '';
     btn.onclick = togglePushSubscription;   // 封鎖狀態換過 handler，這裡換回來
-    placeBar(homeHead);
+    placeBar();
     // 內建瀏覽器按下去一定失敗，與其讓他撞牆，不如先講怎麼跳出去（按鈕留著讓他仍可試）
     icon.textContent  = _inAppBrowser ? '🌐' : '🔇';
+    // 還沒開的那一句也要講代價，與被封鎖那句同一個寫法（2026-09-27 Howard）：
+    // 「尚未啟用推播通知」只描述設定狀態，讀不出「所以我漏掉了什麼」。
     txt.textContent   = _inAppBrowser
       ? `${_inAppBrowser} 內建瀏覽器無法啟用通知，請用「以其他瀏覽器開啟」改用 Chrome`
-      : '尚未啟用推播通知';
+      : '通知尚未開啟，無法收到盤中訊號變化';
     btn.innerHTML     = '<span class="d-none d-sm-inline">啟用瀏覽器通知</span><span class="d-sm-none">啟用通知</span>';
     btn.className     = 'btn btn-sm btn-outline-light';
   } catch (e) {

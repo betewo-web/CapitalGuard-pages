@@ -173,38 +173,43 @@ body.has-bottom-nav .page-shell {
 	width: min(1140px, 100%);
 }
 
-/* 瀏覽器推播通知列：精簡單行 bar，而非完整 card */
+/* 通知關著的那一行（2026-09-27 放大，Howard）：它講的是「你現在收不到盤中訊號變化」，
+   是整個產品的前提壞掉了，不是一句提示。所以字級從 0.78 拉到 0.98rem、加粗、
+   上下留白從 0.65rem 拉到 1.1rem（與相鄰的卡片明顯分開），框線與底色用唯一的強調色橘。
+   訊息改成可以換行：整句要讀得完（以前 nowrap + ellipsis，窄螢幕會把後半句切掉，
+   那也是 2026-09-24 把後半句整個拿掉的原因）。 */
 .push-bar {
 	display: flex;
-	flex-wrap: nowrap;
+	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
-	gap: 0.5rem;
-	padding: 0.35rem 0.65rem;
-	margin-bottom: 0.65rem;
-	border-radius: 11px;
-	border: 1px solid rgba(128, 154, 212, 0.3);
-	background: rgba(20, 28, 50, 0.55);
+	gap: 0.6rem;
+	padding: 0.7rem 0.85rem;
+	margin: 1.1rem 0;
+	border-radius: 12px;
+	border: 1px solid rgba(255, 159, 67, 0.55);
+	background: rgba(255, 159, 67, 0.1);
 }
 
 .push-bar-msg {
 	display: flex;
 	align-items: center;
-	gap: 0.4rem;
+	gap: 0.45rem;
+	flex: 1 1 11rem;
 	min-width: 0;
-	font-size: 0.78rem;
-	color: var(--text-1);
+	font-size: 0.98rem;
+	font-weight: 600;
+	line-height: 1.45;
+	color: var(--text-0);
 }
 
 .push-bar-msg span:first-child {
-	font-size: 0.95rem;
+	font-size: 1.15rem;
 	flex-shrink: 0;
 }
 
 .push-bar-msg span:last-child {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	white-space: normal;
 }
 
 .push-bar button {
@@ -1961,7 +1966,9 @@ body.modal-blocking .modal-backdrop.show {
 
 .post-ev:active { transform: scale(0.99); }
 
-/* 卡片底部一列：資料／持股／K 線。有事件時「今日 N 件資料」吃掉剩下的寬度 */
+/* 卡片底部一列：資訊彙整／持股／K 線。有事件時「資訊彙整」吃掉剩下的寬度。
+   （標題那張卡叫「今日股票資訊彙整」，這顆在單一檔的卡片裡只寫後四個字：
+   八個字在 360px 螢幕上會折成兩行，整列跟著變高——2026-09-27 實測過。） */
 .post-actions { display: flex; align-items: stretch; gap: 0.5rem; }
 .post-actions .post-ev { flex: 2 1 auto; width: auto; }
 .post-actions .wl-icon-btn { flex: 1 1 0; min-width: 88px; }
@@ -2278,7 +2285,7 @@ body.modal-blocking .modal-backdrop.show {
 	align-items: flex-start;
 	padding: 0.5rem 0.15rem;
 	border-bottom: 1px solid rgba(146, 146, 163, 0.12);
-	/* 2026-09-22：今日資料／接下來 7 天整組放大（Howard） */
+	/* 2026-09-22：今日股票資訊彙整／接下來 7 天整組放大（Howard） */
 	font-size: 0.98rem;
 	cursor: pointer;
 }
@@ -2289,7 +2296,7 @@ body.modal-blocking .modal-backdrop.show {
 .home-feed-tx b { font-weight: 700; }
 .home-feed-tx .k { font-size: 0.86rem; color: var(--text-muted); }
 
-/* 今日資料預設只留第一條，其餘收在這一列裡（Howard 2026-09-24）。
+/* 今日股票資訊彙整預設只留第一條，其餘收在這一列裡（Howard 2026-09-24）。
    它是清單的最後一列、不是另一張卡：沿用 .home-feed 的列高與分隔線
    （:last-child 會把下緣那條去掉），只把文字換成可點的紫，
    並補一個會轉的箭頭——沒有箭頭的話，「還有 N 件」看起來像純文字說明。 */
