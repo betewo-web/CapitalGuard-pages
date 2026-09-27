@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="202">
+  <meta name="app-version" content="203">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=202" rel="stylesheet">
+  <link href="watchlist.css?v=203" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -4740,8 +4740,8 @@ function inferSeverity(row) {
   if (LEGACY_SEV[s]) return LEGACY_SEV[s];
   if (SEV_META[s])   return s;
   const t = String(row.title || "");
-  if (/跌破支撐|漲停|跌停|價位/.test(t))            return "orange";
-  if (/逼近|爆量|帶量|突破壓力|收復|融資/.test(t))  return "blue";
+  if (/跌破支撐|跌破關鍵價位|漲停|跌停|自訂(?:上漲|下跌)價位|設定價格/.test(t)) return "orange";
+  if (/逼近|爆量|成交量異常|帶量|突破壓力|突破關鍵價位|收復|融資/.test(t)) return "blue";
   return "info";
 }
 
@@ -4759,7 +4759,7 @@ function alertTypeLabel(row) {
   if (sig && SIGNAL_LABEL_MAP[sig]) return SIGNAL_LABEL_MAP[sig];
   if (String(row.source || "") === "rule") return "進階訊號";
   const t = String(row.title || "");
-  const m = t.match(/(跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|帶量上漲|帶量下跌|帶量上攻|帶量下殺|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
+  const m = t.match(/(跌破關鍵價位|突破關鍵價位|成交量異常|達到設定價格（上漲）|達到設定價格（下跌）|跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|帶量上漲|帶量下跌|帶量上攻|帶量下殺|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
   if (m) return m[1].replace("達到自訂", "");
   if (String(row.source || "").startsWith("daily_report")) return "每日報告";
   return "通知";
@@ -5433,11 +5433,11 @@ function buildWhyHtml(row) {
   const name = getPreferredStockName(sid, wl.stock_name);
 
   const condMap = [
-    [/跌破支撐/, "⚠️ 跌破關鍵價位", wl.alert_break_support],
+    [/跌破支撐|跌破關鍵價位/, "⚠️ 跌破關鍵價位", wl.alert_break_support],
     [/逼近支撐/, "🟢 逼近支撐", wl.alert_near_support],
-    [/突破壓力/, "⚡ 突破關鍵價位", wl.alert_break_resistance],
+    [/突破壓力|突破關鍵價位/, "⚡ 突破關鍵價位", wl.alert_break_resistance],
     [/逼近壓力/, "🔴 逼近壓力", wl.alert_near_resistance],
-    [/爆量/,     "🚀 成交量異常",     wl.alert_volume_spike],
+    [/爆量|成交量異常/, "🚀 成交量異常",     wl.alert_volume_spike],
     [/漲停/,     "🔒 漲停",     wl.alert_limit_up],
     [/跌停/,     "💥 跌停",     wl.alert_limit_down],
     [/法人連買/, "📈 法人連買", wl.alert_inst_buy],
@@ -5449,8 +5449,8 @@ function buildWhyHtml(row) {
   for (const [re, label] of condMap) {
     if (re.test(t)) { lines.push(`已開啟「${label}」通知條件`); break; }
   }
-  if (/上漲價位/.test(t) && wl.target_price_high != null) lines.push(`設定的上漲價格：${wl.target_price_high}`);
-  if (/下跌價位/.test(t) && wl.target_price_low != null)  lines.push(`設定的下跌價格：${wl.target_price_low}`);
+  if (/上漲價位|設定價格（上漲）/.test(t) && wl.target_price_high != null) lines.push(`設定的上漲價格：${wl.target_price_high}`);
+  if (/下跌價位|設定價格（下跌）/.test(t) && wl.target_price_low != null)  lines.push(`設定的下跌價格：${wl.target_price_low}`);
   if (String(row.source || "").startsWith("daily_report")) lines.push("已訂閱每日分析報告推播");
   return `<div class="why-box"><div class="why-title">為什麼通知你？</div>${lines.map(l => `・${l}`).join("<br>")}</div>`;
 }
@@ -6386,8 +6386,9 @@ function _numberAfter(text, label) {
   const v = Number(m[1].replace(/,/g, ""));
   return Number.isFinite(v) && v > 0 ? v : null;
 }
-// 規則的內文寫「突破 20 日高 212.00」「跌破 52 週低 80.00」「站上月線（MA20 1380.00）」，一併認得
-const _LEVEL_WORDS = ["壓力", "支撐", "目標", "漲停板", "跌停板", "日高", "日低", "週高", "週低", "MA20", "MA60", "MA5", "MA10"];
+// 規則的內文寫「突破 20 日高 212.00」「創 52 週新低 80.00」「站上月線（MA20 1380.00）」，一併認得；
+// 「目標」「週高」「週低」是 2026-09-27 以前的推播用字，alert_history 舊列還在，留著
+const _LEVEL_WORDS = ["壓力", "支撐", "設定價格", "目標", "漲停板", "跌停板", "日高", "日低", "週新高", "週新低", "週高", "週低", "MA20", "MA60", "MA5", "MA10"];
 function _levelFromText(text) {
   for (const w of _LEVEL_WORDS) {
     const v = _numberAfter(text, w);
