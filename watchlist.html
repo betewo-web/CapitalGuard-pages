@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="205">
+  <meta name="app-version" content="206">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=205" rel="stylesheet">
+  <link href="watchlist.css?v=206" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -245,11 +245,11 @@
 
     <!-- ═══ 🏠 首頁 Today ═══ -->
     <section id="view-home" class="app-view">
-      <!-- 首頁的三個分頁（2026-09-22 Howard）：總覽（原本的首頁）／盤後／設定。
+      <!-- 首頁的三個分頁（2026-09-22 Howard）：盤中（2026-09-27 從「總覽」改名，Howard：這一頁講的是今天盤中誰有事）／盤後／設定。
            三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
            底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
       <nav class="home-tabs" aria-label="首頁分頁">
-        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>總覽</button>
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
         <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
         <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
       </nav>
@@ -308,12 +308,9 @@
         <div class="home-grid" id="home-watchlist"></div>
       </div>
 
-      <div class="card panel-card mb-3">
-        <div class="card-body p-3">
-          <div class="home-sec-title"><span class="hs-label"><i data-icon="news"></i>今日資料</span> <span class="hs-link" id="home-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
-          <div id="home-news"></div>
-        </div>
-      </div>
+      <!-- 「今日資料」那張卡 2026-09-27 搬到「盤後」分頁的最上面（Howard）：內容全部來自
+           16:30 的 fetch-events（籌碼、融資、技術量能、月營收、重大訊息都是收盤後才有的資料），
+           盤中進來這一區幾乎永遠是「今日尚無資料」。見 renderTodayNews()。 -->
 
       <div class="card panel-card mb-3" id="home-upcoming-card" style="display:none">
         <div class="card-body p-3">
@@ -399,26 +396,37 @@
          2026-09-22 從「設定」頁搬過來（那一頁只留設定）。K 線也在這裡。資料全部已經在記憶體裡：
          getCloseQuote（日線／報告／intraday_state 收盤後的最後一筆）、stockEvents、holdingEntries。 -->
     <section id="view-post" class="app-view">
-      <!-- 首頁的三個分頁（2026-09-22 Howard）：總覽（原本的首頁）／盤後／設定。
+      <!-- 首頁的三個分頁（2026-09-22 Howard）：盤中（2026-09-27 從「總覽」改名，Howard：這一頁講的是今天盤中誰有事）／盤後／設定。
            三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
            底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
       <nav class="home-tabs" aria-label="首頁分頁">
-        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>總覽</button>
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
         <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
         <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
       </nav>
 
       <!-- 標題「🌙 盤後」2026-09-22 拿掉（Howard）：上面的分頁列已經寫著「盤後」，不必再說一次 -->
+
+      <!-- 今日資料：2026-09-27 從首頁搬到這一頁的最上面（Howard）。事件是 16:30 的
+           fetch-events 寫進 stock_events 的（籌碼 T86、融資、技術量能、月營收、季財報、重大訊息），
+           盤中那段時間這一區本來就沒有內容——收盤後要看的第一件事才是它。內容由 renderTodayNews() 畫。 -->
+      <div class="card panel-card mb-3">
+        <div class="card-body p-3">
+          <div class="home-sec-title"><span class="hs-label"><i data-icon="news"></i>今日資料</span> <span class="hs-link" id="post-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
+          <div id="post-news"></div>
+        </div>
+      </div>
+
       <div id="post-list" class="post-list"></div>
       <div id="post-empty" class="view-empty" style="display:none"></div>
     </section>
 
     <section id="view-watch" class="app-view">
-      <!-- 首頁的三個分頁（2026-09-22 Howard）：總覽（原本的首頁）／盤後／設定。
+      <!-- 首頁的三個分頁（2026-09-22 Howard）：盤中（2026-09-27 從「總覽」改名，Howard：這一頁講的是今天盤中誰有事）／盤後／設定。
            三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
            底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
       <nav class="home-tabs" aria-label="首頁分頁">
-        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>總覽</button>
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
         <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
         <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
       </nav>
@@ -1272,7 +1280,7 @@ const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5
 }
 
 // ── PWA v2: App Shell 狀態 ──
-// 首頁是三個分頁（總覽／盤後／設定），三者都是獨立的 view，由頂端那條 .home-tabs 切換；
+// 首頁是三個分頁（盤中／盤後／設定），三者都是獨立的 view，由頂端那條 .home-tabs 切換；
 // 底部導覽只有「首頁」一格，三頁都算它亮著（HOME_GROUP）
 const APP_TABS = ["home", "scores", "inbox", "watch", "post"];
 const HOME_GROUP = ["home", "post", "watch"];
@@ -1307,8 +1315,9 @@ let scoresFilter = "screen";    // screen / picks / mine（2026-09-23 預設改�
 const HOLDINGS_ONLY_KEY = "cg-home-holdings-only";
 // 今日資料預設收合，只留第一條（Howard 2026-09-24）。刻意不寫進 localStorage：
 // 「只列持股」是使用者對清單的長期偏好，這個只是「這一次想不想多看幾條」，
-// 重開 App 回到收合才對——不然某天展開過，之後每天一進首頁都是一長串事件。
-let homeNewsExpanded = false;
+// 重開 App 回到收合才對——不然某天展開過，之後每天一進來都是一長串事件。
+// （2026-09-27 這一區從首頁搬到盤後分頁，變數跟著改名）
+let postNewsExpanded = false;
 
 let homeHoldingsOnly = (() => {
   try { return localStorage.getItem(HOLDINGS_ONLY_KEY) === "1"; } catch { return false; }
@@ -4799,7 +4808,8 @@ function alertTypeLabel(row) {
         icon: NOTIFICATION_ICON,
         badge: NOTIFICATION_BADGE,
         tag: `home-important-info-${taipeiDateKey(new Date())}`,
-        data: { url: new URL("watchlist.html#home", window.location.href).toString() },
+        // 點通知要落在看得到這幾則的那一頁：2026-09-27 起「今日資料」在盤後分頁
+        data: { url: new URL("watchlist.html#post", window.location.href).toString() },
       });
       localStorage.setItem(key, "1");
     } catch (e) {
@@ -5588,43 +5598,11 @@ function renderHome() {
       : emptyHtml)
       + (example ? showcaseTileHtml() : "");
   }
-  // 今日資料：自選股今天的事件（2026-09-20 起不分階，全部列、最多 6 件）——
-  // 僅限今天首次入庫或事件日為今天的列；先前就已知、每天重新確認的舊事件
-  // 不再重新上榜（也不重推播）。
-  const newsRows = [];
-  for (const [sid, evs] of Object.entries(stockEvents)) {
-    for (const ev of evs) {
-      if (isTodayEvent(ev)) newsRows.push({ sid, ev });
-    }
-  }
-  newsRows.sort((a, b) => _compareEvents(a.ev, b.ev));
-  const newsEl = document.getElementById("home-news");
-  if (newsEl) {
-    // 預設只畫第一條，其餘收起來（Howard 2026-09-24）：首頁第一眼要留給自選清單，
-    // 事件多的那幾天本來會把清單整個推到螢幕外。展開就全部畫出來——
-    // 本來的 6 條上限會讓「還有 N 件」對不上實際展開的條數，不如不設限，
-    // 使用者是自己按開的，而且「查看明細 →」仍然在。
-    const shownNews = homeNewsExpanded ? newsRows : newsRows.slice(0, 1);
-    const hiddenNews = newsRows.length - shownNews.length;
-    newsEl.innerHTML = newsRows.length
-      ? shownNews.map(({ sid, ev }) => `
-          <div class="home-feed" onclick="openEventsPanel('${jsAttr(sid)}')">
-            <span class="home-feed-tm">${escapeHtml((_EVENT_TYPE_LABEL[ev.event_type] || "").replace(/^\S+\s/, "") || "事件")}</span>
-            <span class="home-feed-tx"><b>${escapeHtml(stockNameOf(sid) || sid)}</b> ${escapeHtml(_eventTitleWithoutStock(ev.title, sid, stockNameOf(sid)))}</span>
-          </div>`).join("")
-        + (newsRows.length > 1 ? `
-          <div class="home-feed home-feed-more" role="button" tabindex="0" aria-expanded="${homeNewsExpanded}"
-               onclick="toggleHomeNews()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHomeNews();}">
-            <span class="home-feed-tx">${homeNewsExpanded ? "收合" : `還有 ${hiddenNews} 件`}</span>
-            <span class="home-feed-caret${homeNewsExpanded ? " is-open" : ""}" aria-hidden="true"></span>
-          </div>` : "")
-      : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無資料</div>';
-  }
-  const newsLink = document.getElementById("home-news-link");
-  if (newsLink) newsLink.style.display = newsRows.length ? "" : "none";
-
   homeRenderUpcoming();
-  sendTodayImportantInfoNotification(newsRows);
+  // 「今日資料」那一區 2026-09-27 搬到盤後分頁（見 renderTodayNews()）。這一句留在首頁：
+  // 當日事件的本機通知一天只發一次，而使用者多半停在這一頁——只在盤後頁發的話，
+  // 沒點進盤後就永遠收不到。
+  sendTodayImportantInfoNotification(_collectTodayEvents());
 }
 
 // 漲／平／跌：盤中即時（現價對前一日收盤），漲跌為零才是平——Howard 2026-09-20 定案：
@@ -5904,13 +5882,13 @@ function setHomeHoldingsOnly(on) {
   renderHome();
 }
 
-// 今日資料的展開／收合。整頁重畫與「只列持股」同一個做法：這一區的內容
-// （包含 sendTodayImportantInfoNotification 的判斷）全在 renderHome 裡算出來，
-// 只改這一塊 innerHTML 反而要把那段邏輯抄第二份。
-function toggleHomeNews() {
-  homeNewsExpanded = !homeNewsExpanded;
-  trackActivity("home_news_toggle", { on: homeNewsExpanded ? 1 : 0 });
-  renderHome();
+// 今日資料的展開／收合（2026-09-27 起這一區在盤後分頁）。只重畫這一區就夠——
+// 它的內容全在 renderTodayNews() 裡算出來，不必連整頁的收盤清單一起重畫。
+// 埋點名稱沿用 home_news_toggle：改了名，admin 儀表板上以前的資料就對不到標籤。
+function togglePostNews() {
+  postNewsExpanded = !postNewsExpanded;
+  trackActivity("home_news_toggle", { on: postNewsExpanded ? 1 : 0 });
+  renderTodayNews();
 }
 
 // 撥片的外觀跟著變數走。renderHome 每次都叫一次，開 App 時記住的狀態才會顯示在撥片上
@@ -7550,6 +7528,7 @@ function renderWatchlist(rows) {
 // 那一頁是設定，這一頁是收盤後看一次的東西。資料都在記憶體，不需要新的請求。
 // 排序：持股的排前面（最在意），再來漲跌幅由大到小；沒有報價的排最後。
 function renderPost() {
+  renderTodayNews();
   const listEl = document.getElementById("post-list");
   const emptyEl = document.getElementById("post-empty");
   if (!listEl) return;
@@ -7621,6 +7600,40 @@ function renderPost() {
       </div>
     </article>`;
   }).join("");
+}
+
+// 今日資料：自選股今天的事件（2026-09-20 起不分階，全部列）。
+// 2026-09-27 從首頁搬到盤後分頁的最上面（Howard）：來源是 16:30 的 fetch-events——
+// 籌碼 T86、融資、技術量能、月營收、季財報、重大訊息全是收盤後才算出來的，盤中看這一區
+// 只會看到「今日尚無資料」；收盤後它反而是第一件要讀的事。
+// 只認今天首次入庫（created_at）或事件日就是今天的列；先前就已知、每天重新確認的舊事件
+// 不再重新上榜（也不重推播）。
+function renderTodayNews() {
+  const newsRows = _collectTodayEvents();
+  const newsEl = document.getElementById("post-news");
+  if (newsEl) {
+    // 預設只畫第一條，其餘收起來（Howard 2026-09-24）：事件多的那幾天本來會把下面的
+    // 收盤清單整個推到螢幕外。展開就全部畫出來——本來的 6 條上限會讓「還有 N 件」對不上
+    // 實際展開的條數，不如不設限，使用者是自己按開的，而且「查看明細 →」仍然在。
+    const shownNews = postNewsExpanded ? newsRows : newsRows.slice(0, 1);
+    const hiddenNews = newsRows.length - shownNews.length;
+    newsEl.innerHTML = newsRows.length
+      ? shownNews.map(({ sid, ev }) => `
+          <div class="home-feed" onclick="openEventsPanel('${jsAttr(sid)}')">
+            <span class="home-feed-tm">${escapeHtml((_EVENT_TYPE_LABEL[ev.event_type] || "").replace(/^\S+\s/, "") || "事件")}</span>
+            <span class="home-feed-tx"><b>${escapeHtml(stockNameOf(sid) || sid)}</b> ${escapeHtml(_eventTitleWithoutStock(ev.title, sid, stockNameOf(sid)))}</span>
+          </div>`).join("")
+        + (newsRows.length > 1 ? `
+          <div class="home-feed home-feed-more" role="button" tabindex="0" aria-expanded="${postNewsExpanded}"
+               onclick="togglePostNews()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();togglePostNews();}">
+            <span class="home-feed-tx">${postNewsExpanded ? "收合" : `還有 ${hiddenNews} 件`}</span>
+            <span class="home-feed-caret${postNewsExpanded ? " is-open" : ""}" aria-hidden="true"></span>
+          </div>` : "")
+      : '<div class="view-empty py-2" style="padding:0.5rem">今日尚無資料</div>';
+  }
+  const newsLink = document.getElementById("post-news-link");
+  if (newsLink) newsLink.style.display = newsRows.length ? "" : "none";
+  return newsRows;
 }
 
 // "2026-09-18" → "9/18"：收盤日期標籤用，只在收盤後仍顯示前一日收盤時出現
