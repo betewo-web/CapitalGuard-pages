@@ -212,9 +212,34 @@ body.has-bottom-nav .page-shell {
 	white-space: normal;
 }
 
-.push-bar button {
+/* 那一行唯一的動作（2026-09-27 Howard：要更凸顯）：實心橘膠囊＋深色字，
+   與空清單那顆 .btn-cta-lg 同一個形，只是小一號。外框線的版本跟旁邊的
+   「全部已讀／清空」長得一樣，在一條本來就是橘框的列裡反而退成背景。
+   選擇器帶 .push-bar（0,2,0）才壓得過 Bootstrap 的 .btn-sm／.btn-warning；
+   HTML 底下仍墊著 btn-warning，萬一拿到「新 HTML ＋ 舊 CSS」也還是看得見的實心鈕。 */
+.push-bar .push-bar-cta {
 	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3rem;
+	padding: 0.5rem 1.05rem;
+	border: 0;
+	border-radius: 999px;
+	background: var(--sig-orange);
+	color: #17131f;
+	font-family: inherit;
+	font-size: 0.92rem;
+	font-weight: 700;
+	line-height: 1.25;
+	white-space: nowrap;
+	cursor: pointer;
+	box-shadow: 0 6px 18px rgba(255, 159, 67, 0.32);
 }
+
+.push-bar .push-bar-cta:hover { background: #ffb066; color: #17131f; }
+.push-bar .push-bar-cta:active { background: #f08c2c; transform: scale(0.98); }
+.push-bar .push-bar-cta:disabled { opacity: 0.55; box-shadow: none; }
 
 @media (max-width: 480px) {
 	.modern-navbar .container-lg {
