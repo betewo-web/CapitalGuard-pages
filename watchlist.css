@@ -175,7 +175,8 @@ body.has-bottom-nav .page-shell {
 
 /* 通知關著的那一行（2026-09-27 放大，Howard）：它講的是「你現在收不到盤中訊號變化」，
    是整個產品的前提壞掉了，不是一句提示。所以字級從 0.78 拉到 0.98rem、加粗、
-   上下留白從 0.65rem 拉到 1.1rem（與相鄰的卡片明顯分開），框線與底色用唯一的強調色橘。
+   上下留白一路從 0.65rem 拉到 1.7rem（Howard 兩次都說「再加大」——它要跟上下的
+   狀態列／卡片看起來不是同一組東西），框線與底色用唯一的強調色橘。
    訊息改成可以換行：整句要讀得完（以前 nowrap + ellipsis，窄螢幕會把後半句切掉，
    那也是 2026-09-24 把後半句整個拿掉的原因）。 */
 .push-bar {
@@ -185,7 +186,7 @@ body.has-bottom-nav .page-shell {
 	justify-content: space-between;
 	gap: 0.6rem;
 	padding: 0.7rem 0.85rem;
-	margin: 1.1rem 0;
+	margin: 1.7rem 0;
 	border-radius: 12px;
 	border: 1px solid rgba(255, 159, 67, 0.55);
 	background: rgba(255, 159, 67, 0.1);
