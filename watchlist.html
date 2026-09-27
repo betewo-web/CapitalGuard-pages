@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="212">
+  <meta name="app-version" content="213">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=212" rel="stylesheet">
+  <link href="watchlist.css?v=213" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1079,7 +1079,15 @@ async function sbCount(table, params, accessToken) {
   return m ? Number(m[1]) : null;
 }
 
+// 這台裝置一寫入就讓 K3 的本機快取作廢。掛在三支寫入 helper 上而不是各個呼叫點：
+// 漏一個地方的代價是「改了開關、重開 App 又變回去」這種最難查的 bug。
+const _WATCH_CACHE_TABLES = new Set(["watchlist", "alert_rules", "broker_holdings"]);
+function _invalidateWatchCacheFor(table) {
+  if (_WATCH_CACHE_TABLES.has(String(table || "").split("?")[0])) _invalidateWatchCache();
+}
+
 async function sbPost(table, body, accessToken, minimal = false) {
+  _invalidateWatchCacheFor(table);
   const headers = sbHeaders(accessToken);
   if (minimal) headers["Prefer"] = "return=minimal";
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
@@ -1091,6 +1099,7 @@ async function sbPost(table, body, accessToken, minimal = false) {
 }
 
 async function sbPatch(table, params, body, accessToken) {
+  _invalidateWatchCacheFor(table);
   const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
   for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
   const r = await fetch(url, {
@@ -1101,6 +1110,7 @@ async function sbPatch(table, params, body, accessToken) {
 }
 
 async function sbDelete(table, params, accessToken) {
+  _invalidateWatchCacheFor(table);
   const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
   for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
   const r = await fetch(url, { method: "DELETE", headers: sbHeaders(accessToken) });
@@ -1200,6 +1210,8 @@ let klineTouchStartedLocked = false; // 這次觸控開始時十字線已鎖定�
 let watchlistRows = [];
 let intradayQuoteMap = {};
 let intradayQuotesLoadingPromise = null;
+const QUOTE_FULL_MS = 5 * 60 * 1000;   // 完整欄位的補漏間隔（L2）：輕量那條只拿價與時間
+let _lastFullQuoteAt = 0;
 let finmindQuoteMap = {};
 let finmindQuotesLoadingPromise = null;
 let removeModalRowId = null;
@@ -1384,6 +1396,10 @@ let _eventsCacheLoaded = false;
 let _eventsCursor      = null;         // 本機最新一列的 created_at
 let _eventsCoveredSids = [];           // 快取涵蓋哪幾檔（新加的股票要單獨整窗口抓一次）
 let _eventsWindowStart = null;         // 快取是以哪一天當窗口起點抓的
+let _eventsFetchedAt   = 0;            // 上次真的問過倉庫的時刻（J1 的 16:30 閘用）
+const EVENTS_PUBLISH_MINUTES = 16 * 60 + 30;   // 排程每天 16:30 跑 fetch-events（main.py --schedule）
+// 兩支 delta RPC 是否不存在（migrate_delta_rpc.sql 未跑）：問到一次 404 就不再試
+const _deltaRpcMissing = { inbox: false, events: false };
 const _eventsDetailLoaded = new Set(); // 已補過詳情層的：股號，或 "__today__"
 
 function _eventsCacheKey() { return `events:${state.userId}`; }
@@ -1423,10 +1439,36 @@ async function _eventsRestoreCache() {
   _eventsCursor      = saved.cursor || null;
   _eventsCoveredSids = Array.isArray(saved.sids) ? saved.sids : [];
   _eventsWindowStart = saved.windowStart || null;
+  _eventsFetchedAt   = saved.fetchedAt || 0;
 }
 
-function _eventsSaveCache(sids, windowStart) {
+// 最近一次 16:30（台北）的時間戳。現在還沒到 16:30 就是昨天那一次。
+// 排程每天 16:30 跑 fetch-events，所以本機那份只要晚於這個時間點就是最新的。
+function _eventsLastPublishMs() {
+  const todayPublish = Date.now() - (_taipeiMinutesNow() - EVENTS_PUBLISH_MINUTES) * 60000;
+  return _taipeiMinutesNow() >= EVENTS_PUBLISH_MINUTES ? todayPublish : todayPublish - 864e5;
+}
+
+// J3：一支 RPC 同時回「比游標新的列」與「窗口內的總數」。
+// 函式不存在（migration 未跑）就記住並永遠退回原本的兩個請求。
+async function _eventsDeltaRpc(sids, start, end, since) {
+  if (_deltaRpcMissing.events) return null;
+  try {
+    const res = await sbRpc("events_delta", {
+      p_sids: sids, p_start: start, p_end: end, p_since: since || null,
+      p_limit: EVENTS_QUERY_LIMIT,
+    }, state.accessToken);
+    if (!res || !Array.isArray(res.rows)) { _deltaRpcMissing.events = true; return null; }
+    return { rows: res.rows, total: Number.isFinite(res.total) ? res.total : null };
+  } catch (e) {
+    if (/: (404|400)$/.test(String(e && e.message || ""))) _deltaRpcMissing.events = true;
+    return null;
+  }
+}
+
+function _eventsSaveCache(sids, windowStart, fetched = true) {
   if (!state.userId || stockEventsLegacyMode) return;
+  if (fetched) _eventsFetchedAt = Date.now();
   const rows = _eventsFlatRows();
   let cursor = null;
   for (const row of rows) {
@@ -1436,7 +1478,8 @@ function _eventsSaveCache(sids, windowStart) {
   _eventsCoveredSids = sids;
   _eventsWindowStart = windowStart;
   // 詳情層一起存：同一天再開 App 連內文都不用重抓
-  _reportCachePut(_eventsCacheKey(), { savedAt: Date.now(), cursor, sids, windowStart, rows })
+  _reportCachePut(_eventsCacheKey(),
+    { savedAt: Date.now(), fetchedAt: _eventsFetchedAt, cursor, sids, windowStart, rows })
     .catch(() => {});
 }
 
@@ -1475,7 +1518,7 @@ async function _eventsFetch(cols, sids, extra = {}) {
   return (await Promise.all(responses.map(r => r.json()))).flat();
 }
 
-async function loadStockEvents(sids) {
+async function loadStockEvents(sids, force = false) {
   const wanted = [...new Set((sids || []).map(s => String(s || "").trim()).filter(Boolean))].sort();
   if (!wanted.length) { stockEvents = {}; return; }
   const { start, end } = _eventsWindow();
@@ -1495,10 +1538,22 @@ async function loadStockEvents(sids) {
     // 窗口每天往前滑一天，所以昨天的快取起點一定不同；起點不同就當成沒有快取
     const canIncrement = !!_eventsCursor && _eventsWindowStart === start && known.length > 0;
 
+    // J1（2026-09-27）：這張表的唯一寫入者是排程每天 16:30 的 data/events.py，
+    // 盤中的 monitor 不寫它。本機那份如果已經包含最近一次 16:30 的結果，就完全不必問。
+    if (!force && canIncrement && !missing.length && _eventsFetchedAt >= _eventsLastPublishMs()) return;
+
+    const since = canIncrement
+      ? new Date(Math.max(new Date(_eventsCursor).getTime() - EVENTS_OVERLAP_MS, 0)).toISOString()
+      : null;
+    // J3：一支 RPC 同時回「新列」與「總數」，省掉第二次往返（未部署時自動退回下面那條路）
+    const delta = await _eventsDeltaRpc(wanted, start, end, (canIncrement && !missing.length) ? since : null);
     const rows = [];
-    if (canIncrement) {
+    let serverTotal = null;
+    if (delta) {
+      rows.push(...delta.rows);
+      serverTotal = delta.total;
+    } else if (canIncrement) {
       // 已經有的那幾檔：只拿比游標新的列（往回重疊 10 分鐘）
-      const since = new Date(Math.max(new Date(_eventsCursor).getTime() - EVENTS_OVERLAP_MS, 0)).toISOString();
       rows.push(...(await _eventsFetch(EVENT_LIST_COLS, known,
         { event_date: [`gte.${start}`, `lte.${end}`], created_at: `gte.${since}` })));
       // 新加入自選的股票：那幾檔要整個窗口抓一次（一檔實測 2.7 KB）
@@ -1523,12 +1578,14 @@ async function loadStockEvents(sids) {
       return d >= start && d <= end;
     });
 
-    // 別台裝置清空／後端保留期清理（120 天）：總數對不上就整段重抓。
-    // 只在增量那條路需要對，整抓本來就是最新的。
-    if (canIncrement) {
-      const total = await _eventsCount(wanted, start, end);
+    // 後端保留期清理（120 天）：總數對不上就整段重抓。增量那條路才需要對，
+    // 整抓本來就是最新的。RPC 那條路的總數跟著同一個回應來，不必多問一次。
+    const usedCursor = delta ? (canIncrement && !missing.length && since) : canIncrement;
+    if (usedCursor) {
+      const total = serverTotal !== null ? serverTotal : await _eventsCount(wanted, start, end);
       if (total !== null && total !== merged.length) {
-        merged = await _eventsFetch(EVENT_LIST_COLS, wanted, win);
+        const again = await _eventsDeltaRpc(wanted, start, end, null);
+        merged = again ? again.rows : await _eventsFetch(EVENT_LIST_COLS, wanted, win);
         _eventsDetailLoaded.clear();   // 重抓的是列表層，詳情要重新補
       }
     }
@@ -1587,7 +1644,7 @@ async function ensureEventDetails(scope) {
       if (patch) Object.assign(ev, patch);
     }
     _eventsDetailLoaded.add(scope);
-    _eventsSaveCache(_eventsCoveredSids, _eventsWindowStart);
+    _eventsSaveCache(_eventsCoveredSids, _eventsWindowStart, false);
   } catch (e) {
     console.warn("[Events] 詳情載入失敗:", e.message);
   }
@@ -1981,7 +2038,7 @@ function _todayEventGroupsHtml(rows) {
 
 async function refreshEvents(sid) {
   const sids = watchlistRows.map(r => r.stock_id).filter(Boolean);
-  await loadStockEvents(sids);
+  await loadStockEvents(sids, true);   // 使用者按了「重新載入」：跳過 16:30 閘，真的去問一次
   openEventsPanel(sid);
 }
 
@@ -1999,13 +2056,28 @@ const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 // 擋，也要能把伺服器回的 hint（limit:watchlist）轉成升級提示。
 // ═══════════════════════════════════════════════════════════════
 
+// 三個方案的規格（價格與各項上限）是全站共用、一天不會變一次的資料（K1）：
+// 存 localStorage 一天。改價或調上限要隔天才會反映在舊裝置上——這是刻意的取捨，
+// 換來每次問方案少一個請求（1.2 KB，其中 1 KB 是標頭）。
+const PLANS_CACHE_KEY = "cg-plans";
+async function _loadPlansCached() {
+  const today = taipeiDateKey(new Date());
+  try {
+    const saved = JSON.parse(localStorage.getItem(PLANS_CACHE_KEY) || "null");
+    if (saved && saved.date === today && Array.isArray(saved.plans) && saved.plans.length) return saved.plans;
+  } catch { /* 無痕模式或壞掉的 JSON：當作沒有 */ }
+  const plans = await sbGet("plans", { is_public: "eq.true", order: "sort_order.asc" });
+  try { localStorage.setItem(PLANS_CACHE_KEY, JSON.stringify({ date: today, plans })); } catch {}
+  return plans;
+}
+
 async function loadPlanState() {
   if (!state.accessToken) return;
   const prevCode = planState.ready && planState.plan ? planState.plan.code : null;
   try {
     const [mine, plans] = await Promise.all([
       sbRpc("my_plan", {}, state.accessToken),
-      sbGet("plans", { is_public: "eq.true", order: "sort_order.asc" }),
+      _loadPlansCached(),
     ]);
     if (!mine || !mine.plan) throw new Error("my_plan 回傳空值");
     planState = { ...planState, ready: true, plan: mine.plan,
@@ -3531,7 +3603,9 @@ async function showMain() {
   ensurePushSubscriptionRegistered();
   refreshInbox(true);
   loadSharedReportData().then(() => renderCurrentTab()).catch(() => {});
-  loadSignalHistory(true).then(() => renderCurrentTab()).catch(() => {});   // 首頁格子的過去日子
+  // 首頁格子的過去日子：loadWatchlist 的 scheduleQuoteHydration 也會叫一次，
+  // 兩邊共用同一個請求（_sigHistLoadingPromise），本機有今天那份就完全不發請求（K2）
+  loadSignalHistory(false).then(() => renderCurrentTab()).catch(() => {});
   loadShowcase().then(s => { if (s && currentTab === "home") renderHome(); }).catch(() => {});   // 範例股
   // 延後再跳：免責聲明閘、強制更新閘、金流導回的方案面板都在這之前處理，
   // 直接跳會疊在它們上面（_screenIsBusy 會擋，但那樣這次就白白錯過了）
@@ -3610,22 +3684,25 @@ async function _autoRefreshOnce() {
   if (!state.userId || document.hidden) return;
   const marketOpen = _isMarketOpenNow();
   const tasks = [];
-  if (!marketOpen || Date.now() - _lastInboxRefreshAt >= _inboxIntervalMs()) {
+  // 收盤後仍每 5 分鐘問一次通知匣：盤後提醒與每日報告會在那時候進來，而推播若沒送達
+  // 就只剩這條補得到。盤中不問（J2，2026-09-27）——推播一到 service worker 就直接把
+  // 那一則插進通知匣與雷達（F1），這條輪詢只是補漏，一小時 24 KB 買一個很少發生的保險。
+  // 開 App、回前景、切到通知頁時都仍會抓一次，所以漏掉的那則最多晚到下一次切分頁。
+  if (!marketOpen && Date.now() - _lastInboxRefreshAt >= _inboxIntervalMs()) {
     _lastInboxRefreshAt = Date.now();
     tasks.push(refreshInbox(true));
-    // 方案狀態跟著通知一起重問（一次 RPC，很輕）：管理員指派、到期降級、
-    // 別的裝置升級，幾分鐘內徽章與上限就會跟著變，不必手動重整
-    tasks.push(loadPlanState());
   }
+  // 方案狀態不再跟著輪詢（K1）：方案只有升級、到期、管理員指派三種變動，
+  // 都不會在盤中自己發生。開 App、回前景、打開方案面板時各問一次就夠，
+  // 而這條每 5 分鐘一次要 2.5 KB（其中 2 KB 是標頭），一小時 30 KB。
   // 盤中每輪拉報價。收盤後自選頁要換上當天收盤價：還沒拿齊就每輪（5 分鐘）再拉一次
   // intraday_state（監控 13:35 前寫完最後一輪），主機沒寫到的再問 FinMind（那支自己限流）。
   if (marketOpen) {
     if (_intradayViewOpen()) { _lastQuoteRefreshAt = Date.now(); tasks.push(loadIntradayQuotes(true)); }
   } else if (_isSessionOverToday() && _closeQuoteMissing()) {
-    tasks.push(loadIntradayQuotes(true).then(() => (_closeQuoteMissing() ? loadFinMindCloseQuotes() : null)));
+    tasks.push(loadIntradayQuotes(true, { full: true }).then(() => (_closeQuoteMissing() ? loadFinMindCloseQuotes() : null)));
   }
-  // 首頁格子的過去日子：自帶 10 分鐘限流（今天那格走 intraday_state，不靠它）
-  if (currentTab === "home" || radarTimelineSid) tasks.push(loadSignalHistory(false));
+  // 首頁格子的過去日子不在這裡抓：一天只定案一次，由本機快取自己判斷（K2）
   await Promise.allSettled(tasks);
   _lastRefreshAt = Date.now();
   renderCurrentTab();
@@ -3661,6 +3738,8 @@ function _stopAutoRefresh() {
 //   2. 接管時觸發 controllerchange → 在使用者沒在輸入、沒開面板時 reload
 //   3. 從背景切回前景也檢查一次，最常見的「隔天打開還是舊版」就靠這個
 const APP_UPDATE_CHECK_MS = 10 * 60 * 1000;
+const VERSION_CHECK_MS    = 30 * 60 * 1000;   // 問伺服器最低版本的節奏（L1）：本文 109 B、標頭 979 B
+let _lastVersionCheckAt = 0;
 let _reloadPending = false;
 let _hadController = false;
 let _appUpdaterStarted = false;
@@ -3678,8 +3757,16 @@ async function initAppUpdater() {
     _reloadPending = true;
     _maybeReload();
   });
-  // 兩件事一起：抓新 sw.js（有新版就裝），並問伺服器這一版是否已經太舊
-  const check = () => { reg.update().catch(() => {}); enforceAppVersion().catch(() => {}); };
+  // 兩件事的節奏不同（L1，2026-09-27）：
+  //   抓新 sw.js — 每 10 分鐘，走 GitHub Pages，不算 Supabase 流量
+  //   問伺服器最低版本 — 每 30 分鐘。本文只有 109 B 卻要付 979 B 的回應標頭，
+  //     而開 App 與回前景本來就各問一次，真正漏掉的窗口很小
+  const check = () => {
+    reg.update().catch(() => {});
+    if (Date.now() - _lastVersionCheckAt < VERSION_CHECK_MS) return;
+    _lastVersionCheckAt = Date.now();
+    enforceAppVersion().catch(() => {});
+  };
   check();
   setInterval(check, APP_UPDATE_CHECK_MS);
   document.addEventListener("visibilitychange", () => {
@@ -3720,6 +3807,7 @@ function appVersion() {
 const _FORCE_UPDATE_KEY = "force_update_tries";
 
 async function enforceAppVersion() {
+  _lastVersionCheckAt = Date.now();   // 開頁那次也算數：initAppUpdater 的第一次 check 就不必再問一遍
   let st = null;
   try { st = await sbRpc("app_status", {}); } catch { /* 離線或表未建：不擋 */ }
   if (!st || st.ok !== false) {
@@ -3794,7 +3882,7 @@ async function manualRefresh() {
   try {
     // loadIntradayQuotes 讀的是 watchlistRows，必須等自選股先回來
     await Promise.allSettled([loadWatchlist(), refreshInbox(true), loadSharedReportData(true)]);
-    await Promise.allSettled([loadIntradayQuotes(true), loadSignalHistory(true)]);
+    await Promise.allSettled([loadIntradayQuotes(true, { full: true }), loadSignalHistory(true)]);
     if (_isSessionOverToday() && _closeQuoteMissing()) await loadFinMindCloseQuotes().catch(() => {});
     _lastRefreshAt = Date.now();
     _lastInboxRefreshAt = Date.now();
@@ -3865,22 +3953,53 @@ function renderCurrentTab() {
 // ── signal_history：每檔股票每個交易日的訊號序列（migrate_signal_history.sql，2026-09-20）──
 // intraday_state.signals_today 只有今天；首頁「近 10 個交易日」的格子與時間軸切日期
 // 讀這張表。表還沒建（查詢 404／400）就記住不支援，過去的日子只剩通知紀錄可數。
-// 內容一天只在收盤後定案，盤中每輪有新訊號的股票才會更新，所以最多每 SIGNAL_HISTORY_MS 抓一次。
+// 內容一天只在收盤後定案，今天那格走 intraday_state.signals_today，所以本機快取一天只換一次（K2）。
 const HOME_HISTORY_DAYS = 10;          // 首頁格子與時間軸日期籤的交易日數
 const SIGNAL_HISTORY_CAL_DAYS = 21;    // 往回抓幾個日曆日（10 個交易日含連假綽綽有餘）
-const SIGNAL_HISTORY_MS = 10 * 60 * 1000;
 let signalHistoryMap = {};             // sid → { "YYYY-MM-DD": { signals, levels, prevClose, close } }
 let signalHistorySupported = true;
 let signalHistoryLoadedAt = 0;
+let _sigHistCached = null;             // 本機那份的中繼資料（日期、涵蓋哪幾檔、有沒有補過收盤後那次）
+let _sigHistLoadingPromise = null;
+
+// K2（2026-09-27）：這張表一天只定案一次。過去那 9 天的格子在收盤後就不會再變，
+// 今天那格本來就走 intraday_state.signals_today，所以「每 10 分鐘抓一次」是純浪費。
+// 現在：存 IndexedDB，跨日、自選股多了新的、或收盤後還沒補過那一次，才重抓。
+function _sigHistCacheKey() { return `sighist:${state.userId}`; }
+
+// 快取還能用嗎？回傳 false 就要重抓
+function _sigHistFresh(cached, sids) {
+  if (!cached || !cached.map || cached.date !== taipeiDateKey(new Date())) return false;
+  const covered = new Set(cached.sids || []);
+  if (sids.some(sid => !covered.has(sid))) return false;
+  // 今天那一列在收盤後才寫定：13:35 之後要再補一次（補過就不再補）
+  const afterClose = _taipeiMinutesNow() >= 13 * 60 + 35;
+  return !(afterClose && !cached.afterClose);
+}
 
 async function loadSignalHistory(force = false) {
   if (!signalHistorySupported || !state.userId) return signalHistoryMap;
-  if (!force && Date.now() - signalHistoryLoadedAt < SIGNAL_HISTORY_MS) return signalHistoryMap;
   const sids = [...new Set((watchlistRows || [])
     .map(r => String(r.stock_id || "").trim())
     .concat(showcase ? [String(showcase.stock_id)] : [])   // 範例股一起抓，時間軸開著時重抓才不會洗掉它
     .filter(sid => /^\d{4}$/.test(sid)))];
   if (!sids.length) { signalHistoryMap = {}; return signalHistoryMap; }
+  // 開 App 時會被呼叫兩次（自選股載入後一次、首頁初始化一次）：共用同一個請求
+  if (_sigHistLoadingPromise) return _sigHistLoadingPromise;
+  if (!signalHistoryLoadedAt) {
+    const cached = await _reportCacheGet(_sigHistCacheKey()).catch(() => null);
+    if (cached && cached.map) {
+      signalHistoryMap = cached.map;
+      signalHistoryLoadedAt = cached.savedAt || Date.now();
+      _sigHistCached = cached;
+    }
+  }
+  if (!force && _sigHistFresh(_sigHistCached, sids)) return signalHistoryMap;
+  _sigHistLoadingPromise = _loadSignalHistoryNow(sids);
+  try { return await _sigHistLoadingPromise; } finally { _sigHistLoadingPromise = null; }
+}
+
+async function _loadSignalHistoryNow(sids) {
   const since = taipeiDateKey(new Date(Date.now() - SIGNAL_HISTORY_CAL_DAYS * 864e5));
   try {
     const rows = await sbGet("signal_history", {
@@ -3906,6 +4025,11 @@ async function loadSignalHistory(force = false) {
     }
     signalHistoryMap = map;
     signalHistoryLoadedAt = Date.now();
+    _sigHistCached = {
+      savedAt: signalHistoryLoadedAt, date: taipeiDateKey(new Date()), sids,
+      afterClose: _taipeiMinutesNow() >= 13 * 60 + 35, map,
+    };
+    _reportCachePut(_sigHistCacheKey(), _sigHistCached).catch(() => {});
   } catch (e) {
     // 404（表不存在）與 400（欄位不齊）都當作「這個 DB 還沒跑 migration」；網路錯誤下次再試
     if (/: (404|400)$/.test(String(e && e.message || ""))) signalHistorySupported = false;
@@ -4013,7 +4137,9 @@ function radarHistoryDates(n = HOME_HISTORY_DAYS) {
   return out.reverse();
 }
 
-async function loadIntradayQuotes(force = false) {
+async function loadIntradayQuotes(force = false, opts) {
+  // 簽名裡不放 {}：測試抽函式本文是用大括號配對數的，簽名裡的空物件會讓它提早收尾
+  const wantFullCols = !!(opts && opts.full);
   if (!state.accessToken) return intradayQuoteMap;
   const sids = [...new Set((watchlistRows || [])
     .map(r => String(r.stock_id || "").trim())
@@ -4025,14 +4151,26 @@ async function loadIntradayQuotes(force = false) {
 
   if (!force && intradayQuotesLoadingPromise) return intradayQuotesLoadingPromise;
 
+  // L2（2026-09-27）：盤中每 60 秒只拿真的會變的那幾欄。
+  // levels（開盤前算一次就凍結一整天）、stock_name、prev_close 不會在盤中變，
+  // 訊號欄位則由推播即時送達（F1）——每分鐘重傳一次是純浪費：3 檔 1.7 → 1.1 KB、
+  // 24 檔 3.2 → 1.4 KB。完整欄位留給開 App、自選股變動、以及每 5 分鐘一次補漏
+  // （沒開通知權限的人收不到推播，訊號欄位只能靠這一次補上）。
+  const needFull = wantFullCols
+    || !_lastFullQuoteAt
+    || Date.now() - _lastFullQuoteAt >= QUOTE_FULL_MS
+    || sids.some(sid => !intradayQuoteMap[sid]);   // 新加入自選的股票還沒有完整那份
+
   intradayQuotesLoadingPromise = (async () => {
     try {
       // 不取 volume：那是 MIS 的當日累計張數原值，量能偵測全在自家主機上跑完
       // （monitor/realtime.py），前端只需要判定結果。以前取它是為了讓規則編輯器
       // 的命中預覽能在本地算 volume_vs_ma——那條預覽已改為伺服器端評估。
       const cols = "stock_id,stock_name,price,prev_close,change_pct,signal,severity,level,signal_at,updated_at";
+      const liveCols = ["stock_id", "price", "change_pct", "updated_at"]
+        .concat(intradayOptionalCols.includes("quote_at") ? ["quote_at"] : []).join(",");
       const query = () => ({
-        select: [cols, ...intradayOptionalCols].join(","),
+        select: needFull ? [cols, ...intradayOptionalCols].join(",") : liveCols,
         stock_id: `in.(${sids.join(",")})`,
         limit: String(Math.max(30, sids.length * 2)),
       });
@@ -4048,6 +4186,31 @@ async function loadIntradayQuotes(force = false) {
           catch (e2) { if (!intradayOptionalCols.length) throw e2; }
         }
         intradaySupportsLevels = intradayOptionalCols.includes("levels");
+      }
+      if (needFull) _lastFullQuoteAt = Date.now();
+      // 輕量那條是「就地更新」：只覆蓋價格那幾個欄位，其餘沿用上一次完整拉到的值
+      if (!needFull) {
+        const keep = new Set(sids);
+        for (const sid of Object.keys(intradayQuoteMap)) if (!keep.has(sid)) delete intradayQuoteMap[sid];
+        for (const row of rows || []) {
+          const sid = String(row.stock_id || "").trim();
+          const entry = intradayQuoteMap[sid];
+          if (!entry) continue;
+          const price = Number(row.price);
+          if (!Number.isFinite(price)) continue;
+          const changePctRaw = row.change_pct == null ? null : Number(row.change_pct);
+          let changePct = (changePctRaw !== null && Number.isFinite(changePctRaw)) ? changePctRaw : null;
+          if (changePct === null && entry.prevClose !== null && entry.prevClose !== undefined) {
+            changePct = ((price - entry.prevClose) / entry.prevClose) * 100;
+          }
+          entry.price = price;
+          entry.changePct = changePct;
+          entry.updated_at = row.updated_at || entry.updated_at;
+          entry.tradeDate = taipeiDateKey(row.updated_at) || entry.tradeDate;
+          if ("quote_at" in row) entry.quote_at = row.quote_at || null;
+        }
+        _reapplyPushedSignals(intradayQuoteMap);
+        return intradayQuoteMap;
       }
       const map = {};
       for (const row of rows || []) {
@@ -5266,8 +5429,8 @@ async function hydrateMissingQuotes() {
 
 function scheduleQuoteHydration() {
   Promise.resolve()
-    .then(() => loadIntradayQuotes(true))
-    .then(() => loadSignalHistory(true))     // 自選清單變了：新加的股票要有格子
+    .then(() => loadIntradayQuotes(true, { full: true }))
+    .then(() => loadSignalHistory(false))    // 自選清單變了：新加的股票不在快取涵蓋內，會自己重抓
     .then(() => loadFinMindQuotesForMissing(true))
     .then(() => renderCurrentTab())
     .catch(() => {});
@@ -5310,12 +5473,37 @@ function _inboxWindowStart(now = Date.now()) { return new Date(now - INBOX_HISTO
 function _inboxTs(v) { const t = new Date(v || 0).getTime(); return Number.isFinite(t) ? t : 0; }
 
 // 純函式：組查詢參數。沒有游標＝整段（登入後第一次、或總數對不上時）。
+// 純函式：游標往回重疊 10 分鐘的那個時間點（sent_at 是倉庫寫入時刻，各列不保證依序到達）
+function _inboxSince(cursor, windowStart) {
+  if (!cursor) return null;
+  return new Date(Math.max(_inboxTs(cursor) - INBOX_OVERLAP_MS, _inboxTs(windowStart))).toISOString();
+}
+
 function _inboxQueryParams(cursor, readCursor, windowStart) {
   const p = { order: "sent_at.desc", sent_at: `gte.${windowStart}`, limit: String(INBOX_HISTORY_LIMIT) };
   if (!cursor) return p;
-  const since = new Date(Math.max(_inboxTs(cursor) - INBOX_OVERLAP_MS, _inboxTs(windowStart))).toISOString();
+  const since = _inboxSince(cursor, windowStart);
   p.or = readCursor ? `(sent_at.gt.${since},read_at.gt.${readCursor})` : `(sent_at.gt.${since})`;
   return p;
+}
+
+// J3：一支 RPC 同時回「新列」與「窗口內總數」，省掉第二次往返。
+// 函式不存在（migrate_delta_rpc.sql 未跑）就記住並永遠退回原本的兩個請求。
+async function _inboxDeltaRpc(cursor, readCursor, windowStart) {
+  if (_deltaRpcMissing.inbox) return null;
+  try {
+    const res = await sbRpc("inbox_delta", {
+      p_window_start: windowStart,
+      p_since: _inboxSince(cursor, windowStart),
+      p_read_since: cursor ? (readCursor || null) : null,
+      p_limit: INBOX_HISTORY_LIMIT,
+    }, state.accessToken);
+    if (!res || !Array.isArray(res.rows)) { _deltaRpcMissing.inbox = true; return null; }
+    return { rows: res.rows, total: Number.isFinite(res.total) ? res.total : null };
+  } catch (e) {
+    if (/: (404|400)$/.test(String(e && e.message || ""))) _deltaRpcMissing.inbox = true;
+    return null;
+  }
 }
 
 // 純函式：倉庫回來的列併進本機的。同 id 以倉庫為準（read_at 可能在別台裝置變了）、掉出
@@ -5366,17 +5554,23 @@ async function refreshInbox(force = true) {
     if (!_inboxCacheLoaded) await _inboxRestoreCache();
     const windowStart = _inboxWindowStart();
     const params = _inboxQueryParams(_inboxCursor, _inboxReadCursor, windowStart);
-    const fresh = (await sbGet("alert_history", params, state.accessToken)) || [];
+    const delta = await _inboxDeltaRpc(_inboxCursor, _inboxReadCursor, windowStart);
+    const fresh = delta ? delta.rows : ((await sbGet("alert_history", params, state.accessToken)) || []);
     let rows;
     if (params.or) {
       rows = _inboxMergeRows(inboxRows, fresh, windowStart);
       // 別台裝置清空／伺服器清理：總數對不上就整段重抓。本機已抓滿上限時對不了（伺服器可能更多），略過
       const localN = rows.filter(r => !r.pending).length;
-      const total = localN < INBOX_HISTORY_LIMIT
-        ? await sbCount("alert_history", { sent_at: `gte.${windowStart}` }, state.accessToken).catch(() => null)
-        : null;
+      // 本機已抓滿上限時對不了（伺服器一定更多），跳過比對
+      let total = null;
+      if (localN < INBOX_HISTORY_LIMIT) {
+        total = delta ? delta.total
+          : await sbCount("alert_history", { sent_at: `gte.${windowStart}` }, state.accessToken).catch(() => null);
+      }
       if (total !== null && total !== localN) {
-        const all = (await sbGet("alert_history", _inboxQueryParams(null, null, windowStart), state.accessToken)) || [];
+        const again = await _inboxDeltaRpc(null, null, windowStart);
+        const all = again ? again.rows
+          : ((await sbGet("alert_history", _inboxQueryParams(null, null, windowStart), state.accessToken)) || []);
         rows = _inboxMergeRows(inboxRows.filter(r => r.pending), all, windowStart);
       }
     } else {
@@ -7678,16 +7872,55 @@ function applyPreferredNames(rows) {
 }
 
 // ── 自選股清單 ──────────────────────────────────────────────────
+// K3（2026-09-27）：自選股、額度、券商庫存、規則數只有使用者自己改才會變，
+// 卻每次開 App 都重抓（5.6 KB）。`my_plan` 本來就回傳用量（幾檔、幾條），
+// 拿它當「別台裝置有沒有動過」的版本戳：對得上就整串讀本機，一個請求都不必發。
+// 這台裝置自己寫入時由 _invalidateWatchCache() 作廢（掛在 sbPost／sbPatch／sbDelete 上）。
+// 比對不到的邊界：在別台裝置只改了某一檔的提醒開關（檔數沒變）——那要等下次數量
+// 變動或手動重整才會同步。要補的話得在 my_plan 的回傳加一個 max(updated_at)。
+function _watchCacheKey() { return `watch:${state.userId}`; }
+
+function _watchStamp() {
+  const u = planState.usage || {};
+  const code = planState.plan ? planState.plan.code : "";
+  return `${code}|${u.watchlist ?? "?"}|${u.rules ?? "?"}`;
+}
+
+function _invalidateWatchCache() {
+  if (!state.userId) return;
+  _reportCacheDelete(_watchCacheKey()).catch(() => {});
+}
+
 async function loadWatchlist() {
-  // 券商庫存跟著自選股一起抓：所有會刷新自選的路徑（登入、手動更新）
-  // 就自動涵蓋持股分頁，不必在每個呼叫點各記一行
-  const [rows, activeIds] = await Promise.all([
-    sbGet("watchlist", {}, state.accessToken),
-    loadActiveIds("active_watchlist"),   // 方案上限內仍生效的列（BILLING.md）
-    loadBrokerHoldings(),
-    loadPlanState(),
-    loadRuleNudgeState(),   // 首頁的進階訊號推薦卡要知道目前幾條
-  ]);
+  // 先拿方案與用量：它同時是版本戳，決定下面那四個請求要不要發
+  await loadPlanState();
+  const stamp = _watchStamp();
+  const today = taipeiDateKey(new Date());
+  const cached = planState.ready ? await _reportCacheGet(_watchCacheKey()).catch(() => null) : null;
+  let rows, activeIds;
+  if (cached && cached.stamp === stamp && cached.date === today && Array.isArray(cached.rows)) {
+    rows = cached.rows;
+    activeIds = Array.isArray(cached.activeIds) ? new Set(cached.activeIds) : null;
+    brokerHoldings = cached.broker || [];
+    brokerHoldingsAt = cached.brokerAt || null;
+    ruleNudge.rules = cached.rules || null;
+  } else {
+    // 券商庫存跟著自選股一起抓：所有會刷新自選的路徑（登入、手動更新）
+    // 就自動涵蓋持股分頁，不必在每個呼叫點各記一行
+    [rows, activeIds] = await Promise.all([
+      sbGet("watchlist", {}, state.accessToken),
+      loadActiveIds("active_watchlist"),   // 方案上限內仍生效的列（BILLING.md）
+      loadBrokerHoldings(),
+      loadRuleNudgeState(),   // 首頁的進階訊號推薦卡要知道目前幾條
+    ]);
+    if (state.userId && planState.ready) {
+      _reportCachePut(_watchCacheKey(), {
+        stamp, date: today, savedAt: Date.now(), rows: rows || [],
+        activeIds: activeIds ? [...activeIds] : null,
+        broker: brokerHoldings, brokerAt: brokerHoldingsAt, rules: ruleNudge.rules,
+      }).catch(() => {});
+    }
+  }
   planState.activeWatchIds = activeIds;
   watchlistRows = applyPreferredNames(rows);
   prefetchWatchlistDetail();   // A3：自選股所在的報告分片先抓（沒有分層就是 no-op）
