@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="214">
+  <meta name="app-version" content="215">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=214" rel="stylesheet">
+  <link href="watchlist.css?v=215" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1173,7 +1173,21 @@ async function flushActivity() {
   } catch { /* 離線或被擋：這批就算了，不重送 */ }
   if (_activityQueue.length) _activityTimer = setTimeout(flushActivity, ACTIVITY_FLUSH_MS);
 }
-document.addEventListener("visibilitychange", () => { if (document.hidden) flushActivity(); });
+// 切到背景：先記一筆「這一段前景待了多久」再送出。搭現有的批次與 keepalive，
+// 不會多一個請求，但讓容量儀表算得出輪詢成本（輪詢＝前景分鐘數 × 速率），
+// 順便回答 SCALING.md 兩年前就想知道的「盤中同時在線多少人」。
+let _foregroundSince = Date.now();
+function _trackForegroundSpan() {
+  const sec = Math.round((Date.now() - _foregroundSince) / 1000);
+  _foregroundSince = Date.now();
+  if (sec >= 5 && sec <= 12 * 3600) trackActivity("app_close", { sec, tab: currentTab || "" });
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { _trackForegroundSpan(); flushActivity(); }
+  else _foregroundSince = Date.now();
+});
+// 關掉分頁／重新整理：pagehide 是三個平台唯一都會送的那一個（iOS 不送 unload）
+window.addEventListener("pagehide", () => { _trackForegroundSpan(); flushActivity(); });
 
 // 管理者旗標：只決定要不要顯示儀表板入口；能不能看由伺服器端 admin_stats() 判定
 async function loadAdminFlag() {
