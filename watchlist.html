@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="209">
+  <meta name="app-version" content="212">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=209" rel="stylesheet">
+  <link href="watchlist.css?v=212" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1359,48 +1359,237 @@ function isTodayEvent(ev) {
 // 最多排到 90 天後），不然遠期日程永遠排在最上面。
 const EVENTS_QUERY_CHUNK = 25;
 const EVENTS_QUERY_LIMIT = 1000;
+const EVENTS_WINDOW_DAYS = 90;
+const EVENTS_OVERLAP_MS  = 10 * 60 * 1000;   // 游標往回多看一點：created_at 是寫入時刻，各列不保證依序到達
+
+// ── 事件分兩層拿（2026-09-27）───────────────────────────────────────────
+// 以前一次拿 15 個欄位、前後各 90 天、每次要就整批重抓：10 檔自選 496 列＝壓縮後 37 KB，
+// 是盤中報價輪詢的 15 倍，而且開 App／按重新整理／增刪自選股都會再來一次。
+// 拆法依「前端真的在哪裡讀它」：
+//   列表層 — 清單、排序、今日判定、事件卡標頭。實測同樣 496 列只剩 10.9 KB
+//   詳情層 — 內文、AI 說明、分數拆解、指標。這四個只有事件彈窗打開時才畫得到，
+//            所以改成開彈窗才補（一檔 3.9 KB）。renderEventCard 本來就對缺欄位有容錯
+//            （`ev.content ? … : ""`），補到之後重畫即可，渲染邏輯不用動。
+// 再加上本機快取＋created_at 游標（作法與通知匣 refreshInbox 相同），每次開 App 從
+// 74.6 KB（那時還會重跑兩遍）降到 1.0–2.7 KB。
+const EVENT_LIST_COLS   = "stock_id,event_date,event_type,title,importance,event_score,"
+                        + "direction,event_code,created_at,observed_at,source_url";
+// 前四欄是併回列表層那一列的鍵，不是要顯示的東西
+const EVENT_DETAIL_COLS = "stock_id,event_date,event_code,title,content,ai_analysis,score_breakdown,metrics";
+// Event Engine 的欄位還沒建（migration 未套用）時的退路：與 2026-09 以前的行為相同
+const EVENT_LEGACY_COLS = "stock_id,event_date,event_type,title,content,source_url,importance,ai_analysis";
+
+let stockEventsLegacyMode = false;     // 退到舊欄位：不分層、不快取（那個 schema 沒有 created_at）
+let _eventsCacheLoaded = false;
+let _eventsCursor      = null;         // 本機最新一列的 created_at
+let _eventsCoveredSids = [];           // 快取涵蓋哪幾檔（新加的股票要單獨整窗口抓一次）
+let _eventsWindowStart = null;         // 快取是以哪一天當窗口起點抓的
+const _eventsDetailLoaded = new Set(); // 已補過詳情層的：股號，或 "__today__"
+
+function _eventsCacheKey() { return `events:${state.userId}`; }
+function _eventsWindow() {
+  return {
+    start: _localDateIso(new Date(Date.now() - EVENTS_WINDOW_DAYS * 864e5)),
+    end:   _localDateIso(new Date(Date.now() + EVENTS_WINDOW_DAYS * 864e5)),
+  };
+}
+
+// 併回詳情層時用的身分。沒有拿 id／dedupe_key 是刻意的：兩者都是隨機字串，
+// 壓縮壓不掉，496 列光 dedupe_key 就要多 14 KB（2026-09-27 實測）。
+function eventRowKey(ev) {
+  return [ev?.stock_id, ev?.event_date, ev?.event_code || "", ev?.title || ""].join("|");
+}
+
+function _eventsFlatRows() {
+  return Object.values(stockEvents || {}).flat();
+}
+
+// 依股號分組寫回 stockEvents。排序交給畫面（首頁看分數、個股面板看日期）
+function _eventsApplyRows(rows) {
+  const map = {};
+  for (const row of rows || []) {
+    const sid = String(row?.stock_id || "").trim();
+    if (!sid) continue;
+    (map[sid] ||= []).push(row);
+  }
+  stockEvents = map;
+}
+
+async function _eventsRestoreCache() {
+  _eventsCacheLoaded = true;
+  const saved = await _reportCacheGet(_eventsCacheKey()).catch(() => null);
+  if (!saved || !Array.isArray(saved.rows)) return;
+  _eventsApplyRows(saved.rows);
+  _eventsCursor      = saved.cursor || null;
+  _eventsCoveredSids = Array.isArray(saved.sids) ? saved.sids : [];
+  _eventsWindowStart = saved.windowStart || null;
+}
+
+function _eventsSaveCache(sids, windowStart) {
+  if (!state.userId || stockEventsLegacyMode) return;
+  const rows = _eventsFlatRows();
+  let cursor = null;
+  for (const row of rows) {
+    if (row?.created_at && (!cursor || row.created_at > cursor)) cursor = row.created_at;
+  }
+  _eventsCursor = cursor;
+  _eventsCoveredSids = sids;
+  _eventsWindowStart = windowStart;
+  // 詳情層一起存：同一天再開 App 連內文都不用重抓
+  _reportCachePut(_eventsCacheKey(), { savedAt: Date.now(), cursor, sids, windowStart, rows })
+    .catch(() => {});
+}
+
+function _eventsUrl(cols, chunk, extra = {}) {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/stock_events`);
+  url.searchParams.set("select", cols);
+  url.searchParams.set("stock_id", chunk.length === 1 ? `eq.${chunk[0]}` : `in.(${chunk.join(",")})`);
+  // 舊 schema 沒有 event_score，拿它排序會整批 400（然後才退回舊欄位，白跑一趟）
+  url.searchParams.set("order", stockEventsLegacyMode
+    ? "importance.asc,event_date.desc" : "event_date.desc,event_score.desc.nullslast");
+  url.searchParams.set("limit", String(EVENTS_QUERY_LIMIT));
+  // 同一個欄位要兩個條件（event_date 的上下界）就得 append 兩次，PostgREST 才會 AND 起來
+  for (const [k, v] of Object.entries(extra)) {
+    for (const one of Array.isArray(v) ? v : [v]) url.searchParams.append(k, one);
+  }
+  return url;
+}
+
+function _eventsChunks(sids) {
+  const out = [];
+  for (let i = 0; i < sids.length; i += EVENTS_QUERY_CHUNK) out.push(sids.slice(i, i + EVENTS_QUERY_CHUNK));
+  return out;
+}
+
+// 帶 token：stock_events 改成登入後才能讀（migrate_private_reports.sql），
+// 沒帶的話 RLS 會回空陣列而不是錯誤，畫面只會安靜地沒有事件
+async function _eventsFetch(cols, sids, extra = {}) {
+  const responses = await Promise.all(_eventsChunks(sids).map(
+    chunk => fetch(_eventsUrl(cols, chunk, extra), { headers: sbHeaders(state.accessToken) })));
+  const failed = responses.find(r => !r.ok);
+  if (failed) {
+    const err = new Error(`stock_events: ${failed.status}`);
+    err.status = failed.status;
+    throw err;
+  }
+  return (await Promise.all(responses.map(r => r.json()))).flat();
+}
 
 async function loadStockEvents(sids) {
-  if (!sids || sids.length === 0) return;
+  const wanted = [...new Set((sids || []).map(s => String(s || "").trim()).filter(Boolean))].sort();
+  if (!wanted.length) { stockEvents = {}; return; }
+  const { start, end } = _eventsWindow();
+  const win = { event_date: [`gte.${start}`, `lte.${end}`] };
   try {
-    const today = _localDateIso();
-    const historyStart = _localDateIso(new Date(Date.now() - 90 * 864e5));
-    const historyEnd = _localDateIso(new Date(Date.now() + 90 * 864e5));
-    const buildUrl = (rich, chunk) => {
-      const url = new URL(`${SUPABASE_URL}/rest/v1/stock_events`);
-      const legacy = "stock_id,event_date,event_type,title,content,source_url,importance,ai_analysis";
-      const scored = `${legacy},event_code,direction,event_score,score_breakdown,metrics,source,created_at,observed_at,dedupe_key`;
-      url.searchParams.set("select", rich ? scored : legacy);
-      url.searchParams.append("event_date", `gte.${rich ? historyStart : today}`);
-      if (rich) url.searchParams.append("event_date", `lte.${historyEnd}`);
-      url.searchParams.set("stock_id", `in.(${chunk.join(",")})`);
-      url.searchParams.set("order", rich ? "event_date.desc,event_score.desc.nullslast" : "importance.asc,event_date.desc");
-      url.searchParams.set("limit", rich ? String(EVENTS_QUERY_LIMIT) : "300");
-      return url;
-    };
-    const chunks = [];
-    for (let i = 0; i < sids.length; i += EVENTS_QUERY_CHUNK) chunks.push(sids.slice(i, i + EVENTS_QUERY_CHUNK));
-    // 帶 token：stock_events 改成登入後才能讀（migrate_private_reports.sql），
-    // 沒帶的話 RLS 會回空陣列而不是錯誤，畫面只會安靜地沒有事件
-    const fetchAll = rich => Promise.all(chunks.map(chunk => fetch(buildUrl(rich, chunk), { headers: sbHeaders(state.accessToken) })));
-    let responses = await fetchAll(true);
-    if (responses.some(r => !r.ok && [400, 404].includes(r.status))) {
-      console.info("[Events] Event Engine migration 尚未套用，使用舊欄位載入");
-      responses = await fetchAll(false);
-    }
-    const failed = responses.find(r => !r.ok);
-    if (failed) {
-      console.warn("[Events] 載入失敗：", failed.status);
+    if (stockEventsLegacyMode) {
+      // 舊 schema：沒有 created_at，退回「今天以後」那份查詢（與 2026-09 以前相同）
+      const rows = await _eventsFetch(EVENT_LEGACY_COLS, wanted, { event_date: `gte.${_localDateIso()}` });
+      _eventsApplyRows(rows);
       return;
     }
-    const rows = (await Promise.all(responses.map(r => r.json()))).flat();
-    stockEvents = {};
-    for (const row of rows) {
-      if (!stockEvents[row.stock_id]) stockEvents[row.stock_id] = [];
-      stockEvents[row.stock_id].push(row);
+    if (!_eventsCacheLoaded) await _eventsRestoreCache();
+
+    const covered = new Set(_eventsCoveredSids);
+    const known = wanted.filter(sid => covered.has(sid));
+    const missing = wanted.filter(sid => !covered.has(sid));
+    // 窗口每天往前滑一天，所以昨天的快取起點一定不同；起點不同就當成沒有快取
+    const canIncrement = !!_eventsCursor && _eventsWindowStart === start && known.length > 0;
+
+    const rows = [];
+    if (canIncrement) {
+      // 已經有的那幾檔：只拿比游標新的列（往回重疊 10 分鐘）
+      const since = new Date(Math.max(new Date(_eventsCursor).getTime() - EVENTS_OVERLAP_MS, 0)).toISOString();
+      rows.push(...(await _eventsFetch(EVENT_LIST_COLS, known,
+        { event_date: [`gte.${start}`, `lte.${end}`], created_at: `gte.${since}` })));
+      // 新加入自選的股票：那幾檔要整個窗口抓一次（一檔實測 2.7 KB）
+      if (missing.length) rows.push(...(await _eventsFetch(EVENT_LIST_COLS, missing, win)));
+    } else {
+      rows.push(...(await _eventsFetch(EVENT_LIST_COLS, wanted, win)));
     }
+
+    // 併進本機那份：同一列以倉庫為準、掉出窗口或已不在自選清單的丟掉
+    const byKey = new Map();
+    const keep = new Set(wanted);
+    for (const row of _eventsFlatRows()) {
+      if (keep.has(String(row.stock_id || "").trim())) byKey.set(eventRowKey(row), row);
+    }
+    for (const row of rows) {
+      const key = eventRowKey(row);
+      // 倉庫回來的是列表層，別把之前補好的詳情層蓋掉
+      byKey.set(key, { ...(byKey.get(key) || {}), ...row });
+    }
+    let merged = [...byKey.values()].filter(r => {
+      const d = String(r.event_date || "");
+      return d >= start && d <= end;
+    });
+
+    // 別台裝置清空／後端保留期清理（120 天）：總數對不上就整段重抓。
+    // 只在增量那條路需要對，整抓本來就是最新的。
+    if (canIncrement) {
+      const total = await _eventsCount(wanted, start, end);
+      if (total !== null && total !== merged.length) {
+        merged = await _eventsFetch(EVENT_LIST_COLS, wanted, win);
+        _eventsDetailLoaded.clear();   // 重抓的是列表層，詳情要重新補
+      }
+    }
+
+    _eventsApplyRows(merged);
+    _eventsSaveCache(wanted, start);
   } catch (e) {
+    if ([400, 404].includes(e.status) && !stockEventsLegacyMode) {
+      console.info("[Events] Event Engine migration 尚未套用，改用舊欄位載入");
+      stockEventsLegacyMode = true;
+      return loadStockEvents(sids);
+    }
     console.warn("[Events] 無法載入股票事件:", e.message);
+  }
+}
+
+// 窗口內伺服器上總共幾列（Prefer: count=exact 只回標頭與一列）。分批時各批相加
+async function _eventsCount(sids, start, end) {
+  try {
+    const totals = await Promise.all(_eventsChunks(sids).map(async chunk => {
+      const url = _eventsUrl("id", chunk, { event_date: [`gte.${start}`, `lte.${end}`] });
+      url.searchParams.set("select", "id");
+      url.searchParams.set("limit", "1");
+      const headers = sbHeaders(state.accessToken);
+      headers["Prefer"] = "count=exact";
+      const r = await fetch(url, { headers });
+      if (!r.ok) return null;
+      const m = /\/(\d+)\s*$/.exec(r.headers.get("content-range") || "");
+      return m ? Number(m[1]) : null;
+    }));
+    return totals.some(t => t === null) ? null : totals.reduce((a, b) => a + b, 0);
+  } catch { return null; }
+}
+
+// 詳情層：把內文、AI 說明、分數拆解、指標補進已經在記憶體裡的那幾列。
+// scope 是股號（開個股事件面板）或 "__today__"（首頁的今日彙整）。補過就不再抓。
+async function ensureEventDetails(scope) {
+  if (stockEventsLegacyMode) return;          // 舊 schema 本來就整份帶內文
+  if (!state.accessToken || !scope) return;
+  if (_eventsDetailLoaded.has(scope)) return;
+  const today = _localDateIso();
+  const isToday = scope === "__today__";
+  const sids = isToday
+    ? [...new Set(_eventsFlatRows().filter(ev => isTodayEvent(ev)).map(ev => String(ev.stock_id || "").trim()))]
+    : [String(scope).trim()];
+  if (!sids.length || sids.some(s => !s)) { _eventsDetailLoaded.add(scope); return; }
+  const { start, end } = _eventsWindow();
+  const extra = isToday
+    ? { event_date: `eq.${today}` }
+    : { event_date: [`gte.${start}`, `lte.${end}`] };
+  try {
+    const rows = await _eventsFetch(EVENT_DETAIL_COLS, sids, extra);
+    const byKey = new Map(rows.map(r => [eventRowKey(r), r]));
+    for (const ev of _eventsFlatRows()) {
+      const patch = byKey.get(eventRowKey(ev));
+      if (patch) Object.assign(ev, patch);
+    }
+    _eventsDetailLoaded.add(scope);
+    _eventsSaveCache(_eventsCoveredSids, _eventsWindowStart);
+  } catch (e) {
+    console.warn("[Events] 詳情載入失敗:", e.message);
   }
 }
 
@@ -1647,7 +1836,20 @@ function renderEventCard(sid, ev, options = {}) {
     </article>`;
 }
 
+// 事件彈窗現在顯示的是哪一檔（或今日彙整）：詳情層補到之後只重畫還開著的那一個
+let _eventsPanelScope = null;
+
 function openEventsPanel(sid) {
+  _eventsPanelScope = sid;
+  _renderEventsPanel(sid);
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal")).show();
+  // 內文、AI 說明、分數拆解、指標只有這裡畫得到：開了才抓（一檔約 3.9 KB），補到重畫
+  ensureEventDetails(sid)
+    .then(() => { if (_eventsPanelScope === sid) _renderEventsPanel(sid); })
+    .catch(() => {});
+}
+
+function _renderEventsPanel(sid) {
   const events = stockEvents[sid] || [];
   const sidName = universe[sid]?.n || sid;
   document.getElementById("events-modal-title").textContent = `📋 ${sidName} 事件彙整（近 90 天）`;
@@ -1676,8 +1878,6 @@ function openEventsPanel(sid) {
   } else {
     body.innerHTML = eventLegendHtml("", true) + renderEventSections(sid, events);
   }
-  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal"));
-  modal.show();
 }
 
 // 彈窗頂部的圖例。以前整個事件彈窗沒有任何一句話說明分組或顏色是什麼意思，
@@ -1711,6 +1911,16 @@ function _compareEventsByDate(a, b) {
 }
 
 function openTodayEventsPanel() {
+  _eventsPanelScope = "__today__";
+  _renderTodayEventsPanel();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal")).show();
+  // 今天那幾筆的內文與拆解（實測 7 筆＝0.6 KB）：開了才抓
+  ensureEventDetails("__today__")
+    .then(() => { if (_eventsPanelScope === "__today__") _renderTodayEventsPanel(); })
+    .catch(() => {});
+}
+
+function _renderTodayEventsPanel() {
   const rows = _collectTodayEvents();
   const titleEl = document.getElementById("events-modal-title");
   const bodyEl = document.getElementById("events-modal-body");
@@ -1738,8 +1948,6 @@ function openTodayEventsPanel() {
       + `標「<b>新</b>」的是今天第一次抓到的那 ${newCount} 件。`, false)
       + _todayEventGroupsHtml(rows);
   }
-
-  bootstrap.Modal.getOrCreateInstance(document.getElementById("stockEventsModal")).show();
 }
 
 // 今日彙整的一階：按股票分組，每組一個標題與「查看此股 →」
@@ -3200,6 +3408,7 @@ async function loadUniverse() {
       loaded = Object.keys(universe).length > 0;
       // universe.json 一載入就立刻重繪，讓名稱從全名變成簡稱（不需等 API）
       if (loaded && state.accessToken && document.getElementById("main-section")?.style.display !== "none") {
+        watchlistRows = applyPreferredNames(watchlistRows);
         renderCurrentTab();
       }
     }
@@ -3212,8 +3421,13 @@ async function loadUniverse() {
     loaded = true;
   }
   universeLoading = false;
+  // 對照表載完只需要「名稱從全名變簡稱」，那是純顯示的事：重套名稱＋重畫就好。
+  // 2026-09-27 以前這裡呼叫 loadWatchlist()，等於每次開 App 都把整串八個請求
+  // （自選股／方案／額度／庫存／規則數／事件／報價／訊號歷史）重打一遍，光個股事件
+  // 就 36 KB，而資料一筆都沒變——換名稱從來不需要重抓資料。
   if (loaded && state.accessToken && document.getElementById("main-section").style.display !== "none") {
-    await loadWatchlist();
+    watchlistRows = applyPreferredNames(watchlistRows);
+    renderCurrentTab();
   }
 }
 
@@ -3336,7 +3550,11 @@ async function showMain() {
 function logout() {
   trackActivity("logout");
   flushActivity();   // keepalive：重載後仍會送達
-  if (state.userId) _reportCacheDelete(_inboxCacheKey()).catch(() => {});   // 通知匣是個人資料，登出就刪
+  if (state.userId) {
+    // 通知匣與事件快取都是個人資料（誰在看哪幾檔），登出就刪
+    _reportCacheDelete(_inboxCacheKey()).catch(() => {});
+    _reportCacheDelete(_eventsCacheKey()).catch(() => {});
+  }
   localStorage.removeItem("sma_session");
   location.reload();
 }
@@ -7445,6 +7663,20 @@ async function loadBrokerHoldings() {
   } catch (e) { /* 404（表不存在）或暫時失敗：保留上次資料 */ }
 }
 
+// 自選列的顯示名稱：倉庫存的是加入當時的名稱（常常是全名），畫面要的是對照表裡的簡稱。
+// 全市場對照表是非同步載入的，所以它載完之後要對已經在記憶體裡的列重套一次
+// （loadUniverse 結尾）——那是唯一需要等對照表的東西，不必因此重抓任何資料。
+// 對照表裡有的一律以它為準，所以重複套用不會有副作用。
+function applyPreferredNames(rows) {
+  return (rows || []).map(row => {
+    const sid = String(row.stock_id || "").trim();
+    return {
+      ...row,
+      stock_name: getPreferredStockName(sid, row.stock_name) || String(row.stock_name || "").trim(),
+    };
+  });
+}
+
 // ── 自選股清單 ──────────────────────────────────────────────────
 async function loadWatchlist() {
   // 券商庫存跟著自選股一起抓：所有會刷新自選的路徑（登入、手動更新）
@@ -7457,13 +7689,7 @@ async function loadWatchlist() {
     loadRuleNudgeState(),   // 首頁的進階訊號推薦卡要知道目前幾條
   ]);
   planState.activeWatchIds = activeIds;
-  watchlistRows = (rows || []).map(row => {
-    const sid = String(row.stock_id || "").trim();
-    return {
-      ...row,
-      stock_name: getPreferredStockName(sid, row.stock_name) || String(row.stock_name || "").trim(),
-    };
-  });
+  watchlistRows = applyPreferredNames(rows);
   prefetchWatchlistDetail();   // A3：自選股所在的報告分片先抓（沒有分層就是 no-op）
   renderCurrentTab();
   scheduleQuoteHydration();

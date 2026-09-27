@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="209">
+  <meta name="app-version" content="212">
 <title>台股每日分析報告</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -351,11 +351,113 @@ function renderDateTabs() {
   });
 }
 
+// ── 分層載入與本機快取（2026-09-27）────────────────────────────────────
+// 這一頁以前每開一次就抓整份報告：壓縮後 1.25 MB，是冷啟動整個 App 的三倍，
+// 而且沒有任何快取，往前翻一天再一次。App 主畫面早就改成「核心檔＋分片＋存本機、
+// 一天只換一次」，這裡照搬同一套：
+//   • 核心檔（全市場數值欄，壓縮後約 68 KB）就足夠畫列表與策略表
+//   • 說明四條、分數趨勢、明細指標、K 線在分片裡，點進某一檔才抓
+//   • IndexedDB 刻意用與 App 相同的庫、store 與鍵：同一個網域共用一份，
+//     當天誰先開誰下載，另一邊免費
+// report-data 尚未部署新版（part=core 回 null）時仍退回整份，行為與以前相同。
+const REPORT_DB_NAME  = "cg-report";
+const REPORT_DB_STORE = "reports";
+const REPORT_READY_MINUTES = 7 * 60;   // 每日報告 06:15 產出；07:00 之後才視「昨天那份」為過期
+let _reportDbPromise = null;
+let _reportData = null;
+let _reportLayersVersion = 0;
+const _loadedShards = new Set();
+
+function _reportDb() {
+  if (_reportDbPromise) return _reportDbPromise;
+  _reportDbPromise = new Promise(resolve => {
+    if (!("indexedDB" in window)) return resolve(null);
+    try {
+      const req = indexedDB.open(REPORT_DB_NAME, 1);
+      req.onupgradeneeded = () => { try { req.result.createObjectStore(REPORT_DB_STORE); } catch { /* 已存在 */ } };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    } catch { resolve(null); }
+  });
+  return _reportDbPromise;
+}
+
+async function _cacheGet(key) {
+  const db = await _reportDb();
+  if (!db) return null;
+  return new Promise(resolve => {
+    try {
+      const rq = db.transaction(REPORT_DB_STORE, "readonly").objectStore(REPORT_DB_STORE).get(key);
+      rq.onsuccess = () => resolve(rq.result || null);
+      rq.onerror = () => resolve(null);
+    } catch { resolve(null); }
+  });
+}
+
+async function _cachePut(key, value) {
+  const db = await _reportDb();
+  if (!db) return false;
+  return new Promise(resolve => {
+    try {
+      const tx = db.transaction(REPORT_DB_STORE, "readwrite");
+      tx.objectStore(REPORT_DB_STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    } catch { resolve(false); }
+  });
+}
+
+// 與 App 的 _reportDateIsStale 同一套判斷：今天的報告還沒產出前，昨天那份不算舊
+function _taipeiDateKey(d = new Date()) {
+  const p = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(d);
+  const get = t => p.find(x => x.type === t)?.value || "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function _taipeiMinutesNow() {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Taipei", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date());
+  const get = t => Number(p.find(x => x.type === t)?.value || 0);
+  return (get("hour") % 24) * 60 + get("minute");
+}
+
+function _coreIsStale(date) {
+  if (!date) return true;
+  const today = _taipeiDateKey();
+  if (date === today) return false;
+  return _taipeiMinutesNow() >= REPORT_READY_MINUTES;   // 今天那份應該已經產出了
+}
+
 async function loadReport(idx) {
   const dt = availableDates[idx];
   document.getElementById("report-body").innerHTML =
     '<div class="text-center py-5 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>載入中…</div>';
   try {
+    // 本機那份還能用就直接畫：latest 看日期新不新，指定日期的那份產出後就不會再變
+    const cacheKey = dt === "latest" ? "core" : `core:${dt}`;
+    const cached = await _cacheGet(cacheKey);
+    if (cached && cached.json && (dt === "latest" ? !_coreIsStale(cached.date) : cached.date === dt)) {
+      renderReport(cached.json);
+      return;
+    }
+
+    // 核心檔優先（report-data 新版 part=core）
+    const coreRes = await reportApi({ name: dt, part: "core" });
+    if (coreRes && coreRes.url) {
+      const r = await fetch(coreRes.url, { cache: "no-store" });
+      if (r.ok) {
+        const json = await r.json();
+        if (json && json.layers && json.investment_scores) {
+          renderReport(json);
+          _cachePut(cacheKey, { date: json.date, json }).catch(() => {});
+          return;
+        }
+      }
+    }
+
     // 私有 Storage 的簽名網址優先；function 未部署（回 null）才退回 Pages 上的舊路徑
     const res = await reportApi({ name: dt });
     let url;
@@ -370,20 +472,56 @@ async function loadReport(idx) {
     if (!r.ok) throw new Error("HTTP " + r.status);
     const data = await r.json();
     renderReport(data);
+    if (data && data.date) _cachePut(cacheKey, { date: data.date, json: data }).catch(() => {});
   } catch(e) {
     document.getElementById("report-body").innerHTML =
       `<div class="alert alert-warning">無法載入報告：${e.message}</div>`;
   }
 }
 
+// 一個分片（股號前兩碼）的說明、分數趨勢、明細指標與 K 線併進目前這份報告。
+// 記錄形狀與 App 的 ensureShard 完全一致（{date, ver, json}），兩邊共用同一份快取。
+async function ensureShard(xx) {
+  const data = _reportData;
+  if (!data || !data.layers || !/^\d{2}$/.test(xx)) return;
+  const known = Array.isArray(data.layers.shards) ? data.layers.shards : null;
+  if (known && !known.includes(xx)) return;          // 這一組沒有任何評分股
+  if (_loadedShards.has(xx)) return;
+  let shard = await _cacheGet("shard:" + xx);
+  const ver = data.layers.version || 1;
+  if (!shard || !shard.json || shard.date !== data.date || shard.ver !== ver) {
+    const res = await reportApi({ name: availableDates[currentIdx] || "latest", part: "shard", shard: xx });
+    if (!res || !res.url) return;
+    const r = await fetch(res.url, { cache: "no-store" });
+    if (!r.ok) return;
+    const json = await r.json();
+    shard = { date: json.date, ver, json };
+    _cachePut("shard:" + xx, shard).catch(() => {});
+  }
+  if (_reportData !== data) return;                   // 等待期間換了一天
+  for (const [sid, entry] of Object.entries(shard.json.stocks || {})) {
+    if (entry.scores && data.investment_scores?.[sid]) Object.assign(data.investment_scores[sid], entry.scores);
+    if (entry.stock) data.stock_data[sid] = entry.stock;
+  }
+  _loadedShards.add(xx);
+}
+
 // ── Render ──────────────────────────────────────────────────────
 function renderReport(data) {
   const date = data.date || "—";
   const strategies = data.strategies || [];
-  _stockData = data.stock_data || {};  // 儲存詳細資料供 Modal 使用
-  _investmentScores = data.investment_scores || {};
+  if (!data.stock_data) data.stock_data = {};   // 核心檔沒有 K 線，分片併進來時才長出來
+  if (!data.investment_scores) data.investment_scores = {};
+  // 換一份報告（換日期）：分片要重新併，不然會拿舊那天的說明配新那天的分數
+  if (_reportData !== data) _loadedShards.clear();
+  _reportData = data;
+  _reportLayersVersion = (data.layers || {}).version || 0;
+  _stockData = data.stock_data;             // 同一個物件（不是複本）：分片併進去這裡就看得到
+  _investmentScores = data.investment_scores;
+  // 股票數以評分筆數為準：universe 從 2026-09-26 起不在核心檔裡（前端另有 universe.json）
+  const counted = Object.keys(data.universe || {}).length || Object.keys(_investmentScores).length;
   document.getElementById("report-info").textContent =
-    `分析日期：${date}　共分析 ${Object.keys(data.universe || {}).length} 支股票`;
+    `分析日期：${date}　共分析 ${counted} 支股票`;
 
   const body = document.getElementById("report-body");
   body.innerHTML = "";
@@ -480,7 +618,9 @@ function buildInvestmentTable(ids) {
     const direction = score.score_direction || "new";
     const arrow = direction === "improving" ? "↑" : direction === "deteriorating" ? "↓" : "→";
     const directionClass = direction === "improving" ? "direction-up" : direction === "deteriorating" ? "direction-down" : "direction-flat";
-    const reason = (score.explanations || [])[0]?.text || "資料累積中";
+    // 核心檔只帶第一條說明（reason1）；整包 explanations 在分片，點進去才抓。
+    // reporter 還沒重啟、核心檔還沒有這個欄位時就退回「資料累積中」，不會壞掉。
+    const reason = score.reason1 || (score.explanations || [])[0]?.text || "資料累積中";
     const fmt = value => value == null || isNaN(value) ? "—" : (+value).toFixed(1);
     const change = score.score_change == null || isNaN(score.score_change) ? "—" : `${score.score_change>=0?'+':''}${(+score.score_change).toFixed(1)}`;
     return `<tr>
@@ -510,7 +650,10 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
 }
 
-function openInvestmentDetail(sid) {
+async function openInvestmentDetail(sid) {
+  // 明細要的東西（說明四條、分數趨勢、十幾個歷史指標、K 線）全在分片裡：先補那一片。
+  // 核心檔沒有 layers 就是「還在用整份」，ensureShard 會直接返回，行為與以前相同。
+  await ensureShard(String(sid || "").slice(0, 2)).catch(() => {});
   const score = _investmentScores[sid];
   if (!score) { openDetail(sid); return; }  // 無評分資料（如新股）時直接開 K 線詳情
   document.getElementById("sm-code").textContent = sid;
@@ -609,6 +752,9 @@ function buildTable(rows) {
 // ── 全域 stock data（從 JSON 載入後儲存） ───────────────────────
 let _stockData = {};
 
+// 不做成 async：沒有 K 線資料時這裡會 window.open 跳 Yahoo，中間插一個 await 就會
+// 失去使用者手勢、被彈出視窗封鎖器默默吃掉。兩個呼叫它的地方都在 openInvestmentDetail
+// 的 await ensureShard 之後，分片已經併好了，所以這裡不需要自己補。
 function openDetail(sid) {
   const d = _stockData[sid];
   if (!d) {
