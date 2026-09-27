@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="203">
+  <meta name="app-version" content="204">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=203" rel="stylesheet">
+  <link href="watchlist.css?v=204" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -6038,7 +6038,7 @@ function renderScores() {
     listEl.innerHTML = `<div class="view-empty">報告資料載入中…</div>`;
     return;
   }
-  dateEl.textContent = data.date ? `${data.date} 盤前資料` : "";
+  dateEl.textContent = data.date ? `${data.date} 盤前資料${scoreHeaderNote(data)}` : "";
   const scores = data.investment_scores || {};
   syncScreenTools(scores);
 
@@ -6096,9 +6096,20 @@ const SCORE_COMPONENT_GROUPS = [
   ]],
 ];
 
+// 統計頁表頭那一句：行情到哪一天；休市（含週末）沒有新交易日時說明分數為什麼整排是 0。
+// 放在表頭而不是每一列的變化欄——那一欄只放得下「▲1.2」，塞字會把整列撐開。
+function scoreHeaderNote(data) {
+  const m = data && data.market;
+  if (!m || !m.last_bar_date) return "";
+  let note = ` · 行情至 ${String(m.last_bar_date).slice(5)}`;
+  if (m.same_as_prev) note += "，之後休市，分數與上一份相同";
+  return note;
+}
+
 function fmtScoreDelta(value, digits = 1) {
   const v = Number(value);
   if (value == null || !Number.isFinite(v)) return `<span class="chg-flat">—</span>`;
+  if (Math.abs(v) < 0.005) return `<span class="chg-flat">—</span>`;   // 真的沒變：只畫一個槓，不寫 0.0
   const cls = v > 0.05 ? "chg-up" : v < -0.05 ? "chg-down" : "chg-flat";
   const arrow = v > 0.05 ? "▲" : v < -0.05 ? "▼" : "—";
   return `<span class="${cls}">${arrow}${Math.abs(v).toFixed(digits)}</span>`;
