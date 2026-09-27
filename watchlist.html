@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="213">
+  <meta name="app-version" content="214">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=213" rel="stylesheet">
+  <link href="watchlist.css?v=214" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7729,8 +7729,26 @@ async function saveRule() {
 // 基準是最近一根完整日 K，不是盤中即時價（見 previewCondition）。
 // 所以這裡一定要把基準日寫出來：使用者盤中看到的是昨天的收盤，
 // 不講清楚就會以為畫面上這個數字是「現在」。
+// 命中預覽用的是進榜股的日線（v4 起在 K 線分片裡）：自選股裡有進榜股才去抓，
+// 通常一片都不用抓。每次開編輯器最多試一輪，抓完重畫一次讓數字從 0 變成真的；
+// 抓失敗也不再重試——不然重畫又觸發一次抓取，就變成無窮迴圈。
+let _previewKLineTried = false;
+async function _ensureKLineForPreview() {
+  const have = _klineStocks();
+  if (!have || _previewKLineTried) return false;
+  const want = [...new Set((watchlistRows || [])
+    .map(w => String(w.stock_id || "").trim())
+    .filter(sid => have.has(sid) && !sharedReportData?.stock_data?.[sid])
+    .map(sid => sid.slice(0, 2)))];
+  _previewKLineTried = true;
+  if (!want.length) return false;
+  await Promise.all(want.map(xx => ensureKLine(xx).catch(() => {})));
+  return true;
+}
+
 function renderRulePreview() {
   renderRuleSummary();
+  _ensureKLineForPreview().then(loaded => { if (loaded) renderRulePreview(); }).catch(() => {});
   const el = document.getElementById("rule-preview");
   const previewable = editorConditions.filter(c => (RULE_CATALOG_BY_TYPE[c.type] || {}).preview);
   const deferred = editorConditions.filter(c => !(RULE_CATALOG_BY_TYPE[c.type] || {}).preview);
@@ -8575,11 +8593,53 @@ const _shardLoading = {};
 function _applySharedReport(json) {
   if (!json.stock_data) json.stock_data = {};          // 核心檔沒有 K 線；既有讀法 data.stock_data?.[sid] 照常
   _detailLoadedShards.clear();
+  _klineLoaded.clear();
+  _previewKLineTried = false;
   sharedReportData = json;
   prefetchWatchlistDetail();
 }
 
-// A3：一個分片（股號前兩碼）的說明欄位與 K 線併進 sharedReportData；IndexedDB 有今天的就不下載
+// 哪幾檔有 K 線（報告的 stock_data 只涵蓋進榜的那 38 檔）。舊版報告沒有這個清單，
+// 那時 K 線是跟說明一起放在分片裡的，所以回 null 代表「不必另外抓」。
+function _klineStocks() {
+  const list = sharedReportData?.layers?.kline_stocks;
+  return Array.isArray(list) ? new Set(list) : null;
+}
+
+// K 線分片（2026-09-27）：只有真的要畫圖表時才抓。
+// 拆出來的理由：那 38 檔的日線／週線／月線／籌碼佔了分片體積的 45%（654 KB），
+// 而多數使用者的自選股根本不在那 38 檔裡——他們的 K 線是向 FinMind 現抓的，
+// 預取下來的那 45% 一個位元組都用不到。
+const _klineLoaded = new Set();
+const _klineLoading = {};
+async function ensureKLine(xx) {
+  const data = sharedReportData;
+  const have = _klineStocks();
+  if (!data || !data.layers || !have) return;        // 舊版報告：K 線已經在分片裡
+  const known = Array.isArray(data.layers.klines) ? data.layers.klines : null;
+  if (known && !known.includes(xx)) return;          // 這一組沒有任何進榜股
+  if (_klineLoaded.has(xx)) return;
+  if (!_klineLoading[xx]) {
+    _klineLoading[xx] = (async () => {
+      let cached = await _reportCacheGet("kline:" + xx);
+      const ver = data.layers.version || 1;
+      if (!cached || !cached.json || cached.date !== data.date || cached.ver !== ver) {
+        const url = await reportSignedUrl("latest", "kline", xx);
+        if (!url) return;
+        const json = await _fetchReportJson(url);
+        cached = { date: json.date, ver, json };
+        _reportCachePut("kline:" + xx, cached).catch(() => {});
+      }
+      if (sharedReportData !== data) return;
+      for (const [s, stock] of Object.entries(cached.json.stocks || {})) data.stock_data[s] = stock;
+      _klineLoaded.add(xx);
+    })().catch(() => {}).finally(() => { delete _klineLoading[xx]; });
+  }
+  await _klineLoading[xx];
+}
+
+// A3：一個分片（股號前兩碼）的說明欄位併進 sharedReportData；IndexedDB 有今天的就不下載。
+// v4 起 K 線不在這裡（見 ensureKLine），但舊版報告的分片仍帶 entry.stock，照樣認。
 async function ensureShard(xx) {
   const data = sharedReportData;
   if (!data || !data.layers) return;
@@ -8648,7 +8708,8 @@ async function loadKLineIntoCard(sid) {
 
   try {
     const data = await loadSharedReportData();
-    await ensureStockDetail(sidKey);                     // A3：K 線在分片裡
+    await ensureStockDetail(sidKey);                     // A3：說明欄位在分片裡
+    await ensureKLine(sidKey.slice(0, 2));               // K 線另外一片，點開圖表才抓（v4）
     const stock = data.stock_data?.[sidKey];
     currentKLineSid = sidKey;
 

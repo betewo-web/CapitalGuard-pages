@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="213">
+  <meta name="app-version" content="214">
 <title>台股每日分析報告</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -501,9 +501,41 @@ async function ensureShard(xx) {
   if (_reportData !== data) return;                   // 等待期間換了一天
   for (const [sid, entry] of Object.entries(shard.json.stocks || {})) {
     if (entry.scores && data.investment_scores?.[sid]) Object.assign(data.investment_scores[sid], entry.scores);
-    if (entry.stock) data.stock_data[sid] = entry.stock;
+    if (entry.stock) data.stock_data[sid] = entry.stock;   // v3 以前 K 線跟說明在同一片
   }
   _loadedShards.add(xx);
+}
+
+// 哪幾檔有 K 線（只有進榜的那 38 檔）。舊版報告沒有這個清單，代表 K 線還在說明分片裡。
+function _klineStocks() {
+  const list = _reportData?.layers?.kline_stocks;
+  return Array.isArray(list) ? new Set(list) : null;
+}
+
+// K 線分片（v4，2026-09-27）：那 38 檔的日線／週線／月線／籌碼佔了分片體積的 45%，
+// 但只有真的點開圖表的人需要。與 App 共用同一份 IndexedDB 快取（鍵 kline:XX）。
+const _loadedKLines = new Set();
+async function ensureKLine(xx) {
+  const data = _reportData;
+  const have = _klineStocks();
+  if (!data || !data.layers || !have || !/^\d{2}$/.test(xx)) return;
+  const known = Array.isArray(data.layers.klines) ? data.layers.klines : null;
+  if (known && !known.includes(xx)) return;
+  if (_loadedKLines.has(xx)) return;
+  let cached = await _cacheGet("kline:" + xx);
+  const ver = data.layers.version || 1;
+  if (!cached || !cached.json || cached.date !== data.date || cached.ver !== ver) {
+    const res = await reportApi({ name: availableDates[currentIdx] || "latest", part: "kline", shard: xx });
+    if (!res || !res.url) return;
+    const r = await fetch(res.url, { cache: "no-store" });
+    if (!r.ok) return;
+    const json = await r.json();
+    cached = { date: json.date, ver, json };
+    _cachePut("kline:" + xx, cached).catch(() => {});
+  }
+  if (_reportData !== data) return;
+  for (const [sid, stock] of Object.entries(cached.json.stocks || {})) data.stock_data[sid] = stock;
+  _loadedKLines.add(xx);
 }
 
 // ── Render ──────────────────────────────────────────────────────
@@ -513,7 +545,7 @@ function renderReport(data) {
   if (!data.stock_data) data.stock_data = {};   // 核心檔沒有 K 線，分片併進來時才長出來
   if (!data.investment_scores) data.investment_scores = {};
   // 換一份報告（換日期）：分片要重新併，不然會拿舊那天的說明配新那天的分數
-  if (_reportData !== data) _loadedShards.clear();
+  if (_reportData !== data) { _loadedShards.clear(); _loadedKLines.clear(); }
   _reportData = data;
   _reportLayersVersion = (data.layers || {}).version || 0;
   _stockData = data.stock_data;             // 同一個物件（不是複本）：分片併進去這裡就看得到
@@ -700,7 +732,9 @@ async function openInvestmentDetail(sid) {
     return `<div class="category-row"><span>${label}</span><div></div><strong style="white-space:nowrap">${display}</strong></div>`;
   }).join("");
   const chartButton = document.getElementById("sm-chart-btn");
-  chartButton.style.display = _stockData[sid] ? "inline-block" : "none";
+  const klineStocks = _klineStocks();
+  const hasKLine = !!_stockData[sid] || (klineStocks ? klineStocks.has(sid) : false);
+  chartButton.style.display = hasKLine ? "inline-block" : "none";
   chartButton.onclick = () => {
     bootstrap.Modal.getInstance(document.getElementById("scoreModal"))?.hide();
     openDetail(sid);
@@ -752,10 +786,20 @@ function buildTable(rows) {
 // ── 全域 stock data（從 JSON 載入後儲存） ───────────────────────
 let _stockData = {};
 
-// 不做成 async：沒有 K 線資料時這裡會 window.open 跳 Yahoo，中間插一個 await 就會
-// 失去使用者手勢、被彈出視窗封鎖器默默吃掉。兩個呼叫它的地方都在 openInvestmentDetail
-// 的 await ensureShard 之後，分片已經併好了，所以這裡不需要自己補。
+// 這一層刻意保持同步：沒有 K 線資料時它會 window.open 跳 Yahoo，中間插一個 await
+// 就會失去使用者手勢、被彈出視窗封鎖器默默吃掉。有沒有 K 線可以先從清單判斷
+// （_klineStocks），所以「要跳 Yahoo」這條路上一個 await 都沒有。
 function openDetail(sid) {
+  const klineStocks = _klineStocks();
+  if (!_stockData[sid] && klineStocks && klineStocks.has(sid)) {
+    // 有 K 線但還沒抓那一片：抓完再進去（這條路不會 window.open）
+    ensureKLine(String(sid).slice(0, 2)).then(() => _openDetailNow(sid)).catch(() => _openDetailNow(sid));
+    return;
+  }
+  _openDetailNow(sid);
+}
+
+function _openDetailNow(sid) {
   const d = _stockData[sid];
   if (!d) {
     // 無詳細資料：開 Yahoo Finance
