@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="218">
+  <meta name="app-version" content="219">
 <title>台股每日分析報告</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -259,9 +259,26 @@ function handleUpdateRequired(data) {
   return true;
 }
 
+// 免費版（plans.stats_enabled=false）：report-data 回 403 plan_required。整頁換成說明卡，
+// 之後這一頁不再打任何資料請求（日期清單、分片都不要）；報告本來就不是免費方案的功能。
+let _planLocked = false;
+function renderPlanLocked() {
+  _planLocked = true;
+  const tabs = document.getElementById("date-tabs");
+  if (tabs) tabs.innerHTML = "";
+  document.getElementById("report-body").innerHTML = `
+    <div class="text-center" style="max-width:440px;margin:2.5rem auto;padding:1.6rem 1.2rem;border:1px solid #444;border-radius:14px">
+      <div style="font-size:2.2rem;margin-bottom:.6rem">🔒</div>
+      <h5>每日評分報告是付費方案功能</h5>
+      <p class="text-muted" style="font-size:.9rem">目前的方案不含每日評分與統計整理。升級，或先免費體驗，就能看全市場評分、13 個子項與變化原因。</p>
+      <a href="watchlist.html?plan=pro" class="btn btn-primary w-100">查看方案與免費體驗</a>
+    </div>`;
+}
+
 // 向 report-data 要資料。回 null = function 尚未部署（過渡期走舊的相對路徑）；
-// 401 = token 失效，清掉並回登入頁。
+// 401 = token 失效，清掉並回登入頁；403 plan_required = 免費版，整頁鎖住。
 async function reportApi(body) {
+  if (_planLocked) return { code: "plan_required" };
   let r;
   try {
     r = await fetch(`${SUPABASE_FUNCTIONS_URL}/report-data`, {
@@ -271,6 +288,7 @@ async function reportApi(body) {
   const data = await r.json().catch(() => ({}));
   if (handleUpdateRequired(data)) return null;
   if (r.status === 401) { logout(); return null; }
+  if (r.status === 403 && data.code === "plan_required") { _planLocked = true; return data; }
   if (r.ok) return data;
   return data.code ? data : null;
 }
@@ -319,10 +337,10 @@ async function initReport() {
 
   // 日期導覽：問 report-data 有哪些日期版；function 未部署時退回探測 Pages 上的檔案
   let dated = [];
-  const listed = await reportApi({ action: "dates" });
+  const listed = _planLocked ? null : await reportApi({ action: "dates" });
   if (listed && Array.isArray(listed.dates)) {
     dated = listed.dates.slice(0, 3);
-  } else {
+  } else if (!_planLocked) {
     for (let i = 0; i < 3; i++) {
       const dt = localDateStr(i);
       try {
@@ -433,6 +451,7 @@ function _coreIsStale(date) {
 
 async function loadReport(idx) {
   const dt = availableDates[idx];
+  if (_planLocked) { renderPlanLocked(); return; }
   document.getElementById("report-body").innerHTML =
     '<div class="text-center py-5 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>載入中…</div>';
   try {
@@ -446,6 +465,7 @@ async function loadReport(idx) {
 
     // 核心檔優先（report-data 新版 part=core）
     const coreRes = await reportApi({ name: dt, part: "core" });
+    if (coreRes && coreRes.code === "plan_required") { renderPlanLocked(); return; }
     if (coreRes && coreRes.url) {
       const r = await fetch(coreRes.url, { cache: "no-store" });
       if (r.ok) {
@@ -463,6 +483,9 @@ async function loadReport(idx) {
     let url;
     if (res && res.url) {
       url = res.url;   // 簽名網址自帶簽章參數，不能再加 ?t=
+    } else if (res && res.code === "plan_required") {
+      renderPlanLocked();
+      return;
     } else if (res && res.code === "report_missing") {
       throw new Error("這一天的報告尚未產生");
     } else {

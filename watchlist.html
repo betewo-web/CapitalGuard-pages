@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="218">
+  <meta name="app-version" content="219">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=218" rel="stylesheet">
+  <link href="watchlist.css?v=219" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1207,6 +1207,9 @@ let universeLoading = false;
 let twseUniverseCache = null;
 let tpexUniverseCache = null;
 let sharedReportData = null;
+// 免費版（plans.stats_enabled=false）：report-data 回過 403 plan_required 之後這一輪就不再打，
+// 也不走公開路徑的退路（那些檔案早就不在了，只會多幾個 404）。方案變了（loadPlanState）會清掉。
+let _reportPlanLocked = false;
 let sharedDataLoadingPromise = null;
 let klineChart = null;
 let currentKLineSid = null;
@@ -2107,6 +2110,7 @@ async function loadPlanState() {
     planState = { ...planState, ready: true, plan: mine.plan,
                   subscription: mine.subscription, usage: mine.usage, plans: plans || [],
                   trial: trial && typeof trial === "object" ? trial : null };
+    if (planAllows("stats_enabled")) _reportPlanLocked = false;   // 升級／體驗後報告要能再抓
   } catch (e) {
     // migrate_billing.sql 尚未執行（404）或暫時失敗：方案功能整個關閉，
     // 不做任何前端限制——寧可多放行，也不要因為表沒建就讓人加不了股票
@@ -8792,6 +8796,8 @@ async function confirmRemoveStock() {
 // 向 report-data 換 10 分鐘簽名網址；未登入、function 未部署、檔案不存在都回 null
 async function reportSignedUrl(name = "latest", part = null, shard = null) {
   if (!state.accessToken) return null;
+  // 免費版不打 report-data（伺服器也會 403）：報告是付費方案功能，一次呼叫都省下來
+  if (_reportPlanLocked || (planState.ready && !planAllows("stats_enabled"))) return null;
   try {
     const req = { name };
     if (part) req.part = part;            // "core"／"shard"（A2／A3）；不帶＝整份
@@ -8801,6 +8807,7 @@ async function reportSignedUrl(name = "latest", part = null, shard = null) {
     });
     const data = await r.json().catch(() => ({}));
     if (handleUpdateRequired(data)) return null;
+    if (r.status === 403 && data.code === "plan_required") { _reportPlanLocked = true; return null; }
     return r.ok && data.url ? data.url : null;
   } catch (e) {
     return null;
@@ -8879,6 +8886,10 @@ async function _fetchReportJson(url) {
 }
 
 async function loadSharedReportData(force = false) {
+  // 免費版（plans.stats_enabled=false）：每日評分報告整個鎖住——不讀本機快取、不向 report-data 要網址。
+  // 首頁與盤後頁不靠它（收盤價另有 FinMind 與 intraday_state 兩個來源、關卡在 intraday_state），
+  // 需要它的統計頁與 K 線本來就鎖著。
+  if (_reportPlanLocked || (planState.ready && !planAllows("stats_enabled"))) { sharedReportData = null; return null; }
   if (!force && sharedReportData) return sharedReportData;
   if (!force && sharedDataLoadingPromise) return sharedDataLoadingPromise;
 
@@ -8893,6 +8904,7 @@ async function loadSharedReportData(force = false) {
     const attempts = [];
     // A2：先試核心檔（report-data 新版 part=core）；沒有就退回整份
     const coreUrl = await reportSignedUrl("latest", "core");
+    if (_reportPlanLocked) { sharedReportData = null; return null; }   // 方案狀態還沒載到就先問了：伺服器說不行
     if (coreUrl) {
       try {
         const json = await _fetchReportJson(coreUrl);
