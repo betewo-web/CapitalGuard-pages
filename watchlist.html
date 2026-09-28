@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="222">
+  <meta name="app-version" content="223">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=222" rel="stylesheet">
+  <link href="watchlist.css?v=223" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1304,7 +1304,7 @@ const AI_FEATURES_LIVE = false;
 const SITE_BASE_URL = "https://betewo-web.github.io/betewo-site/";
 const PLAN_COMING_SOON_NOTE = "AI 資料白話仍在開發，目前不包含在任何方案裡；完成後會先公告。";
 // 付款紀錄裡非公開方案的名字
-const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達", premium: "廣域追蹤雷達", basic: "專業版（舊制）" };
+const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達（專業版）", premium: "廣域追蹤雷達（旗艦版）", basic: "專業版（舊制）" };
 let planState = {
   ready: false,          // false = plans 表不存在或載入失敗 → 前端不做任何限制
   plan: null,            // plans 列（code / name / watch_limit / rule_limit / ai_*）
@@ -1342,6 +1342,16 @@ const ICON_EDIT   = _svg('<path d="M11.1 2.6 13.4 4.9 5.6 12.7 2.6 13.4l0.7-3z"/
 const ICON_WALLET = _svg('<rect x="2.4" y="4.2" width="11.2" height="8.2" rx="1.8"/><path d="M2.4 6.6h11.2"/><circle cx="11" cy="9.4" r="0.9"/>');
 const ICON_FILTER = _svg('<path d="M2.6 3.4h10.8l-4.2 4.9v4.4l-2.4-1.4V8.3z"/>');
 const ICON_TRASH  = _svg('<path d="M2.8 4.4h10.4"/><path d="M6.4 4.4V2.9h3.2v1.5"/><path d="M4.1 4.4l0.6 8.5h6.6l0.6-8.5"/><path d="M6.7 6.8v3.8M9.3 6.8v3.8"/>', 14);
+// 方案面板（方案與用量）用的：混和、雷達、K 線、體驗、警告、鎖、AI。
+// 之前這七項是 emoji（🔀⚡📈🎁⚠️🔒🤖），與全站線條圖示不同調、也吃不到文字顏色。
+const ICON_MIX    = _svg('<path d="M2.4 4.4h2.3c2.6 0 3.5 7.2 6.1 7.2h2.2"/><path d="M2.4 11.6h2.3c2.6 0 3.5-7.2 6.1-7.2h2.2"/><path d="M11.2 2.8 13.4 4.4l-2.2 1.6"/><path d="M11.2 10 13.4 11.6l-2.2 1.6"/>');
+const ICON_RADAR  = _svg('<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2.4"/><path d="M8 8 12.1 4.9"/>');
+// K 線：兩根實體＋上下影線。影線不穿過實體（穿過去在 14px 會糊成一團），實體也不能再窄
+const ICON_CANDLE = _svg('<path d="M5.2 2.4v1.8M5.2 10.4v3.2"/><rect x="3.2" y="4.2" width="4" height="6.2" rx="0.8"/><path d="M10.8 3.4v2.4M10.8 11.4v2.2"/><rect x="8.8" y="5.8" width="4" height="5.6" rx="0.8"/>');
+const ICON_GIFT   = _svg('<rect x="2.6" y="6.4" width="10.8" height="7" rx="1.5"/><path d="M2.2 9h11.6M8 6.4v7"/><path d="M8 6.4C7.2 4.2 6.5 3 5.4 3a1.7 1.7 0 0 0 0 3.4h5.2a1.7 1.7 0 0 0 0-3.4c-1.1 0-1.8 1.2-2.6 3.4Z"/>');
+const ICON_WARN   = _svg('<path d="M8 2.6 14 13.2H2z"/><path d="M8 6.6v3.1"/><path d="M8 11.4v.1"/>');
+const ICON_LOCK   = _svg('<rect x="3.4" y="7" width="9.2" height="6.4" rx="1.6"/><path d="M5.8 7V5.5a2.2 2.2 0 0 1 4.4 0V7"/>');
+const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2.9-1z"/><path d="M11.5 8.6l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z"/>');
 
 // 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
 {
@@ -2270,7 +2280,7 @@ function limitPromptHtml(kind, err) {
   const btn = next
     ? `<button type="button" class="btn btn-xs btn-success btn-accent-sm ms-1" onclick="openPlanModal('${jsAttr(kind)}', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} →</button>`
     : `<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${jsAttr(kind)}')">查看方案 →</button>`;
-  return `<span class="text-warning">⚠️ ${escapeHtml(text)}</span> ${btn}`;
+  return `<span class="text-warning plan-hint">${ICON_WARN}${escapeHtml(text)}</span> ${btn}`;
 }
 
 // 功能型（不是數量型）的提示：統計頁、盤中雷達持續更新、混和訊號。
@@ -2292,7 +2302,7 @@ function featurePromptHtml(feature) {
   const btn = next
     ? `<button type="button" class="btn btn-xs btn-success btn-accent-sm ms-1" onclick="openPlanModal('${jsAttr(feature)}', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} →</button>`
     : `<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${jsAttr(feature)}')">查看方案 →</button>`;
-  return `<span class="text-warning">🔒 ${escapeHtml(text)}</span> ${btn}`;
+  return `<span class="text-warning plan-hint">${ICON_LOCK}${escapeHtml(text)}</span> ${btn}`;
 }
 
 // 「我的自選股 N/上限」那顆計數籤 2026-09-22 隨標題一起拿掉（Howard）；
@@ -2443,16 +2453,18 @@ function planFeatureRows(p) {
   const yes = '<span class="plan-yes">✓</span>';
   const no = '<span class="plan-no">—</span>';
   const unit = { stocks: "檔", rules: "條" };   // 數字後面的量詞（不硬寫上限本身）
+  // 每一列的圖示都是線條 SVG（2026-09-22 起全站不用 emoji 當圖示）
+  const feat = (icon, text) => `<span class="plan-feat">${icon}${text}</span>`;
   return [
-    `<li><span>⭐ 自選股</span><b>${p.watch_limit} ${unit.stocks}</b></li>`,
-    `<li><span>📐 進階訊號</span><b>${p.rule_limit} ${unit.rules}</b></li>`,
-    `<li><span>🔀 混和訊號（一條放多個條件）</span>${p.mixed_signals ? yes : no}</li>`,
-    `<li><span>📊 統計整理分頁（每日評分）</span>${p.stats_enabled ? yes : no}</li>`,
-    `<li><span>⚡ 盤中雷達持續更新</span>${p.live_radar ? yes
-      : no + '<span class="plan-sub">開啟 App／收到通知時更新</span>'}</li>`,
-    `<li><span>📡 盤中／盤後通知</span>${p.push_daily_limit ? `<b>每天 ${p.push_daily_limit} 則</b>` : yes}</li>`,
-    `<li><span>📈 K 線圖</span>${p.kline_enabled === false ? no : yes}</li>`,
-    `<li><span>💼 持股損益</span>${yes}</li>`,
+    `<li>${feat(ICON_STAR, "自選股")}<b>${p.watch_limit} ${unit.stocks}</b></li>`,
+    `<li>${feat(ICON_RULES, "進階訊號")}<b>${p.rule_limit} ${unit.rules}</b></li>`,
+    `<li>${feat(ICON_MIX, "混和訊號（一條放多個條件）")}${p.mixed_signals ? yes : no}</li>`,
+    `<li>${feat(ICON_CHART, "統計整理分頁（每日評分）")}${p.stats_enabled ? yes : no}</li>`,
+    `<li>${feat(ICON_RADAR, "盤中雷達持續更新" + (p.live_radar ? ""
+      : '<span class="plan-sub">開啟 App／收到通知時更新</span>'))}${p.live_radar ? yes : no}</li>`,
+    `<li>${feat(ICON_BELL, "盤中／盤後通知")}${p.push_daily_limit ? `<b>每天 ${p.push_daily_limit} 則</b>` : yes}</li>`,
+    `<li>${feat(ICON_CANDLE, "K 線圖")}${p.kline_enabled === false ? no : yes}</li>`,
+    `<li>${feat(ICON_WALLET, "持股損益")}${yes}</li>`,
   ].join("");
 }
 
@@ -2475,11 +2487,11 @@ function subscriptionStatusHtml() {
   const cancelBtn = `<button type="button" class="btn btn-xs btn-outline-danger ms-2" onclick="cancelSubscription()">取消續訂</button>`;
   // 扣款失敗要先判：plan_of() 這時已推導成 free，放在 free 之後永遠走不到
   if (s && s.status === "past_due") {
-    return `<div class="plan-status plan-status-warn">⚠️ 上期扣款失敗，已暫回免費版。綠界下期仍會嘗試扣款；不想再扣請取消續訂，想繼續用請更新付款方式後重新訂閱。${agreementOpen ? cancelBtn : ""}</div>`;
+    return `<div class="plan-status plan-status-warn">${ICON_WARN}上期扣款失敗，已暫回免費版。綠界下期仍會嘗試扣款；不想再扣請取消續訂，想繼續用請更新付款方式後重新訂閱。${agreementOpen ? cancelBtn : ""}</div>`;
   }
   if (!s || p.code === "free") {
     if (agreementOpen) {
-      return `<div class="plan-status plan-status-warn">⚠️ 先前的定期定額約定仍在綠界（服務已於 ${fmtPlanDate(s.current_period_end)} 到期）。不想再扣款請取消續訂。${cancelBtn}</div>`;
+      return `<div class="plan-status plan-status-warn">${ICON_WARN}先前的定期定額約定仍在綠界（服務已於 ${fmtPlanDate(s.current_period_end)} 到期）。不想再扣款請取消續訂。${cancelBtn}</div>`;
     }
     return `<div class="plan-status">免費使用中，隨時可升級。</div>`;
   }
@@ -2490,7 +2502,7 @@ function subscriptionStatusHtml() {
   if (s.provider === "trial") {
     const left = tradingDaysLeftFrom(s.current_period_end);
     const freeName = planNameOf("free") || "免費版";
-    return `<div class="plan-status">🎁 免費體驗中，到 <b>${trialLastDayLabel(s.current_period_end)}</b> 收盤為止${left !== null ? `（含今天還剩 ${left} 個交易日）` : ""}，之後自動回到${escapeHtml(freeName)}，不會扣款。想繼續用不中斷，隨時可以升級。</div>`;
+    return `<div class="plan-status">${ICON_GIFT}免費體驗中，到 <b>${trialLastDayLabel(s.current_period_end)}</b> 收盤為止${left !== null ? `（含今天還剩 ${left} 個交易日）` : ""}，之後自動回到${escapeHtml(freeName)}，不會扣款。想繼續用不中斷，隨時可以升級。</div>`;
   }
   if (s.provider === "manual") {
     return `<div class="plan-status">由管理員指派${s.note ? `（${escapeHtml(s.note)}）` : ""}，有效至 <b>${until}</b>。</div>`;
@@ -2515,15 +2527,15 @@ function renderPlanModal(focus) {
     ? planState.plans.find(x => x.code === _planFocusCode) || null : null;
   const pitch = target && target.price_twd > 0 ? planPitch(target) : "";
   let focusHint = {
-    ai:          "🤖 AI 資料白話仍在開發，目前不包含在任何方案裡。",
-    ai_limit:    "🤖 今日 AI 使用次數已達上限，明天會重置。",
-    watchlist:   "⭐ 自選股已達目前方案上限，升級即可加入更多。",
-    alert_rules: "📐 進階訊號已達目前方案上限，升級即可新增更多。",
-    stats_enabled: "📊 統計整理分頁（全市場評分的排序與篩選）需要付費方案。",
-    live_radar:    "⚡ 盤中雷達持續更新需要付費方案；目前是開啟 App 或收到通知時更新一次。",
-    mixed_signals: "🔀 一條進階訊號放多個條件（混和訊號）是廣域追蹤雷達功能。",
-    kline_enabled: "📈 K 線圖需要付費方案。",
-    trial:         "🎁 免費體驗不需要付款資料，到期自動回到免費方案。",
+    ai:          `${ICON_AI}AI 資料白話仍在開發，目前不包含在任何方案裡。`,
+    ai_limit:    `${ICON_AI}今日 AI 使用次數已達上限，明天會重置。`,
+    watchlist:   `${ICON_STAR}自選股已達目前方案上限，升級即可加入更多。`,
+    alert_rules: `${ICON_RULES}進階訊號已達目前方案上限，升級即可新增更多。`,
+    stats_enabled: `${ICON_CHART}統計整理分頁（全市場評分的排序與篩選）需要付費方案。`,
+    live_radar:    `${ICON_RADAR}盤中雷達持續更新需要付費方案；目前是開啟 App 或收到通知時更新一次。`,
+    mixed_signals: `${ICON_MIX}一條進階訊號放多個條件（混和訊號）是廣域追蹤雷達（旗艦版）功能。`,
+    kline_enabled: `${ICON_CANDLE}K 線圖需要付費方案。`,
+    trial:         `${ICON_GIFT}免費體驗不需要付款資料，到期自動回到免費方案。`,
     deeplink:    pitch || "從官網過來的：先看看目前方案的用量，需要再升級。",
     paid:        "付款結果以綠界回呼為準。若方案尚未更新，請稍後再開啟這個面板確認。",
     pay_failed:  "綠界回報這次付款未成功，沒有扣款也沒有開通。可以重新選擇方案再試一次。",
@@ -2541,9 +2553,9 @@ function renderPlanModal(focus) {
         <span class="plan-current-price">${planPriceLabel(p)}</span>
       </div>
       <div class="plan-meters">
-        ${meterHtml("⭐ 自選股", u.watchlist || 0, p.watch_limit)}
-        ${meterHtml("📐 進階訊號", u.rules || 0, p.rule_limit)}
-        ${p.ai_enabled ? meterHtml("🤖 今日 AI 次數", u.ai_today || 0, p.ai_daily_limit) : ""}
+        ${meterHtml(`${ICON_STAR}自選股`, u.watchlist || 0, p.watch_limit)}
+        ${meterHtml(`${ICON_RULES}進階訊號`, u.rules || 0, p.rule_limit)}
+        ${p.ai_enabled ? meterHtml(`${ICON_AI}今日 AI 次數`, u.ai_today || 0, p.ai_daily_limit) : ""}
       </div>
       ${subscriptionStatusHtml()}
     </div>`;
@@ -2639,7 +2651,8 @@ function setPlanMsgHtml(html, isErr) {
 function showBillingResult({ tone = "info", title, lines = [], onClose } = {}) {
   const box = document.getElementById("billing-result");
   if (!box) return;
-  const icon = { ok: "✓", wait: "⏳", warn: "!", info: "i" }[tone] || "i";
+  // 四個都是文字記號（不是 emoji）：emoji 吃不到圓圈的顏色，各平台長相也不同
+  const icon = { ok: "✓", wait: "…", warn: "!", info: "i" }[tone] || "i";
   document.getElementById("billing-result-icon").textContent = icon;
   document.getElementById("billing-result-title").textContent = title || "";
   document.getElementById("billing-result-lines").innerHTML = lines.map(l =>
@@ -6728,10 +6741,10 @@ function scoreRowHtml(sid, s, opts = {}) {
 function scoresLockedHtml() {
   const next = nextPlanFor("stats_enabled");
   const btn = next
-    ? `<button class="btn btn-sm btn-success btn-accent-sm" onclick="openPlanModal('stats_enabled', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)}（NT$${next.price_twd}／月）→</button>`
+    ? `<button class="btn btn-sm btn-success btn-accent-sm" onclick="openPlanModal('stats_enabled', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} NT$${next.price_twd}／月 →</button>`
     : `<button class="btn btn-sm btn-outline-info" onclick="openPlanModal('stats_enabled')">查看方案 →</button>`;
   return `<div class="plan-locked">
-    <div class="plan-locked-title">🔒 統計整理是付費方案功能</div>
+    <div class="plan-locked-title">${ICON_LOCK}統計整理是付費方案功能</div>
     <ul class="plan-locked-list">
       <li>全市場每日評分，依你選的欄位排序與過濾</li>
       <li>基本面與技術量能的分數變化、變化原因</li>
@@ -6748,14 +6761,14 @@ function klineLockedHtml() {
   const next = nextPlanFor("kline_enabled");
   trackActivity("feature_hint", { feature: "kline_enabled", next: next ? next.code : "" });
   const btn = next
-    ? `<button class="btn btn-sm btn-success btn-accent-sm" onclick="openPlanModal('kline_enabled', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)}（NT$${next.price_twd}／月）→</button>`
+    ? `<button class="btn btn-sm btn-success btn-accent-sm" onclick="openPlanModal('kline_enabled', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} NT$${next.price_twd}／月 →</button>`
     : `<button class="btn btn-sm btn-outline-info" onclick="openPlanModal('kline_enabled')">查看方案 →</button>`;
   const t = trialOfferAvailable() ? planState.trial : null;
   const trial = t
     ? `<div class="plan-locked-trial">或先<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('trial')">免費體驗 ${t.trading_days} 個交易日 →</button></div>`
     : "";
   return `<div class="plan-locked">
-    <div class="plan-locked-title">🔒 K 線圖是付費方案功能</div>
+    <div class="plan-locked-title">${ICON_LOCK}K 線圖是付費方案功能</div>
     <ul class="plan-locked-list">
       <li>日 K／週 K／月 K，圖上標出支撐與壓力關卡</li>
       <li>今天發過的訊號直接標在對應的 K 棒上</li>
@@ -6820,7 +6833,7 @@ function trialOfferHtml(highlight) {
   const rows = plan ? `<ul class="plan-feats">${planFeatureRows(plan)}</ul>` : "";
   const until = t.offer_until ? `<span class="plan-trial-until">優惠至 ${escapeHtml(t.offer_until)}</span>` : "";
   return `<div class="plan-trial${highlight ? " is-focus" : ""}" id="plan-trial">
-    <div class="plan-trial-title">🎁 免費體驗 ${t.trading_days} 個交易日的${escapeHtml(name)}</div>
+    <div class="plan-trial-title">${ICON_GIFT}免費體驗 ${t.trading_days} 個交易日的${escapeHtml(name)}</div>
     <div class="plan-trial-text">體驗期間就是完整的${escapeHtml(name)}，到 ${trialLastDayLabel(t.would_end)} 收盤為止，之後自動回到${escapeHtml(planState.plan.name)}。不需要付款資料、不會扣款，每個帳號一次。</div>
     ${rows}
     <button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center" id="plan-trial-go" onclick="claimTrial()">開始免費體驗</button>

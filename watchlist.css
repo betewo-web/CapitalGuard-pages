@@ -3613,10 +3613,29 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 }
 .plan-feats li:last-child { border-bottom: none; }
 .plan-feats b { color: var(--text-0); white-space: nowrap; }
+/* 方案面板的圖示：線條 SVG，跟著文字走（inline + vertical-align，不改成 flex，
+   免得「混和訊號（一條放多個條件）」這種會折行的標題排版跟著變）。
+   功能列的圖示壓灰：顏色只做強調，方案差異看右邊的 ✓ 與數字。 */
+.plan-feat .ic,
+.plan-meter-head .ic,
+.plan-focus-hint .ic,
+.plan-status .ic,
+.plan-trial-title .ic,
+.plan-locked-title .ic,
+.plan-hint .ic {
+	width: 14px;
+	height: 14px;
+	margin-right: 0.3rem;
+	vertical-align: -2px;
+	flex: 0 0 auto;
+}
+.plan-feat .ic { color: var(--text-muted); }
+.plan-trial-title .ic { width: 15px; height: 15px; }
 .plan-yes { color: var(--accent); font-weight: 700; }
 .plan-no { color: var(--text-muted); }
-/* 跟在 ✓ 後面同一行（另起一行會讓打勾懸在半空） */
-.plan-sub { display: inline; margin-left: 0.3rem; font-size: 0.66rem; color: var(--text-muted); white-space: nowrap; }
+/* 那句補充（目前只有盤中雷達那一列有）跟著左邊的標題走，不是獨立的一格：
+   放在「—」後面當第三格時，三欄並排的寬度會被它吃光，左邊的標題被壓成一個字一行。 */
+.plan-sub { margin-left: 0.3rem; font-size: 0.66rem; color: var(--text-muted); }
 .plan-soon {
 	font-size: 0.62rem;
 	padding: 0.08rem 0.35rem;
