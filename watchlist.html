@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="221">
+  <meta name="app-version" content="222">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=221" rel="stylesheet">
+  <link href="watchlist.css?v=222" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -3058,7 +3058,12 @@ async function lineLogin(body) {
   });
   const data = await r.json().catch(() => ({}));
   if (handleUpdateRequired(data)) throw new Error(data.error || "App 需要更新");
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  if (!r.ok) {
+    // 狀態碼要留著：登入碼「用過／過期」(404/410) 要給復原指引，限流(429) 不行
+    const err = new Error(data.error || `HTTP ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
   return data;
 }
 
@@ -3078,6 +3083,26 @@ function clearShortCodeInput() {
   inp.focus();
 }
 
+// 開啟 LINE 聊天室並把「登入」帶進輸入框，使用者只要按送出（line-webhook 的 LOGIN_KEYWORDS）
+const LINE_RELOGIN_URL = "https://line.me/R/oaMessage/@408csebn/?" + encodeURIComponent("登入");
+
+// 「登入碼不正確或已使用」原本直接把後端字串丟成紅字，使用者只會以為自己打錯、
+// 再打一次再失敗。真正的原因多半是：在電腦上登入時就把碼用掉了——而且點 LINE 訊息裡的
+// 連結也算，因為 deliver() 會把同一人成對的 invite_link 與 short_code 一起刪掉
+// （不留活碼在聊天室，SECURITY.md）。所以這裡要講原因，並給一鍵重拿的路徑。
+function showShortCodeRecovery(expired) {
+  const cause = expired
+    ? "這組登入碼已經過期了。"
+    : "這組登入碼不能用了。一組碼只能用一次，<b>只要在電腦上登入過就會用掉</b>——點 LINE 訊息裡的連結也算。（如果是手打的，也可能是輸入錯誤。）";
+  const msg = document.getElementById("short-code-msg");
+  msg.innerHTML =
+    '<div class="alert py-2 small text-start ob-inapp mb-0">'
+    + `<div class="mb-2">${cause}</div>`
+    + '<div class="mb-2">要在這支手機登入，回 LINE 傳「登入」就會收到一組新的碼。</div>'
+    + `<a class="btn btn-success btn-line btn-sm w-100" href="${LINE_RELOGIN_URL}" target="_blank" rel="noopener">開啟 LINE 取得新登入碼</a>`
+    + '</div>';
+}
+
 async function doShortCodeLogin() {
   const inp = document.getElementById("inp-short-code");
   const btn = document.getElementById("short-code-btn");
@@ -3095,7 +3120,9 @@ async function doShortCodeLogin() {
     await finishLogin(data);
     startOnboarding("short_code");
   } catch (e) {
-    msg.innerHTML = `<span class="text-danger">❌ ${e.message}</span>`;
+    // 404＝已用過或不正確、410＝過期：兩者都要重拿新碼，給指引而不是紅字
+    if (e.status === 404 || e.status === 410) showShortCodeRecovery(e.status === 410);
+    else msg.innerHTML = `<span class="text-danger">❌ ${e.message}</span>`;
     clearShortCodeInput();
   } finally {
     btn.disabled = false;
@@ -3664,6 +3691,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   loadUniverse();
 
+  let codeFailure = 0;
   if (urlCode) {
     history.replaceState(null, "", location.pathname);
     try {
@@ -3673,12 +3701,15 @@ window.addEventListener("DOMContentLoaded", async () => {
         if (data.kind === "invite_link") startOnboarding("invite");
         return;
       }
-    } catch { /* 登入碼無效或已用過，fall through */ }
+    } catch (e) { codeFailure = e.status || 0; /* 登入碼無效或已用過，fall through */ }
     // 碼過期或已用過，但這台裝置本來就登入著：回到原本的畫面，不要把人踢去登入頁
     if (await resumeSavedSession()) return;
   }
   showLoginInAppHint();
   noteSessionLost();   // 被清掉的登入要講一聲，不然只是莫名其妙回到登入畫面
+  // 在電腦上用掉碼之後又在手機點同一條邀請連結：以前是靜默掉回登入畫面，
+  // 什麼都沒講。這裡要蓋掉 noteSessionLost 的泛用訊息，講明白是碼被用掉了。
+  if (codeFailure === 404 || codeFailure === 410) showShortCodeRecovery(codeFailure === 410);
 
   // 舊版 ?token= 仍相容（推播裡的個人化連結）；RLS 只回本人那一列
   const urlToken = qs.get("token");
