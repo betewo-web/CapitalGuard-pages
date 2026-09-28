@@ -3450,9 +3450,8 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	white-space: nowrap;
 }
 /* 方案色階：免費灰、專業藍、旗艦橘——跟全站的優先度色階同一組，
-   不用紅綠（那組專屬漲跌幅）。basic 是舊制 NT$49，與專業版同色。 */
-.plan-badge.plan-pro,
-.plan-badge.plan-basic   { color: var(--sig-blue); background: rgba(86, 168, 255, 0.16); }
+   不用紅綠（那組專屬漲跌幅）。 */
+.plan-badge.plan-pro     { color: var(--sig-blue); background: rgba(86, 168, 255, 0.16); }
 .plan-badge.plan-premium { color: var(--sig-orange); background: rgba(255, 159, 67, 0.18); }
 .plan-badge-lg { font-size: 0.78rem; padding: 0.18rem 0.6rem; }
 

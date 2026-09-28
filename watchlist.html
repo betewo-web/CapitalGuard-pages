@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="226">
+  <meta name="app-version" content="227">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=226" rel="stylesheet">
+  <link href="watchlist.css?v=227" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1288,7 +1288,7 @@ let brokerHoldingsAt = null; // 最近一次同步時間（synced_at 最大值�
 // （test_billing.py 釘住），方案面板的卡片順序與顏色靠它。
 // basic 是 2026-09 舊制 NT$49（is_public=false，不在方案頁列出），
 // 但仍有生效中的訂閱，徽章與付款紀錄要認得它。
-const PLAN_CODES = ["free", "pro", "premium", "basic"];
+const PLAN_CODES = ["free", "pro", "premium"];
 // 線上付款的前端總開關（緊急關閉用）。真正的鎖在 create-order：Secrets 還是綠界
 // 測試金鑰（ECPAY_STAGE=true）時只有管理員能建單，一般用戶會收到 503
 // checkout_unavailable 並看到「來信申請」的說明。換正式金鑰後不需要改前端。
@@ -1304,7 +1304,7 @@ const AI_FEATURES_LIVE = false;
 const SITE_BASE_URL = "https://betewo-web.github.io/betewo-site/";
 const PLAN_COMING_SOON_NOTE = "AI 資料白話仍在開發，目前不包含在任何方案裡；完成後會先公告。";
 // 付款紀錄裡非公開方案的名字
-const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達（專業版）", premium: "廣域追蹤雷達（旗艦版）", basic: "廣域追蹤雷達（舊制）" };
+const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達（專業版）", premium: "廣域追蹤雷達（旗艦版）" };
 let planState = {
   ready: false,          // false = plans 表不存在或載入失敗 → 前端不做任何限制
   plan: null,            // plans 列（code / name / watch_limit / rule_limit / ai_*）
