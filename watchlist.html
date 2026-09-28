@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="220">
+  <meta name="app-version" content="221">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=220" rel="stylesheet">
+  <link href="watchlist.css?v=221" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2888,6 +2888,17 @@ function normalizeStockInput(v) {
   return String(v || "").trim().replace(/\s+/g, " ");
 }
 
+// 股票代號格式：四碼個股，或 00 開頭的 ETF（0050、00878、006208、00631L）。
+// 與 data/stock_ids.py、watchlist 表的 CHECK、interpret-event 同一條規則；ETF 的字母一律大寫。
+function isStockId(sid) {
+  return /^(\d{4}|00\d{3,4}[A-Z]?)$/.test(String(sid || "").trim());
+}
+
+// ETF 沒有財報也沒有產業別：評分頁對它顯示「不適用」，其餘（報價、K 線、關卡、訊號）照常
+function isEtfId(sid) {
+  return /^00/.test(String(sid || "").trim());
+}
+
 function normalizeNameForSearch(name) {
   return String(name || "")
     .toLowerCase()
@@ -2909,9 +2920,9 @@ function findStockMatches(rawInput, limit = 15) {
   const q = normalizeNameForSearch(rawInput);
   if (!q) return [];
 
-  const exactCode = q.match(/^\d{4}$/);
-  if (exactCode && universe[exactCode[0]]) {
-    return [[exactCode[0], universe[exactCode[0]]]];
+  const code = q.toUpperCase();
+  if (isStockId(code) && universe[code]) {
+    return [[code, universe[code]]];
   }
 
   const ranked = [];
@@ -2919,7 +2930,7 @@ function findStockMatches(rawInput, limit = 15) {
     const nameRaw = String(v?.n || "");
     const name = normalizeNameForSearch(nameRaw);
     let score = -1;
-    if (sid.startsWith(q)) score = 0;
+    if (sid.toLowerCase().startsWith(q)) score = 0;
     else if (name === q) score = 1;
     else if (name.startsWith(q)) score = 2;
     else if (name.includes(q)) score = 3;
@@ -2942,7 +2953,7 @@ function resolveStock(rawInput) {
     return { sid: selectedSid, name: universe[selectedSid]?.n || "" };
   }
 
-  const codeMatch = raw.match(/^(\d{4})\b/);
+  const codeMatch = raw.toUpperCase().match(/^(\d{4}|00\d{3,4}[A-Z]?)\b/);
   if (codeMatch) {
     const sid = codeMatch[1];
     return { sid, name: universe[sid]?.n || "" };
@@ -4223,7 +4234,7 @@ async function loadSignalHistory(force = false) {
   const sids = [...new Set((watchlistRows || [])
     .map(r => String(r.stock_id || "").trim())
     .concat(showcase ? [String(showcase.stock_id)] : [])   // 範例股一起抓，時間軸開著時重抓才不會洗掉它
-    .filter(sid => /^\d{4}$/.test(sid)))];
+    .filter(sid => isStockId(sid)))];
   if (!sids.length) { signalHistoryMap = {}; return signalHistoryMap; }
   // 開 App 時會被呼叫兩次（自選股載入後一次、首頁初始化一次）：共用同一個請求
   if (_sigHistLoadingPromise) return _sigHistLoadingPromise;
@@ -4254,7 +4265,7 @@ async function _loadSignalHistoryNow(sids) {
     for (const row of rows || []) {
       const sid = String(row.stock_id || "").trim();
       const date = String(row.trade_date || "").slice(0, 10);
-      if (!/^\d{4}$/.test(sid) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      if (!isStockId(sid) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
       const prevRaw = row.prev_close == null ? null : Number(row.prev_close);
       const closeRaw = row.close == null ? null : Number(row.close);
       (map[sid] ||= {})[date] = {
@@ -4288,7 +4299,7 @@ async function loadShowcase() {
     const r = await fetch("showcase.json", { cache: "no-cache" });
     if (!r.ok) return null;
     const s = await r.json();
-    if (!s || !/^\d{4}$/.test(String(s.stock_id || "")) || !s.top || !s.top.date) return null;
+    if (!s || !isStockId(s.stock_id) || !s.top || !s.top.date) return null;
     showcase = s;
   } catch { showcase = null; }
   return showcase;
@@ -4384,7 +4395,7 @@ async function loadIntradayQuotes(force = false, opts) {
   if (!state.accessToken) return intradayQuoteMap;
   const sids = [...new Set((watchlistRows || [])
     .map(r => String(r.stock_id || "").trim())
-    .filter(sid => /^\d{4}$/.test(sid)))];
+    .filter(sid => isStockId(sid)))];
   if (!sids.length) {
     intradayQuoteMap = {};
     return intradayQuoteMap;
@@ -4457,7 +4468,7 @@ async function loadIntradayQuotes(force = false, opts) {
       const map = {};
       for (const row of rows || []) {
         const sid = String(row.stock_id || "").trim();
-        if (!/^\d{4}$/.test(sid)) continue;
+        if (!isStockId(sid)) continue;
         const price = Number(row.price);
         if (!Number.isFinite(price)) continue;
         const prevCloseRaw = row.prev_close == null ? null : Number(row.prev_close);
@@ -4553,7 +4564,7 @@ async function fetchFinMindQuote(sid) {
 async function loadFinMindQuotesForMissing(force = false) {
   const sids = [...new Set((watchlistRows || [])
     .map(r => String(r.stock_id || "").trim())
-    .filter(sid => /^\d{4}$/.test(sid)))];
+    .filter(sid => isStockId(sid)))];
   if (!sids.length) {
     finmindQuoteMap = {};
     return finmindQuoteMap;
@@ -5630,7 +5641,7 @@ function _closeQuoteMissing() {
   const today = taipeiDateKey(new Date());
   return (watchlistRows || []).some(r => {
     const sid = String(r.stock_id || "").trim();
-    return /^\d{4}$/.test(sid) && getCloseQuote(sid)?.tradeDate !== today;
+    return isStockId(sid) && getCloseQuote(sid)?.tradeDate !== today;
   });
 }
 
@@ -5645,7 +5656,7 @@ async function loadFinMindCloseQuotes() {
   const today = taipeiDateKey(new Date());
   const sids = [...new Set((watchlistRows || [])
     .map(r => String(r.stock_id || "").trim())
-    .filter(sid => /^\d{4}$/.test(sid) && getCloseQuote(sid)?.tradeDate !== today))];
+    .filter(sid => isStockId(sid) && getCloseQuote(sid)?.tradeDate !== today))];
   if (!sids.length) return finmindQuoteMap;
   _lastCloseFinMindAt = Date.now();
   const map = { ...finmindQuoteMap };
@@ -5664,7 +5675,7 @@ function hasAnyQuote(sid) {
 async function hydrateMissingQuotes() {
   const sids = [...new Set((watchlistRows || [])
     .map(r => String(r.stock_id || "").trim())
-    .filter(sid => /^\d{4}$/.test(sid)))];
+    .filter(sid => isStockId(sid)))];
   const hasMissing = sids.some(sid => !hasAnyQuote(sid));
   if (!hasMissing) return;
   await loadFinMindQuotesForMissing(true);
@@ -6854,7 +6865,8 @@ function renderScores() {
     } else {
       const scoreOf = sid => (scores[sid] && Number.isFinite(Number(scores[sid].total_score))) ? Number(scores[sid].total_score) : -1;
       mine.sort((a, b) => scoreOf(b) - scoreOf(a));
-      html = mine.map(sid => scoreRowHtml(sid, scores[sid], { note: scores[sid] ? "" : "本期未評分" })).join("");
+      html = mine.map(sid => scoreRowHtml(sid, scores[sid],
+        { note: scores[sid] ? "" : (isEtfId(sid) ? "ETF 不適用基本面評分" : "本期未評分") })).join("");
     }
   } else if (scoresFilter === "screen") {
     const rows = runScreen(scores);
@@ -6957,7 +6969,12 @@ async function openScoreDetail(sid) {
   };
 
   if (!s) {
-    body.innerHTML = `<div class="view-empty">本期未評分（不在流動性篩選後的股票池，或資料不足）</div>`;
+    // ETF 沒有財報也沒有產業別，每日評分只針對個股；價格、K 線、關卡與量能訊號照常提供
+    body.innerHTML = isEtfId(sidKey)
+      ? `<div class="view-empty">ETF 不適用基本面評分<br>
+           <span style="font-size:.85rem">ETF 沒有財報與產業分類，每日評分只針對個股；
+           價格、K 線、支撐壓力關卡與量能訊號照常提供。</span></div>`
+      : `<div class="view-empty">本期未評分（不在流動性篩選後的股票池，或資料不足）</div>`;
     bootstrap.Modal.getOrCreateInstance(document.getElementById("scoreDetailModal")).show();
     return;
   }
@@ -10301,18 +10318,18 @@ async function addStock() {
 
   if (!matched) {
     if (!Object.keys(universe).length) {
-      msgEl.innerHTML = '<span class="text-warning">⚠️ 股票清單載入中，名稱搜尋暫不可用；請先輸入 4 碼代號（如 2330）</span>';
+      msgEl.innerHTML = '<span class="text-warning">⚠️ 股票清單載入中，名稱搜尋暫不可用；請先輸入代號（如 2330、0050）</span>';
       return;
     }
-    msgEl.innerHTML = '<span class="text-warning">⚠️ 找不到此股票，請改輸入 4 碼代號或從下拉清單選擇</span>';
+    msgEl.innerHTML = '<span class="text-warning">⚠️ 找不到此股票，請改輸入代號（如 2330、0050）或從下拉清單選擇</span>';
     return;
   }
 
   const sid  = matched.sid;
   let name = matched.name;
 
-  if (!/^\d{4}$/.test(sid)) {
-    msgEl.innerHTML = '<span class="text-warning">⚠️ 股票代號格式錯誤，請輸入 4 碼數字（如 2330）</span>';
+  if (!isStockId(sid)) {
+    msgEl.innerHTML = '<span class="text-warning">⚠️ 股票代號格式錯誤，請輸入 4 碼數字（如 2330）或 ETF 代號（如 0050、00878）</span>';
     return;
   }
 
@@ -10400,8 +10417,8 @@ async function runStockAutocomplete() {
   }
 
   if (Object.keys(universe).length === 0) {
-    // fallback：清單載入失敗時，仍可用 4 碼代號即時驗證
-    if (/^\d{4}$/.test(qRaw)) {
+    // fallback：清單載入失敗時，仍可用代號即時驗證
+    if (isStockId(qRaw)) {
       const check = await validateStockCode(qRaw);
       if (check.found) {
         const name = check.name || qRaw;
