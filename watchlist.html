@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="219">
+  <meta name="app-version" content="220">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=219" rel="stylesheet">
+  <link href="watchlist.css?v=220" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1056,12 +1056,48 @@ function sbHeaders(accessToken) {
   return h;
 }
 
+// 登入被清掉之後要讓登入畫面說得出原因（noteSessionLost 讀）
+const SESSION_LOST_KEY = "cg-session-lost";
+
+// 寫入被拒的錯誤只有一份翻譯。PostgREST 對 anon 角色的 42501（RLS 擋下）回的是
+// 401，而全站十幾個 catch 都寫成 `失敗：${e.message}`——不翻的話，使用者看到的是
+// 一行英文 JSON，會以為是自己操作錯了，而真正的原因是「這個請求沒有身分」。
+// 其餘狀態碼維持原本的 `VERB table: status` 格式：有幾個呼叫端靠它認 404／400／23505。
+function sbError(verb, target, status, body) {
+  if (status === 401 || /42501|row-level security/i.test(String(body || ""))) {
+    recheckSessionAfterDenial();
+    const err = new Error("登入已失效，請重新登入後再試一次");
+    err.name = "NoSessionError";
+    err.status = status;
+    return err;
+  }
+  return new Error(`${verb} ${target}: ${status}${body ? " " + body : ""}`);
+}
+
+// 被擋下來的原因有兩種，處理方式相反，所以一律問完再決定：
+//   • 版本閘（S31）：min_app_version 在 App 開著的時候被抬高 → 要停在更新畫面
+//   • token 失效：帳號被刪、或備份還原到別台裝置 → 要回登入畫面
+// 兩個都不是（暫時性錯誤、離線）就什麼都不做，寧可讓這次操作失敗，也不要把人踢出去。
+let _sessionRecheckPending = false;
+async function recheckSessionAfterDenial() {
+  if (_sessionRecheckPending || !hasSession()) return;
+  _sessionRecheckPending = true;
+  try {
+    if (!(await enforceAppVersion())) return;   // 版本太舊：forceUpdate 已接手
+    const rows = await sbGet("users", { select: "id" }, state.accessToken);
+    if (rows && rows.length) return;            // token 還有效：這次 401 另有原因
+    try { sessionStorage.setItem(SESSION_LOST_KEY, "1"); } catch {}
+    localStorage.removeItem("sma_session");
+    location.reload();                          // 回登入畫面；記憶體裡的 state 一併清掉
+  } catch { /* 離線或暫時性錯誤：留著，下一次再說 */ }
+  finally { _sessionRecheckPending = false; }
+}
 async function sbGet(table, params, accessToken) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
   url.searchParams.set("select", "*");
   for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
   const r = await fetch(url, { headers: sbHeaders(accessToken) });
-  if (!r.ok) throw new Error(`GET ${table}: ${r.status}`);
+  if (!r.ok) throw sbError("GET", table, r.status);
   return r.json();
 }
 
@@ -1075,7 +1111,7 @@ async function sbCount(table, params, accessToken) {
   const headers = sbHeaders(accessToken);
   headers["Prefer"] = "count=exact";
   const r = await fetch(url, { headers });
-  if (!r.ok) throw new Error(`COUNT ${table}: ${r.status}`);
+  if (!r.ok) throw sbError("COUNT", table, r.status);
   const m = /\/(\d+)\s*$/.exec(r.headers.get("content-range") || "");
   return m ? Number(m[1]) : null;
 }
@@ -1094,7 +1130,7 @@ async function sbPost(table, body, accessToken, minimal = false) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
     method: "POST", headers, body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(`POST ${table}: ${r.status} ${await r.text()}`);
+  if (!r.ok) throw sbError("POST", table, r.status, await r.text());
   if (minimal) return null;
   return r.json();
 }
@@ -1106,7 +1142,7 @@ async function sbPatch(table, params, body, accessToken) {
   const r = await fetch(url, {
     method: "PATCH", headers: sbHeaders(accessToken), body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(`PATCH ${table}: ${r.status}`);
+  if (!r.ok) throw sbError("PATCH", table, r.status);
   return r.json();
 }
 
@@ -1115,7 +1151,7 @@ async function sbDelete(table, params, accessToken) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
   for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
   const r = await fetch(url, { method: "DELETE", headers: sbHeaders(accessToken) });
-  if (!r.ok) throw new Error(`DELETE ${table}: ${r.status}`);
+  if (!r.ok) throw sbError("DELETE", table, r.status);
 }
 
 async function sbRpc(fn, params, accessToken) {
@@ -1132,7 +1168,7 @@ async function sbRpc(fn, params, accessToken) {
     headers,
     body: JSON.stringify(params || {}),
   });
-  if (!r.ok) throw new Error(`RPC ${fn}: ${r.status} ${await r.text()}`);
+  if (!r.ok) throw sbError("RPC", fn, r.status, await r.text());
   return r.json();
 }
 
@@ -1202,6 +1238,15 @@ async function loadAdminFlag() {
 
 // ── 全域狀態 ────────────────────────────────────────────────────
 let state = { userId: null, accessToken: null, displayName: "" };
+
+// 「還算不算登入」只能有一個答案來源。憑證就是一串 access_token：帳號被刪、或是
+// 進度跑到還沒輸入登入碼的頁面上時，它會「看起來還在」——讀取一律回空陣列、
+// 寫入一律被 RLS 擋成 401（42501），畫面卻停在已登入的樣子，症狀全部指向別的地方。
+// 非登入不可的動作一律先問這裡，不要各自判 state.userId 或 state.accessToken。
+function hasSession() {
+  return !!(state && state.userId && state.accessToken);
+}
+
 let universe = {};   // sid → { n: name, i: industry }
 let universeLoading = false;
 let twseUniverseCache = null;
@@ -3074,6 +3119,20 @@ function showLoginInAppHint() {
   el.style.display = "";
 }
 
+// 登入失效被清掉之後回到登入畫面：不講一聲的話，使用者只會覺得「怎麼又要登入」，
+// 還會懷疑是自己剛剛按錯了什麼。旗標由 recheckSessionAfterDenial／resumeSavedSession 設。
+function noteSessionLost() {
+  let lost = false;
+  try {
+    lost = sessionStorage.getItem(SESSION_LOST_KEY) === "1";
+    sessionStorage.removeItem(SESSION_LOST_KEY);
+  } catch {}
+  if (!lost) return;
+  const msg = document.getElementById("short-code-msg");
+  if (msg) msg.innerHTML = '<span class="text-warning">登入已失效，'
+    + '請回 LINE 點「複製登入碼」重新登入。</span>';
+}
+
 // ── 邀請連結在錯的地方被打開：兩個「先別兌換」的閘 ───────────────────
 function showBrowserGate() {
   document.getElementById("bg-app-name").textContent = _inAppBrowser || "App";
@@ -3185,11 +3244,29 @@ function resumeOnboarding() {
   renderOnboarding();
 }
 
+// 精靈走到「② 開啟通知」卻沒有登入：把精靈收起來、露出登入畫面。進度留在
+// localStorage，登入完成後 startOnboarding 會再把它叫回來，不會少走一步。
+function _onboardNeedsLogin() {
+  const gate = document.getElementById("onboard-gate");
+  if (gate) gate.style.display = "none";
+  const main = document.getElementById("main-section");
+  const login = document.getElementById("login-section");
+  if (main) main.style.display = "none";
+  if (login) login.style.display = "";
+  const msg = document.getElementById("short-code-msg");
+  if (msg) msg.innerHTML = '<span class="text-warning">請先登入，通知才綁得到你的帳號：'
+    + '回 LINE 點「複製登入碼」，再按下方的貼上圖示。</span>';
+}
+
 async function renderOnboarding() {
   const s = _obState();
   if (!s) return;
   // 免責同意閘與精靈同為全螢幕、同 z-index，精靈在 DOM 後面會蓋住它：先同意，acceptDisclaimer 再把精靈叫回來
   if (!disclaimerAccepted()) return;
+  // 「開啟通知」那一步要把訂閱寫進這個帳號，沒登入就一定寫不進去（RLS 擋成 401）。
+  // Android 的 WebAPK 與 Chrome 共用 localStorage，精靈進度會跟著跑到還沒登入的
+  // 頁面上；在這裡擋住，那一次「一台裝置只會出現一次」的系統權限詢問才不會白花掉。
+  if (s.stage === "push" && !hasSession()) { _onboardNeedsLogin(); return; }
   const gate = document.getElementById("onboard-gate");
   const icon = document.getElementById("ob-icon");
   const title = document.getElementById("ob-title");
@@ -3429,6 +3506,8 @@ async function onboardEnablePush() {
   const btn = document.getElementById("ob-push-btn");
   const msg = document.getElementById("ob-push-msg");
   const stamp = `（${new Date().toLocaleTimeString("zh-TW", { hour12: false })} 檢查）`;
+  // 權限詢問之前先確認登入：問到了也存不進帳號，而那一次詢問是花掉就沒有的
+  if (!hasSession()) { _onboardNeedsLogin(); return; }
   if (_pushPermissionBlocked()) {
     await _onboardShowPushBlocked(`通知權限還是關閉的${stamp}。請依上面的步驟打開之後，再按一次「啟用通知」。`);
     return;
@@ -3526,9 +3605,27 @@ window.addEventListener("DOMContentLoaded", async () => {
   const urlCode = qs.get("code");
   const saved = localStorage.getItem("sma_session");
 
+  // 存在 localStorage 的登入只是一串 access_token。帳號被刪、或把備份還原到另一台
+  // 裝置之後，它會「看起來還在」：讀取全部回空陣列、寫入全部被 RLS 擋成 401、
+  // log_activity 靜默回 0，畫面卻停在已登入的樣子，而且沒有任何一條路會自動登出。
+  // 開頁時跟伺服器對一次；只有在「連得上、而且伺服器說這個 token 不屬於任何人」時
+  // 才清掉——離線與暫時性錯誤一律沿用，不能因為捷運上沒訊號就把人登出。
+  async function savedSessionIsValid() {
+    try {
+      const rows = await sbGet("users", { select: "id" }, state.accessToken);
+      return !!(rows && rows.length);
+    } catch { return true; }
+  }
+
   async function resumeSavedSession() {
     if (!saved) return false;
     try { state = JSON.parse(saved); } catch { localStorage.removeItem("sma_session"); return false; }
+    if (!hasSession() || !(await savedSessionIsValid())) {
+      try { sessionStorage.setItem(SESSION_LOST_KEY, "1"); } catch {}
+      localStorage.removeItem("sma_session");
+      state = { userId: null, accessToken: null, displayName: "" };
+      return false;
+    }
     await showMain();
     resumeOnboarding();
     return true;
@@ -3570,6 +3667,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (await resumeSavedSession()) return;
   }
   showLoginInAppHint();
+  noteSessionLost();   // 被清掉的登入要講一聲，不然只是莫名其妙回到登入畫面
 
   // 舊版 ?token= 仍相容（推播裡的個人化連結）；RLS 只回本人那一列
   const urlToken = qs.get("token");
@@ -10526,6 +10624,14 @@ async function _savePushSubscription(sub) {
 }
 
 async function _savePushSubscriptionJson(j) {
+  // 沒登入就送出去的下場：瀏覽器端的訂閱已經成立，Supabase 這一列卻被 RLS
+  // （user_id = current_user_id()）擋成 42501、PostgREST 包成 401，使用者只看到
+  // 一行看不懂的英文，其實他只是還沒輸入登入碼。在送出前就講清楚是哪一種失敗。
+  if (!hasSession()) {
+    const err = new Error('尚未登入，通知訂閱無法綁到帳號');
+    err.name = 'NoSessionError';
+    throw err;
+  }
   await sbPost('push_subscriptions', {
     user_id:    state.userId,
     endpoint:   j.endpoint,
@@ -10751,6 +10857,12 @@ function _pushFailureHint(e) {
   const name = (e && e.name) || '';
   const msg  = (e && e.message) || String(e);
 
+  // 沒登入／登入失效：唯一一種「照著瀏覽器的步驟做也不會好」的失敗，所以要排在最前面。
+  // 排在 iOS 或 AbortError 後面的話會被那兩段文案蓋掉，變成叫他去改瀏覽器設定——
+  // 他改一整天也不會好，因為問題根本不在瀏覽器。
+  if (name === 'NoSessionError' || /\b401\b/.test(msg) || /row-level security/i.test(msg)) {
+    return { short: '登入狀態已失效，請重新登入後再開啟通知' };
+  }
   // iOS 在 Safari 分頁（未加入主畫面）訂閱一定失敗，訊息要講清楚怎麼辦
   if (_isIOS && !_pwaIsStandalone) {
     return { short: '請先用「分享 → 加入主畫面」安裝後，再開啟通知' };
@@ -10790,7 +10902,9 @@ function _pushFailureHint(e) {
             + '在通知啟用之前，所有提醒還是會寫進 App 的「通知」分頁，不會漏掉，只是不會主動跳出來。',
     };
   }
-  return { short: `錯誤：${msg}` };
+  // 認不出來的失敗：原文往往是 PostgREST 或瀏覽器的英文 JSON，貼在畫面上只會讓人
+  // 以為是自己做錯什麼。原文留在 console（呼叫端已經 console.error 過），畫面給人話。
+  return { short: '通知啟用失敗，請稍後再試一次' };
 }
 
 async function togglePushSubscription() {
