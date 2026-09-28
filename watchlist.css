@@ -3446,11 +3446,51 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	background: rgba(146, 146, 163, 0.18);
 	white-space: nowrap;
 }
-/* 方案色階：免費灰、基本藍、專業橘——跟全站的優先度色階同一組，
-   不用紅綠（那組專屬漲跌幅） */
-.plan-badge.plan-basic { color: var(--sig-blue); background: rgba(86, 168, 255, 0.16); }
-.plan-badge.plan-pro   { color: var(--sig-orange); background: rgba(255, 159, 67, 0.18); }
+/* 方案色階：免費灰、專業藍、旗艦橘——跟全站的優先度色階同一組，
+   不用紅綠（那組專屬漲跌幅）。basic 是舊制 NT$49，與專業版同色。 */
+.plan-badge.plan-pro,
+.plan-badge.plan-basic   { color: var(--sig-blue); background: rgba(86, 168, 255, 0.16); }
+.plan-badge.plan-premium { color: var(--sig-orange); background: rgba(255, 159, 67, 0.18); }
 .plan-badge-lg { font-size: 0.78rem; padding: 0.18rem 0.6rem; }
+
+/* ── 方案鎖住的功能（stats_enabled / live_radar / mixed_signals）───────────
+   鎖頭一律用文字說明是哪個方案的功能，顏色只做強調：
+   鎖住的東西不變色（灰），要按的那顆鈕才是橘的。 */
+.plan-locked {
+	padding: 1.4rem 1rem 1.5rem;
+	text-align: center;
+}
+.plan-locked-title { font-size: 0.94rem; font-weight: 700; color: var(--text-1); }
+.plan-locked-list {
+	display: inline-block;
+	margin: 0.7rem 0 0.5rem;
+	padding: 0;
+	text-align: left;
+	list-style: none;
+	font-size: 0.8rem;
+	color: var(--text-1);
+}
+.plan-locked-list li { padding: 0.12rem 0; }
+.plan-locked-list li::before { content: "・"; color: var(--text-muted); }
+.plan-locked-note {
+	margin: 0.2rem 0 0.9rem;
+	font-size: 0.74rem;
+	color: var(--text-muted);
+}
+/* 導覽列上鎖住的分頁：小鎖疊在圖示右上角，不改文字（位置固定才不會跳） */
+.bottom-nav-item.is-locked .bn-icon::after {
+	content: "🔒";
+	position: absolute;
+	top: -2px;
+	right: -6px;
+	font-size: 0.55rem;
+	line-height: 1;
+}
+.bottom-nav-item.is-locked .bn-icon { position: relative; }
+/* 盤中雷達不持續更新（免費版）：狀態字，不是警告 */
+.rtl-live-off { color: var(--text-muted); font-size: 0.72rem; }
+/* 「再加一個條件」被方案鎖住時：仍可按（按了給升級提示），但看得出是鎖著的 */
+.rule-add-cond.is-locked { opacity: 0.75; border-style: dashed; }
 
 .plan-focus-hint {
 	padding: 0.55rem 0.75rem;
@@ -3533,7 +3573,8 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	border-color: rgba(139, 124, 255, 0.55);
 	box-shadow: 0 0 0 1px rgba(139, 124, 255, 0.25) inset;
 }
-.plan-card-pro { border-color: rgba(255, 159, 67, 0.35); }
+/* 最高階那張卡框線標橘（與方案徽章同色階） */
+.plan-card-premium { border-color: rgba(255, 159, 67, 0.35); }
 .plan-card-name { font-weight: 700; color: var(--text-0); font-size: 0.95rem; }
 .plan-price {
 	font-family: "Space Grotesk", sans-serif;
