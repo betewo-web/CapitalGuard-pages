@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="217">
+  <meta name="app-version" content="218">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=217" rel="stylesheet">
+  <link href="watchlist.css?v=218" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1265,6 +1265,7 @@ let planState = {
   plans: [],             // 方案比較表用（is_public）
   activeWatchIds: null,  // active_watchlist 的 id 集合；null = view 不存在，全部視為生效
   activeRuleIds: null,   // active_alert_rules 同上
+  trial: null,           // trial_status()：免費體驗能不能領、領了到哪天（migrate_trial.sql）
 };
 
 // ── 線條圖示 ────────────────────────────────────────────────────
@@ -2096,13 +2097,16 @@ async function loadPlanState() {
   if (!state.accessToken) return;
   const prevCode = planState.ready && planState.plan ? planState.plan.code : null;
   try {
-    const [mine, plans] = await Promise.all([
+    const [mine, plans, trial] = await Promise.all([
       sbRpc("my_plan", {}, state.accessToken),
       _loadPlansCached(),
+      // migrate_trial.sql 未跑（404）或暫時失敗：當作沒有體驗這回事，面板不畫那張卡
+      sbRpc("trial_status", {}, state.accessToken).catch(() => null),
     ]);
     if (!mine || !mine.plan) throw new Error("my_plan 回傳空值");
     planState = { ...planState, ready: true, plan: mine.plan,
-                  subscription: mine.subscription, usage: mine.usage, plans: plans || [] };
+                  subscription: mine.subscription, usage: mine.usage, plans: plans || [],
+                  trial: trial && typeof trial === "object" ? trial : null };
   } catch (e) {
     // migrate_billing.sql 尚未執行（404）或暫時失敗：方案功能整個關閉，
     // 不做任何前端限制——寧可多放行，也不要因為表沒建就讓人加不了股票
@@ -2149,11 +2153,12 @@ function planLimitOf(kind) {
 //   stats_enabled  📊 統計分頁
 //   live_radar     盤中雷達是否持續更新
 //   mixed_signals  一條進階訊號能不能放多個條件
+//   kline_enabled  K 線圖（個股字卡第三頁；2026-09-28）
 // 判斷一律「不是明確的 false 就放行」：plans 表還沒加這三欄（migration 未跑）
 // 或方案狀態沒載到時，功能維持原狀——寧可多放行，也不要因為欄位缺了就把畫面鎖住。
 // 真正的強制力在 DB（mixed_signals 有 trigger 與 view）；統計頁與雷達更新頻率
 // 只有這裡一層，那兩項是功能可見度與抓取節奏，不是資料權限。
-const PLAN_FEATURES = ["stats_enabled", "live_radar", "mixed_signals"];
+const PLAN_FEATURES = ["stats_enabled", "live_radar", "mixed_signals", "kline_enabled"];
 
 function planAllows(feature) {
   if (!planState.ready || !planState.plan) return true;
@@ -2225,6 +2230,7 @@ const PLAN_FEATURE_TEXT = {
   stats_enabled: "全市場評分的統計整理",
   live_radar:    "盤中雷達持續更新",
   mixed_signals: "一條進階訊號放多個條件（混和訊號）",
+  kline_enabled: "K 線圖",
 };
 
 function featurePromptHtml(feature) {
@@ -2270,10 +2276,16 @@ function renderPlanBadge() {
 // 不是只在啟動時做一次。
 function syncPlanLocks() {
   const nav = document.querySelector('#bottom-nav [data-tab="scores"]');
-  if (!nav) return;
-  const locked = !planAllows("stats_enabled");
-  nav.classList.toggle("is-locked", locked);
-  nav.setAttribute("aria-label", locked ? "統計（付費方案功能）" : "統計");
+  if (nav) {
+    const locked = !planAllows("stats_enabled");
+    nav.classList.toggle("is-locked", locked);
+    nav.setAttribute("aria-label", locked ? "統計（付費方案功能）" : "統計");
+  }
+  // 字卡第三頁「看 K 線」（plans.kline_enabled）：分頁籤掛小鎖；卡片正開在那一頁就換成說明卡
+  const klineLocked = !planAllows("kline_enabled");
+  const kt = document.getElementById("rtl-tab-kline");
+  if (kt) kt.classList.toggle("is-locked", klineLocked);
+  if (klineLocked && typeof stockCardTab !== "undefined" && stockCardTab === "kline" && radarTimelineSid) renderKLineLocked();
 }
 
 // ── 方案面板 ──
@@ -2374,7 +2386,7 @@ function consumePlanIntent() {
 }
 
 // 功能列。數字全部來自 plans 表；「共有」的功能每一欄都打勾，
-// 差異是五項：自選股數、進階訊號數、混和訊號、統計分頁、盤中雷達持續更新
+// 差異是七項：自選股數、進階訊號數、混和訊號、統計分頁、盤中雷達持續更新、K 線圖、每日通知則數
 // ——與 BILLING.md 的規格表一致。
 // AI 兩列 2026-09-27 拿掉：三階都不含（plans.ai_enabled 全 false），
 // 三欄都是「—」的列只是佔位；它去哪了由 PLAN_COMING_SOON_NOTE 說。
@@ -2386,11 +2398,12 @@ function planFeatureRows(p) {
     `<li><span>⭐ 自選股</span><b>${p.watch_limit} ${unit.stocks}</b></li>`,
     `<li><span>📐 進階訊號</span><b>${p.rule_limit} ${unit.rules}</b></li>`,
     `<li><span>🔀 混和訊號（一條放多個條件）</span>${p.mixed_signals ? yes : no}</li>`,
-    `<li><span>📊 統計整理分頁</span>${p.stats_enabled ? yes : no}</li>`,
+    `<li><span>📊 統計整理分頁（每日評分）</span>${p.stats_enabled ? yes : no}</li>`,
     `<li><span>⚡ 盤中雷達持續更新</span>${p.live_radar ? yes
       : no + '<span class="plan-sub">開啟 App／收到通知時更新</span>'}</li>`,
-    `<li><span>📡 盤中／盤後通知</span>${yes}</li>`,
-    `<li><span>📈 每日評分報告・持股損益・K 線</span>${yes}</li>`,
+    `<li><span>📡 盤中／盤後通知</span>${p.push_daily_limit ? `<b>每天 ${p.push_daily_limit} 則</b>` : yes}</li>`,
+    `<li><span>📈 K 線圖</span>${p.kline_enabled === false ? no : yes}</li>`,
+    `<li><span>💼 持股損益</span>${yes}</li>`,
   ].join("");
 }
 
@@ -2425,6 +2438,11 @@ function subscriptionStatusHtml() {
   if (s.cancel_requested_at) {
     return `<div class="plan-status">已取消續訂，${escapeHtml(p.name)}功能保留至 <b>${until}</b>，之後回到免費版。</div>`;
   }
+  if (s.provider === "trial") {
+    const left = tradingDaysLeftFrom(s.current_period_end);
+    const freeName = planNameOf("free") || "免費版";
+    return `<div class="plan-status">🎁 免費體驗中，到 <b>${trialLastDayLabel(s.current_period_end)}</b> 收盤為止${left !== null ? `（含今天還剩 ${left} 個交易日）` : ""}，之後自動回到${escapeHtml(freeName)}，不會扣款。想繼續用不中斷，隨時可以升級。</div>`;
+  }
   if (s.provider === "manual") {
     return `<div class="plan-status">由管理員指派${s.note ? `（${escapeHtml(s.note)}）` : ""}，有效至 <b>${until}</b>。</div>`;
   }
@@ -2455,6 +2473,8 @@ function renderPlanModal(focus) {
     stats_enabled: "📊 統計整理分頁（全市場評分的排序與篩選）需要付費方案。",
     live_radar:    "⚡ 盤中雷達持續更新需要付費方案；目前是開啟 App 或收到通知時更新一次。",
     mixed_signals: "🔀 一條進階訊號放多個條件（混和訊號）是廣域追蹤雷達功能。",
+    kline_enabled: "📈 K 線圖需要付費方案。",
+    trial:         "🎁 免費體驗不需要付款資料，到期自動回到免費方案。",
     deeplink:    pitch || "從官網過來的：先看看目前方案的用量，需要再升級。",
     paid:        "付款結果以綠界回呼為準。若方案尚未更新，請稍後再開啟這個面板確認。",
     pay_failed:  "綠界回報這次付款未成功，沒有扣款也沒有開通。可以重新選擇方案再試一次。",
@@ -2514,6 +2534,7 @@ function renderPlanModal(focus) {
   body.innerHTML = `
     ${focusHint ? `<div class="plan-focus-hint">${focusHint}</div>` : ""}
     ${current}
+    ${trialOfferHtml(focus === "trial")}
     <div class="plan-sec-title">方案比較</div>
     <div class="plan-grid">${cards}</div>
     ${comingSoon}
@@ -2525,6 +2546,8 @@ function renderPlanModal(focus) {
   // 上限提示／深連結帶進來的那張卡：捲到看得見的地方（面板上半部是目前方案與用量）
   const focusEl = target && document.getElementById("plan-card-focus");
   if (focusEl) setTimeout(() => focusEl.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
+  const trialEl = focus === "trial" && document.getElementById("plan-trial");
+  if (trialEl) setTimeout(() => trialEl.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
 }
 
 // 訊息列在付款紀錄下面，面板捲在上半部時看不到——按「改為免費版」沒反應的錯覺就是這樣來的
@@ -2728,6 +2751,11 @@ function cancelSubscription() {
   const s = planState.subscription;
   // 能不能取消看「綠界約定是否還活著」，不看目前方案：past_due／到期的約定綠界照樣會扣
   const agreementOpen = !!(s && s.provider === "ecpay" && s.provider_ref && !s.cancel_requested_at);
+  if (s && s.provider === "trial" && s.status === "active" && new Date(s.current_period_end) > new Date()) {
+    showBillingResult({ tone: "info", title: "體驗不需要取消",
+      lines: [`免費體驗到 ${trialLastDayLabel(s.current_period_end)} 收盤為止，之後自動回到免費方案，沒有任何扣款。`] });
+    return;
+  }
   if (s && s.provider === "manual") {
     showBillingResult({
       tone: "info", title: "這個方案由管理員指派",
@@ -5828,6 +5856,13 @@ function _handleNotificationClickUrl(url, at) {
   const key = u.searchParams.get("alert");
   const tab = (u.hash || "").replace("#", "");
   if (key) { focusInboxAlert(key); return; }
+  // 盤後摘要／體驗提醒的通知帶 ?plan=：直接開「方案與用量」面板（未登入就先收起來，登入後再開）
+  const plan = u.searchParams.get("plan");
+  if (plan && /^[a-z]{2,12}$/.test(plan)) {
+    if (state.accessToken) openPlanModal("deeplink", plan);
+    else localStorage.setItem("cg-plan-intent", plan);
+    return;
+  }
   if (APP_TABS.includes(tab) && state.userId) switchTab(tab);
 }
 
@@ -6562,6 +6597,127 @@ function scoresLockedHtml() {
     ${btn}</div>`;
 }
 
+// ── K 線（字卡第三頁）被方案鎖住：plans.kline_enabled（2026-09-28）──
+// 與統計分頁同一套 planAllows()／nextPlanFor()：鎖住時整頁換成說明卡，分頁籤仍在
+// （看不到的功能不會有人買）。ECharts 沒被叫到，容器隱藏也不會量錯高度。
+function klineLockedHtml() {
+  const next = nextPlanFor("kline_enabled");
+  trackActivity("feature_hint", { feature: "kline_enabled", next: next ? next.code : "" });
+  const btn = next
+    ? `<button class="btn btn-sm btn-success btn-accent-sm" onclick="openPlanModal('kline_enabled', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)}（NT$${next.price_twd}／月）→</button>`
+    : `<button class="btn btn-sm btn-outline-info" onclick="openPlanModal('kline_enabled')">查看方案 →</button>`;
+  const t = trialOfferAvailable() ? planState.trial : null;
+  const trial = t
+    ? `<div class="plan-locked-trial">或先<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('trial')">免費體驗 ${t.trading_days} 個交易日 →</button></div>`
+    : "";
+  return `<div class="plan-locked">
+    <div class="plan-locked-title">🔒 K 線圖是付費方案功能</div>
+    <ul class="plan-locked-list">
+      <li>日 K／週 K／月 K，圖上標出支撐與壓力關卡</li>
+      <li>今天發過的訊號直接標在對應的 K 棒上</li>
+      <li>籌碼與均線切換、長按讀數</li>
+    </ul>
+    <div class="plan-locked-note">「盤中雷達」與「歷史訊號」這兩頁不受影響。</div>
+    ${btn}${trial}</div>`;
+}
+
+function renderKLineLocked() {
+  const pane = document.getElementById("rtl-pane-kline");
+  if (!pane) return;
+  let box = document.getElementById("kline-locked");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "kline-locked";
+    pane.prepend(box);
+  }
+  box.innerHTML = klineLockedHtml();
+  pane.classList.add("is-locked");
+}
+
+function clearKLineLocked() {
+  const pane = document.getElementById("rtl-pane-kline");
+  if (pane) pane.classList.remove("is-locked");
+}
+
+// ── 免費體驗 N 個交易日（migrate_trial.sql，2026-09-28）──
+// trial_status() 說能不能領；claim_trial() 領。到期由 plan_of() 自動回 free，前端不做任何倒數邏輯，
+// 只把「最後一天」與「還剩幾個交易日」算出來給人看（週一至週五，與後端 trading_days_left 同一套）。
+function trialOfferAvailable() {
+  return !!(planState.ready && planState.trial && planState.trial.available === true);
+}
+
+// period_end 是「最後一個交易日的隔日 00:00（台北）」：退一秒才是最後一天
+function trialLastDayLabel(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "—";
+  return fmtPlanDate(new Date(d.getTime() - 1000).toISOString());
+}
+
+function tradingDaysLeftFrom(iso) {
+  const end = new Date(iso);
+  if (isNaN(end)) return null;
+  const last = taipeiDateKey(new Date(end.getTime() - 1000));
+  let d = taipeiDateKey(new Date());
+  let n = 0;
+  for (let i = 0; i < 40 && d <= last; i++) {
+    const [y, m, dd] = d.split("-").map(Number);
+    const dow = new Date(Date.UTC(y, m - 1, dd)).getUTCDay();
+    if (dow >= 1 && dow <= 5) n++;
+    d = taipeiDateKey(new Date(Date.UTC(y, m - 1, dd + 1, 12)));   // 中午加一天，避開時區邊界
+  }
+  return n;
+}
+
+function trialOfferHtml(highlight) {
+  if (!trialOfferAvailable()) return "";
+  const t = planState.trial;
+  const plan = planState.plans.find(x => x.code === t.plan_code);
+  const name = t.plan_name || planNameOf(t.plan_code);
+  const rows = plan ? `<ul class="plan-feats">${planFeatureRows(plan)}</ul>` : "";
+  const until = t.offer_until ? `<span class="plan-trial-until">優惠至 ${escapeHtml(t.offer_until)}</span>` : "";
+  return `<div class="plan-trial${highlight ? " is-focus" : ""}" id="plan-trial">
+    <div class="plan-trial-title">🎁 免費體驗 ${t.trading_days} 個交易日的${escapeHtml(name)}</div>
+    <div class="plan-trial-text">體驗期間就是完整的${escapeHtml(name)}，到 ${trialLastDayLabel(t.would_end)} 收盤為止，之後自動回到${escapeHtml(planState.plan.name)}。不需要付款資料、不會扣款，每個帳號一次。</div>
+    ${rows}
+    <button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center" id="plan-trial-go" onclick="claimTrial()">開始免費體驗</button>
+    ${until}
+  </div>`;
+}
+
+async function claimTrial() {
+  const btn = document.getElementById("plan-trial-go");
+  if (btn) btn.disabled = true;
+  const t = planState.trial || {};
+  trackActivity("trial_claim", { plan: t.plan_code || "" });
+  try {
+    const r = await sbRpc("claim_trial", {}, state.accessToken);
+    await loadPlanState();
+    loadWatchlist().catch(() => {});
+    renderPlanModal();
+    showBillingResult({
+      tone: "ok", title: "體驗已開始",
+      lines: [
+        `${planNameOf(r.plan_code)}的功能已全部開放，到 ${trialLastDayLabel(r.period_end)} 收盤為止（${r.trading_days} 個交易日）。`,
+        "到期會自動回到免費方案，不會扣款；想繼續用，隨時可以在這裡升級。",
+      ],
+    });
+  } catch (e) {
+    // RAISE 的 HINT（trial:<reason>）跟著 PostgREST 的錯誤 JSON 進到 e.message
+    const reason = (String((e && e.message) || "").match(/trial:([a-z_]+)/) || [])[1] || "";
+    const text = {
+      used: "這個帳號已經用過免費體驗了。",
+      active: "體驗還在進行中。",
+      has_subscription: "目前已有生效中的方案，不需要體驗。",
+      agreement_open: "先前的定期定額約定還在綠界，請先取消續訂再開始體驗。",
+      offer_ended: "這個優惠已經結束了。",
+      auth: "請先登入。",
+    }[reason] || "暫時無法開始體驗，請稍後再試。";
+    showBillingResult({ tone: "warn", title: "體驗沒有開始", lines: [text] });
+    if (btn) btn.disabled = false;
+    loadPlanState().then(() => renderPlanModal()).catch(() => {});
+  }
+}
+
 function renderScores() {
   const listEl = document.getElementById("scores-list");
   if (!listEl) return;
@@ -7095,7 +7251,11 @@ function switchStockCardTab(tab) {
   // K 線那一頁在桌機要寬（圖才有解析度）；手機本來就滿版
   document.getElementById("rtl-dialog")?.classList.toggle("is-kline", tab === "kline");
   if (tab === "history") trackActivity("radar_history_open", { stock: radarTimelineSid || "" });
-  if (tab === "kline" && radarTimelineSid) loadKLineIntoCard(radarTimelineSid);
+  if (tab === "kline" && radarTimelineSid) {
+    // plans.kline_enabled：免費版整頁換成說明卡、不載圖（也就不會為看不到的圖抓 K 線分片）
+    if (!planAllows("kline_enabled")) renderKLineLocked();
+    else { clearKLineLocked(); loadKLineIntoCard(radarTimelineSid); }
+  }
 }
 
 // 清單裡點一天：回到「盤中雷達」那一頁看那天（雷達的交易日就是「今天」那列）

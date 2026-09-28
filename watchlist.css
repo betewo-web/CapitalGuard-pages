@@ -3491,6 +3491,23 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .rtl-live-off { color: var(--text-muted); font-size: 0.72rem; }
 /* 「再加一個條件」被方案鎖住時：仍可按（按了給升級提示），但看得出是鎖著的 */
 .rule-add-cond.is-locked { opacity: 0.75; border-style: dashed; }
+/* 字卡第三頁「看 K 線」被方案鎖住（plans.kline_enabled）：分頁籤掛小鎖，內容整頁換成說明卡 */
+.rtl-tab.is-locked::after { content: "🔒"; font-size: 0.6rem; margin-left: 0.25rem; }
+#rtl-pane-kline.is-locked > :not(#kline-locked) { display: none !important; }
+.plan-locked-trial { margin-top: 0.7rem; font-size: 0.8rem; color: var(--text-muted); }
+/* 免費體驗卡：橘框是「要按的那顆」，字仍是一般色 */
+.plan-trial {
+	margin: 0 0 0.9rem;
+	padding: 0.8rem 0.9rem 0.9rem;
+	border-radius: 12px;
+	border: 1px solid rgba(255, 159, 67, 0.55);
+	background: rgba(255, 159, 67, 0.08);
+}
+.plan-trial.is-focus { box-shadow: 0 0 0 2px rgba(255, 159, 67, 0.55); }
+.plan-trial-title { font-size: 0.95rem; font-weight: 700; color: var(--text-1); }
+.plan-trial-text { margin: 0.35rem 0 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+.plan-trial .plan-feats { margin: 0 0 0.7rem; }
+.plan-trial-until { display: block; margin-top: 0.4rem; font-size: 0.72rem; color: var(--text-muted); }
 
 .plan-focus-hint {
 	padding: 0.55rem 0.75rem;
