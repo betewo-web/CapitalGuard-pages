@@ -3493,6 +3493,117 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .rtl-live-off { color: var(--text-muted); font-size: 0.72rem; }
 /* 「再加一個條件」被方案鎖住時：仍可按（按了給升級提示），但看得出是鎖著的 */
 .rule-add-cond.is-locked { opacity: 0.75; border-style: dashed; }
+
+/* 編輯器最底的升級區塊：被鎖的按鈕按下去會捲到這裡並閃 3 秒（showUpgradeAtEditorBottom） */
+.upgrade-callout {
+	padding: 0.55rem 0.7rem;
+	border: 1px solid rgba(255, 176, 74, 0.35);
+	border-radius: 10px;
+	background: rgba(255, 176, 74, 0.06);
+	line-height: 1.6;
+}
+.upgrade-callout.is-flashing { animation: upgrade-flash 0.75s ease-in-out 4; }
+@keyframes upgrade-flash {
+	0%, 100% { box-shadow: 0 0 0 0 rgba(255, 176, 74, 0); background: rgba(255, 176, 74, 0.06); }
+	50%      { box-shadow: 0 0 0 4px rgba(255, 176, 74, 0.55); background: rgba(255, 176, 74, 0.22); }
+}
+
+/* 升級提示後面的體驗入口（trialHintHtml）：一行接在按鈕後面，說明字小一號 */
+.plan-trial-hint { display: inline-block; margin-left: 0.35rem; color: var(--text-1); }
+.plan-trial-hint-sub { display: block; margin-top: 0.2rem; font-size: 0.74rem; color: var(--text-muted); }
+
+/* 條件型別：按鈕（開選單頁）＋「說明」 */
+.rule-type-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.4rem;
+	text-align: left;
+	cursor: pointer;
+}
+.rule-type-btn svg { flex: 0 0 auto; opacity: 0.7; }
+.rule-info-btn { flex: 0 0 auto; padding: 0.15rem 0.5rem; font-size: 0.78rem; white-space: nowrap; }
+
+/* 條件選單頁 */
+.cond-pick-hint { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.7rem; line-height: 1.55; }
+.cond-pick-group { margin-bottom: 0.9rem; }
+.cond-pick-group-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; }
+.cond-pick-group-note { font-size: 0.78rem; color: var(--text-muted); }
+.cond-pick-item {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.15rem;
+	width: 100%;
+	padding: 0.55rem 0.7rem;
+	margin-bottom: 0.4rem;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--surface-2);
+	color: var(--text-1);
+	text-align: left;
+	cursor: pointer;
+}
+.cond-pick-item:hover { border-color: rgba(139, 124, 255, 0.55); }
+.cond-pick-item.is-current { border-color: var(--accent-2); box-shadow: inset 3px 0 0 var(--accent-2); }
+.cond-pick-name { font-size: 0.92rem; font-weight: 600; }
+.cond-pick-brief { font-size: 0.78rem; color: var(--text-muted); line-height: 1.45; }
+
+/* 條件說明視窗：蓋在進階訊號面板上的一層 */
+.cond-explain {
+	position: absolute;
+	inset: 0;
+	z-index: 5;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1rem;
+	background: rgba(3, 5, 12, 0.72);
+	border-radius: inherit;
+}
+.cond-explain-card {
+	width: 100%;
+	max-width: 420px;
+	max-height: 100%;
+	overflow: auto;
+	background: var(--surface-1, #12162a);
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	padding: 0.8rem 0.9rem;
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.cond-explain-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+.cond-explain-head h6 { font-size: 1rem; font-weight: 700; }
+.cond-explain-body { font-size: 0.86rem; line-height: 1.65; color: var(--text-1); }
+.cond-explain-body p { margin: 0 0 0.45rem; }
+.cond-explain-tier { display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+.cond-explain-params { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+.cond-explain-note { font-size: 0.74rem; color: var(--text-muted); border-top: 1px dashed var(--border); padding-top: 0.4rem; margin-top: 0.3rem; }
+.cond-explain-foot { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.7rem; }
+
+/* 超出方案的提示列（自選股頁、進階訊號面板）與保留選擇視窗 */
+.over-limit-banner { margin: 0.6rem 0.8rem; flex-wrap: wrap; }
+.keep-lead { font-size: 0.84rem; line-height: 1.6; color: var(--text-muted); margin-bottom: 0.7rem; }
+.keep-item {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.5rem 0.6rem;
+	margin-bottom: 0.4rem;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--surface-2);
+	cursor: pointer;
+}
+.keep-item .keep-box { flex: 0 0 auto; margin: 0; }
+.keep-item .keep-box:disabled + .keep-text { opacity: 0.45; }
+.keep-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.keep-name { font-size: 0.9rem; font-weight: 600; }
+.keep-sub { font-size: 0.76rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.keep-count { margin-right: auto; font-size: 0.82rem; color: var(--text-muted); }
+.home-nudge-msg { flex-basis: 100%; font-size: 0.76rem; }
+.home-nudge-msg:empty { display: none; }
+.home-nudge, .home-nudge > div { flex-wrap: wrap; }
 /* 字卡第三頁「看 K 線」被方案鎖住（plans.kline_enabled）：分頁籤掛小鎖，內容整頁換成說明卡 */
 .rtl-tab.is-locked::after { content: "🔒"; font-size: 0.6rem; margin-left: 0.25rem; }
 #rtl-pane-kline.is-locked > :not(#kline-locked) { display: none !important; }

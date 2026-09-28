@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="227">
+  <meta name="app-version" content="228">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=227" rel="stylesheet">
+  <link href="watchlist.css?v=228" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -359,7 +359,8 @@
       <div class="card panel-card">
         <div class="card-body p-0" id="scores-list"></div>
       </div>
-      <div class="view-hint p-2">
+      <!-- 免費版整段收起（renderScores）：report-data 會回 403，連結留著只會開出一頁錯誤 -->
+      <div class="view-hint p-2" id="scores-report-hint">
         分數＝基本面 50%＋技術量能 50%，每日盤前更新；分頁只放摘要，
         <span class="hs-link" onclick="openDailyReportFromHistory()">看完整報告 →</span>
       </div>
@@ -459,6 +460,8 @@
           <div id="wl-empty" class="empty-state text-center py-5 text-muted" style="display:none">
             尚未加入任何股票，從上方搜尋並加入吧！
           </div>
+          <!-- 超出方案時的提示（renderOverLimitBanner）：目前依加入時間保留最早的 N 檔，可以自己選 -->
+          <div class="home-nudge over-limit-banner" id="wl-over-limit" style="display:none"></div>
           <div id="wl-grid" class="watchlist-list" style="display:none"></div>
         </div>
       </div>
@@ -520,7 +523,32 @@
       <div class="modal-body p-3" id="rule-nudge-popup-body"></div>
       <div class="modal-footer py-2">
         <button type="button" class="btn btn-sm btn-outline-light" onclick="snoozeRuleNudgeFromPopup()">稍後</button>
+        <button type="button" class="btn btn-sm btn-outline-info" onclick="autoPickRules('popup', this)">讓系統幫我選</button>
         <button type="button" class="btn btn-sm btn-success btn-accent-sm" onclick="openRulesFromPopup()">新增進階訊號</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 降級後選擇保留哪些自選股／進階訊號（keep_rank，migrate_signal_defaults_keep.sql）。
+     內容由 renderKeepPicker() 畫；儲存把勾選的寫 1..N、其餘清 NULL，
+     active_* view 依 keep_rank 排名，所以 monitor 那邊什麼都不用改。 -->
+<div class="modal fade sheet-modal" id="keepModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="keep-title">選擇要保留的項目</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body p-3">
+        <div class="keep-lead" id="keep-lead"></div>
+        <div id="keep-list"></div>
+        <div id="keep-msg" class="small mt-2"></div>
+      </div>
+      <div class="modal-footer py-2">
+        <span class="keep-count" id="keep-count"></span>
+        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-sm btn-primary" id="keep-save" onclick="saveKeepPicker()">儲存</button>
       </div>
     </div>
   </div>
@@ -595,8 +623,17 @@
               </svg><span>新增訊號</span>
             </button>
           </div>
+          <div class="home-nudge over-limit-banner" id="rules-over-limit" style="display:none"></div>
           <div id="rules-list"></div>
           <div id="rules-msg" class="rules-msg"></div>
+        </div>
+
+        <!-- pane 3：條件選單。原本是原生 <select>，手機上只能選項目、不知道每一項是什麼，
+             也沒有明確的退出。改成一頁清單：每項一行名稱＋一句說明，點了先跳說明視窗
+             （只解說訊號代表什麼，不講該怎麼做），視窗上才有「使用這個條件」。 -->
+        <div id="rules-pane-picker" style="display:none">
+          <div class="cond-pick-hint">點一個項目看說明，確認後再選用。左上角「返回編輯」可直接回去。</div>
+          <div id="cond-pick-list"></div>
         </div>
 
         <!-- pane 2：編輯器。三步驟由上而下：範圍 → 條件 → 名稱（選填），
@@ -636,6 +673,22 @@
       <div class="modal-footer py-2" id="rules-footer" style="display:none">
         <button type="button" class="btn btn-sm btn-outline-light" onclick="showRulesPane('list')">取消</button>
         <button type="button" class="btn btn-sm btn-primary" onclick="saveRule()">儲存並啟用</button>
+      </div>
+      <div class="modal-footer py-2" id="rules-picker-footer" style="display:none">
+        <button type="button" class="btn btn-sm btn-outline-light" onclick="showRulesPane('editor')">返回編輯</button>
+      </div>
+
+      <!-- 條件說明視窗：蓋在這個面板上的一層（不是第二個 Bootstrap modal——疊兩層會把背景鎖住）。
+           內容只解釋「這個條件量的是什麼、什麼時候成立」，不含任何操作建議（COMPLIANCE.md）。 -->
+      <div class="cond-explain" id="cond-explain" style="display:none" role="dialog" aria-modal="true" aria-labelledby="cond-explain-title">
+        <div class="cond-explain-card">
+          <div class="cond-explain-head">
+            <h6 class="mb-0" id="cond-explain-title"></h6>
+            <button type="button" class="btn-close" aria-label="關閉" onclick="hideCondExplain()"></button>
+          </div>
+          <div class="cond-explain-body" id="cond-explain-body"></div>
+          <div class="cond-explain-foot" id="cond-explain-foot"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -761,13 +814,13 @@
               </span>
             </label>
             <label class="alert-item">
-              <span class="alert-item-text"><span class="alert-item-label">融資暴增</span><span class="alert-item-note">單日增加 20% 以上</span></span>
+              <span class="alert-item-text"><span class="alert-item-label">融資顯著增加</span><span class="alert-item-note">單日增加 20% 以上</span></span>
               <span class="toggle-wrap form-check form-switch mb-0">
                 <input id="alert-margin-up" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_margin_up', this.checked)">
               </span>
             </label>
             <label class="alert-item">
-              <span class="alert-item-text"><span class="alert-item-label">融資暴減</span><span class="alert-item-note">單日減少 20% 以上</span></span>
+              <span class="alert-item-text"><span class="alert-item-label">融資顯著減少</span><span class="alert-item-note">單日減少 20% 以上</span></span>
               <span class="toggle-wrap form-check form-switch mb-0">
                 <input id="alert-margin-down" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_margin_down', this.checked)">
               </span>
@@ -2205,6 +2258,114 @@ function isRuleActive(rule) {
   return !planState.ready || !planState.activeRuleIds || planState.activeRuleIds.has(String(rule.id));
 }
 
+// ── 降級後「保留哪些」由使用者決定（2026-09-28 Howard）──
+// view 的排名是 keep_rank NULLS LAST, created_at, id（migrate_signal_defaults_keep.sql）。
+// 這裡不自己算排名，只做兩件事：算出「超出幾個」畫提示，以及把使用者勾的寫成 1..N。
+function overLimitInfo(kind) {
+  const rows = kind === "watchlist" ? watchlistRows : alertRules;
+  const ids = kind === "watchlist" ? planState.activeWatchIds : planState.activeRuleIds;
+  const limit = planLimitOf(kind);
+  if (!planState.ready || !ids || limit === null) return null;
+  const inactive = rows.filter(r => !ids.has(String(r.id)));
+  if (!inactive.length) return null;
+  return { total: rows.length, limit, inactive: inactive.length };
+}
+
+function renderOverLimitBanner(kind) {
+  const el = document.getElementById(kind === "watchlist" ? "wl-over-limit" : "rules-over-limit");
+  if (!el) return;
+  const info = overLimitInfo(kind);
+  el.style.display = info ? "" : "none";
+  if (!info) return;
+  const what = kind === "watchlist" ? "自選股" : "進階訊號";
+  const unit = kind === "watchlist" ? "檔" : "條";
+  el.innerHTML = `
+    <span class="home-nudge-text">${ICON_LOCK}${escapeHtml(planState.plan.name)}保留 ${info.limit} ${unit}${what}，你有 ${info.total} ${unit}；有 ${info.inactive} ${unit}暫停通知</span>
+    <span class="home-nudge-actions">
+      <button type="button" class="hs-btn" onclick="openKeepPicker('${jsAttr(kind)}')">選擇要保留哪些</button>
+    </span>`;
+}
+
+let _keepKind = "watchlist";
+function openKeepPicker(kind) {
+  _keepKind = kind;
+  // 從進階訊號面板過來：先把它收掉，Bootstrap 疊兩層 modal 會亂
+  const rulesEl = document.getElementById("rulesModal");
+  const rulesInst = rulesEl && bootstrap.Modal.getInstance(rulesEl);
+  const reopenRules = !!(rulesInst && rulesEl.classList.contains("show"));
+  if (reopenRules) rulesInst.hide();
+  renderKeepPicker();
+  trackActivity("keep_open", { kind });
+  const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("keepModal"));
+  setTimeout(() => modal.show(), reopenRules ? 220 : 0);
+}
+
+function renderKeepPicker() {
+  const kind = _keepKind;
+  const rows = kind === "watchlist" ? watchlistRows : alertRules;
+  const ids = (kind === "watchlist" ? planState.activeWatchIds : planState.activeRuleIds) || new Set();
+  const limit = planLimitOf(kind);
+  const what = kind === "watchlist" ? "自選股" : "進階訊號";
+  const unit = kind === "watchlist" ? "檔" : "條";
+  document.getElementById("keep-title").textContent = `選擇要保留的${what}`;
+  document.getElementById("keep-lead").innerHTML =
+    `${escapeHtml(planState.plan.name)}可保留 ${limit} ${unit}。勾選的繼續產生通知，其餘保留資料、暫停通知；升級後全部恢復。目前是依加入時間保留最早的 ${limit} ${unit}。`;
+  document.getElementById("keep-list").innerHTML = rows.map(r => {
+    const id = String(r.id);
+    const label = kind === "watchlist"
+      ? `<span class="keep-name">${escapeHtml(getPreferredStockName(String(r.stock_id).trim(), r.stock_name) || universe[String(r.stock_id).trim()]?.n || "")}</span><span class="keep-sub">${escapeHtml(String(r.stock_id).trim())}</span>`
+      : `<span class="keep-name">${escapeHtml(r.name || "(未命名)")}</span><span class="keep-sub">${escapeHtml((Array.isArray(r.conditions) ? r.conditions : []).map(describeCondition).join("、"))}</span>`;
+    return `<label class="keep-item">
+      <input type="checkbox" class="form-check-input keep-box" value="${escapeHtml(id)}" ${ids.has(id) ? "checked" : ""} onchange="syncKeepCount()">
+      <span class="keep-text">${label}</span>
+    </label>`;
+  }).join("");
+  document.getElementById("keep-msg").textContent = "";
+  syncKeepCount();
+}
+
+function syncKeepCount() {
+  const limit = planLimitOf(_keepKind);
+  const boxes = Array.from(document.querySelectorAll("#keep-list .keep-box"));
+  const n = boxes.filter(b => b.checked).length;
+  boxes.forEach(b => { b.disabled = !b.checked && n >= limit; });
+  const unit = _keepKind === "watchlist" ? "檔" : "條";
+  document.getElementById("keep-count").textContent = `已選 ${n}／${limit} ${unit}`;
+  document.getElementById("keep-save").disabled = n === 0;
+}
+
+async function saveKeepPicker() {
+  const kind = _keepKind;
+  const table = kind === "watchlist" ? "watchlist" : "alert_rules";
+  const rows = kind === "watchlist" ? watchlistRows : alertRules;
+  const chosen = Array.from(document.querySelectorAll("#keep-list .keep-box:checked")).map(b => b.value);
+  const msgEl = document.getElementById("keep-msg");
+  const btn = document.getElementById("keep-save");
+  btn.disabled = true;
+  msgEl.innerHTML = '<span class="text-muted">儲存中…</span>';
+  try {
+    // 勾選的依勾選順序寫 1..N；其餘清回 NULL（回到依加入時間排）
+    for (const r of rows) {
+      const idx = chosen.indexOf(String(r.id));
+      const keep_rank = idx >= 0 ? idx + 1 : null;
+      if ((r.keep_rank ?? null) === keep_rank) continue;
+      await sbPatch(table, { id: `eq.${r.id}` }, { keep_rank }, state.accessToken);
+      r.keep_rank = keep_rank;
+    }
+    trackActivity("keep_save", { kind, n: chosen.length });
+    msgEl.innerHTML = '<span class="text-success">已儲存，通知從下一次評估起依這份名單。</span>';
+    // 自選股快取（IndexedDB）連 activeIds 一起存、且以方案戳記為鍵：keep_rank 改了戳記不變，
+    // 不清掉的話 loadWatchlist 會拿到舊的「仍生效」集合，提示列看起來像沒存
+    if (kind === "watchlist") { await _reportCacheDelete(_watchCacheKey()).catch(() => {}); await loadWatchlist(); }
+    else await refreshRules();
+    setTimeout(() => bootstrap.Modal.getInstance(document.getElementById("keepModal"))?.hide(), 700);
+  } catch (e) {
+    // keep_rank 欄位還沒建（migration 未跑）：PostgREST 回 400／404
+    msgEl.innerHTML = `<span class="text-danger">儲存失敗：${escapeHtml(String(e.message || e))}</span>`;
+    btn.disabled = false;
+  }
+}
+
 // aiAllowed() 2026-09-23 一併移除：兩個呼叫它的地方（事件卡的 AI 按鈕、浮動 AI 問答）
 // 都收起來了。plans 表的 ai_enabled 仍在，方案面板照樣列這項功能。
 
@@ -2285,7 +2446,16 @@ function limitPromptHtml(kind, err) {
   const btn = next
     ? `<button type="button" class="btn btn-xs btn-success btn-accent-sm ms-1" onclick="openPlanModal('${jsAttr(kind)}', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} →</button>`
     : `<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${jsAttr(kind)}')">查看方案 →</button>`;
-  return `<span class="text-warning plan-hint">${ICON_WARN}${escapeHtml(text)}</span> ${btn}`;
+  return `<span class="text-warning plan-hint">${ICON_WARN}${escapeHtml(text)}</span> ${btn}${trialHintHtml()}`;
+}
+
+// 每個升級提示後面都接這一句（還沒體驗過的帳號才有）：上限提示、功能提示、
+// 統計頁與 K 線的鎖頁。trial_status() 說 available 才畫；用過、體驗中、已付費都不畫。
+function trialHintHtml() {
+  if (!trialOfferAvailable()) return "";
+  const t = planState.trial;
+  const name = t.plan_name || planNameOf(t.plan_code);
+  return `<span class="plan-trial-hint">或先<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('trial')">免費體驗 ${t.trading_days} 個交易日 →</button><span class="plan-trial-hint-sub">${escapeHtml(name)}完整功能、不需付款資料、每個帳號一次</span></span>`;
 }
 
 // 功能型（不是數量型）的提示：統計頁、盤中雷達持續更新、混和訊號。
@@ -2307,7 +2477,7 @@ function featurePromptHtml(feature) {
   const btn = next
     ? `<button type="button" class="btn btn-xs btn-success btn-accent-sm ms-1" onclick="openPlanModal('${jsAttr(feature)}', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} →</button>`
     : `<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${jsAttr(feature)}')">查看方案 →</button>`;
-  return `<span class="text-warning plan-hint">${ICON_LOCK}${escapeHtml(text)}</span> ${btn}`;
+  return `<span class="text-warning plan-hint">${ICON_LOCK}${escapeHtml(text)}</span> ${btn}${trialHintHtml()}`;
 }
 
 // 「我的自選股 N/上限」那顆計數籤 2026-09-22 隨標題一起拿掉（Howard）；
@@ -2614,7 +2784,7 @@ function renderPlanModal(focus) {
     ${payments}
     <div id="plan-msg" class="plan-msg"></div>
     <div class="plan-invite">覺得好用？<button type="button" class="btn btn-xs btn-outline-info" onclick="shareInvite()">邀請朋友一起用</button><span>朋友加 LINE 好友就能免費開始。</span></div>
-    <div class="plan-foot-note">月費不退款；取消續訂後功能保留至當期結束。超出方案的自選股與規則會保留資料、暫停通知，升級後即恢復。<span class="plan-ver">App v${appVersion()}</span></div>`;
+    <div class="plan-foot-note">月費不退款；取消續訂後功能保留至當期結束。超出方案的自選股與規則會保留資料、暫停通知，升級後即恢復；要保留哪些可以在自選股頁與進階訊號面板自己選。<span class="plan-ver">App v${appVersion()}</span></div>`;
   // 上限提示／深連結帶進來的那張卡：捲到看得見的地方（面板上半部是目前方案與用量）
   const focusEl = target && document.getElementById("plan-card-focus");
   if (focusEl) setTimeout(() => focusEl.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
@@ -4962,6 +5132,79 @@ const RULE_CATALOG = [
 
 const RULE_CATALOG_BY_TYPE = Object.fromEntries(RULE_CATALOG.map(c => [c.type, c]));
 
+// 每個條件的說明（選單頁的一句話 brief、說明視窗的 what／when）。
+// 只講「量的是什麼、什麼時候成立」，不寫任何該買該賣、看好看壞的字
+// （test_rule_explain 用 test_neutral_presentation 的 JUDGMENT_WORDS 掃）。
+// 每個 RULE_CATALOG 的 type 都要有一筆，測試會擋。
+const RULE_EXPLAIN = {
+  break_prior_high: { brief: "今天的價格高過最近 N 天的最高價",
+    what: "把最近 N 個交易日（不含今天）的最高價當作比較基準。",
+    when: "盤中成交價高於那個最高價時成立。N 由「回看天數」決定，預設 20 天。" },
+  break_prior_low: { brief: "今天的價格低過最近 N 天的最低價",
+    what: "把最近 N 個交易日（不含今天）的最低價當作比較基準。",
+    when: "盤中成交價低於那個最低價時成立。N 由「回看天數」決定，預設 20 天。" },
+  break_52w_high: { brief: "今天的價格高過最近一年的最高價",
+    what: "最近 52 週（約 250 個交易日）的最高價。",
+    when: "盤中成交價高於這一年裡的最高價時成立。" },
+  break_52w_low: { brief: "今天的價格低過最近一年的最低價",
+    what: "最近 52 週（約 250 個交易日）的最低價。",
+    when: "盤中成交價低於這一年裡的最低價時成立。" },
+  change_pct_above: { brief: "今天相對昨收的漲幅達到設定值",
+    what: "今天的成交價相對昨天收盤價的變動百分比。",
+    when: "漲幅達到或超過你設定的百分比時成立，例如設 5 就是漲 5% 以上。" },
+  change_pct_below: { brief: "今天相對昨收的跌幅達到設定值",
+    what: "今天的成交價相對昨天收盤價的變動百分比。",
+    when: "跌幅達到或超過你設定的百分比時成立；請填正數，例如設 5 就是跌 5% 以上。" },
+  gap_up: { brief: "開盤價高於昨天最高價一段距離",
+    what: "今天開盤價與昨天最高價之間的缺口，以百分比計。開盤高於昨收但還在昨天的價格區間內不算。",
+    when: "開盤價高於昨天最高價、而且差距達到設定的百分比時成立。" },
+  gap_down: { brief: "開盤價低於昨天最低價一段距離",
+    what: "今天開盤價與昨天最低價之間的缺口，以百分比計。開盤低於昨收但還在昨天的價格區間內不算。",
+    when: "開盤價低於昨天最低價、而且差距達到設定的百分比時成立。" },
+  volume_vs_ma: { brief: "今天成交量與均量的倍數關係",
+    what: "今天的成交量，對比最近 5 日或 20 日的平均成交量。",
+    when: "「高於」：成交量達到均量的設定倍數以上時成立；「低於」：成交量在均量的設定倍數以下時成立。" },
+  ma_cross: { brief: "快線與慢線的交叉",
+    what: "兩條移動平均線：快線（天數少）與慢線（天數多）。",
+    when: "「向上」：快線由下往上穿過慢線的那一天成立；「向下」：快線由上往下穿過慢線的那一天成立。以日線收盤資料計算。" },
+  price_vs_ma: { brief: "收盤價穿越某一條均線",
+    what: "收盤價與一條移動平均線（5、10、20 或 60 日）的相對位置。",
+    when: "「站上」：收盤價從均線之下變成之上的那一天成立；「跌破」：從之上變成之下的那一天成立。" },
+  rsi_above: { brief: "RSI 指標達到設定值以上",
+    what: "RSI（相對強弱指標，14 日）：把近期上漲日與下跌日的幅度換算成 0 到 100 的數值。",
+    when: "RSI 數值達到或超過你設定的值時成立，預設 70。" },
+  rsi_below: { brief: "RSI 指標落到設定值以下",
+    what: "RSI（相對強弱指標，14 日）：把近期上漲日與下跌日的幅度換算成 0 到 100 的數值。",
+    when: "RSI 數值落到你設定的值以下時成立，預設 30。" },
+  macd_cross: { brief: "MACD 線與訊號線的交叉",
+    what: "MACD 指標：MACD 線（12 日與 26 日指數平均的差）與訊號線（MACD 線的 9 日平均）。",
+    when: "「黃金交叉」：MACD 線由下往上穿過訊號線的那一天成立；「死亡交叉」：由上往下穿過的那一天成立。" },
+  net_buy_above: { brief: "單日法人買超張數達到設定值",
+    what: "證交所每日公布的三大法人（或你指定的外資、投信）當日買進減賣出的張數。",
+    when: "當日買超張數達到你設定的張數以上時成立。盤後資料公布後評估。" },
+  consec_net_buy: { brief: "法人連續買超的天數達到設定值",
+    what: "三大法人（或外資、投信）每日買超的連續紀錄。",
+    when: "連續買超天數達到你設定的天數時成立，例如設 3 就是連續三個交易日都是買超。" },
+  net_buy_flip: { brief: "法人由前一日賣超變成今日買超",
+    what: "三大法人（或外資、投信）前一日與今日的買賣超方向。",
+    when: "前一個交易日是賣超、今天變成買超的那一天成立。" },
+  net_buy_high: { brief: "今日買超張數是最近 N 天裡最多的",
+    what: "三大法人（或外資、投信）今天的買超張數，對比最近 N 天的每日買超。",
+    when: "今天的買超張數高於最近 N 天（不含今天）任何一天時成立。N 由「比較天數」決定。" },
+  revenue_yoy: { brief: "最新月營收相對去年同月的變動",
+    what: "公司最新公布的月營收，與去年同一個月的營收比較（年增率）。",
+    when: "年增率達到你設定的百分比以上時成立。每月營收公布、每日分析更新後評估。" },
+  revenue_mom: { brief: "最新月營收相對上個月的變動",
+    what: "公司最新公布的月營收，與前一個月比較（月增率）。",
+    when: "月增率低於你設定的百分比時成立；填負數就是「衰退到這個幅度」的門檻。" },
+  margin_above: { brief: "最新一季的利潤率達到設定值",
+    what: "最新一季財報的毛利率、營業利益率或淨利率。",
+    when: "你選的那個利潤率達到設定百分比以上時成立。財報更新、每日分析後評估。" },
+  roe_above: { brief: "最新的股東權益報酬率達到設定值",
+    what: "ROE（股東權益報酬率）：最新財報的淨利除以股東權益。",
+    when: "ROE 達到你設定的百分比以上時成立。財報更新、每日分析後評估。" },
+};
+
 // ── 進階訊號推薦（rule nudge）────────────────────────────────────
 // 規則少於 RULE_NUDGE_TARGET 條的使用者（免費版或付費版都一樣）在首頁看到
 // 一張卡：目前幾條、幾條可一鍵加入的範本、以及進編輯器的入口。
@@ -4969,6 +5212,9 @@ const RULE_CATALOG_BY_TYPE = Object.fromEntries(RULE_CATALOG.map(c => [c.type, c
 // （test_rule_ui_catalog.py 釘住），否則會存出後端看不懂、永遠不觸發的規則。
 // 名稱只描述條件、不下判斷（COMPLIANCE.md）。範本一律套用到全部自選股。
 const RULE_NUDGE_TARGET = 3;
+// 依方案的目標條數（Howard 2026-09-28）：免費版沒用過進階訊號、專業版不到 3 條、
+// 旗艦版不到 5 條就提醒。代碼不在表裡的方案退回 RULE_NUDGE_TARGET，且永遠不超過方案上限。
+const RULE_NUDGE_TARGET_BY_PLAN = { free: 1, pro: 3, premium: 5 };
 const RULE_NUDGE_SNOOZE_KEY = "cg-rule-nudge-snooze-until";
 const RULE_NUDGE_SNOOZE_DAYS = 7;
 const RULE_TEMPLATES = [
@@ -4998,7 +5244,51 @@ async function loadRuleNudgeState() {
 // 「達上限了還在推薦」
 function ruleNudgeTarget() {
   const limit = planLimitOf("alert_rules");
-  return limit === null ? RULE_NUDGE_TARGET : Math.min(RULE_NUDGE_TARGET, limit);
+  const byPlan = planState.ready && planState.plan ? RULE_NUDGE_TARGET_BY_PLAN[planState.plan.code] : undefined;
+  const target = byPlan !== undefined ? byPlan : RULE_NUDGE_TARGET;
+  return limit === null ? target : Math.min(target, limit);
+}
+
+// 「讓系統幫我選」：把範本一條條加到目標條數為止（跳過已有同型別的），
+// 撞到方案上限就停。首頁那一行、開機彈窗、進階訊號面板三處共用。
+async function autoPickRules(ctx, btn) {
+  if (!state.userId) return;
+  const msgEl = document.getElementById(
+    ctx === "modal" ? "rules-msg" : ctx === "popup" ? "rule-popup-msg" : "rule-nudge-msg");
+  const have = (ruleNudge.rules || []).length;
+  const need = Math.max(0, ruleNudgeTarget() - have);
+  const tpls = ruleTemplateSuggestions(need);
+  if (!tpls.length) { if (msgEl) msgEl.textContent = "已經達到目標條數。"; return; }
+  if (btn) { btn.disabled = true; btn.textContent = "加入中…"; }
+  let added = 0, limitHit = false;
+  try {
+    for (const t of tpls) {
+      try {
+        await sbPost("alert_rules", {
+          user_id: state.userId, name: t.name, stock_id: null, severity: null,
+          conditions: t.conditions, enabled: true,
+        }, state.accessToken, true);
+        added++;
+      } catch (e) {
+        if (isLimitError(e, "alert_rules")) { limitHit = true; break; }
+        throw e;
+      }
+    }
+    trackActivity("rule_autopick", { ctx, n: added });
+    await loadRuleNudgeState();
+    if (added) { noteRuleAdded(); queuePushPromptAfterSignal(); }
+    if (ctx === "modal") refreshRules(); else renderRuleNudge();
+    const names = tpls.slice(0, added).map(t => `「${t.name}」`).join("");
+    if (msgEl) {
+      msgEl.innerHTML = added
+        ? `<span class="text-success">已加入 ${added} 條：${escapeHtml(names)}，套用到全部自選股，可在進階訊號面板調整或刪除。</span>${limitHit ? " " + limitPromptHtml("alert_rules") : ""}`
+        : limitPromptHtml("alert_rules");
+    }
+  } catch (e) {
+    if (msgEl) msgEl.innerHTML = `<span class="text-danger">加入失敗：${escapeHtml(String(e.message || e))}</span>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "讓系統幫我選"; }
+  }
 }
 
 function ruleNudgeSnoozed() {
@@ -5313,8 +5603,10 @@ function renderRuleNudge() {
     <span class="home-nudge-text">${ICON_RULES}已設定 ${n}／${target} 條</span>
     <span class="home-nudge-actions">
       <button type="button" class="hs-btn" onclick="openRuleEditorFromNudge()">新增進階訊號</button>
+      <span class="hs-link" onclick="autoPickRules('home', this)" title="依範本補到目標條數">讓系統幫我選</span>
       <span class="hs-link home-nudge-later" onclick="snoozeRuleNudge()" title="7 天內不再顯示">稍後</span>
-    </span>`;
+    </span>
+    <div id="rule-nudge-msg" class="home-nudge-msg"></div>`;
 }
 
 async function addRuleTemplate(idx, ctx, btn) {
@@ -5463,8 +5755,9 @@ function alertTypeLabel(row) {
   if (sig && SIGNAL_LABEL_MAP[sig]) return SIGNAL_LABEL_MAP[sig];
   if (String(row.source || "") === "rule") return "進階訊號";
   const t = String(row.title || "");
-  const m = t.match(/(跌破關鍵價位|突破關鍵價位|成交量異常|達到設定價格（上漲）|達到設定價格（下跌）|跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|帶量上漲|帶量下跌|帶量上攻|帶量下殺|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資暴增|融資暴減)/);
-  if (m) return m[1].replace("達到自訂", "");
+  const m = t.match(/(跌破關鍵價位|突破關鍵價位|成交量異常|達到設定價格（上漲）|達到設定價格（下跌）|跌破支撐|逼近支撐|突破壓力|逼近壓力|漲停|跌停|爆量|帶量上漲|帶量下跌|帶量上攻|帶量下殺|收復支撐|達到自訂上漲價位|達到自訂下跌價位|法人連買|法人連賣|融資顯著增加|融資顯著減少|融資暴增|融資暴減)/);
+  // alert_history 舊列仍寫「暴增／暴減」（2026-09-28 改名前），顯示一律用新字
+  if (m) return m[1].replace("達到自訂", "").replace("暴增", "顯著增加").replace("暴減", "顯著減少");
   if (String(row.source || "").startsWith("daily_report")) return "每日報告";
   return "通知";
 }
@@ -6185,8 +6478,8 @@ function buildWhyHtml(row) {
     [/跌停/,     "💥 跌停",     wl.alert_limit_down],
     [/法人連買/, "📈 法人連買", wl.alert_inst_buy],
     [/法人連賣/, "📉 法人連賣", wl.alert_inst_sell],
-    [/融資暴增/, "💳 融資暴增", wl.alert_margin_up],
-    [/融資暴減/, "💳 融資暴減", wl.alert_margin_down],
+    [/融資暴增|融資顯著增加/, "💳 融資顯著增加", wl.alert_margin_up],
+    [/融資暴減|融資顯著減少/, "💳 融資顯著減少", wl.alert_margin_down],
   ];
   const lines = [`你已將 <b>${escapeHtml(name)} ${escapeHtml(sid)}</b> 加入自選股`];
   for (const [re, label] of condMap) {
@@ -6234,6 +6527,12 @@ async function markAllRead() {
 }
 
 function openDailyReportFromHistory() {
+  // 免費版：report-data 對這個方案回 403，開出去只會是一頁錯誤。改開方案面板。
+  if (!planAllows("stats_enabled")) {
+    const next = nextPlanFor("stats_enabled");
+    openPlanModal("stats_enabled", next ? next.code : undefined);
+    return;
+  }
   trackActivity("report_open");
   const url = new URL("report.html", window.location.href);
   if (state?.accessToken) {
@@ -6761,8 +7060,8 @@ function scoresLockedHtml() {
       <li>基本面與技術量能的分數變化、變化原因</li>
       <li>兩組篩選示範</li>
     </ul>
-    <div class="plan-locked-note">自選股的訊號、盤中與盤後通知、每日報告、K 線都不受影響。</div>
-    ${btn}</div>`;
+    <div class="plan-locked-note">自選股的訊號、盤中與盤後通知都不受影響。</div>
+    ${btn}${trialLockedLineHtml()}</div>`;
 }
 
 // ── K 線（字卡第三頁）被方案鎖住：plans.kline_enabled（2026-09-28）──
@@ -6774,10 +7073,7 @@ function klineLockedHtml() {
   const btn = next
     ? `<button class="btn btn-sm btn-success btn-accent-sm" onclick="openPlanModal('kline_enabled', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} NT$${next.price_twd}／月 →</button>`
     : `<button class="btn btn-sm btn-outline-info" onclick="openPlanModal('kline_enabled')">查看方案 →</button>`;
-  const t = trialOfferAvailable() ? planState.trial : null;
-  const trial = t
-    ? `<div class="plan-locked-trial">或先<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('trial')">免費體驗 ${t.trading_days} 個交易日 →</button></div>`
-    : "";
+  const trial = trialLockedLineHtml();
   return `<div class="plan-locked">
     <div class="plan-locked-title">${ICON_LOCK}K 線圖是付費方案功能</div>
     <ul class="plan-locked-list">
@@ -6787,6 +7083,14 @@ function klineLockedHtml() {
     </ul>
     <div class="plan-locked-note">「盤中雷達」與「歷史訊號」這兩頁不受影響。</div>
     ${btn}${trial}</div>`;
+}
+
+// 鎖頁（統計、K 線）底下那一行體驗入口；與 trialHintHtml 同一個判斷、只是排版不同
+function trialLockedLineHtml() {
+  if (!trialOfferAvailable()) return "";
+  const t = planState.trial;
+  const name = t.plan_name || planNameOf(t.plan_code);
+  return `<div class="plan-locked-trial">還沒體驗過：可先<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('trial')">免費體驗 ${t.trading_days} 個交易日 →</button><div class="plan-trial-hint-sub">${escapeHtml(name)}完整功能、不需付款資料、到期自動回到${escapeHtml(freePlanName())}</div></div>`;
 }
 
 function renderKLineLocked() {
@@ -6893,14 +7197,17 @@ function renderScores() {
   // 📊 統計分頁：plans.stats_enabled 為 false 的方案看到的是上面那張卡
   const filtersEl = document.getElementById("scores-filters");
   const toolsEl = document.getElementById("scores-screen-tools");
+  const hintEl = document.getElementById("scores-report-hint");
   if (!planAllows("stats_enabled")) {
     if (filtersEl) filtersEl.style.display = "none";
     if (toolsEl) toolsEl.style.display = "none";
+    if (hintEl) hintEl.style.display = "none";
     dateEl.textContent = "";
     listEl.innerHTML = scoresLockedHtml();
     return;
   }
   if (filtersEl) filtersEl.style.display = "";
+  if (hintEl) hintEl.style.display = "";
   const data = sharedReportData;
   if (!data) {
     dateEl.textContent = "";
@@ -7857,17 +8164,32 @@ let editorConditions = [];
 
 // 清單與編輯器是同一個面板的兩個 pane，切換只是換內容——
 // 不動 modal 本身，就不會有「淡出→沒有 modal→淡入」中間那一格閃到底層。
+// 三個 pane：list（清單）→ editor（編輯器）→ picker（條件選單）。
+// 返回鍵永遠退一層：picker → editor → list；標題與返回鍵文字跟著換。
+let _rulesPane = "list";
+let _rulesEditorTitle = "新增訊號";
 function showRulesPane(pane) {
-  const editing = pane === "editor";
-  document.getElementById("rules-pane-list").style.display   = editing ? "none" : "";
+  const editing = pane === "editor", picking = pane === "picker";
+  _rulesPane = pane;
+  hideCondExplain();
+  document.getElementById("rules-pane-list").style.display   = (editing || picking) ? "none" : "";
   document.getElementById("rules-pane-editor").style.display = editing ? "" : "none";
-  document.getElementById("rules-back").style.display   = editing ? "" : "none";
+  document.getElementById("rules-pane-picker").style.display = picking ? "" : "none";
+  const back = document.getElementById("rules-back");
+  back.style.display = (editing || picking) ? "" : "none";
+  back.querySelector("span").textContent = picking ? "返回編輯" : "訊號清單";
+  back.setAttribute("aria-label", picking ? "返回編輯" : "返回訊號清單");
+  back.onclick = () => showRulesPane(picking ? "editor" : "list");
   document.getElementById("rules-footer").style.display = editing ? "" : "none";
+  document.getElementById("rules-picker-footer").style.display = picking ? "" : "none";
   // 換 pane 等於換一頁，捲軸要回到最上面，否則新頁一進來就停在半路
   const body = document.querySelector("#rulesModal .modal-body");
   if (body) body.scrollTop = 0;
-  if (!editing) {
-    document.getElementById("rules-modal-title").textContent = "進階訊號";
+  const titleEl = document.getElementById("rules-modal-title");
+  if (picking) titleEl.textContent = "選擇條件";
+  else if (editing) titleEl.textContent = _rulesEditorTitle;
+  else {
+    titleEl.textContent = "進階訊號";
     refreshRules();
   }
 }
@@ -7897,11 +8219,13 @@ async function refreshRules() {
     return;
   }
   document.getElementById("rules-count").innerHTML = rulesCountLabel();
+  renderOverLimitBanner("alert_rules");
 
   // 未達推薦目標條數時，面板裡也給範本（與首頁卡片同一組）
   const tpls = alertRules.length < ruleNudgeTarget() ? ruleTemplateSuggestions() : [];
   const tplHtml = tpls.length ? `
-      <div class="rules-empty-sub">${alertRules.length ? "還可以加入範本" : "或先從範本開始"}（套用到全部自選股）</div>
+      <div class="rules-empty-sub">${alertRules.length ? "還可以加入範本" : "或先從範本開始"}（套用到全部自選股）
+        <button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="autoPickRules('modal', this)">讓系統幫我選</button></div>
       <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "modal")}</div>` : "";
 
   if (!alertRules.length) {
@@ -8026,7 +8350,8 @@ function openRuleEditor(id) {
   }
   editingRuleId = id;
   const r = id ? alertRules.find(x => String(x.id) === String(id)) : null;
-  document.getElementById("rules-modal-title").textContent = r ? "編輯訊號" : "新增訊號";
+  _rulesEditorTitle = r ? "編輯訊號" : "新增訊號";
+  document.getElementById("rules-modal-title").textContent = _rulesEditorTitle;
   document.getElementById("rule-name").value = (r && r.name) || "";
   document.getElementById("rule-editor-msg").textContent = "";
 
@@ -8049,13 +8374,84 @@ function addRuleCondition() {
   // 混和訊號是方案功能（plans.mixed_signals）。DB 的 trigger 才是防線，
   // 這裡先把話講清楚，不要讓人組好三個條件才在儲存時被拒。
   if (!planAllows("mixed_signals")) {
-    const el = document.getElementById("rule-editor-msg");
-    el.innerHTML = featurePromptHtml("mixed_signals");
-    el.className = "small mt-2";
+    showUpgradeAtEditorBottom(featurePromptHtml("mixed_signals"));
     return;
   }
   editorConditions.push({ type: "change_pct_above", value: 5 });
   renderRuleConditions();
+}
+
+// 升級提示在編輯器最底（#rule-editor-msg），按鈕在畫面中段：不捲過去的話
+// 使用者按了沒反應（Howard 2026-09-28）。捲到底＋整塊閃 3 秒，讓眼睛跟過去。
+const UPGRADE_FLASH_MS = 3000;
+function showUpgradeAtEditorBottom(html) {
+  const el = document.getElementById("rule-editor-msg");
+  if (!el) return;
+  el.innerHTML = html;
+  el.className = "small mt-2 upgrade-callout";
+  const body = document.querySelector("#rulesModal .modal-body");
+  if (body) body.scrollTo({ top: body.scrollHeight, behavior: "smooth" });
+  el.classList.remove("is-flashing");
+  void el.offsetWidth;   // 重新觸發 animation
+  el.classList.add("is-flashing");
+  clearTimeout(el._flashTimer);
+  el._flashTimer = setTimeout(() => el.classList.remove("is-flashing"), UPGRADE_FLASH_MS);
+}
+
+// ── 條件選單頁 ──
+let _pickerTarget = 0;   // 正在替第幾個條件挑型別
+
+function openCondPicker(i) {
+  _pickerTarget = i;
+  const cur = (editorConditions[i] || {}).type;
+  const grouped = {};
+  RULE_CATALOG.forEach(c => { (grouped[c.tier] = grouped[c.tier] || []).push(c); });
+  const listEl = document.getElementById("cond-pick-list");
+  listEl.innerHTML = Object.keys(RULE_TIERS).map(t => `
+    <div class="cond-pick-group">
+      <div class="cond-pick-group-head"><span class="rule-tier tier-${t}">${RULE_TIERS[t].label}</span><span class="cond-pick-group-note">${RULE_TIERS[t].note}</span></div>
+      ${(grouped[t] || []).map(x => `
+        <button type="button" class="cond-pick-item${x.type === cur ? " is-current" : ""}" onclick="showCondExplain('${jsAttr(x.type)}', 'pick')">
+          <span class="cond-pick-name">${escapeHtml(x.name)}</span>
+          <span class="cond-pick-brief">${escapeHtml((RULE_EXPLAIN[x.type] || {}).brief || "")}</span>
+        </button>`).join("")}
+    </div>`).join("");
+  showRulesPane("picker");
+}
+
+// mode = 'pick'：從選單點進來，底下有「使用這個條件」；'info'：編輯器裡按「說明」，只有關閉
+function showCondExplain(type, mode) {
+  const spec = RULE_CATALOG_BY_TYPE[type];
+  const ex = RULE_EXPLAIN[type];
+  if (!spec || !ex) return;
+  const box = document.getElementById("cond-explain");
+  document.getElementById("cond-explain-title").textContent = spec.name;
+  const params = spec.params.length
+    ? `<div class="cond-explain-params"><b>可調整的設定</b>：${spec.params.map(p => escapeHtml(p.label)).join("、")}</div>`
+    : "";
+  document.getElementById("cond-explain-body").innerHTML = `
+    <div class="cond-explain-tier"><span class="rule-tier tier-${spec.tier}">${RULE_TIERS[spec.tier].label}</span>評估時機：${RULE_TIERS[spec.tier].note}</div>
+    <p><b>量的是什麼</b>：${escapeHtml(ex.what)}</p>
+    <p><b>什麼時候成立</b>：${escapeHtml(ex.when)}</p>
+    ${params}
+    <div class="cond-explain-note">以上只說明條件的定義，不代表任何操作建議。</div>`;
+  document.getElementById("cond-explain-foot").innerHTML = mode === "pick"
+    ? `<button type="button" class="btn btn-sm btn-outline-light" onclick="hideCondExplain()">返回列表</button>
+       <button type="button" class="btn btn-sm btn-primary" onclick="useCondType('${jsAttr(type)}')">使用這個條件</button>`
+    : `<button type="button" class="btn btn-sm btn-outline-light" onclick="hideCondExplain()">關閉</button>`;
+  box.style.display = "";
+  trackActivity("cond_explain", { type, mode });
+}
+
+function hideCondExplain() {
+  const box = document.getElementById("cond-explain");
+  if (box) box.style.display = "none";
+}
+
+function useCondType(type) {
+  hideCondExplain();
+  onConditionTypeChange(_pickerTarget, type);
+  showRulesPane("editor");
 }
 
 function removeRuleCondition(i) {
@@ -8126,7 +8522,7 @@ function syncMixedSignalUi() {
   const msgEl = document.getElementById("rule-editor-msg");
   if (msgEl && !allowed && editorConditions.length > 1) {
     msgEl.innerHTML = featurePromptHtml("mixed_signals");
-    msgEl.className = "small mt-2";
+    msgEl.className = "small mt-2 upgrade-callout";
   }
 }
 
@@ -8137,11 +8533,6 @@ function renderRuleConditions() {
 
   wrap.innerHTML = editorConditions.map((c, i) => {
     const spec = RULE_CATALOG_BY_TYPE[c.type] || RULE_CATALOG[0];
-    const opts = Object.keys(RULE_TIERS).map(t =>
-      `<optgroup label="${RULE_TIERS[t].label}">` +
-      (grouped[t] || []).map(x =>
-        `<option value="${x.type}"${x.type === c.type ? " selected" : ""}>${x.name}</option>`).join("") +
-      `</optgroup>`).join("");
 
     const params = spec.params.map(p => {
       const v = c[p.k] !== undefined ? c[p.k] : p.def;
@@ -8171,8 +8562,10 @@ function renderRuleConditions() {
       <div class="rule-cond">
         <div class="rule-cond-top">
           <span class="rule-cond-index">條件 ${i + 1}</span>
-          <select class="rule-input" aria-label="條件 ${i + 1} 的類型"
-                  onchange="onConditionTypeChange(${i}, this.value)">${opts}</select>
+          <button type="button" class="rule-input rule-type-btn" aria-label="條件 ${i + 1} 的類型：${escapeHtml(spec.name)}，點一下換別的"
+                  onclick="openCondPicker(${i})"><span>${escapeHtml(spec.name)}</span><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
+          <button type="button" class="btn btn-sm btn-outline-light rule-info-btn" title="這個條件是什麼意思"
+                  aria-label="說明：${escapeHtml(spec.name)}" onclick="showCondExplain('${jsAttr(spec.type)}', 'info')">說明</button>
           ${removeBtn}
         </div>
         <div class="rule-cond-tier">${RULE_TIERS[spec.tier].label}　${RULE_TIERS[spec.tier].note}</div>
@@ -8499,6 +8892,7 @@ function renderWatchlist(rows) {
          <div class="hec-sub">在上面的搜尋列輸入代號或名稱，例如 2330／台積電。</div>
        </div>`;
   grid.style.display = visible.length ? "block" : "none";
+  renderOverLimitBanner("watchlist");
 
   // 收盤價、事件、持股都在「🌙 盤後」：這一頁不再讀任何報價。
 
@@ -8750,9 +9144,10 @@ function openAlertSettings(scope) {
   for (const f of ALERT_FIELDS) {
     const el = document.getElementById(ALERT_FIELD_IDS[f]);
     if (!el) continue;
+    // 缺鍵（舊 schema）視為開：與 DB 預設、後端 fallback 同一個方向（預設全開）
     el.checked = useAll
-      ? watchlistRows.filter(r => !!r[f]).length * 2 > watchlistRows.length
-      : !!row[f];
+      ? watchlistRows.filter(r => r[f] !== false).length * 2 > watchlistRows.length
+      : row[f] !== false;
   }
   const hi = useAll ? null : row.target_price_high;
   const lo = useAll ? null : row.target_price_low;
@@ -10415,16 +10810,17 @@ async function addStock() {
       user_id:    state.userId,
       stock_id:   sid,
       stock_name: name,
+      // 2026-09-28 Howard：基礎訊號預設全開（DB 預設同步改，migrate_signal_defaults_keep.sql）
       alert_break_support:    true,
       alert_near_support:     true,
-      alert_break_resistance: false,
-      alert_near_resistance:  false,
-      alert_volume_spike:     false,
-      alert_limit_up:         false,
+      alert_break_resistance: true,
+      alert_near_resistance:  true,
+      alert_volume_spike:     true,
+      alert_limit_up:         true,
       alert_limit_down:       true,
-      alert_inst_buy:         false,
+      alert_inst_buy:         true,
       alert_inst_sell:        true,
-      alert_margin_up:        false,
+      alert_margin_up:        true,
       alert_margin_down:      true,
     }, state.accessToken);
     trackActivity("watch_add", { stock: sid });

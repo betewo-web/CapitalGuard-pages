@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="227">
+  <meta name="app-version" content="228">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -385,6 +385,10 @@ const ACTION_LABELS = {
   checkout_confirm_open: "開結帳確認視圖",
   billing_result:    "金流結果視窗",
   trial_claim:       "開始免費體驗",
+  cond_explain:      "看條件說明",
+  keep_open:         "開保留選擇",
+  keep_save:         "儲存保留名單",
+  rule_autopick:     "讓系統選訊號",
   push_enable:       "開啟推播",
   disclaimer_accept: "同意免責聲明",
 };
@@ -429,7 +433,7 @@ const KIND_LABELS = {
 const FLAG_LABELS = {
   break_support: "跌破關鍵價位", near_support: "逼近支撐", break_resistance: "突破關鍵價位", near_resistance: "逼近壓力",
   volume_spike: "成交量異常", limit_up: "漲停", limit_down: "跌停", inst_buy: "法人連買", inst_sell: "法人連賣",
-  margin_up: "融資暴增", margin_down: "融資暴減",
+  margin_up: "融資顯著增加", margin_down: "融資顯著減少",
 };
 const EVENT_TYPE_LABELS = {
   announcement: "公告", revenue: "營收", eps: "EPS", conference: "法說", dividend: "股利", margin: "融資券",
