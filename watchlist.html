@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="224">
+  <meta name="app-version" content="225">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=224" rel="stylesheet">
+  <link href="watchlist.css?v=225" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -166,7 +166,7 @@
               title="方案與用量" aria-label="方案與用量"></button>
       <!-- 管理儀表板（ADMIN_DASHBOARD.md）：users.is_admin 才顯示；權限在伺服器端 admin_stats() 判定 -->
       <a id="nav-admin" class="btn btn-sm btn-outline-warning" href="admin.html" style="display:none"
-         title="管理儀表板" aria-label="管理儀表板">📊<span class="d-none d-sm-inline ms-1">儀表板</span></a>
+         title="管理儀表板" aria-label="管理儀表板"><i data-icon="chart"></i><span class="d-none d-sm-inline ms-1">儀表板</span></a>
       <button id="nav-logout" class="btn btn-sm btn-outline-light" style="display:none" onclick="logout()">登出</button>
     </div>
   </div>
@@ -1304,7 +1304,7 @@ const AI_FEATURES_LIVE = false;
 const SITE_BASE_URL = "https://betewo-web.github.io/betewo-site/";
 const PLAN_COMING_SOON_NOTE = "AI 資料白話仍在開發，目前不包含在任何方案裡；完成後會先公告。";
 // 付款紀錄裡非公開方案的名字
-const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達（專業版）", premium: "廣域追蹤雷達（旗艦版）", basic: "專業版（舊制）" };
+const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達（專業版）", premium: "廣域追蹤雷達（旗艦版）", basic: "廣域追蹤雷達（舊制）" };
 let planState = {
   ready: false,          // false = plans 表不存在或載入失敗 → 前端不做任何限制
   plan: null,            // plans 列（code / name / watch_limit / rule_limit / ai_*）
@@ -1351,6 +1351,7 @@ const ICON_CANDLE = _svg('<path d="M5.2 2.4v1.8M5.2 10.4v3.2"/><rect x="3.2" y="
 const ICON_GIFT   = _svg('<rect x="2.6" y="6.4" width="10.8" height="7" rx="1.5"/><path d="M2.2 9h11.6M8 6.4v7"/><path d="M8 6.4C7.2 4.2 6.5 3 5.4 3a1.7 1.7 0 0 0 0 3.4h5.2a1.7 1.7 0 0 0 0-3.4c-1.1 0-1.8 1.2-2.6 3.4Z"/>');
 const ICON_WARN   = _svg('<path d="M8 2.6 14 13.2H2z"/><path d="M8 6.6v3.1"/><path d="M8 11.4v.1"/>');
 const ICON_LOCK   = _svg('<rect x="3.4" y="7" width="9.2" height="6.4" rx="1.6"/><path d="M5.8 7V5.5a2.2 2.2 0 0 1 4.4 0V7"/>');
+const ICON_USER   = _svg('<circle cx="8" cy="5.7" r="2.6"/><path d="M3.1 13.4a4.9 4.9 0 0 1 9.8 0"/>', 14);
 const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2.9-1z"/><path d="M11.5 8.6l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z"/>');
 
 // 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
@@ -2326,7 +2327,7 @@ function renderPlanBadge() {
   const badge = planState.ready
     ? `<span class="${planBadgeClass(planState.plan.code)}">${escapeHtml(planState.plan.name)}</span>`
     : "";
-  el.innerHTML = `👤 ${escapeHtml(state.displayName || "")}${badge}`;
+  el.innerHTML = `${ICON_USER}${escapeHtml(state.displayName || "")}${badge}`;
   syncPlanLocks();
 }
 
@@ -2404,6 +2405,12 @@ function planPriceLabel(p) {
 function planNameOf(code) {
   const p = planState.plans.find(x => x.code === code);
   return p ? p.name : (PLAN_NAME_FALLBACK[code] || code || "");
+}
+
+// 畫面上不寫「免費版」三個字，一律寫 plans 裡的全名（標準雷達（免費版））：
+// 只寫階級看不出它是哪一台雷達，同一個面板裡一半寫全名、一半寫階級更難懂（Howard 2026-09-28）
+function freePlanName() {
+  return planNameOf("free") || "免費版";
 }
 
 // ── 邀請朋友（B3）：台灣的傳播在 LINE 群組，App 裡以前沒有任何可以分享出去的入口 ──
@@ -2487,21 +2494,21 @@ function subscriptionStatusHtml() {
   const cancelBtn = `<button type="button" class="btn btn-xs btn-outline-danger ms-2" onclick="cancelSubscription()">取消續訂</button>`;
   // 扣款失敗要先判：plan_of() 這時已推導成 free，放在 free 之後永遠走不到
   if (s && s.status === "past_due") {
-    return `<div class="plan-status plan-status-warn">${ICON_WARN}上期扣款失敗，已暫回免費版。綠界下期仍會嘗試扣款；不想再扣請取消續訂，想繼續用請更新付款方式後重新訂閱。${agreementOpen ? cancelBtn : ""}</div>`;
+    return `<div class="plan-status plan-status-warn">${ICON_WARN}上期扣款失敗，已暫回${escapeHtml(freePlanName())}。綠界下期仍會嘗試扣款；不想再扣請取消續訂，想繼續用請更新付款方式後重新訂閱。${agreementOpen ? cancelBtn : ""}</div>`;
   }
   if (!s || p.code === "free") {
     if (agreementOpen) {
       return `<div class="plan-status plan-status-warn">${ICON_WARN}先前的定期定額約定仍在綠界（服務已於 ${fmtPlanDate(s.current_period_end)} 到期）。不想再扣款請取消續訂。${cancelBtn}</div>`;
     }
-    return `<div class="plan-status">免費使用中，隨時可升級。</div>`;
+    return `<div class="plan-status">${escapeHtml(freePlanName())}使用中，隨時可升級。</div>`;
   }
   const until = fmtPlanDate(s.current_period_end);
   if (s.cancel_requested_at) {
-    return `<div class="plan-status">已取消續訂，${escapeHtml(p.name)}功能保留至 <b>${until}</b>，之後回到免費版。</div>`;
+    return `<div class="plan-status">已取消續訂，${escapeHtml(p.name)}功能保留至 <b>${until}</b>，之後回到${escapeHtml(freePlanName())}。</div>`;
   }
   if (s.provider === "trial") {
     const left = tradingDaysLeftFrom(s.current_period_end);
-    const freeName = planNameOf("free") || "免費版";
+    const freeName = freePlanName();
     return `<div class="plan-status">${ICON_GIFT}免費體驗中，到 <b>${trialLastDayLabel(s.current_period_end)}</b> 收盤為止${left !== null ? `（含今天還剩 ${left} 個交易日）` : ""}，之後自動回到${escapeHtml(freeName)}，不會扣款。想繼續用不中斷，隨時可以升級。</div>`;
   }
   if (s.provider === "manual") {
@@ -2533,9 +2540,9 @@ function renderPlanModal(focus) {
     alert_rules: `${ICON_RULES}進階訊號已達目前方案上限，升級即可新增更多。`,
     stats_enabled: `${ICON_CHART}統計整理分頁（全市場評分的排序與篩選）需要付費方案。`,
     live_radar:    `${ICON_RADAR}盤中雷達持續更新需要付費方案；目前是開啟 App 或收到通知時更新一次。`,
-    mixed_signals: `${ICON_MIX}一條進階訊號放多個條件（混和訊號）是廣域追蹤雷達（旗艦版）功能。`,
+    mixed_signals: `${ICON_MIX}一條進階訊號放多個條件（混和訊號）是${escapeHtml(planNameOf("premium"))}功能。`,
     kline_enabled: `${ICON_CANDLE}K 線圖需要付費方案。`,
-    trial:         `${ICON_GIFT}免費體驗不需要付款資料，到期自動回到免費方案。`,
+    trial:         `${ICON_GIFT}免費體驗不需要付款資料，到期自動回到${escapeHtml(freePlanName())}。`,
     deeplink:    pitch || "從官網過來的：先看看目前方案的用量，需要再升級。",
     paid:        "付款結果以綠界回呼為準。若方案尚未更新，請稍後再開啟這個面板確認。",
     pay_failed:  "綠界回報這次付款未成功，沒有扣款也沒有開通。可以重新選擇方案再試一次。",
@@ -2566,7 +2573,7 @@ function renderPlanModal(focus) {
     if (isCurrent) {
       cta = `<button type="button" class="btn btn-sm btn-outline-light w-100" disabled>目前方案</button>`;
     } else if (x.price_twd === 0) {
-      cta = `<button type="button" class="btn btn-sm btn-outline-light w-100" onclick="cancelSubscription()">改為免費版</button>`;
+      cta = `<button type="button" class="btn btn-sm btn-outline-light w-100" onclick="cancelSubscription()">改為${escapeHtml(x.name)}</button>`;
     } else {
       const up = x.price_twd > p.price_twd;
       cta = `<button type="button" class="btn btn-sm ${up ? "btn-success btn-accent-sm" : "btn-outline-light"} w-100 justify-content-center"
@@ -2611,7 +2618,7 @@ function renderPlanModal(focus) {
   if (trialEl) setTimeout(() => trialEl.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
 }
 
-// 訊息列在付款紀錄下面，面板捲在上半部時看不到——按「改為免費版」沒反應的錯覺就是這樣來的
+// 訊息列在付款紀錄下面，面板捲在上半部時看不到——按免費那張卡的鈕沒反應的錯覺就是這樣來的
 function _revealPlanMsg(el) {
   if (el.textContent.trim()) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
@@ -2815,21 +2822,21 @@ function cancelSubscription() {
   const agreementOpen = !!(s && s.provider === "ecpay" && s.provider_ref && !s.cancel_requested_at);
   if (s && s.provider === "trial" && s.status === "active" && new Date(s.current_period_end) > new Date()) {
     showBillingResult({ tone: "info", title: "體驗不需要取消",
-      lines: [`免費體驗到 ${trialLastDayLabel(s.current_period_end)} 收盤為止，之後自動回到免費方案，沒有任何扣款。`] });
+      lines: [`免費體驗到 ${trialLastDayLabel(s.current_period_end)} 收盤為止，之後自動回到${freePlanName()}，沒有任何扣款。`] });
     return;
   }
   if (s && s.provider === "manual") {
     showBillingResult({
       tone: "info", title: "這個方案由管理員指派",
       lines: [
-        `不是綠界訂閱，沒有扣款；會在 ${fmtPlanDate(s.current_period_end)} 自動回到免費版。`,
+        `不是綠界訂閱，沒有扣款；會在 ${fmtPlanDate(s.current_period_end)} 自動回到${freePlanName()}。`,
         { html: `想提前結束請<a href="${BILLING_CONTACT_MAILTO}">來信</a>，由管理員調整。` },
       ],
     });
     return;
   }
   if (!agreementOpen) {
-    showBillingResult({ tone: "info", title: s && s.cancel_requested_at ? "已經取消過了" : "目前是免費版",
+    showBillingResult({ tone: "info", title: s && s.cancel_requested_at ? "已經取消過了" : `目前是${freePlanName()}`,
       lines: [s && s.cancel_requested_at
         ? `綠界的定期定額已終止，不會再扣款；功能保留至 ${fmtPlanDate(s.current_period_end)}。`
         : "沒有進行中的付費訂閱，也沒有任何扣款約定需要取消。"] });
@@ -2845,10 +2852,10 @@ function cancelSubscription() {
       <div class="plan-confirm-box">
         <ul class="plan-confirm-points">
           ${stillActive
-            ? `<li>${escapeHtml(planName)}功能保留至 <b>${until}</b>，之後回到免費版</li>`
-            : `<li>目前已是免費版（${escapeHtml(planName)}服務於 ${until} 結束）；這一步是終止綠界那邊仍在的扣款約定</li>`}
+            ? `<li>${escapeHtml(planName)}功能保留至 <b>${until}</b>，之後回到${escapeHtml(freePlanName())}</li>`
+            : `<li>目前已是${escapeHtml(freePlanName())}（${escapeHtml(planName)}服務於 ${until} 結束）；這一步是終止綠界那邊仍在的扣款約定</li>`}
           <li>綠界不會再扣下一期；已付的月費不退款</li>
-          <li>超出免費版上限的自選股與規則會保留資料、暫停通知，重新訂閱即恢復</li>
+          <li>超出${escapeHtml(freePlanName())}上限的自選股與規則會保留資料、暫停通知，重新訂閱即恢復</li>
         </ul>
       </div>
       <div class="plan-confirm-actions">
@@ -2878,9 +2885,9 @@ async function confirmCancel() {
           ? "綠界的定期定額先前已終止（已向綠界查證），之後不會再扣款。"
           : "綠界已終止定期定額，之後不會再扣款。",
         data.plan_active
-          ? `${name}功能保留至 ${fmtPlanDate(data.service_until)}，到期自動回到免費版；面板在那之前會顯示「已取消續訂」。`
-          : "目前維持免費版；不會再有任何扣款。",
-        "已付的月費不退款。超出免費版上限的自選股與規則會保留資料、暫停通知，重新訂閱即恢復。",
+          ? `${name}功能保留至 ${fmtPlanDate(data.service_until)}，到期自動回到${freePlanName()}；面板在那之前會顯示「已取消續訂」。`
+          : `目前維持${freePlanName()}；不會再有任何扣款。`,
+        `已付的月費不退款。超出${freePlanName()}上限的自選股與規則會保留資料、暫停通知，重新訂閱即恢復。`,
       ],
     });
   } catch (e) {
@@ -6855,7 +6862,7 @@ async function claimTrial() {
       tone: "ok", title: "體驗已開始",
       lines: [
         `${planNameOf(r.plan_code)}的功能已全部開放，到 ${trialLastDayLabel(r.period_end)} 收盤為止（${r.trading_days} 個交易日）。`,
-        "到期會自動回到免費方案，不會扣款；想繼續用，隨時可以在這裡升級。",
+        `到期會自動回到${freePlanName()}，不會扣款；想繼續用，隨時可以在這裡升級。`,
       ],
     });
   } catch (e) {

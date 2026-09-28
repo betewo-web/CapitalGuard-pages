@@ -3433,6 +3433,9 @@ button.user-chip {
 	gap: 0.35rem;
 }
 button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--text-0); }
+/* 人像與儀表板圖示：線條 SVG，跟著 chip 的文字顏色走（原本是 👤／📊 兩個 emoji） */
+.user-chip .ic,
+#nav-admin .ic { flex: 0 0 auto; width: 14px; height: 14px; }
 
 .plan-badge {
 	display: inline-block;
