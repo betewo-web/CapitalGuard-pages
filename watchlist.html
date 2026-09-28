@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="216">
+  <meta name="app-version" content="217">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=216" rel="stylesheet">
+  <link href="watchlist.css?v=217" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1256,7 +1256,7 @@ const AI_FEATURES_LIVE = false;
 const SITE_BASE_URL = "https://betewo-web.github.io/betewo-site/";
 const PLAN_COMING_SOON_NOTE = "AI 資料白話仍在開發，目前不包含在任何方案裡；完成後會先公告。";
 // 付款紀錄裡非公開方案的名字
-const PLAN_NAME_FALLBACK = { free: "免費版", pro: "專業版", premium: "旗艦版", basic: "專業版（舊制）" };
+const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達", premium: "廣域追蹤雷達", basic: "專業版（舊制）" };
 let planState = {
   ready: false,          // false = plans 表不存在或載入失敗 → 前端不做任何限制
   plan: null,            // plans 列（code / name / watch_limit / rule_limit / ai_*）
@@ -2080,7 +2080,7 @@ const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 // 鍵名帶版本：2026-09-27 換方案（free/pro/premium ＋三個新旗標）那天，已經快取過
 // 今天那份的裝置會整天看到舊卡片（價格、上限全是舊的）。換鍵＝所有人重抓一次。
 // 以後改價或加欄位也要跟著 +1。
-const PLANS_CACHE_KEY = "cg-plans-v2";
+const PLANS_CACHE_KEY = "cg-plans-v3";   // v3：2026-09-28 方案改名
 async function _loadPlansCached() {
   const today = taipeiDateKey(new Date());
   try {
@@ -2454,7 +2454,7 @@ function renderPlanModal(focus) {
     alert_rules: "📐 進階訊號已達目前方案上限，升級即可新增更多。",
     stats_enabled: "📊 統計整理分頁（全市場評分的排序與篩選）需要付費方案。",
     live_radar:    "⚡ 盤中雷達持續更新需要付費方案；目前是開啟 App 或收到通知時更新一次。",
-    mixed_signals: "🔀 一條進階訊號放多個條件（混和訊號）是旗艦版功能。",
+    mixed_signals: "🔀 一條進階訊號放多個條件（混和訊號）是廣域追蹤雷達功能。",
     deeplink:    pitch || "從官網過來的：先看看目前方案的用量，需要再升級。",
     paid:        "付款結果以綠界回呼為準。若方案尚未更新，請稍後再開啟這個面板確認。",
     pay_failed:  "綠界回報這次付款未成功，沒有扣款也沒有開通。可以重新選擇方案再試一次。",
