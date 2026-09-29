@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="235">
+  <meta name="app-version" content="236">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=235" rel="stylesheet">
+  <link href="watchlist.css?v=236" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -8960,23 +8960,34 @@ function renderWatchlist(rows) {
     }
 
     const item = document.createElement("article");
-    item.className = active ? "wl-row" : "wl-row is-inactive";
+    item.className = active ? "wl-row wl-row-tappable" : "wl-row wl-row-tappable is-inactive";
     item.dataset.id = row.id;
     item.dataset.sid = sid;
     // 2026-09-22：一列就是「名稱＋代號 …… 移除」，超出方案時多一行標記。
     // 收盤價、事件、持股與 K 線在「🌙 盤後」，通知改從標題列那顆「🔔 通知」一次設定。
+    // 2026-09-29（Howard）：整列可點，點進去就是這一檔的基礎訊號——本來只能從標題列
+    // 的「基礎訊號」進「全部股票」，再按「設定個股」挑，要調某一檔得繞三步。
+    // 名稱那一塊是真的 <button>，鍵盤與讀屏靠它；點列上的空白處由下面的 listener 接。
     item.innerHTML = `
       <div class="wl-row-head">
-        <div class="wl-ident">
+        <button type="button" class="wl-ident"
+                aria-label="設定 ${escapeHtml(displayName)} ${escapeHtml(sid)} 的基礎訊號">
           <span class="wl-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
           <span class="wl-sid">${escapeHtml(sid)}</span>
-        </div>
+          <span class="wl-row-go" aria-hidden="true">›</span>
+        </button>
         <div class="wl-row-actions">
           <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}<span class="wl-ic-label">移除</span></button>
         </div>
       </div>
       ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
     `;
+    // 整列一個 listener 就夠：名稱那顆 button 的 click（滑鼠或鍵盤 Enter／空白）
+    // 會冒泡上來，所以它不必自己綁。.wl-row-actions 裡的「移除」有自己的動作，排除掉。
+    item.addEventListener("click", (e) => {
+      if (e.target.closest(".wl-row-actions")) return;
+      openAlertSettings(row.id);
+    });
     grid.appendChild(item);
   });
 }

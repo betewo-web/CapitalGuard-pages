@@ -628,12 +628,43 @@ body.has-bottom-nav .page-shell {
 	min-width: 0;
 }
 
+/* 2026-09-29（Howard）：設定頁的一列可以點，進去是這一檔的基礎訊號。
+   名稱這一塊從 <div> 換成真的 <button>（鍵盤與讀屏的入口），所以要先把瀏覽器
+   預設的按鈕外觀清乾淨，剩下的版面規則與換之前一字不差。 */
 .wl-ident {
+	appearance: none;
+	-webkit-appearance: none;
+	background: none;
+	border: 0;
+	padding: 0;
+	margin: 0;
+	font: inherit;
+	color: inherit;
+	text-align: left;
 	min-width: 0;
 	flex: 1 1 auto;
 	display: flex;
 	align-items: baseline;
 	gap: 0.4rem;
+}
+
+/* 整列可點：cursor 在桌機是唯一的提示，手機靠右邊那個 › */
+.wl-row-tappable { cursor: pointer; }
+
+.wl-ident:focus-visible {
+	outline: 2px solid rgba(120, 180, 255, 0.72);
+	outline-offset: 3px;
+	border-radius: 8px;
+}
+
+/* › 貼到右邊，停在「移除」左側：這是「點進去還有一層」的招牌。
+   放在 .wl-ident 裡面，所以超出方案那一列的半透明也會一起吃到。 */
+.wl-row-go {
+	margin-left: auto;
+	flex: 0 0 auto;
+	color: var(--text-muted);
+	font-size: 1.15rem;
+	line-height: 1;
 }
 
 /* 全名優先：窄螢幕上寧可折成兩行，也不要把「台灣積體電路製造股份有限公司」
