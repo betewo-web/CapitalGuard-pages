@@ -2749,6 +2749,18 @@ body.modal-blocking .modal-backdrop.show {
 .rule-tpl-strip { margin-bottom: 0.8rem; }
 .rule-tpl-strip .rules-empty-sub { margin-top: 0; margin-bottom: 0.4rem; }
 
+/* 「讓系統幫我選」原本是 btn-xs（0.72rem）接在說明字後面，在手機上小到看不出
+   是可以按的（Howard 2026-09-29）：拉成獨立一行的正常尺寸按鈕。 */
+.rules-autopick-row { margin: 0.45rem 0 0.7rem; }
+.rules-empty .rules-autopick-row { text-align: center; }
+.rule-tpl-strip .rules-autopick-row { margin: 0.35rem 0 0.6rem; }
+.rule-autopick-btn {
+	padding: 0.42rem 1.1rem;
+	font-size: 1rem;
+	font-weight: 700;
+	border-radius: 9px;
+}
+
 /* 編輯器 */
 .rule-field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.7rem; flex: 1 1 auto; }
 .rule-field > label { font-size: 0.88rem; color: var(--text-muted); }

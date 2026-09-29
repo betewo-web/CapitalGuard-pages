@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="229">
+  <meta name="app-version" content="230">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=229" rel="stylesheet">
+  <link href="watchlist.css?v=230" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5065,10 +5065,13 @@ const RULE_CATALOG = [
     params: [{ k: "window", label: "回看天數", type: "number", def: 20, min: 2, max: 250 }] },
   { type: "break_52w_high", tier: "intraday", name: "創 52 週新高", preview: true, params: [] },
   { type: "break_52w_low", tier: "intraday", name: "創 52 週新低", preview: true, params: [] },
+  // 上限 9%：台股漲跌幅 ±10%，10% 以上的門檻永遠不會成立；9% 再留一點安全邊際
+  // （與跳空同一個理由）。預設 2%：5% 一天難得出現幾檔，新手設完常常整天沒通知，
+  // 以為是系統壞了（Howard 2026-09-29）。
   { type: "change_pct_above", tier: "intraday", name: "漲幅超過", preview: true,
-    params: [{ k: "value", label: "漲幅 %", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
+    params: [{ k: "value", label: "漲幅 %", type: "number", def: 2, min: 0.1, max: 9, step: 0.1 }] },
   { type: "change_pct_below", tier: "intraday", name: "跌幅超過", preview: true,
-    params: [{ k: "value", label: "跌幅 %（填正數）", type: "number", def: 5, min: 0.1, max: 30, step: 0.1 }] },
+    params: [{ k: "value", label: "跌幅 %（填正數）", type: "number", def: 2, min: 0.1, max: 9, step: 0.1 }] },
   // 缺口以昨日最高／最低價為基準：開盤高於昨收但仍在昨日區間內的不算跳空。
   // 上限 9%：台股漲跌幅 ±10%，開盤價最多就是昨收 ×1.1，而昨高 >= 昨收，
   // 所以缺口的理論極大值正好是 10%（昨天收在最高價、今天開漲停）。門檻設到
@@ -5143,6 +5146,14 @@ const RULE_CATALOG = [
 ];
 
 const RULE_CATALOG_BY_TYPE = Object.fromEntries(RULE_CATALOG.map(c => [c.type, c]));
+
+// 預設條件一律從目錄長出來：門檻寫死在三、四個地方時，改了 def 就會有人拿到舊數字
+function defaultCondition(type = "change_pct_above") {
+  const spec = RULE_CATALOG_BY_TYPE[type];
+  const c = { type };
+  (spec ? spec.params : []).forEach(p => { c[p.k] = p.def; });
+  return c;
+}
 
 // 每個條件的說明（選單頁的一句話 brief、說明視窗的 what／when）。
 // 只講「量的是什麼、什麼時候成立」，不寫任何該買該賣、看好看壞的字
@@ -8236,8 +8247,9 @@ async function refreshRules() {
   // 未達推薦目標條數時，面板裡也給範本（與首頁卡片同一組）
   const tpls = alertRules.length < ruleNudgeTarget() ? ruleTemplateSuggestions() : [];
   const tplHtml = tpls.length ? `
-      <div class="rules-empty-sub">${alertRules.length ? "還可以加入範本" : "或先從範本開始"}（套用到全部自選股）
-        <button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="autoPickRules('modal', this)">讓系統幫我選</button></div>
+      <div class="rules-empty-sub">${alertRules.length ? "還可以加入範本" : "或先從範本開始"}（套用到全部自選股）</div>
+      <div class="rules-autopick-row">
+        <button type="button" class="btn btn-outline-info rule-autopick-btn" onclick="autoPickRules('modal', this)">讓系統幫我選</button></div>
       <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "modal")}</div>` : "";
 
   if (!alertRules.length) {
@@ -8376,7 +8388,7 @@ function openRuleEditor(id) {
 
   editorConditions = r && Array.isArray(r.conditions) && r.conditions.length
     ? JSON.parse(JSON.stringify(r.conditions))
-    : [{ type: "change_pct_above", value: 5 }];
+    : [defaultCondition()];
   renderRuleConditions();
 
   showRulesPane("editor");
@@ -8389,7 +8401,7 @@ function addRuleCondition() {
     showUpgradeAtEditorBottom(featurePromptHtml("mixed_signals"));
     return;
   }
-  editorConditions.push({ type: "change_pct_above", value: 5 });
+  editorConditions.push(defaultCondition());
   renderRuleConditions();
 }
 
@@ -8441,8 +8453,10 @@ function showCondExplain(type, mode) {
   const params = spec.params.length
     ? `<div class="cond-explain-params"><b>可調整的設定</b>：${spec.params.map(p => escapeHtml(p.label)).join("、")}</div>`
     : "";
+  // 「評估時機：每 5 秒評估」2026-09-29 拿掉：每個條件的說明都寫一次，
+  // 使用者要的是「這個條件在量什麼」，評估頻率是實作細節（分層籤仍留著）。
   document.getElementById("cond-explain-body").innerHTML = `
-    <div class="cond-explain-tier"><span class="rule-tier tier-${spec.tier}">${RULE_TIERS[spec.tier].label}</span>評估時機：${RULE_TIERS[spec.tier].note}</div>
+    <div class="cond-explain-tier"><span class="rule-tier tier-${spec.tier}">${RULE_TIERS[spec.tier].label}</span></div>
     <p><b>量的是什麼</b>：${escapeHtml(ex.what)}</p>
     <p><b>什麼時候成立</b>：${escapeHtml(ex.when)}</p>
     ${params}
@@ -8468,16 +8482,13 @@ function useCondType(type) {
 
 function removeRuleCondition(i) {
   editorConditions.splice(i, 1);
-  if (!editorConditions.length) editorConditions.push({ type: "change_pct_above", value: 5 });
+  if (!editorConditions.length) editorConditions.push(defaultCondition());
   renderRuleConditions();
 }
 
 function onConditionTypeChange(i, type) {
-  const spec = RULE_CATALOG_BY_TYPE[type];
   // 換型別就重建參數：舊型別的參數名對新型別沒有意義，留著會存出髒資料
-  const next = { type };
-  (spec ? spec.params : []).forEach(p => { next[p.k] = p.def; });
-  editorConditions[i] = next;
+  editorConditions[i] = defaultCondition(type);
   renderRuleConditions();
 }
 
@@ -8580,7 +8591,7 @@ function renderRuleConditions() {
                   aria-label="說明：${escapeHtml(spec.name)}" onclick="showCondExplain('${jsAttr(spec.type)}', 'info')">說明</button>
           ${removeBtn}
         </div>
-        <div class="rule-cond-tier">${RULE_TIERS[spec.tier].label}　${RULE_TIERS[spec.tier].note}</div>
+        <div class="rule-cond-tier">${RULE_TIERS[spec.tier].label}</div>
         ${params ? `<div class="rule-params">${params}</div>` : ""}
       </div>`;
   }).join("");
@@ -8609,12 +8620,10 @@ function renderRuleSummary() {
   const scope = sid ? `${sid} ${stockNameOf(sid)}`.trim() : "全部自選股";
   const chips = editorConditions.map(c => `<span class="rs-chip">${escapeHtml(describeCondition(c))}</span>`)
     .join('<span class="rs-and">且</span>');
-  const tier = ruleTierOf(editorConditions);
   el.innerHTML = `
     <div class="rp-title">這條規則的意思</div>
     <div class="rs-line">「${escapeHtml(name)}」：<b>${escapeHtml(scope)}</b> 出現 ${chips} 時通知你。</div>
-    <div class="rs-meta">評估時機：${RULE_TIERS[tier].label}（${RULE_TIERS[tier].note}）。
-      通知等級依條件自動判定：下跌方向的條件（跌破、跌幅、向下交叉）為 🟠（與漲跌停、跌破關鍵價位、達到設定價格同一級），其餘為 🔵 其他盤中訊號。</div>`;
+    <div class="rs-meta">通知等級依條件自動判定：下跌方向的條件（跌破、跌幅、向下交叉）為 🟠（與漲跌停、跌破關鍵價位、達到設定價格同一級），其餘為 🔵 其他盤中訊號。</div>`;
 }
 
 async function saveRule() {
