@@ -4159,7 +4159,47 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 }
 
 .alert-per-stock-sub { display: block; font-size: 0.76rem; font-weight: 400; color: var(--text-muted); margin-top: 3px; }
-.alert-pick-row { cursor: pointer; }
+/* 2026-09-30（Howard）：挑股票那一列現在有兩個控制項——左邊的勾選框（這次要一起
+   設定哪幾檔）與右邊的名稱鈕（進去單獨設定那一檔）。列本身不再是按鈕，游標交給
+   兩個子元素各自負責，免得點在列的空白處看起來可點、其實什麼也不會發生。 */
+.alert-pick-row { gap: 0.2rem; }
+
+/* 勾選框的可點範圍：左右各留一點，手指才點得到，又不會吃到名稱那一塊 */
+.alert-pick-check {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	margin: 0;
+	padding: 0.2rem 0.55rem 0.2rem 0.1rem;
+	cursor: pointer;
+}
+.alert-pick-check .alert-pick-box { margin: 0; cursor: pointer; }
+
+/* 名稱鈕：清掉瀏覽器預設的按鈕外觀，版面沿用 .alert-item 那一套 */
+.alert-pick-go {
+	appearance: none;
+	-webkit-appearance: none;
+	background: none;
+	border: 0;
+	margin: 0;
+	padding: 0;
+	font: inherit;
+	color: inherit;
+	text-align: left;
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.8rem;
+	cursor: pointer;
+}
+.alert-pick-go:focus-visible {
+	outline: 2px solid rgba(120, 180, 255, 0.72);
+	outline-offset: 3px;
+	border-radius: 8px;
+}
+
 .alert-stock-meta { flex: 0 0 auto; font-size: 0.82rem; color: var(--text-muted); white-space: nowrap; }
 
 .alert-msg { font-size: 0.84rem; color: var(--text-muted); min-height: 1.2rem; margin-top: 0.2rem; }

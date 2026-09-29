@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="236">
+  <meta name="app-version" content="237">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=236" rel="stylesheet">
+  <link href="watchlist.css?v=237" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -734,7 +734,7 @@
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
                stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M9.8 3.2 5 8l4.8 4.8"/>
-          </svg><span>全部股票</span>
+          </svg><span>選擇股票</span>
         </button>
         <h5 class="mb-0" id="alert-settings-title">基礎訊號</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
@@ -852,21 +852,32 @@
           </div>
 
           <button type="button" class="alert-per-stock" id="alert-per-stock-btn" onclick="showAlertPane('picker')">
-            設定個股<span class="alert-per-stock-sub">單獨調整某一檔（含自訂價位）</span>
+            重新選擇股票<span class="alert-per-stock-sub">改選要設定哪幾檔，或單獨調整某一檔（含自訂價位）</span>
           </button>
         </div>
 
-        <!-- 選一檔：點下去就回到上面那組開關，只是對象換成這一檔 -->
+        <!-- 2026-09-30（Howard）：這一面從「只能挑一檔」升級成整個面板的入口。
+             一列同時做兩件事：左邊的框決定這次的設定要套用到哪幾檔（按「確定」進開關頁），
+             點名稱那一塊則是進去單獨設定那一檔——與設定分頁的列同一種互動。 -->
         <div id="alert-pane-picker" style="display:none">
-          <p class="alert-scope-hint">選一檔單獨設定。沒有特別調整的股票會照「全部股票」那一組。</p>
+          <p class="alert-scope-hint" id="alert-pick-hint"></p>
+          <div class="alert-bulk">
+            <button type="button" class="alert-bulk-btn" onclick="setAllAlertPicks(true)">全選</button>
+            <button type="button" class="alert-bulk-btn" onclick="setAllAlertPicks(false)">全取消</button>
+          </div>
           <div class="alert-list" id="alert-stock-list"></div>
         </div>
 
         <div id="alert-settings-msg" class="alert-msg"></div>
       </div>
-      <div class="modal-footer alert-footer">
+      <div class="modal-footer alert-footer" id="alert-list-footer">
         <button type="button" class="btn alert-cancel" data-bs-dismiss="modal">取消</button>
         <button type="button" class="btn alert-done" onclick="saveAlertDraft()">完成</button>
+      </div>
+      <!-- 挑股票那一面自己的 footer：那裡按「完成」沒有意義，草稿都還沒開始 -->
+      <div class="modal-footer alert-footer" id="alert-picker-footer" style="display:none">
+        <button type="button" class="btn alert-cancel" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn alert-done" id="alert-pick-ok" onclick="confirmAlertPicks()">確定</button>
       </div>
       </div>
     </div>
@@ -6553,6 +6564,7 @@ function openSettingsFromDetail() {
   const wl = watchlistRows.find(w => String(w.stock_id).trim() === sid);
   if (!wl) return;
   bootstrap.Modal.getInstance(document.getElementById("alertHistoryDetailModal"))?.hide();
+  alertSelectedIds = null;   // 同上：從通知詳情進來也是全新的進入點
   openAlertSettings(wl.id);
 }
 
@@ -8986,6 +8998,7 @@ function renderWatchlist(rows) {
     // 會冒泡上來，所以它不必自己綁。.wl-row-actions 裡的「移除」有自己的動作，排除掉。
     item.addEventListener("click", (e) => {
       if (e.target.closest(".wl-row-actions")) return;
+      alertSelectedIds = null;   // 全新的進入點，按返回時勾選頁要回到預設全選
       openAlertSettings(row.id);
     });
     grid.appendChild(item);
@@ -9149,7 +9162,14 @@ function focusAddStock() {
 
 function openAlertSettingsPicker() {
   if (!requireWatchlist("基礎訊號")) return;
-  openAlertSettings(ALERT_SCOPE_ALL);   // 預設「全部股票」，要單獨調某一檔再按「設定個股」
+  // 2026-09-30（Howard）：先出勾選清單，按「確定」才進開關頁。預設全部勾選——
+  // 一路按下去的結果與改版前（按下去就是全部股票）完全一樣。
+  alertSelectedIds = null;
+  alertScope = ALERT_SCOPE_ALL;
+  alertDraft = {};
+  document.getElementById("alert-settings-msg").textContent = "";
+  showAlertPane("picker");
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("alertSettingsModal")).show();
 }
 
 // 2026-09-22 改成「草稿」：開關與價位只改暫存值，按「完成」才寫回去；「取消」直接關掉。
@@ -9172,7 +9192,15 @@ const ALERT_FIELD_IDS = {
 const ALERT_SCOPE_ALL = "__all__";
 let alertScope = null;    // row id 或 ALERT_SCOPE_ALL
 let alertDraft = {};      // 這次動過的欄位（只寫這些回去）
-let alertTitleBeforePicker = "";   // 進「挑一檔」前的標題，返回時要還原
+let alertSelectedIds = null;   // 勾選的 row id；null＝沒選過，視同全部
+
+// ALERT_SCOPE_ALL 時這次要套用的那幾列。null 代表沒經過勾選（例如從設定分頁的
+// 某一列直接進來又按返回），那就回到改版前的語意：全部自選股。
+function alertTargetRows() {
+  if (!alertSelectedIds) return watchlistRows.slice();
+  const want = new Set(alertSelectedIds);
+  return watchlistRows.filter(r => want.has(String(r.id)));
+}
 
 function openAlertSettings(scope) {
   const useAll = String(scope) === ALERT_SCOPE_ALL;
@@ -9180,11 +9208,14 @@ function openAlertSettings(scope) {
   if (!useAll && !row) return;
   alertScope = useAll ? ALERT_SCOPE_ALL : scope;
   alertDraft = {};
-  alertTitleBeforePicker = "";   // 這裡自己會寫標題，別讓 showAlertPane 還原成舊的
 
+  const picked = useAll ? alertTargetRows() : [];
+  const isEveryStock = useAll && picked.length === watchlistRows.length;
   const titleEl = document.getElementById("alert-settings-title");
   if (useAll) {
-    titleEl.textContent = `基礎訊號｜全部股票（${watchlistRows.length} 檔）`;
+    titleEl.textContent = isEveryStock
+      ? `基礎訊號｜全部股票（${watchlistRows.length} 檔）`
+      : `基礎訊號｜已選 ${picked.length} 檔`;
   } else {
     const sid = String(row.stock_id || "").trim();
     const displayName = getPreferredStockName(sid, row.stock_name) || universe[sid]?.n || "未命名";
@@ -9192,12 +9223,12 @@ function openAlertSettings(scope) {
   }
   const hintEl = document.getElementById("alert-scope-hint");
   if (hintEl) {
-    hintEl.textContent = useAll
-      ? `按「完成」時，這一頁動過的項目會套用到全部 ${watchlistRows.length} 檔（沒動過的維持原樣）。`
-      : "只影響這一檔。要改回全部股票，點左上角的返回。";
+    hintEl.textContent = !useAll
+      ? "只影響這一檔。要換一檔或改選範圍，點左上角的返回。"
+      : isEveryStock
+        ? `按「完成」時，這一頁動過的項目會套用到全部 ${watchlistRows.length} 檔（沒動過的維持原樣）。`
+        : `按「完成」時，這一頁動過的項目會套用到你勾選的 ${picked.length} 檔（沒動過的維持原樣）。`;
   }
-  const backEl = document.getElementById("alert-back");
-  if (backEl) backEl.style.display = useAll ? "none" : "";
   const perStockBtn = document.getElementById("alert-per-stock-btn");
   if (perStockBtn) perStockBtn.style.display = useAll ? "" : "none";
   // 自訂價位是「這一檔的價」，全部股票時整組不出現
@@ -9210,7 +9241,7 @@ function openAlertSettings(scope) {
     if (!el) continue;
     // 缺鍵（舊 schema）視為開：與 DB 預設、後端 fallback 同一個方向（預設全開）
     el.checked = useAll
-      ? watchlistRows.filter(r => r[f] !== false).length * 2 > watchlistRows.length
+      ? picked.filter(r => r[f] !== false).length * 2 > picked.length
       : row[f] !== false;
   }
   const hi = useAll ? null : row.target_price_high;
@@ -9223,54 +9254,92 @@ function openAlertSettings(scope) {
   bootstrap.Modal.getOrCreateInstance(document.getElementById("alertSettingsModal")).show();
 }
 
-// 兩個面：list＝開關（全部股票或某一檔）、picker＝挑一檔
+// 兩個面：picker＝選要設定哪幾檔（入口）、list＝開關。
+// 標題只在 picker 這一面由這裡寫；list 那一面的標題是 openAlertSettings 的事，
+// 它呼叫完這裡就結束了，所以這裡不能去碰，否則會把剛寫好的股票名蓋掉。
 function showAlertPane(pane) {
   const list = document.getElementById("alert-pane-list");
   const picker = document.getElementById("alert-pane-picker");
   if (!list || !picker) return;
-  if (pane === "picker") renderAlertStockPicker();
-  // 標題跟著換面：挑股票時它是唯一能說明「現在要你做什麼」的地方
-  const titleEl = document.getElementById("alert-settings-title");
-  if (titleEl) {
-    if (pane === "picker") {
-      alertTitleBeforePicker = titleEl.textContent;
-      titleEl.textContent = "基礎訊號｜請選擇一檔個股";
-    } else if (alertTitleBeforePicker) {
-      titleEl.textContent = alertTitleBeforePicker;
-      alertTitleBeforePicker = "";
-    }
+  const picking = pane === "picker";
+  if (picking) {
+    renderAlertStockPicker();
+    document.getElementById("alert-settings-title").textContent = "基礎訊號｜選擇要設定的股票";
   }
-  list.style.display = pane === "picker" ? "none" : "";
-  picker.style.display = pane === "picker" ? "" : "none";
+  list.style.display = picking ? "none" : "";
+  picker.style.display = picking ? "" : "none";
+  const listFooter = document.getElementById("alert-list-footer");
+  const pickFooter = document.getElementById("alert-picker-footer");
+  if (listFooter) listFooter.style.display = picking ? "none" : "";
+  if (pickFooter) pickFooter.style.display = picking ? "" : "none";
+  // picker 是最上層，沒有上一層可退；那一面要離開用 footer 的「取消」
   const backEl = document.getElementById("alert-back");
-  if (backEl) backEl.style.display = (pane === "picker" || alertScope !== ALERT_SCOPE_ALL) ? "" : "none";
+  if (backEl) backEl.style.display = picking ? "none" : "";
 }
 
-// 左上角返回：在「挑股票」那一面就退回開關，在單一檔的開關就回到全部股票
+// 左上角返回：一律退回挑股票那一面（不管現在是全部股票還是單一檔）
 function alertBack() {
-  const picker = document.getElementById("alert-pane-picker");
-  if (picker && picker.style.display !== "none") { showAlertPane("list"); return; }
-  openAlertSettings(ALERT_SCOPE_ALL);
+  showAlertPane("picker");
 }
 
-// 挑股票：一列一檔，右邊寫這一檔目前開了幾項
+// 挑股票：一列一檔，左邊是勾選框（這次要一起設定哪幾檔），
+// 名稱那一塊是按鈕（進去單獨設定那一檔），右邊寫這一檔目前開了幾項。
+// 勾選框與名稱鈕是並排的兩個控制項，不是巢狀——button 裡不能再放 input。
 function renderAlertStockPicker() {
   const el = document.getElementById("alert-stock-list");
   if (!el) return;
+  const picked = new Set(alertSelectedIds || watchlistRows.map(r => String(r.id)));
   el.innerHTML = watchlistRows.map(r => {
     const sid = String(r.stock_id || "").trim();
     const name = getPreferredStockName(sid, r.stock_name) || universe[sid]?.n || sid;
     const on = ALERT_FIELDS.filter(f => !!r[f]).length;
     const hasPrice = (r.target_price_high != null && r.target_price_high !== "")
                   || (r.target_price_low != null && r.target_price_low !== "");
-    return `<button type="button" class="alert-item alert-pick-row" onclick="openAlertSettings('${jsAttr(String(r.id))}')">
-        <span class="alert-item-text">
-          <span class="alert-item-label">${escapeHtml(name)}</span>
-          <span class="alert-item-note">${escapeHtml(sid)}</span>
-        </span>
-        <span class="alert-stock-meta">${on} 項開啟${hasPrice ? " · 有價位" : ""} ›</span>
-      </button>`;
+    return `<div class="alert-item alert-pick-row">
+        <label class="alert-pick-check">
+          <input type="checkbox" class="form-check-input alert-pick-box" value="${escapeHtml(String(r.id))}"
+                 ${picked.has(String(r.id)) ? "checked" : ""} onchange="syncAlertPickCount()"
+                 aria-label="一起設定 ${escapeHtml(name)} ${escapeHtml(sid)}">
+        </label>
+        <button type="button" class="alert-pick-go" onclick="openAlertSettings('${jsAttr(String(r.id))}')"
+                aria-label="單獨設定 ${escapeHtml(name)} ${escapeHtml(sid)}">
+          <span class="alert-item-text">
+            <span class="alert-item-label">${escapeHtml(name)}</span>
+            <span class="alert-item-note">${escapeHtml(sid)}</span>
+          </span>
+          <span class="alert-stock-meta">${on} 項開啟${hasPrice ? " · 有價位" : ""} ›</span>
+        </button>
+      </div>`;
   }).join("") || '<div class="alert-msg">還沒有自選股</div>';
+  syncAlertPickCount();
+}
+
+// 勾選數變動：說明那一行與「確定」的可用狀態都跟著走
+function syncAlertPickCount() {
+  const boxes = Array.from(document.querySelectorAll("#alert-stock-list .alert-pick-box"));
+  const n = boxes.filter(b => b.checked).length;
+  const hintEl = document.getElementById("alert-pick-hint");
+  if (hintEl) {
+    hintEl.textContent = n
+      ? `已勾 ${n}／${watchlistRows.length} 檔。按「確定」一起設定這幾檔，或點某一檔的名稱單獨調整（含自訂價位）。`
+      : "還沒勾任何一檔。勾選要一起設定的股票，或點某一檔的名稱單獨調整。";
+  }
+  const okEl = document.getElementById("alert-pick-ok");
+  if (okEl) okEl.disabled = n === 0;
+}
+
+function setAllAlertPicks(on) {
+  document.querySelectorAll("#alert-stock-list .alert-pick-box").forEach(b => { b.checked = on; });
+  syncAlertPickCount();
+}
+
+// 按「確定」才把勾選結果收下來，然後進開關頁
+function confirmAlertPicks() {
+  const ids = Array.from(document.querySelectorAll("#alert-stock-list .alert-pick-box"))
+    .filter(b => b.checked).map(b => b.value);
+  if (!ids.length) return;
+  alertSelectedIds = ids;
+  openAlertSettings(ALERT_SCOPE_ALL);
 }
 
 function onAlertDraftToggle(field, checked) {
@@ -9326,7 +9395,7 @@ async function saveAlertDraft() {
     return;
   }
 
-  const targets = alertScope === ALERT_SCOPE_ALL ? watchlistRows.slice() : [getWatchlistRowById(alertScope)].filter(Boolean);
+  const targets = alertScope === ALERT_SCOPE_ALL ? alertTargetRows() : [getWatchlistRowById(alertScope)].filter(Boolean);
   if (!targets.length) return;
   const patch = {};
   for (const f of fields) patch[f] = alertDraft[f];
