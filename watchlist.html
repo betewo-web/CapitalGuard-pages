@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="230">
+  <meta name="app-version" content="231">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=230" rel="stylesheet">
+  <link href="watchlist.css?v=231" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5051,10 +5051,13 @@ function signalIconSvg(row, size = 18) {
 // 條件目錄必須與後端 monitor/rules.py 的 CONDITION_REGISTRY 對齊：
 // type 與參數名不同就會存出後端看不懂的規則（後端遇到未知型別一律不觸發）。
 // tier 決定何時評估；preview 標示前端能否在瀏覽器裡先算給使用者看。
+// note 現在只出現在條件選單的分組標題（2026-09-29 拿掉各條件重複的「評估時機」）。
+// 盤中不寫 note：「每 5 秒評估」是實作細節，使用者只要知道這層是盤中就夠了。
+// 籌碼不提 T86——那是證交所的檔名代號，看得懂的人不需要看，看不懂的人被它卡住。
 const RULE_TIERS = {
-  intraday:    { label: "盤中", note: "每 5 秒評估" },
+  intraday:    { label: "盤中", note: "" },
   technical:   { label: "技術", note: "盤中以即時價接日線計算" },
-  chips:       { label: "籌碼", note: "盤後 T86 發布後" },
+  chips:       { label: "籌碼", note: "盤後發布後" },
   fundamental: { label: "基本面", note: "每日分析後" },
 };
 
