@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="233">
+  <meta name="app-version" content="234">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=233" rel="stylesheet">
+  <link href="watchlist.css?v=234" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5250,6 +5250,13 @@ const RULE_TEMPLATES = [
   { name: "突破 20 日前高",         conditions: [{ type: "break_prior_high", window: 20 }] },
   { name: "跌破 20 日均線",         conditions: [{ type: "price_vs_ma", period: 20, dir: "down" }] },
   { name: "月營收 YoY 高於 30%",    conditions: [{ type: "revenue_yoy", value: 30 }] },
+  // 2026-09-29 補到 10 組＝旗艦版的額度上限：原本只有 6 組，旗艦版六種型別都加過之後
+  // 還剩 4 格額度，面板卻沒有建議可給。順序不動前 6 個——免費版只補第 1 條、
+  // 專業版（額度 6）補到第 6 條，兩者的結果跟以前一樣。
+  { name: "漲幅超過 2%",            conditions: [{ type: "change_pct_above", value: 2 }] },
+  { name: "外資買超超過 1000 張",   conditions: [{ type: "net_buy_above", who: "foreign", lots: 1000 }] },
+  { name: "MA5 向上穿越 MA20",      conditions: [{ type: "ma_cross", fast: 5, slow: 20, dir: "up" }] },
+  { name: "創 52 週新高",           conditions: [{ type: "break_52w_high" }] },
 ];
 
 // rules = null 代表尚未載入或表不存在（migrate_alert_rules.sql 未執行）→ 不顯示推薦
