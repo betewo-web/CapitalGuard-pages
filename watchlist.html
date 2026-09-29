@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="232">
+  <meta name="app-version" content="233">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=232" rel="stylesheet">
+  <link href="watchlist.css?v=233" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5275,16 +5275,33 @@ function ruleNudgeTarget() {
   return limit === null ? target : Math.min(target, limit);
 }
 
-// 「讓系統幫我選」：把範本一條條加到目標條數為止（跳過已有同型別的），
-// 撞到方案上限就停。首頁那一行、開機彈窗、進階訊號面板三處共用。
+// 剩餘額度＝方案上限扣掉已經設定的條數。「讓系統幫我選」與面板的範本清單看這個，
+// 不看 ruleNudgeTarget()：目標條數只是「催你設到幾條」（專業版 3），額度卻有 6 條，
+// 中間那 3 格原本沒有任何一鍵入口，範本區還會整個消失（Howard 2026-09-29）。
+// 方案還沒載到（limit 為 null）時退回範本總數：真的超額由 DB 擋，isLimitError 會接。
+function ruleRoomLeft() {
+  const limit = planLimitOf("alert_rules");
+  const have = (ruleNudge.rules || []).length;
+  return limit === null ? RULE_TEMPLATES.length : Math.max(0, limit - have);
+}
+
+// 「讓系統幫我選」：用範本把剩下的額度補滿（跳過已有同型別的），撞到方案上限就停。
+// 首頁那一行、開機彈窗、進階訊號面板三處共用。
 async function autoPickRules(ctx, btn) {
   if (!state.userId) return;
   const msgEl = document.getElementById(
     ctx === "modal" ? "rules-msg" : ctx === "popup" ? "rule-popup-msg" : "rule-nudge-msg");
-  const have = (ruleNudge.rules || []).length;
-  const need = Math.max(0, ruleNudgeTarget() - have);
-  const tpls = ruleTemplateSuggestions(need);
-  if (!tpls.length) { if (msgEl) msgEl.textContent = "已經達到目標條數。"; return; }
+  const room = ruleRoomLeft();
+  const tpls = ruleTemplateSuggestions(room);
+  if (!tpls.length) {
+    // 兩種「沒得加」要分開講：額度滿了給升級提示，額度還在但範本用完了要指路去編輯器
+    if (msgEl) {
+      msgEl.innerHTML = room === 0
+        ? limitPromptHtml("alert_rules")
+        : "範本都加過了——剩下的額度請用「新增訊號」自己組條件。";
+    }
+    return;
+  }
   if (btn) { btn.disabled = true; btn.textContent = "加入中…"; }
   let added = 0, limitHit = false;
   try {
@@ -5629,7 +5646,7 @@ function renderRuleNudge() {
     <span class="home-nudge-text">${ICON_RULES}已設定 ${n}／${target} 條</span>
     <span class="home-nudge-actions">
       <button type="button" class="hs-btn" onclick="openRuleEditorFromNudge()">新增進階訊號</button>
-      <span class="hs-link" onclick="autoPickRules('home', this)" title="依範本補到目標條數">讓系統幫我選</span>
+      <span class="hs-link" onclick="autoPickRules('home', this)" title="用範本把剩下的額度補滿">讓系統幫我選</span>
       <span class="hs-link home-nudge-later" onclick="snoozeRuleNudge()" title="7 天內不再顯示">稍後</span>
     </span>
     <div id="rule-nudge-msg" class="home-nudge-msg"></div>`;
@@ -8247,10 +8264,13 @@ async function refreshRules() {
   document.getElementById("rules-count").innerHTML = rulesCountLabel();
   renderOverLimitBanner("alert_rules");
 
-  // 未達推薦目標條數時，面板裡也給範本（與首頁卡片同一組）
-  const tpls = alertRules.length < ruleNudgeTarget() ? ruleTemplateSuggestions() : [];
+  // 只要還沒用完方案額度就一直給範本（2026-09-29 改：原本只到推薦目標條數，
+  // 專業版設滿 3 條後還有 3 格額度卻看不到任何入口）。清單本來就只列
+  // 使用者還沒用過的條件型別（ruleTemplateSuggestions 濾掉 owned）。
+  const room = ruleRoomLeft();
+  const tpls = room > 0 ? ruleTemplateSuggestions(room) : [];
   const tplHtml = tpls.length ? `
-      <div class="rules-empty-sub">${alertRules.length ? "還可以加入範本" : "或先從範本開始"}（套用到全部自選股）</div>
+      <div class="rules-empty-sub">${alertRules.length ? `還可以再設 ${room} 條` : "或先從範本開始"}（套用到全部自選股）</div>
       <div class="rules-autopick-row">
         <button type="button" class="btn btn-outline-info rule-autopick-btn" onclick="autoPickRules('modal', this)">讓系統幫我選</button></div>
       <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "modal")}</div>` : "";
