@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="234">
+  <meta name="app-version" content="235">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=234" rel="stylesheet">
+  <link href="watchlist.css?v=235" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -745,6 +745,29 @@
         <div id="alert-pane-list">
           <p class="alert-scope-hint" id="alert-scope-hint"></p>
 
+          <!-- 自訂價位是「這一檔的價」，只有在設定單一股票時才出現 -->
+          <div class="alert-group" id="alert-price-group" style="display:none">
+            <div class="alert-group-head">自訂價位<span class="alert-group-note">盤中觸價，每天只通知一次</span></div>
+            <div class="alert-list">
+              <div class="alert-item">
+                <span class="alert-item-text"><span class="alert-item-label">漲到這個價通知我</span></span>
+                <span class="alert-price-wrap">
+                  <input id="inp-target-high" type="number" class="alert-price-input" placeholder="—" inputmode="decimal"
+                         step="0.01" min="0" oninput="onAlertDraftPrice('target_price_high', this.value)">
+                  <button type="button" class="alert-price-clear" onclick="clearPriceTargetInput('high')" aria-label="清除上漲價位">✕</button>
+                </span>
+              </div>
+              <div class="alert-item">
+                <span class="alert-item-text"><span class="alert-item-label">跌到這個價通知我</span></span>
+                <span class="alert-price-wrap">
+                  <input id="inp-target-low" type="number" class="alert-price-input" placeholder="—" inputmode="decimal"
+                         step="0.01" min="0" oninput="onAlertDraftPrice('target_price_low', this.value)">
+                  <button type="button" class="alert-price-clear" onclick="clearPriceTargetInput('low')" aria-label="清除下跌價位">✕</button>
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div class="alert-bulk">
             <button type="button" class="alert-bulk-btn" onclick="setAllAlertSettings(true)">全部開啟</button>
             <button type="button" class="alert-bulk-btn" onclick="setAllAlertSettings(false)">全部關閉</button>
@@ -825,29 +848,6 @@
                 <input id="alert-margin-down" class="form-check-input" type="checkbox" onchange="onAlertDraftToggle('alert_margin_down', this.checked)">
               </span>
             </label>
-            </div>
-          </div>
-
-          <!-- 自訂價位是「這一檔的價」，只有在設定單一股票時才出現 -->
-          <div class="alert-group" id="alert-price-group" style="display:none">
-            <div class="alert-group-head">自訂價位<span class="alert-group-note">盤中觸價，每天只通知一次</span></div>
-            <div class="alert-list">
-              <div class="alert-item">
-                <span class="alert-item-text"><span class="alert-item-label">漲到這個價通知我</span></span>
-                <span class="alert-price-wrap">
-                  <input id="inp-target-high" type="number" class="alert-price-input" placeholder="—" inputmode="decimal"
-                         step="0.01" min="0" oninput="onAlertDraftPrice('target_price_high', this.value)">
-                  <button type="button" class="alert-price-clear" onclick="clearPriceTargetInput('high')" aria-label="清除上漲價位">✕</button>
-                </span>
-              </div>
-              <div class="alert-item">
-                <span class="alert-item-text"><span class="alert-item-label">跌到這個價通知我</span></span>
-                <span class="alert-price-wrap">
-                  <input id="inp-target-low" type="number" class="alert-price-input" placeholder="—" inputmode="decimal"
-                         step="0.01" min="0" oninput="onAlertDraftPrice('target_price_low', this.value)">
-                  <button type="button" class="alert-price-clear" onclick="clearPriceTargetInput('low')" aria-label="清除下跌價位">✕</button>
-                </span>
-              </div>
             </div>
           </div>
 
@@ -9161,6 +9161,7 @@ const ALERT_FIELD_IDS = {
 const ALERT_SCOPE_ALL = "__all__";
 let alertScope = null;    // row id 或 ALERT_SCOPE_ALL
 let alertDraft = {};      // 這次動過的欄位（只寫這些回去）
+let alertTitleBeforePicker = "";   // 進「挑一檔」前的標題，返回時要還原
 
 function openAlertSettings(scope) {
   const useAll = String(scope) === ALERT_SCOPE_ALL;
@@ -9168,6 +9169,7 @@ function openAlertSettings(scope) {
   if (!useAll && !row) return;
   alertScope = useAll ? ALERT_SCOPE_ALL : scope;
   alertDraft = {};
+  alertTitleBeforePicker = "";   // 這裡自己會寫標題，別讓 showAlertPane 還原成舊的
 
   const titleEl = document.getElementById("alert-settings-title");
   if (useAll) {
@@ -9216,6 +9218,17 @@ function showAlertPane(pane) {
   const picker = document.getElementById("alert-pane-picker");
   if (!list || !picker) return;
   if (pane === "picker") renderAlertStockPicker();
+  // 標題跟著換面：挑股票時它是唯一能說明「現在要你做什麼」的地方
+  const titleEl = document.getElementById("alert-settings-title");
+  if (titleEl) {
+    if (pane === "picker") {
+      alertTitleBeforePicker = titleEl.textContent;
+      titleEl.textContent = "基礎訊號｜請選擇一檔個股";
+    } else if (alertTitleBeforePicker) {
+      titleEl.textContent = alertTitleBeforePicker;
+      alertTitleBeforePicker = "";
+    }
+  }
   list.style.display = pane === "picker" ? "none" : "";
   picker.style.display = pane === "picker" ? "" : "none";
   const backEl = document.getElementById("alert-back");
