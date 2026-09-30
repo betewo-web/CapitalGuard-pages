@@ -4144,21 +4144,7 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	cursor: pointer;
 }
 
-/* 「設定個股」：整寬的次要按鈕，副標說明它做什麼 */
-.alert-per-stock {
-	display: block;
-	width: 100%;
-	padding: 0.8rem;
-	border: 1px solid var(--accent);
-	border-radius: 12px;
-	background: rgba(139, 124, 255, 0.12);
-	color: var(--text-0);
-	font-size: 0.98rem;
-	font-weight: 700;
-	cursor: pointer;
-}
-
-.alert-per-stock-sub { display: block; font-size: 0.76rem; font-weight: 400; color: var(--text-muted); margin-top: 3px; }
+/* 「重新選擇股票」那顆整寬按鈕 2026-10-01 拿掉（Howard）：左上角的「‹ 選擇股票」同義。 */
 /* 2026-09-30（Howard）：挑股票那一列現在有兩個控制項——左邊的勾選框（這次要一起
    設定哪幾檔）與右邊的名稱鈕（進去單獨設定那一檔）。列本身不再是按鈕，游標交給
    兩個子元素各自負責，免得點在列的空白處看起來可點、其實什麼也不會發生。 */

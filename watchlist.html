@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="237">
+  <meta name="app-version" content="238">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=237" rel="stylesheet">
+  <link href="watchlist.css?v=238" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -851,9 +851,8 @@
             </div>
           </div>
 
-          <button type="button" class="alert-per-stock" id="alert-per-stock-btn" onclick="showAlertPane('picker')">
-            重新選擇股票<span class="alert-per-stock-sub">改選要設定哪幾檔，或單獨調整某一檔（含自訂價位）</span>
-          </button>
+          <!-- 2026-10-01（Howard）：這裡原本有一顆整寬的「回去改選股票」按鈕，拿掉——
+               左上角的「‹ 選擇股票」做的是同一件事，而它一直都在。 -->
         </div>
 
         <!-- 2026-09-30（Howard）：這一面從「只能挑一檔」升級成整個面板的入口。
@@ -6459,8 +6458,8 @@ function renderInbox() {
     const sid = String(r.stock_id || "").trim();
     html += `
       <div class="inbox-item${unread ? " unread" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
-           onclick="openInboxDetail('${jsAttr(String(r.id))}')"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxDetail('${jsAttr(String(r.id))}');}">
+           onclick="openInboxItem('${jsAttr(String(r.id))}')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxItem('${jsAttr(String(r.id))}');}">
         ${signalIconSvg(r, 34)}
         <div class="ib-main">
           <div class="ib-title">${escapeHtml(_titleWithoutSid(r.title, sid))}</div>
@@ -6475,21 +6474,72 @@ function renderInbox() {
 
 let detailRow = null;   // 目前開啟詳情的通知 row
 
+// 通知匣列表點一則的入口（2026-10-01 Howard）：盤中雷達講得出來的那幾種訊號
+// 直接跳到那一檔的盤中雷達、把對應的那一顆閃 3 秒；其餘（每日報告、盤後提醒、
+// 到期提醒…）照舊開通知詳情。雷達那邊的每一則仍可點進通知詳情，所以沒有路被堵死。
+function openInboxItem(rowId) {
+  const row = inboxRows.find(r => String(r.id) === String(rowId));
+  if (!row) return;
+  const target = inboxRadarTargetOf(row);
+  if (!target) { openInboxDetail(rowId); return; }
+  _markInboxRowRead(row);
+  trackActivity("inbox_open_radar", { source: row.source || "", stock: target.sid });
+  _flashRtlItem(target.eid);
+  // 卡片是淡入的，捲動要等它可見；shown 之後再畫一次（renderRadarTimeline 那次太早）
+  document.getElementById("radarTimelineModal")
+    ?.addEventListener("shown.bs.modal", () => _paintRtlTarget(), { once: true });
+  openStockCard(target.sid, { date: target.date, tab: "radar" });
+}
+
+// 盤中雷達的故事線放得下的來源：內建訊號與進階訊號（盤後提醒是另一段，不算「盤中」）。
+const INBOX_RADAR_SOURCES = ["monitor", "rule"];
+
+// 這一則能不能在盤中雷達上指出來。**找得到對應的那一顆才回 true**——
+// 找不到就照舊開通知詳情，不要把人丟到一張寫著「沒有這天的紀錄」的空卡片上。
+function inboxRadarTargetOf(row) {
+  if (!row) return null;
+  const sid = String(row.stock_id || "").trim();
+  if (!sid) return null;
+  if (!INBOX_RADAR_SOURCES.includes(String(row.source || "monitor"))) return null;
+  const date = taipeiDateKey(row.sent_at);
+  if (!date) return null;
+  const story = radarStoryOf(sid, date).filter(e => e.src !== "post");
+  const hit = _rtlEntryForInboxRow(story, row);
+  return hit ? { sid, date, eid: rtlEntryId(hit) } : null;
+}
+
+// 先用 rowId 對（進階訊號與自訂價位那幾顆本來就是從通知匣長出來的）。
+// 內建訊號在共用日誌裡、沒有 rowId（radarStoryOf 會跳過通知匣那一份避免重複），
+// 所以退一步用「同一種訊號、時間最接近的那一顆」對。
+function _rtlEntryForInboxRow(story, row) {
+  const rid = String(row.id);
+  const byId = story.find(e => e.rowId && String(e.rowId) === rid);
+  if (byId) return byId;
+  const kind = signalKindOf(row);
+  if (!kind) return null;
+  const ms = Date.parse(row.sent_at) || 0;
+  const cands = story.filter(e => e.key === kind);
+  if (!cands.length) return null;
+  return cands.reduce((a, b) => Math.abs(b.ms - ms) < Math.abs(a.ms - ms) ? b : a);
+}
+
+// 標記已讀（fire-and-forget）。開詳情與跳雷達都算看過了，所以兩條路共用。
+function _markInboxRowRead(row) {
+  if (!inboxSupportsRead || !row || row.read_at || row.pending) return;
+  row.read_at = new Date().toISOString();
+  sbPatch("alert_history", { "id": `eq.${row.id}` }, { read_at: row.read_at }, state.accessToken)
+    .catch(() => {});
+  _inboxSaveCache();
+  updateInboxBadge();
+  if (currentTab === "inbox") renderInbox();
+}
+
 function openInboxDetail(rowId) {
   const row = inboxRows.find(r => String(r.id) === String(rowId));
   if (!row) return;
   detailRow = row;
   trackActivity("inbox_open", { source: row.source || "" });
-
-  // 標記已讀（fire-and-forget）
-  if (inboxSupportsRead && !row.read_at && !row.pending) {
-    row.read_at = new Date().toISOString();
-    sbPatch("alert_history", { "id": `eq.${row.id}` }, { read_at: row.read_at }, state.accessToken)
-      .catch(() => {});
-    _inboxSaveCache();
-    updateInboxBadge();
-    if (currentTab === "inbox") renderInbox();
-  }
+  _markInboxRowRead(row);
 
   const source = String(row.source || "monitor");
   document.getElementById("alert-history-detail-title").textContent = _titleWithoutSid(row.title, row.stock_id) || "通知詳情";
@@ -7866,14 +7916,67 @@ function openInboxDetailFromRadar(rowId) {
   openInboxDetail(rowId);
 }
 
+// ── 故事列裡「指出某一則」的閃爍 ─────────────────────────────────────────────
+// 做成狀態而不是直接掛 class：這張卡開著的時候會重畫好幾次（開卡片後 signal_history
+// 回來補一次、盤中每輪報價補一次），innerHTML 一換節點就沒了，動畫跟著消失。
+// 這是通知匣那邊 v115 踩過的同一個坑，解法也同一套——狀態留著，每次重畫用負的
+// animation-delay 把進度接回去。
+const RTL_TARGET_FLASH_MS = 3000;   // 與 watchlist.css 的 .rtl-item.is-target 同值
+let _rtlTargetEid = null;           // 要閃的那一則（rtlEntryId）
+let _rtlTargetAt = 0;
+let _rtlTargetNeedScroll = false;
+
+// 故事列每一則的識別。重畫後節點會換掉，所以不能用 DOM 位置——
+// 有 rowId（進階訊號、自訂價位、盤後）就用它；內建訊號來自共用日誌、沒有 rowId，
+// 用「種類＋時刻」當識別（同一檔同一秒不會有兩顆同種訊號）。
+function rtlEntryId(e) {
+  return e && e.rowId ? `row:${e.rowId}` : `${(e && e.key) || "?"}@${(e && e.ms) || 0}`;
+}
+
+function _flashRtlItem(eid) {
+  const key = String(eid || "");
+  if (!key) return;
+  _rtlTargetEid = key;
+  _rtlTargetAt = Date.now();
+  _rtlTargetNeedScroll = true;
+  setTimeout(() => {
+    if (_rtlTargetEid === key && Date.now() - _rtlTargetAt >= RTL_TARGET_FLASH_MS) _clearRtlTarget();
+  }, RTL_TARGET_FLASH_MS + 50);
+  _paintRtlTarget();   // 卡片還沒畫出來時這裡找不到節點，下一次重畫會補上
+}
+
+function _clearRtlTarget() {
+  _rtlTargetEid = null;
+  _rtlTargetNeedScroll = false;
+  document.querySelectorAll("#rtl-story .rtl-item.is-target").forEach(el => el.classList.remove("is-target"));
+}
+
+function _paintRtlTarget() {
+  if (!_rtlTargetEid) return;
+  const elapsed = Date.now() - _rtlTargetAt;
+  if (elapsed >= RTL_TARGET_FLASH_MS) { _clearRtlTarget(); return; }
+  const el = document.querySelector(`#rtl-story .rtl-item[data-eid="${_rtlTargetEid.replace(/["\\]/g, "")}"]`);
+  if (!el) return;
+  // 同一次閃爍不要重播：重畫後是全新的節點（沒有 flashAt），這時才重新起跑
+  if (el.dataset.flashAt !== String(_rtlTargetAt)) {
+    el.dataset.flashAt = String(_rtlTargetAt);
+    el.classList.remove("is-target");
+    void el.offsetWidth;
+    el.style.animationDelay = `-${elapsed}ms`;
+    el.classList.add("is-target");
+  }
+  // modal 還在淡入時捲動會被吃掉，等它真的可見再捲（所以旗標只有成功那次才清）
+  if (_rtlTargetNeedScroll && document.getElementById("radarTimelineModal")?.classList.contains("show")) {
+    _rtlTargetNeedScroll = false;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
 // 點軸上的標記 → 捲到故事列裡那一則並亮一下
 function rtlFocusStory(i) {
   const el = document.getElementById(`rtl-item-${i}`);
   if (!el) return;
-  el.scrollIntoView({ behavior: "smooth", block: "center" });
-  el.classList.remove("is-target");
-  void el.offsetWidth;
-  el.classList.add("is-target");
+  _flashRtlItem(el.dataset.eid || "");
 }
 
 function renderRadarTimeline(sid) {
@@ -7921,6 +8024,7 @@ function renderRadarTimeline(sid) {
   const headEl = document.getElementById("rtl-story-head");
   if (headEl) headEl.textContent = past ? `${_mdOf(date)} 盤中發生了什麼` : "盤中發生了什麼";
   document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, { past, covered });
+  _paintRtlTarget();   // 重畫換掉了節點：正在閃的那一則要接著閃完
 }
 
 // opts.past：畫過去的某一天——不畫「現在」游標、不拿今天的報價與月線當參考、壓力／支撐用 iq.levels（那天存下的）
@@ -8156,7 +8260,7 @@ function radarStoryListHtml(story, opts = {}) {
     const link = e.rowId ? ` role="button" tabindex="0" onclick="openInboxDetailFromRadar('${jsAttr(e.rowId)}')"` : "";
     const lvl = (e.src === "builtin" || e.src === "target") ? _signalLevelLabel(e.key, e.level, true)
               : (Number.isFinite(Number(e.level)) && e.level > 0 ? fmtPrice(e.level) : "");
-    return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-sev="${e.sev}"${link}>
+    return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-eid="${escapeHtml(rtlEntryId(e))}" data-sev="${e.sev}"${link}>
       <div class="rtl-time">${fmtTime(e.at)}</div>
       ${signalIconSvg({ signal: e.key, severity: e.sev, source: e.src === "rule" ? "rule" : e.src === "post" ? "post_market" : "monitor" }, 38)}
       <div class="rtl-text">
@@ -9229,8 +9333,6 @@ function openAlertSettings(scope) {
         ? `按「完成」時，這一頁動過的項目會套用到全部 ${watchlistRows.length} 檔（沒動過的維持原樣）。`
         : `按「完成」時，這一頁動過的項目會套用到你勾選的 ${picked.length} 檔（沒動過的維持原樣）。`;
   }
-  const perStockBtn = document.getElementById("alert-per-stock-btn");
-  if (perStockBtn) perStockBtn.style.display = useAll ? "" : "none";
   // 自訂價位是「這一檔的價」，全部股票時整組不出現
   const priceGroup = document.getElementById("alert-price-group");
   if (priceGroup) priceGroup.style.display = useAll ? "none" : "";
