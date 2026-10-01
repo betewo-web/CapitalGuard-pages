@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="238">
+  <meta name="app-version" content="239">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=238" rel="stylesheet">
+  <link href="watchlist.css?v=239" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1312,8 +1312,7 @@ function hasSession() {
 
 let universe = {};   // sid → { n: name, i: industry }
 let universeLoading = false;
-let twseUniverseCache = null;
-let tpexUniverseCache = null;
+// （交易所 openapi 的瀏覽器端快取已移除，見 fetchAllUniverseMap）
 let sharedReportData = null;
 // 免費版（plans.stats_enabled=false）：report-data 回過 403 plan_required 之後這一輪就不再打，
 // 也不走公開路徑的退路（那些檔案早就不在了，只會多幾個 404）。方案變了（loadPlanState）會清掉。
@@ -3184,64 +3183,30 @@ function resolveStock(rawInput) {
   return null;
 }
 
-async function fetchTwseUniverseMap(force = false) {
-  if (!force && twseUniverseCache && Object.keys(twseUniverseCache).length) {
-    return twseUniverseCache;
-  }
-
-  try {
-    const r = await fetch("https://openapi.twse.com.tw/v1/opendata/t187ap03_L");
-    if (!r.ok) return {};
-    const rows = await r.json();
-    const m = {};
-    for (const row of rows || []) {
-      const sid = String(row["公司代號"] || "").trim();
-      if (!/^\d{4}$/.test(sid)) continue;
-      m[sid] = {
-        n: String(row["公司簡稱"] || "").trim(),
-        i: String(row["產業類別"] || "其他").trim(),
-      };
-    }
-    if (Object.keys(m).length) {
-      twseUniverseCache = m;
-      return m;
-    }
-  } catch { /* ignore */ }
-  return {};
-}
-
-async function fetchTpexUniverseMap(force = false) {
-  if (!force && tpexUniverseCache && Object.keys(tpexUniverseCache).length) {
-    return tpexUniverseCache;
-  }
-
-  try {
-    const r = await fetch("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O");
-    if (!r.ok) return {};
-    const rows = await r.json();
-    const m = {};
-    for (const row of rows || []) {
-      const sid = String(row["SecuritiesCompanyCode"] || "").trim();
-      if (!/^\d{4}$/.test(sid)) continue;
-      m[sid] = {
-        n: String(row["CompanyAbbreviation"] || row["CompanyName"] || "").trim(),
-        i: String(row["Industry"] || "上櫃").trim(),
-      };
-    }
-    if (Object.keys(m).length) {
-      tpexUniverseCache = m;
-      return m;
-    }
-  } catch { /* ignore */ }
-  return {};
-}
-
+// 名稱與產業類別只有一個來源：universe.json，後端每天 06:15 從上市＋上櫃一起建
+// （data/universe.py 的 TWSE_OPENAPI ＋ TPEX_OPENAPI；2026-10-01 量到 2,340 檔）。
+//
+// 以前這裡還會直接從頁面打那兩個 openapi，但**瀏覽器打不到**：兩邊都沒有
+// Access-Control-Allow-Origin，fetch 必定被 CORS 擋掉。而且它是啞的——`catch {}`
+// 吞掉之後回 {}，所以沒有人發現它從來沒成功過。2026-10-01 在公開站的
+// console 只看得到 TPEx 那一則錯誤，是因為 universe.json 一載入就把
+// twseUniverseCache 填滿、TWSE 那一支被快取短路了；兩支其實都不能用。
+//
+// 原本那行註解寫「避免上櫃股票（如 4939 亞電）搜尋不到」——4939 就在
+// universe.json 裡（8299、3105 也在），所以那件事早就由後端做掉了。
 async function fetchAllUniverseMap() {
-  const [twse, tpex] = await Promise.all([
-    fetchTwseUniverseMap(),
-    fetchTpexUniverseMap(),
-  ]);
-  return { ...twse, ...tpex };
+  if (Object.keys(universe).length) return universe;
+  try {
+    const r = await fetch("universe.json");
+    if (r.ok) {
+      const m = await r.json();
+      if (m && Object.keys(m).length) {
+        universe = m;
+        return universe;
+      }
+    }
+  } catch { /* 連這個都抓不到：validateStockCode 會誠實回 verifiable:false */ }
+  return {};
 }
 
 async function validateStockCode(sid) {
@@ -3954,7 +3919,6 @@ async function loadUniverse() {
     const r = await fetch("universe.json");
     if (r.ok) {
       universe = await r.json();
-      twseUniverseCache = universe;
       loaded = Object.keys(universe).length > 0;
       // universe.json 一載入就立刻重繪，讓名稱從全名變成簡稱（不需等 API）
       if (loaded && state.accessToken && document.getElementById("main-section")?.style.display !== "none") {
@@ -3964,11 +3928,13 @@ async function loadUniverse() {
     }
   } catch { /* ignore */ }
 
-  // 合併 TWSE + TPEx，避免上櫃股票（如 4939 亞電）搜尋不到
-  const m = await fetchAllUniverseMap();
-  if (Object.keys(m).length) {
-    universe = { ...m, ...universe };
-    loaded = true;
+  // 上面那次抓失敗才再試一次；成功的話這裡不會發出任何請求。
+  if (!loaded) {
+    const m = await fetchAllUniverseMap();
+    if (Object.keys(m).length) {
+      universe = m;
+      loaded = true;
+    }
   }
   universeLoading = false;
   // 對照表載完只需要「名稱從全名變簡稱」，那是純顯示的事：重套名稱＋重畫就好。

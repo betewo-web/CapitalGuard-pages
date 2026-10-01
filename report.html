@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="238">
+  <meta name="app-version" content="239">
 <title>台股每日分析報告</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -515,6 +515,16 @@ function _warnLayerMissing(kind, xx, why) {
   console.warn(`[Report] ${kind} ${xx} 載入失敗（${why}）：這一組股票的明細與 K 線會缺。`);
 }
 
+// `_latest` 物件每天早上覆蓋，所以上傳失敗會留著**昨天的內容**在今天的名字底下。
+// 2026-10-01 的 report_shard_62_latest.json 就是這樣：06:21 上傳被
+// ConnectionResetError 打斷，裡面是 9/30 的分數，而這裡以前拿到就直接併進今天的
+// 報告。缺資料至少看得出來（那幾檔沒有說明），混進昨天的資料看不出來——畫面上
+// 是一份日期寫著今天、裡面有幾十檔是昨天數字的報告。寧可缺，不要錯。
+function _warnLayerStale(kind, xx, got, want) {
+  console.warn(`[Report] ${kind} ${xx} 是 ${got || "不明日期"} 的資料，不是 ${want}：`
+    + `已丟棄不併入。私有 Storage 上那個 _latest 檔沒有被今天的覆蓋成功，需要重傳。`);
+}
+
 // 一個分片（股號前兩碼）的說明、分數趨勢、明細指標與 K 線併進目前這份報告。
 // 記錄形狀與 App 的 ensureShard 完全一致（{date, ver, json}），兩邊共用同一份快取。
 async function ensureShard(xx) {
@@ -531,6 +541,7 @@ async function ensureShard(xx) {
     const r = await fetch(res.url, { cache: "no-store" });
     if (!r.ok) { _warnLayerMissing("shard", xx, "HTTP " + r.status); return; }
     const json = await r.json();
+    if (!json || json.date !== data.date) { _warnLayerStale("shard", xx, json && json.date, data.date); return; }
     shard = { date: json.date, ver, json };
     _cachePut("shard:" + xx, shard).catch(() => {});
   }
@@ -566,6 +577,7 @@ async function ensureKLine(xx) {
     const r = await fetch(res.url, { cache: "no-store" });
     if (!r.ok) { _warnLayerMissing("kline", xx, "HTTP " + r.status); return; }
     const json = await r.json();
+    if (!json || json.date !== data.date) { _warnLayerStale("kline", xx, json && json.date, data.date); return; }
     cached = { date: json.date, ver, json };
     _cachePut("kline:" + xx, cached).catch(() => {});
   }
