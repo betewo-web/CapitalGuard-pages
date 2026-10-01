@@ -317,7 +317,7 @@ async function bootAuth() {
     initReport();
   }
 }
-bootAuth();
+// bootAuth() 的呼叫在這支 script 的最後面，理由寫在那裡。
 
 // ── Date Navigation ─────────────────────────────────────────────
 
@@ -489,7 +489,12 @@ async function loadReport(idx) {
     } else if (res && res.code === "report_missing") {
       throw new Error("這一天的報告尚未產生");
     } else {
-      url = (dt === "latest" ? "report_data_latest.json" : `report_data_${dt}.json`) + "?t=" + Date.now();
+      // 這裡以前會退回抓 Pages 上的 report_data_latest.json，那是 report-data 還沒
+      // 部署時的過渡路徑。報告 JSON 改放私有 Storage 之後（SECURITY.md S7），那個
+      // 檔案被 _remove_public_report_copies 刪掉、又被 .gitignore 擋著，公開站上
+      // 必定不存在——所以這條路只會產生 "HTTP 404"，把真正的原因（function 連不上、
+      // token 失效、回了非 2xx）蓋掉。
+      throw new Error("report-data 沒有回應可用的網址（請查 Network 裡這一筆的狀態碼）");
     }
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
@@ -500,6 +505,14 @@ async function loadReport(idx) {
     document.getElementById("report-body").innerHTML =
       `<div class="alert alert-warning">無法載入報告：${e.message}</div>`;
   }
+}
+
+// 分片抓不到時不要靜默吞掉：這一組股票的說明、明細與 K 線會整個不見，而畫面看
+// 起來完全正常。2026-10-01 06:21 report_shard_62_latest.json 上傳 Storage 失敗
+// （ConnectionResetError），62xx 那一組就是這樣靜靜少掉的，而產生端的 log 還寫著
+// 「前端會退回抓整份」——下面這幾行就是全部的「退路」。
+function _warnLayerMissing(kind, xx, why) {
+  console.warn(`[Report] ${kind} ${xx} 載入失敗（${why}）：這一組股票的明細與 K 線會缺。`);
 }
 
 // 一個分片（股號前兩碼）的說明、分數趨勢、明細指標與 K 線併進目前這份報告。
@@ -514,9 +527,9 @@ async function ensureShard(xx) {
   const ver = data.layers.version || 1;
   if (!shard || !shard.json || shard.date !== data.date || shard.ver !== ver) {
     const res = await reportApi({ name: availableDates[currentIdx] || "latest", part: "shard", shard: xx });
-    if (!res || !res.url) return;
+    if (!res || !res.url) { _warnLayerMissing("shard", xx, "report-data 沒給網址"); return; }
     const r = await fetch(res.url, { cache: "no-store" });
-    if (!r.ok) return;
+    if (!r.ok) { _warnLayerMissing("shard", xx, "HTTP " + r.status); return; }
     const json = await r.json();
     shard = { date: json.date, ver, json };
     _cachePut("shard:" + xx, shard).catch(() => {});
@@ -549,9 +562,9 @@ async function ensureKLine(xx) {
   const ver = data.layers.version || 1;
   if (!cached || !cached.json || cached.date !== data.date || cached.ver !== ver) {
     const res = await reportApi({ name: availableDates[currentIdx] || "latest", part: "kline", shard: xx });
-    if (!res || !res.url) return;
+    if (!res || !res.url) { _warnLayerMissing("kline", xx, "report-data 沒給網址"); return; }
     const r = await fetch(res.url, { cache: "no-store" });
-    if (!r.ok) return;
+    if (!r.ok) { _warnLayerMissing("kline", xx, "HTTP " + r.status); return; }
     const json = await r.json();
     cached = { date: json.date, ver, json };
     _cachePut("kline:" + xx, cached).catch(() => {});
@@ -956,6 +969,21 @@ function _buildOption(pd, levels, period) {
     ]
   };
 }
+
+// ── 啟動 ────────────────────────────────────────────────────────
+// 必須是這支 script 的最後一行。使用者已經有 token 時，bootAuth() 往下到
+// initReport() → loadReport() → _cacheGet() → _reportDb() 整條路上一個 await
+// 都沒有，所以它會同步讀到還沒宣告的 `let _reportDbPromise`，拋出
+// "Cannot access '_reportDbPromise' before initialization"。
+//
+// 2026-09-27（dde088d）把 IndexedDB 快取加進 loadReport 之後就是這樣：已登入的
+// 人每次開報告都只看得到「無法載入報告」，沒登入的人反而正常（走 login-gate，
+// 不會呼叫 initReport），所以從外面看這個站是好的。
+//
+// 上一次踩到同一個坑的對策是把全域變數往上搬（見本檔開頭「全域狀態」那段），
+// 但那要求每次新增全域狀態都記得搬一次——三天後就失效了。放在最後面才是不會
+// 再壞的那個位置。
+bootAuth();
 </script>
 <div class="container-fluid"><div class="disclaimer-note text-center">分數、訊號與篩選結果是公開資料的統計整理，不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。</div></div>
 </body>
