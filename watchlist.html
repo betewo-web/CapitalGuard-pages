@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="239">
+  <meta name="app-version" content="240">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=239" rel="stylesheet">
+  <link href="watchlist.css?v=240" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -4147,11 +4147,19 @@ async function _autoRefreshOnce() {
   if (!state.userId || document.hidden) return;
   const marketOpen = _isMarketOpenNow();
   const tasks = [];
-  // 收盤後仍每 5 分鐘問一次通知匣：盤後提醒與每日報告會在那時候進來，而推播若沒送達
-  // 就只剩這條補得到。盤中不問（J2，2026-09-27）——推播一到 service worker 就直接把
-  // 那一則插進通知匣與雷達（F1），這條輪詢只是補漏，一小時 24 KB 買一個很少發生的保險。
-  // 開 App、回前景、切到通知頁時都仍會抓一次，所以漏掉的那則最多晚到下一次切分頁。
-  if (!marketOpen && Date.now() - _lastInboxRefreshAt >= _inboxIntervalMs()) {
+  // 通知匣每 5 分鐘問一次，**盤中也問**。
+  //
+  // 2026-09-27（J2）曾經把盤中這條關掉，理由是「推播一到 service worker 就直接把那一則
+  // 插進通知匣與雷達（F1），輪詢只是補漏」。那個前提在 2026-10-01 破了：3017 奇鋐那則
+  // 推播伺服器端送達 2/2、alert_history 也寫了，但手機上沒有跳出來。送達不等於看得到，
+  // 而「插進通知匣」那一步跟「跳出通知」走的是同一個 push 事件——push 沒到，兩件事一起沒。
+  //
+  // 關掉之後盤中通知匣沒有任何機制會發現自己少了一則：停在那一頁不會補、點別則也不會補，
+  // 唯一的補救是切出去再切回來（而且要隔超過 60 秒）。代價是一小時 24 KB、盤中 4.5 小時
+  // 約 108 KB／人／天，補漏值這個價。
+  //
+  // 開 App、回前景、切到通知頁、點推播跳進來時仍然各抓一次，那幾條沒變。
+  if (Date.now() - _lastInboxRefreshAt >= _inboxIntervalMs()) {
     _lastInboxRefreshAt = Date.now();
     tasks.push(refreshInbox(true));
   }
