@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="240">
+  <meta name="app-version" content="241">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=240" rel="stylesheet">
+  <link href="watchlist.css?v=241" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -6362,11 +6362,28 @@ function _handleNotificationClickUrl(url, at) {
 }
 
 function updateInboxBadge() {
-  const el = document.getElementById("inbox-badge");
-  if (!el) return;
   const n = inboxSupportsRead ? inboxRows.filter(r => !r.read_at).length : 0;
-  el.style.display = n > 0 ? "block" : "none";
-  el.textContent = n > 99 ? "99+" : String(n);
+  const el = document.getElementById("inbox-badge");
+  if (el) {
+    el.style.display = n > 0 ? "block" : "none";
+    el.textContent = n > 99 ? "99+" : String(n);
+  }
+  _setAppBadge(n);   // 桌面／主畫面的 PWA 圖示未讀數
+}
+
+// App 圖示未讀數（Badging API）。只有安裝成 PWA 才有效，其餘情況靜默跳過。
+// 頁面開著時這裡是真相來源；同時把數字交給 SW 當基準，App 關著時 SW 收到推播
+// 才知道從幾開始加（見 sw.js 的 _maybeBumpAppBadge）。
+function _setAppBadge(n) {
+  if ("setAppBadge" in navigator) {
+    try {
+      if (n > 0) navigator.setAppBadge(n).catch(() => {});
+      else navigator.clearAppBadge().catch(() => {});
+    } catch { /* 平台不支援：忽略 */ }
+  }
+  try {
+    navigator.serviceWorker?.controller?.postMessage({ type: "badge-sync", count: n });
+  } catch { /* 還沒有 controller：下次 updateInboxBadge 會再同步 */ }
 }
 
 // 一排篩選籤裡只有一顆亮著。switchTab 回到預設時也要同一組外觀，所以抽出來共用

@@ -10,7 +10,7 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v240';
+const CACHE_VERSION = 'tw-stock-v241';
 
 // 訂閱輪換用的 Cache：不隨版本清掉，否則升級 SW 就把待同步的訂閱弄丟了。
 const PUSH_SYNC_CACHE = 'push-sync';
@@ -18,6 +18,8 @@ const PUSH_SYNC_URL   = './__push_sync__';   // 假 URL，只當 Cache 的 key �
 const PUSH_KEY_URL    = './__push_key__';    // 頁面訂閱時寫入的 VAPID 公鑰
 const PENDING_ALERT_URL = './__pending_alert__'; // 點通知後要跳去的位置（冷啟動備援）
 const PENDING_SIGNALS_URL = './__pending_signals__'; // 收到的推播內容（頁面開機時撿回，插進通知匣與雷達；F1）
+const BADGE_COUNT_URL = './__badge_count__'; // App 圖示未讀數的基準：頁面開著時寫入真實未讀數，
+                                             // App 關著時 SW 收到推播就從這個數字往上加（Badging API）
 
 // Static assets cached for offline CSS/icon support.
 // watchlist.html is NOT listed here — it is handled by network-first navigation.
@@ -153,7 +155,63 @@ self.addEventListener('push', event => {
     self.registration.showNotification(title, options),
     _stashPushedAlert(data).catch(() => {}),
     _broadcast({ type: 'push-received', alert: data }).catch(() => {}),
+    _maybeBumpAppBadge().catch(() => {}),
   ]));
+});
+
+// ── App 圖示未讀數（Badging API）────────────────────────────────
+// 桌面／主畫面的 PWA 圖示上顯示未讀數。只有安裝成 App 才有效，其餘情況靜默跳過。
+// 真實未讀數永遠由頁面算（它讀得到倉庫）；SW 只在「App 關著、沒有開著的視窗」時，
+// 把收到的每一則推播往基準數上加——因為那種時候只有 SW 在跑。頁面下次開啟時會用
+// 倉庫的真實未讀數覆蓋基準、重設圖示，所以 SW 這邊多算少算都會自己歸位。
+async function _readBadgeCount() {
+  try {
+    const cache = await caches.open(PUSH_SYNC_CACHE);
+    const res = await cache.match(BADGE_COUNT_URL);
+    if (!res) return 0;
+    const n = parseInt(await res.text(), 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch { return 0; }
+}
+
+async function _writeBadgeCount(n) {
+  try {
+    const cache = await caches.open(PUSH_SYNC_CACHE);
+    await cache.put(BADGE_COUNT_URL, new Response(String(Math.max(0, n | 0)),
+      { headers: { 'Content-Type': 'text/plain' } }));
+  } catch { /* 寫不進去，頁面下次開啟會重設 */ }
+}
+
+async function _applyAppBadge(n) {
+  if (!('setAppBadge' in self.navigator)) return;
+  try {
+    if (n > 0) await self.navigator.setAppBadge(n);
+    else await self.navigator.clearAppBadge();
+  } catch { /* 未安裝成 PWA，或平台不支援：忽略 */ }
+}
+
+async function _maybeBumpAppBadge() {
+  if (!('setAppBadge' in self.navigator)) return;
+  try {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // 有開著且在前景的視窗：由頁面負責（它會用倉庫真實未讀數設定），SW 不重複加
+    if (wins.some(c => c.visibilityState === 'visible')) return;
+  } catch { /* 查不到視窗狀態就照舊補一次，寧可多顯示也不要漏 */ }
+  const n = (await _readBadgeCount()) + 1;
+  await _writeBadgeCount(n);
+  await _applyAppBadge(n);
+}
+
+// 頁面把倉庫的真實未讀數交過來：寫成基準、同步圖示。這是 badge 基準的唯一寫入點之一，
+// 頁面端自己也會直接設圖示（即時），這裡負責讓 App 關著時 SW 的累加有正確的起點。
+self.addEventListener('message', event => {
+  const d = event.data;
+  if (!d || d.type !== 'badge-sync') return;
+  const n = Number.isFinite(d.count) && d.count > 0 ? (d.count | 0) : 0;
+  event.waitUntil((async () => {
+    await _writeBadgeCount(n);
+    await _applyAppBadge(n);
+  })());
 });
 
 async function _stashPushedAlert(data) {
