@@ -1,4 +1,4 @@
-/* ─────────────────────────────────────────────
+﻿/* ─────────────────────────────────────────────
    CapitalGuard-股市雷達 — Service Worker
    Strategy:
      • HTML navigation  → Network-first (always fetch latest,
@@ -10,7 +10,7 @@
 ───────────────────────────────────────────── */
 
 // Bump version whenever sw.js itself is updated.
-const CACHE_VERSION = 'tw-stock-v241';
+const CACHE_VERSION = 'tw-stock-v242';
 
 // 訂閱輪換用的 Cache：不隨版本清掉，否則升級 SW 就把待同步的訂閱弄丟了。
 const PUSH_SYNC_CACHE = 'push-sync';
@@ -20,6 +20,7 @@ const PENDING_ALERT_URL = './__pending_alert__'; // 點通知後要跳去的位�
 const PENDING_SIGNALS_URL = './__pending_signals__'; // 收到的推播內容（頁面開機時撿回，插進通知匣與雷達；F1）
 const BADGE_COUNT_URL = './__badge_count__'; // App 圖示未讀數的基準：頁面開著時寫入真實未讀數，
                                              // App 關著時 SW 收到推播就從這個數字往上加（Badging API）
+const PUSH_RECEIPTS_URL = './__push_receipts__'; // 送達回報：顯示過哪幾則通知，頁面下次開啟時補寫回倉庫
 
 // Static assets cached for offline CSS/icon support.
 // watchlist.html is NOT listed here — it is handled by network-first navigation.
@@ -151,13 +152,40 @@ self.addEventListener('push', event => {
   // 通知一定要跳（userVisibleOnly）；順手把內容存進 Cache、丟給開著的視窗，
   // 頁面就能立刻把這則插進通知匣與雷達，不必等下一輪讀倉庫（F1）。
   // 存與丟任一失敗都不影響通知。
+  // showNotification 的結果要留證據：2026-10-02 查「Push Service 說送成功、手機卻沒跳」
+  // 查了一整輪，伺服器端完全清白又重現不出來，就是因為裝置這一端沒有任何紀錄。
+  // 沒有回報 = SW 根本沒跑（訊息沒到裝置）；有回報卻沒看到 = 顯示之後才被丟掉。
+  // 兩者要修的地方完全不同，而現在分不出來。
+  const shown = self.registration.showNotification(title, options);
   event.waitUntil(Promise.all([
-    self.registration.showNotification(title, options),
+    shown,
+    shown.then(() => _recordPushReceipt(data, true, ''),
+               err => _recordPushReceipt(data, false, String((err && err.message) || err)))
+         .catch(() => {}),
     _stashPushedAlert(data).catch(() => {}),
     _broadcast({ type: 'push-received', alert: data }).catch(() => {}),
     _maybeBumpAppBadge().catch(() => {}),
   ]));
 });
+
+// 送達回報：SW 讀不到 localStorage，拿不到使用者的 access token，所以不能自己寫
+// Supabase（與 pushsubscriptionchange 同樣的限制）。先留在 Cache，頁面下次開啟時補寫。
+async function _recordPushReceipt(data, shown, err) {
+  const key = data && data.key;
+  if (!key) return;          // 沒有 event_key 就對不回倉庫那一列（例如每日報告）
+  try {
+    const cache = await caches.open(PUSH_SYNC_CACHE);
+    const res = await cache.match(PUSH_RECEIPTS_URL);
+    let list = [];
+    if (res) { try { list = await res.json(); } catch { list = []; } }
+    if (!Array.isArray(list)) list = [];
+    const cutoff = Date.now() - 7 * 864e5;   // 七天沒機會回寫就放棄，不要無限長大
+    list = list.filter(x => x && x.key && x.key !== key && (x.at || 0) >= cutoff);
+    list.push({ key, at: Date.now(), shown: !!shown, err: String(err || '').slice(0, 200) });
+    await cache.put(PUSH_RECEIPTS_URL, new Response(JSON.stringify(list.slice(-200)),
+                                                   { headers: { 'Content-Type': 'application/json' } }));
+  } catch { /* 寫不進去就沒有這次的回報，不影響通知本身 */ }
+}
 
 // ── App 圖示未讀數（Badging API）────────────────────────────────
 // 桌面／主畫面的 PWA 圖示上顯示未讀數。只有安裝成 App 才有效，其餘情況靜默跳過。

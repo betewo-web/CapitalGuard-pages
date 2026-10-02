@@ -1,11 +1,11 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-TW">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="241">
+  <meta name="app-version" content="242">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=241" rel="stylesheet">
+  <link href="watchlist.css?v=242" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -4032,6 +4032,7 @@ async function showMain() {
   // 網址上沒有參數：可能是 iOS 忽略了 openWindow 的網址，改問 SW 留在 Cache 的目標
   if (!bootAlert) _consumePendingAlertFromCache();
   _consumePendingSignalsFromCache();   // F1：視窗沒開時到的推播，先插進通知匣與雷達
+  _flushPushReceipts().catch(() => {});   // 守門員的送達回報，補寫 delivered_at
   loadAdminFlag();
 
   await loadWatchlist();
@@ -4334,6 +4335,7 @@ function _onAppResume() {
   // 但它在 focus 前已把目標寫進 Cache——回前景時補撿一次，訊息有到的話會被時間戳擋掉
   _consumePendingAlertFromCache();
   _consumePendingSignalsFromCache().then(_refreshQuotesOnPush).catch(() => {});
+  _flushPushReceipts().catch(() => {});
 
   _scheduleAutoRefresh();
 }
@@ -11379,6 +11381,7 @@ const PUSH_SYNC_CACHE = 'push-sync';
 const PUSH_SYNC_URL   = './__push_sync__';
 const PUSH_KEY_URL    = './__push_key__';
 const PENDING_SIGNALS_URL = './__pending_signals__';   // 守門員收到推播時存下的訊號（F1）
+const PUSH_RECEIPTS_URL   = './__push_receipts__';     // 守門員顯示通知後的送達回報，補寫 delivered_at
 
 // ── F1：推播到的訊號直接插進通知匣與雷達 ────────────────────────────
 // 守門員（sw.js）收到推播就把 payload（key／sid／kind／sev／src／at／price／level）
@@ -11461,6 +11464,42 @@ async function _consumePendingSignalsFromCache() {
     if (!Array.isArray(list)) return;
     const cutoff = Date.now() - 2 * 864e5;
     for (const a of list) if (a && (a.receivedAt || 0) >= cutoff) ingestPushedAlert(a);
+  } catch { /* 沒有 Cache API 或讀取失敗就算了 */ }
+}
+
+// 送達回報補寫（2026-10-02）：sw.js 顯示通知後把 {key, at, shown} 留在 Cache，
+// 這裡趁有 access token 時寫回 alert_history.delivered_at。
+//
+// 為什麼要有這條：web_push_sent_ok 只代表 Push Service 回 201 收下，不代表裝置顯示了；
+// 而且它是「n > 0」——兩台裝置一台成功就記 True，分不出哪一台沒拿到。
+// 有了這一欄，「送出了但沒送達」才有證據，不必再靠重送測試去猜。
+//
+// 寫不進去（例如 migrate_push_receipt.sql 還沒執行）就把那筆留著下次再試，
+// 七天後由 sw.js 那邊自然淘汰。
+async function _flushPushReceipts() {
+  if (!state.userId || !('caches' in window)) return;
+  try {
+    const cache = await caches.open(PUSH_SYNC_CACHE);
+    const res = await cache.match(PUSH_RECEIPTS_URL);
+    if (!res) return;
+    let list = await res.json();
+    if (!Array.isArray(list) || !list.length) return;
+
+    const failed = [];
+    for (const r of list) {
+      if (!r || !r.key) continue;
+      try {
+        await sbPatch("alert_history",
+          { "user_id": `eq.${state.userId}`, "event_key": `eq.${r.key}`, "delivered_at": "is.null" },
+          { delivered_at: new Date(r.at || Date.now()).toISOString() },
+          state.accessToken);
+      } catch {
+        failed.push(r);   // 欄位還沒建、或暫時連不上：留著下次再補
+      }
+    }
+    if (!failed.length) await cache.delete(PUSH_RECEIPTS_URL);
+    else await cache.put(PUSH_RECEIPTS_URL, new Response(JSON.stringify(failed),
+                                                        { headers: { 'Content-Type': 'application/json' } }));
   } catch { /* 沒有 Cache API 或讀取失敗就算了 */ }
 }
 
