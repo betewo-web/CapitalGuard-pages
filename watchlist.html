@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="243">
+  <meta name="app-version" content="244">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=243" rel="stylesheet">
+  <link href="watchlist.css?v=244" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -8073,11 +8073,13 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   const liveQ = opts.past ? null : getQuote(sid);
   const priceRaw = Number(iq?.price ?? (opts.past ? NaN : liveQ?.price));
   const cur = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : null;
-  // 這個價是不是「今天的」：剛加入、監控還沒寫出當日那列時，手上只有日線收盤
-  // （報告檔或 FinMind），把它畫成一條叫「現價」的線就是在說謊——2026-10-02 光聖 6442
-  // 盤中漲停 1625，雷達上那條「現價」寫的是昨收 1480。
+  // 這個價是不是「雷達正在顯示的那個交易日」的：剛加入、監控還沒寫出當日那列時，
+  // 手上只有日線收盤（報告檔或 FinMind），把它畫成一條叫「現價」的線就是在說謊——
+  // 2026-10-02 光聖 6442 盤中漲停 1625，雷達上那條「現價」寫的是昨收 1480。
+  // 基準刻意用 radarSessionDate() 而不是「今天」：收盤後與週末看到的是上一個交易日的
+  // 故事，那一天的最後成交價在那一頁就是「現價」，不該因為日曆翻頁就改叫昨收。
   const curDate = opts.past ? "" : String((iq?.price > 0 ? iq.tradeDate : liveQ?.tradeDate) || "");
-  const curIsToday = !!curDate && curDate === taipeiDateKey(new Date());
+  const curIsSession = !!curDate && curDate === radarSessionDate();
   // 縱向位置：訊號當時的成交價（穿過線／停在線前的畫面自然出現）；沒有就用它講的關卡、再沒有就現價
   const marks = entries.map(e => {
     const p = Number(e.price), l = Number(e.level);
@@ -8099,7 +8101,7 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   for (const e of entries) if (RTL_LEVEL_LABEL[e.key]) addRef(RTL_LEVEL_LABEL[e.key], e.level, "sig");
   // 現價（過去的日子＝那天的收盤）一定畫一條：關卡全在很遠的地方時（聯發科 2026-09-22，
   // 支撐在 3,852、壓力一條都沒有），圖上會連一條靠近價格的線都沒有，看不出訊號離現在多遠
-  addRef(opts.past ? "收盤" : (curIsToday ? "現價" : "昨收"), cur, "cur");
+  addRef(opts.past ? "收盤" : (curIsSession ? "現價" : "昨收"), cur, "cur");
   if (iq?.prevClose) addRef("昨收", iq.prevClose, "prev");
   const lv = opts.past ? _nearestFromLevels(iq?.levels, cur) : nearestLevels(sid, cur);
   addRef("壓", lv.resistance, "lvl");
