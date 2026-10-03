@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="244">
+  <meta name="app-version" content="245">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=244" rel="stylesheet">
+  <link href="watchlist.css?v=245" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -4149,6 +4149,9 @@ function _monitorPendingSids() {
     if (!isStockId(sid)) continue;
     const added = Date.parse(r.created_at || "");
     if (!Number.isFinite(added) || now - added > PENDING_MONITOR_MS) continue;
+    // 超出方案上限的那幾檔不在 active_watchlist 裡，monitor 永遠不會追蹤它們：
+    // 標「正在納入監控」是假訊息，而且會白白輪詢 15 分鐘。那一列自己掛「🔒 超出方案」
+    if (!isWatchRowActive(r)) continue;
     const iq = intradayQuoteMap[sid];
     if (iq && iq.tradeDate === today) continue;   // 當日那列已經到了＝納入完成
     out.push(sid);
