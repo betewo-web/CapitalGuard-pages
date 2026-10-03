@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="245">
+  <meta name="app-version" content="246">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=245" rel="stylesheet">
+  <link href="watchlist.css?v=246" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -4123,9 +4123,9 @@ function _intradayViewOpen() {
   return currentTab === "home" || !!radarTimelineSid;
 }
 
-// ── 剛加入自選、還沒被監控納入的股票 ──────────────────────────────────────
+// ── 剛加入自選、還沒被監控納入的股票（「資訊尚未同步」）────────────────────
 // 盤中加一檔自選股，要等監控下一輪 prepare() 才算得出關卡、才會寫 intraday_state
-// 那一列（後端 2026-10-02 起 30 秒快篩一次代號變動，最長仍是 MONITOR_REFRESH_SEC）。
+// 那一列（後端 120 秒快篩一次代號變動，最長仍是 MONITOR_REFRESH_SEC）。
 // 空窗期裡這一檔沒有當日報價、沒有關卡、訊號數 0——跟「今天真的什麼都沒發生」
 // 長得一模一樣，而且雷達圖會把日線收盤畫成一條叫「現價」的線。
 //
@@ -6740,7 +6740,12 @@ function renderHome() {
     const lv = nearestLevels(sid, getQuote(sid)?.price ?? null);
     const nearCount = (lv.supPct != null && lv.supPct <= RADAR_NEAR_PCT ? 1 : 0)
                     + (lv.resPct != null && lv.resPct <= RADAR_NEAR_PCT ? 1 : 0);
-    return { sid, name, active, counts, todayCount, total, standout, dir: homeDirectionOf(sid), nearCount,
+    // 剛加入、監控還沒寫出當日那列：這一列能顯示的全是上一個交易日的東西——
+    // 漲／跌籤是用昨天的漲跌幅算的、訊號 0 與逼近關卡 0 不是今天的結論。
+    // 一律讓位給「資訊尚未同步」（見 _monitorPendingSids）。
+    const pending = _monitorPending(sid);
+    return { sid, name, active, counts, todayCount, total, standout, nearCount, pending,
+             dir: pending ? null : homeDirectionOf(sid),
              limitKind: (active && (active.signal === "limit_up" || active.signal === "limit_down"))
                         ? active.signal : "" };
   });
@@ -6816,7 +6821,12 @@ function homeTileHtml(r) {
   // 0 用灰色，眼睛才會停在有數字的那幾列
   const stat = (n, label, cls) =>
     `<span class="home-tile-stat"><b class="${n ? cls : "hs-zero"}">${n}</b><i>${label}</i></span>`;
-  const lead = stat(r.todayCount, "⚡ 訊號", "sev-orange") + stat(r.nearCount, "🎯 逼近關卡", "sev-blue");
+  // 剛加入、還沒拿到當日那列：兩格數字都還不是今天的結論，整個換成一句話。
+  // 用同一個 .home-tile-stat 盒子（裡面的 <i> 本來就是灰色 nowrap），不必動 CSS；
+  // 一格取代兩格，這一列反而更窄，窄螢幕不會被擠爆。
+  const lead = r.pending
+    ? `<span class="home-tile-stat"><i>資訊尚未同步</i></span>`
+    : stat(r.todayCount, "⚡ 訊號", "sev-orange") + stat(r.nearCount, "🎯 逼近關卡", "sev-blue");
   // 事件籤 2026-09-22 從方塊上拿掉（Howard）：方塊只講訊號，事件在下面那張「今日股票資訊彙整」卡
   // 與「🌙 盤後」頁。r.standout 仍用於排序（今天有事的排前面）。
   // 評分 2026-09-22 從方塊上拿掉（Howard）：首頁只講「今天誰有事」，評分變化在 📊 統計 分頁。
@@ -6853,7 +6863,7 @@ function homeStatusText() {
   if (quoteStale) return `🟠 報價已停止更新 · 最後 ${fmtClock(freshnessAt)}（${fmtAgeRough(quoteAge)}）· 自選 ${n} 檔`;
   // 剛加入的那幾檔還在等監控納入：它們那一列的「訊號 0 / 逼近關卡 0」不是今天的結論
   const pendingN = _monitorPendingSids().length;
-  const pendingNote = pendingN ? ` · ${pendingN} 檔納入監控中` : "";
+  const pendingNote = pendingN ? ` · ${pendingN} 檔資訊尚未同步` : "";
   if (isOpen) return `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : latestAt ? ` · 資料 ${fmtTime(latestAt)}` : ""}${pendingNote} · 自選 ${n} 檔`;
   return `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${n} 檔`;
 }
@@ -8052,7 +8062,7 @@ function renderRadarTimeline(sid) {
     : "";
   // 剛加入、監控還沒納入：副標要寫出來，否則「有 0 則訊號」看起來像今天真的沒事
   const pending = !past && _monitorPending(sid);
-  const pendingHtml = pending ? ` · <span class="rtl-live-off">納入監控中</span>` : "";
+  const pendingHtml = pending ? ` · <span class="rtl-live-off">資訊尚未同步</span>` : "";
   document.getElementById("rtl-sub").innerHTML =
     `${escapeHtml(dayText)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}${pendingHtml}${backHtml}${liveOffHtml}`;
   const daysEl = document.getElementById("rtl-days");
@@ -8245,7 +8255,7 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     }).join("");
     // 「還沒納入監控」不等於「今天沒有訊號」：剛加入的那幾分鐘沒有任何條件被判斷過，
     // 把缺資料說成「所有條件都沒成立」是同一類錯（稽核 I13；2026-10-02 光聖 6442）
-    const emptyLabel = !opts.past ? (opts.pending ? "剛加入，正在納入監控" : "今天還沒有訊號")
+    const emptyLabel = !opts.past ? (opts.pending ? "資訊尚未同步" : "今天還沒有訊號")
                      : (opts.covered ? "這天沒有訊號" : "沒有這天的紀錄");
     emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">${emptyLabel}</text>`;
   }
