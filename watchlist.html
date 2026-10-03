@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="247">
+  <meta name="app-version" content="248">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=247" rel="stylesheet">
+  <link href="watchlist.css?v=248" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2682,6 +2682,16 @@ function meterHtml(label, used, limit) {
     </div>`;
 }
 
+// 體驗中（claim_trial() 寫的那一列）：方案卡與結帳畫面的用字都要跟著變
+// 體驗過期後那一列還留著 provider='trial'、status='active'（方案由 plan_of() 推導回 free），
+// 所以一定要連期限一起看，不然體驗結束之後按鈕還會停在體驗的說法
+function isTrialNow() {
+  const s = planState.subscription;
+  if (!s || s.provider !== "trial" || s.status !== "active") return false;
+  const end = new Date(s.current_period_end);
+  return !isNaN(end) && end > new Date();
+}
+
 function subscriptionStatusHtml() {
   const p = planState.plan, s = planState.subscription;
   // 綠界約定還「活著」（沒請求終止）就要能取消——past_due、到期都不代表綠界不再扣
@@ -2705,7 +2715,7 @@ function subscriptionStatusHtml() {
   if (s.provider === "trial") {
     const left = tradingDaysLeftFrom(s.current_period_end);
     const freeName = freePlanName();
-    return `<div class="plan-status">${ICON_GIFT}免費體驗中，到 <b>${trialLastDayLabel(s.current_period_end)}</b> 收盤為止${left !== null ? `（含今天還剩 ${left} 個交易日）` : ""}，之後自動回到${escapeHtml(freeName)}，不會扣款。想繼續用不中斷，隨時可以升級。</div>`;
+    return `<div class="plan-status">${ICON_GIFT}免費體驗中，到 <b>${trialLastDayLabel(s.current_period_end)}</b> 收盤為止${left !== null ? `（還剩 ${left} 個交易日）` : ""}，之後自動回到${escapeHtml(freeName)}，不會扣款。想繼續用不中斷，隨時可以升級。</div>`;
   }
   if (s.provider === "manual") {
     return `<div class="plan-status">由管理員指派${s.note ? `（${escapeHtml(s.note)}）` : ""}，有效至 <b>${until}</b>。</div>`;
@@ -2769,9 +2779,19 @@ function renderPlanModal(focus) {
     const isCurrent = x.code === p.code;
     let cta;
     if (isCurrent) {
-      cta = `<button type="button" class="btn btn-sm btn-outline-light w-100" disabled>目前方案</button>`;
+      // 體驗中：plan_of() 已經回體驗的那個方案，所以「目前方案」就是它。再印一顆
+      // disabled 的「目前方案」等於整個體驗期間沒有付款入口，想先付錢的人只能等體驗
+      // 過期（2026-10-03）。後端本來就放行體驗中付款：create-order 只擋 provider
+      // 不是 trial 的 active 訂閱，apply_ecpay_payment 的 ON CONFLICT 會把體驗列換成 ecpay。
+      cta = isTrialNow() && x.price_twd > 0
+        ? `<button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center"
+                   onclick="startCheckout('${jsAttr(x.code)}')">正式訂閱${escapeHtml(x.name)}</button>`
+        : `<button type="button" class="btn btn-sm btn-outline-light w-100" disabled>目前方案</button>`;
     } else if (x.price_twd === 0) {
-      cta = `<button type="button" class="btn btn-sm btn-outline-light w-100" onclick="cancelSubscription()">改為${escapeHtml(x.name)}</button>`;
+      // 體驗中按這顆會打到 cancel-subscription，那支只支援 ecpay，回 501
+      cta = isTrialNow()
+        ? `<button type="button" class="btn btn-sm btn-outline-light w-100" disabled>體驗結束後自動回到${escapeHtml(x.name)}</button>`
+        : `<button type="button" class="btn btn-sm btn-outline-light w-100" onclick="cancelSubscription()">改為${escapeHtml(x.name)}</button>`;
     } else {
       const up = x.price_twd > p.price_twd;
       cta = `<button type="button" class="btn btn-sm ${up ? "btn-success btn-accent-sm" : "btn-outline-light"} w-100 justify-content-center"
@@ -2930,15 +2950,18 @@ function startCheckout(code) {
   const body = document.getElementById("plan-modal-body");
   const cur = planState.plan;
   const upgrade = plan.price_twd > (cur ? cur.price_twd : 0);
+  // 體驗中訂閱同一個方案：既不是升級也不是改方案
+  const trialSame = isTrialNow() && !!cur && plan.code === cur.code;
   body.innerHTML = `
     <div class="plan-confirm" id="plan-confirm">
-      <div class="plan-confirm-title">${upgrade ? "升級到" : "改為"}${escapeHtml(plan.name)}</div>
+      <div class="plan-confirm-title">${trialSame ? "正式訂閱" : (upgrade ? "升級到" : "改為")}${escapeHtml(plan.name)}</div>
       <div class="plan-confirm-box">
         <div class="plan-card-name">${escapeHtml(plan.name)}</div>
         <div class="plan-price">${planPriceLabel(plan)}</div>
         <ul class="plan-confirm-points">
           <li>自選股 ${plan.watch_limit} 檔、自訂通知規則 ${plan.rule_limit} 條${plan.ai_enabled ? "、AI 功能" : ""}</li>
           <li>信用卡定期定額：付款後立即開通，之後每月同日自動扣款 NT$${plan.price_twd}</li>
+          ${trialSame ? `<li>付費期間從今天起算一個月，體驗剩下的日子不另外累加（功能不中斷）</li>` : ""}
           <li>隨時可取消續訂，功能保留至當期結束；月費不退款</li>
           <li>卡號在綠界（ECPay）頁面輸入並由綠界保存，不經過 CapitalGuard</li>
         </ul>
