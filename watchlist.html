@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="246">
+  <meta name="app-version" content="247">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=246" rel="stylesheet">
+  <link href="watchlist.css?v=247" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -967,6 +967,7 @@
         <button type="button" class="btn btn-sm btn-outline-light" id="alert-history-settings-btn" style="display:none" onclick="openSettingsFromDetail()">調整通知設定</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-report-btn" style="display:none" onclick="openDailyReportFromHistory()">開啟分析報告</button>
         <button type="button" class="btn btn-sm btn-outline-danger" id="alert-history-stop-rule-btn" style="display:none" onclick="stopRuleFromDetail()">停用此規則</button>
+        <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-plan-btn" style="display:none" onclick="openPlanFromHistory()">查看方案與用量</button>
         <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">關閉</button>
       </div>
     </div>
@@ -2738,6 +2739,8 @@ function renderPlanModal(focus) {
     mixed_signals: `${ICON_MIX}一條進階訊號放多個條件（混和訊號）是${escapeHtml(planNameOf("premium"))}功能。`,
     kline_enabled: `${ICON_CANDLE}K 線圖需要付費方案。`,
     trial:         `${ICON_GIFT}免費體驗不需要付款資料，到期自動回到${escapeHtml(freePlanName())}。`,
+    // 從通知匣的體驗倒數提醒過來：到期前後都說得通，不必判斷現在過期了沒
+    trial_notice:  `${ICON_GIFT}免費體驗到期後會自動回到${escapeHtml(freePlanName())}，設定會保留；要繼續用完整功能可以在這裡升級。`,
     deeplink:    pitch || "從官網過來的：先看看目前方案的用量，需要再升級。",
     paid:        "付款結果以綠界回呼為準。若方案尚未更新，請稍後再開啟這個面板確認。",
     pay_failed:  "綠界回報這次付款未成功，沒有扣款也沒有開通。可以重新選擇方案再試一次。",
@@ -6532,6 +6535,13 @@ function openInboxItem(rowId) {
 // 盤中雷達的故事線放得下的來源：內建訊號與進階訊號（盤後提醒是另一段，不算「盤中」）。
 const INBOX_RADAR_SOURCES = ["monitor", "rule"];
 
+// 方案類通知（體驗倒數…）：詳情卡要給一個能到「方案與用量」的入口。
+// 推播本身帶 ?plan= 點下去就開，但從通知匣點開只會看到一張卡片，
+// 內文那句「點這則通知查看方案」在這裡就變成死路（2026-10-03）。
+const INBOX_PLAN_SOURCES = ["trial"];
+// 來源徽章平常直接印 source（monitor／rule…）；新來源給個看得懂的字
+const INBOX_SOURCE_LABEL = { trial: "方案" };
+
 // 這一則能不能在盤中雷達上指出來。**找得到對應的那一顆才回 true**——
 // 找不到就照舊開通知詳情，不要把人丟到一張寫著「沒有這天的紀錄」的空卡片上。
 function inboxRadarTargetOf(row) {
@@ -6583,7 +6593,7 @@ function openInboxDetail(rowId) {
   document.getElementById("alert-history-detail-title").textContent = _titleWithoutSid(row.title, row.stock_id) || "通知詳情";
   document.getElementById("alert-history-detail-body").textContent = row.body || "（無內容）";
   document.getElementById("alert-history-detail-time").textContent = fmtTime(row.sent_at, true);
-  document.getElementById("alert-history-detail-source").textContent = source;
+  document.getElementById("alert-history-detail-source").textContent = INBOX_SOURCE_LABEL[source] || source;
 
   // 「為什麼通知你？」
   const whyEl = document.getElementById("alert-history-why");
@@ -6598,6 +6608,9 @@ function openInboxDetail(rowId) {
 
   const isDailyReport = String(source || "").startsWith("daily_report");
   document.getElementById("alert-history-open-report-btn").style.display = isDailyReport ? "inline-flex" : "none";
+
+  document.getElementById("alert-history-open-plan-btn").style.display =
+    INBOX_PLAN_SOURCES.includes(source) ? "inline-flex" : "none";
 
   // 進階訊號的通知才給停用按鈕。狀態型條件（ROE、毛利率…）會天天成立，
   // 使用者要能從通知本身直接關掉，而不是自己回去翻規則清單。
@@ -6638,6 +6651,12 @@ function buildWhyHtml(row) {
   if (/下跌價位|設定價格（下跌）/.test(t) && wl.target_price_low != null)  lines.push(`設定的下跌價格：${wl.target_price_low}`);
   if (String(row.source || "").startsWith("daily_report")) lines.push("已訂閱每日分析報告推播");
   return `<div class="why-box"><div class="why-title">為什麼通知你？</div>${lines.map(l => `・${l}`).join("<br>")}</div>`;
+}
+
+function openPlanFromHistory() {
+  // 先收掉詳情卡再開方案面板：Bootstrap 疊兩層 modal 會留下吃掉點擊的背景遮罩
+  bootstrap.Modal.getInstance(document.getElementById("alertHistoryDetailModal"))?.hide();
+  openPlanModal("trial_notice");
 }
 
 function openStockFromDetail() {
