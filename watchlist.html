@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="242">
+  <meta name="app-version" content="243">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=242" rel="stylesheet">
+  <link href="watchlist.css?v=243" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -4123,6 +4123,42 @@ function _intradayViewOpen() {
   return currentTab === "home" || !!radarTimelineSid;
 }
 
+// ── 剛加入自選、還沒被監控納入的股票 ──────────────────────────────────────
+// 盤中加一檔自選股，要等監控下一輪 prepare() 才算得出關卡、才會寫 intraday_state
+// 那一列（後端 2026-10-02 起 30 秒快篩一次代號變動，最長仍是 MONITOR_REFRESH_SEC）。
+// 空窗期裡這一檔沒有當日報價、沒有關卡、訊號數 0——跟「今天真的什麼都沒發生」
+// 長得一模一樣，而且雷達圖會把日線收盤畫成一條叫「現價」的線。
+//
+// 更糟的是空窗期可能不會自己結束：盤中報價輪詢被 _intradayViewOpen() 鎖在首頁與
+// 字卡，加完就把字卡關掉、停在通知匣或自選頁的話，沒有任何路徑會再去拉
+// intraday_state，那一檔的當日資料整個盤中都不會到。
+// 2026-10-02 光聖 6442：11:59:11 加入、監控 12:01:19 就寫好了，畫面上卻一直是
+// 昨收與 0 則訊號，使用者 12:00、12:24 連開三次雷達都一樣（Howard 回報）。
+//
+// 所以：加入後 15 分鐘內、還沒拿到當日那一列的股票，盤中不管停在哪一頁都繼續補拉。
+// 15 分鐘是上限而不是節奏——拿到當日那列就不再算 pending，自然停止。
+const PENDING_MONITOR_MS = 15 * 60 * 1000;
+
+function _monitorPendingSids() {
+  if (!_isMarketOpenNow()) return [];
+  const today = taipeiDateKey(new Date());
+  const now = Date.now();
+  const out = [];
+  for (const r of watchlistRows || []) {
+    const sid = String(r.stock_id || "").trim();
+    if (!isStockId(sid)) continue;
+    const added = Date.parse(r.created_at || "");
+    if (!Number.isFinite(added) || now - added > PENDING_MONITOR_MS) continue;
+    const iq = intradayQuoteMap[sid];
+    if (iq && iq.tradeDate === today) continue;   // 當日那列已經到了＝納入完成
+    out.push(sid);
+  }
+  return out;
+}
+
+function _hasMonitorPending() { return _monitorPendingSids().length > 0; }
+function _monitorPending(sid) { return _monitorPendingSids().includes(String(sid || "").trim()); }
+
 // 從別的分頁回到首頁、或打開字卡：上次拉的已超過一個輪詢間隔就馬上補一次，不等下一輪
 function _refreshQuotesIfStale() {
   if (!state.userId || !_isMarketOpenNow()) return;
@@ -4172,7 +4208,9 @@ async function _autoRefreshOnce() {
   // 免費版盤中不輪詢（plans.live_radar=false）：這條是「持續更新」本身，
   // 收盤後補當天收盤價那條不受影響——那不是盤中雷達，是自選頁要顯示的收盤價。
   if (marketOpen) {
-    if (_intradayViewOpen() && liveQuotesAllowed()) { _lastQuoteRefreshAt = Date.now(); tasks.push(loadIntradayQuotes(true)); }
+    // _hasMonitorPending()：剛加入的那一檔還沒拿到當日那列——停在哪一頁都要補拉，
+    // 否則它整個盤中都停在「昨收＋0 則訊號」（見 _monitorPendingSids）
+    if ((_intradayViewOpen() || _hasMonitorPending()) && liveQuotesAllowed()) { _lastQuoteRefreshAt = Date.now(); tasks.push(loadIntradayQuotes(true)); }
   } else if (_isSessionOverToday() && _closeQuoteMissing()) {
     tasks.push(loadIntradayQuotes(true, { full: true }).then(() => (_closeQuoteMissing() ? loadFinMindCloseQuotes() : null)));
   }
@@ -4634,7 +4672,11 @@ async function loadIntradayQuotes(force = false, opts) {
   const needFull = wantFullCols
     || !_lastFullQuoteAt
     || Date.now() - _lastFullQuoteAt >= QUOTE_FULL_MS
-    || sids.some(sid => !intradayQuoteMap[sid]);   // 新加入自選的股票還沒有完整那份
+    || sids.some(sid => !intradayQuoteMap[sid])    // 新加入自選的股票還沒有完整那份
+    // 剛加入、手上那列還是上一個交易日的（這檔以前有人追蹤過，intraday_state 以
+    // stock_id 為鍵不會換日清空）：輕量那條只換價格，levels 與 signals_today 會留著
+    // 舊的一整輪，雷達就拿上一個交易日的關卡畫今天
+    || _hasMonitorPending();
 
   intradayQuotesLoadingPromise = (async () => {
     try {
@@ -6806,7 +6848,10 @@ function homeStatusText() {
   }
   const quoteStale = isOpen && quoteAge !== null && quoteAge >= QUOTE_STALE_MS;
   if (quoteStale) return `🟠 報價已停止更新 · 最後 ${fmtClock(freshnessAt)}（${fmtAgeRough(quoteAge)}）· 自選 ${n} 檔`;
-  if (isOpen) return `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : latestAt ? ` · 資料 ${fmtTime(latestAt)}` : ""} · 自選 ${n} 檔`;
+  // 剛加入的那幾檔還在等監控納入：它們那一列的「訊號 0 / 逼近關卡 0」不是今天的結論
+  const pendingN = _monitorPendingSids().length;
+  const pendingNote = pendingN ? ` · ${pendingN} 檔納入監控中` : "";
+  if (isOpen) return `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : latestAt ? ` · 資料 ${fmtTime(latestAt)}` : ""}${pendingNote} · 自選 ${n} 檔`;
   return `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${n} 檔`;
 }
 
@@ -8002,8 +8047,11 @@ function renderRadarTimeline(sid) {
   const liveOffHtml = (!past && _isMarketOpenNow() && !liveQuotesAllowed())
     ? ` · <span class="rtl-live-off">⏸ 不自動更新</span> <span class="hs-link" onclick="openPlanModal('live_radar')">持續更新 →</span>`
     : "";
+  // 剛加入、監控還沒納入：副標要寫出來，否則「有 0 則訊號」看起來像今天真的沒事
+  const pending = !past && _monitorPending(sid);
+  const pendingHtml = pending ? ` · <span class="rtl-live-off">納入監控中</span>` : "";
   document.getElementById("rtl-sub").innerHTML =
-    `${escapeHtml(dayText)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}${backHtml}${liveOffHtml}`;
+    `${escapeHtml(dayText)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}${pendingHtml}${backHtml}${liveOffHtml}`;
   const daysEl = document.getElementById("rtl-days");
   if (daysEl) daysEl.innerHTML = rtlDaysHtml(sid);
   const dayCountEl = document.getElementById("rtl-history-n");
@@ -8013,7 +8061,7 @@ function renderRadarTimeline(sid) {
   // 兩者要分開講，不能把缺資料說成「所有條件都沒成立」（稽核 I13）。
   const covered = !past || !!hist;
   document.getElementById("rtl-chart-wrap").innerHTML =
-    radarTimelineChartHtml(sid, intraday, ref, { past, covered });
+    radarTimelineChartHtml(sid, intraday, ref, { past, covered, pending });
   const headEl = document.getElementById("rtl-story-head");
   if (headEl) headEl.textContent = past ? `${_mdOf(date)} 盤中發生了什麼` : "盤中發生了什麼";
   document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, { past, covered });
@@ -8022,8 +8070,14 @@ function renderRadarTimeline(sid) {
 
 // opts.past：畫過去的某一天——不畫「現在」游標、不拿今天的報價與月線當參考、壓力／支撐用 iq.levels（那天存下的）
 function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
-  const priceRaw = Number(iq?.price ?? (opts.past ? NaN : getQuote(sid)?.price));
+  const liveQ = opts.past ? null : getQuote(sid);
+  const priceRaw = Number(iq?.price ?? (opts.past ? NaN : liveQ?.price));
   const cur = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : null;
+  // 這個價是不是「今天的」：剛加入、監控還沒寫出當日那列時，手上只有日線收盤
+  // （報告檔或 FinMind），把它畫成一條叫「現價」的線就是在說謊——2026-10-02 光聖 6442
+  // 盤中漲停 1625，雷達上那條「現價」寫的是昨收 1480。
+  const curDate = opts.past ? "" : String((iq?.price > 0 ? iq.tradeDate : liveQ?.tradeDate) || "");
+  const curIsToday = !!curDate && curDate === taipeiDateKey(new Date());
   // 縱向位置：訊號當時的成交價（穿過線／停在線前的畫面自然出現）；沒有就用它講的關卡、再沒有就現價
   const marks = entries.map(e => {
     const p = Number(e.price), l = Number(e.level);
@@ -8045,7 +8099,7 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   for (const e of entries) if (RTL_LEVEL_LABEL[e.key]) addRef(RTL_LEVEL_LABEL[e.key], e.level, "sig");
   // 現價（過去的日子＝那天的收盤）一定畫一條：關卡全在很遠的地方時（聯發科 2026-09-22，
   // 支撐在 3,852、壓力一條都沒有），圖上會連一條靠近價格的線都沒有，看不出訊號離現在多遠
-  addRef(opts.past ? "收盤" : "現價", cur, "cur");
+  addRef(opts.past ? "收盤" : (curIsToday ? "現價" : "昨收"), cur, "cur");
   if (iq?.prevClose) addRef("昨收", iq.prevClose, "prev");
   const lv = opts.past ? _nearestFromLevels(iq?.levels, cur) : nearestLevels(sid, cur);
   addRef("壓", lv.resistance, "lvl");
@@ -8184,7 +8238,9 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
       return `<line class="rtl-tick" x1="${x}" y1="${axisY - 4}" x2="${x}" y2="${axisY + 6}"/>`
         + (label ? `<text class="rtl-tick-label" x="${x}" y="${(axisY + RTL_FONT.tick + 7).toFixed(1)}" text-anchor="${anchor}">${label}</text>` : "");
     }).join("");
-    const emptyLabel = !opts.past ? "今天還沒有訊號"
+    // 「還沒納入監控」不等於「今天沒有訊號」：剛加入的那幾分鐘沒有任何條件被判斷過，
+    // 把缺資料說成「所有條件都沒成立」是同一類錯（稽核 I13；2026-10-02 光聖 6442）
+    const emptyLabel = !opts.past ? (opts.pending ? "剛加入，正在納入監控" : "今天還沒有訊號")
                      : (opts.covered ? "這天沒有訊號" : "沒有這天的紀錄");
     emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">${emptyLabel}</text>`;
   }
