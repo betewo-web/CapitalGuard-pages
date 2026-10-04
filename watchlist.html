@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="256">
+  <meta name="app-version" content="257">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=256" rel="stylesheet">
+  <link href="watchlist.css?v=257" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -562,7 +562,7 @@
 
           <div class="fr-pane" id="fr-add-qr">
             <div id="fr-qr-box"></div>
-            <p class="fr-hint fr-center">請對方打開 App，到「加好友」的「掃描條碼」來掃。<br>用手機相機掃也可以：Android 會直接開 App；iPhone 會開到 Safari，要回 App 裡掃。</p>
+            <p class="fr-hint fr-center">請對方打開 App，到「加好友」的「掃描條碼」來掃，掃到就會對你發出好友邀請。<br>用手機相機掃也可以：Android 會直接開 App；iPhone 會開到 Safari，要回 App 裡掃。</p>
           </div>
 
           <!-- App 內的掃描器。iPhone 的系統相機掃到連結只會開 Safari，進不了主畫面上的 App
@@ -13132,13 +13132,15 @@ function renderFriendIntentHint() {
   el.innerHTML = `<b>你掃到一個好友條碼</b>（ID：${escapeHtml(shown)}）<br>
     已經在用 CapitalGuard：請打開主畫面上的 App，到「分享」的「加好友 → 掃描條碼」再掃一次——
     手機相機開的是瀏覽器，進不了已安裝的 App。<br>
-    也可以直接在這裡登入，登入後會自動帶出這位好友。`;
+    也可以直接在這裡登入，登入後會自動對這位好友發出邀請。`;
   el.style.display = "";
 }
 
-// 登入後（分享功能確定能用）把收著的好友 ID 拿出來：跳到「加好友 → 搜尋」、帶出那個人，
-// 由使用者自己按「發出邀請」。不自動送出：一條連結就能替人發邀請的話，任何人都能做一個
-// 連結讓別人對他發邀請；而且送出之前該先看到對方是誰。
+// 登入後（分享功能確定能用）把收著的好友 ID 拿出來，直接對那個人發出邀請
+// （Howard 2026-10-04 第六輪：掃到就加，不要再讓人自己按「發出邀請」）。
+// 手機相機掃條碼走的就是這條路，而 App 分不出「相機掃到的連結」與「別人傳來、點開的連結」，
+// 所以點開別人傳的好友連結也會送出邀請。代價有限：送出的只是邀請，對方同意才成為好友，
+// 送出後畫面會停在好友頁、看得到是對誰送的。
 let _frIntentRetries = 0;
 async function consumeFriendIntent() {
   if (!frEnabled || !state.accessToken) return false;
@@ -13154,14 +13156,17 @@ async function consumeFriendIntent() {
   renderFriendIntentHint();
   trackActivity("friend_link_open");
   switchTab("friends");
-  await frOpenFriendCode(id);
+  await frOpenFriendCode(id, { send: true });
   return true;
 }
 
-// 掃到／點到一個好友 ID：停在「加好友 → 搜尋」，把 ID 填進去並查出那個人。
+// 掃到／點到一個好友 ID：到「加好友 → 搜尋」把 ID 填進去、查出那個人；opts.send 時接著直接
+// 發出邀請（掃描與連結都是這樣進來的）。對方還是要同意才會成為好友——除非對方先邀過我，
+// 那就直接成立。不送的四種情況（已經是好友、邀請已在等待、掃到自己、查無此人）停在搜尋
+// 結果上，原因留在畫面，不是一閃而過。
 // 先把子分頁選成「搜尋」再切到「加好友」：frSwitchSeg 會照「目前選的那一格」重畫，
 // 順序反過來的話，上次停在「掃描條碼」的人會看到相機先閃一下。
-async function frOpenFriendCode(id) {
+async function frOpenFriendCode(id, opts) {
   if (!frState) await frReload();
   frSwitchAdd("search");
   frSwitchSeg("add");
@@ -13169,7 +13174,22 @@ async function frOpenFriendCode(id) {
   frSwitchAdd("search");
   const inp = document.getElementById("fr-search-id");
   if (inp) inp.value = FR_HANDLE_RE.test(id) ? frFmt(id) : id;
-  await frSearch();
+  const r = await frSearch();
+  if (!(opts && opts.send) || !r || r === FR_RPC_MISSING) return;
+  if (r.error) { frToast(FR_ERRORS[r.error] || r.error, true); return; }
+  const who = r.name || "對方";
+  if (r.already_friends) { frToast(`你和 ${who} 已經是好友了`); return; }
+  if (r.pending_out) { frToast(`已經邀請過 ${who}，等對方同意`); return; }
+  const res = frIdMode === "handle"
+    ? await frRpc("lab_friend_request_by_handle", { p_handle: r.handle })
+    : await frRpc("lab_friend_request_by_id", { p_user_id: r.user_id });
+  if (!frOk(res)) return;
+  frToast(res.friends ? `${who} 也邀過你，你們已經是好友了` : `已向 ${who} 發出好友邀請，等對方同意`);
+  document.getElementById("fr-search-result").innerHTML = "";
+  if (inp) inp.value = "";
+  await frReload();
+  // 落在好友那一頁：成立的在清單裡，還沒同意的在「等待對方確認」——看得到剛才是對誰送的
+  frSwitchSeg("friends");
 }
 
 // ── App 內掃描條碼 ──
@@ -13285,7 +13305,7 @@ async function frScanStart() {
   frShow("fr-btn-scan-start", false);
   try { await video.play(); } catch {}
   if (gen !== frScan.gen) return;
-  frScanMsg("把對方的條碼放進框裡");
+  frScanMsg("把對方的條碼放進框裡，掃到就會發出好友邀請");
   frScanTick(gen);
 }
 
@@ -13308,14 +13328,14 @@ async function frScanTick(gen) {
   frScan.timer = setTimeout(() => frScanTick(gen), 180);
 }
 
-// 讀到一個條碼。是好友條碼就關相機、帶出那個人；不是就說一聲、繼續掃
+// 讀到一個條碼。是好友條碼就關相機、直接對那個人發出邀請；不是就說一聲、繼續掃
 async function frScanGot(text, fromPhoto) {
   const id = frParseFriendCode(text);
   if (!id) { frScanMsg("這不是 CapitalGuard 的好友條碼", true); return false; }
   frScanStop();
   try { if (navigator.vibrate) navigator.vibrate(60); } catch {}
   trackActivity("friend_scan", { via: fromPhoto ? "photo" : "camera" });
-  await frOpenFriendCode(id);
+  await frOpenFriendCode(id, { send: true });
   return true;
 }
 
@@ -13368,10 +13388,10 @@ async function frSearch() {
     r = await frRpc("lab_lookup_user", { p_user_id: typed });
   }
 
-  if (r === FR_RPC_MISSING) { frOk(r); return; }
+  if (r === FR_RPC_MISSING) { frOk(r); return r; }
   if (r && r.error) {
     box.innerHTML = `<div class="fr-empty">${escapeHtml(FR_ERRORS[r.error] || r.error)}</div>`;
-    return;
+    return r;
   }
 
   const key = frIdMode === "handle"
@@ -13389,6 +13409,7 @@ async function frSearch() {
       <span class="fr-grow">${frPerson(r.name, r.tag)}<div class="fr-id">${escapeHtml(shown)}</div></span>
       ${btn}
     </li></ul>`;
+  return r;       // 掃描／連結進來的要看查到什麼，才決定要不要直接送出邀請
 }
 
 // ── 群組：新增／調整成員 ──
