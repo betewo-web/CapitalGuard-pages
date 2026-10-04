@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="248">
+  <meta name="app-version" content="249">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=248" rel="stylesheet">
+  <link href="watchlist.css?v=249" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -487,6 +487,100 @@
 
     </section>
 
+    <!-- ── 好友（第四格）────────────────────────────────────────────────
+         後端是 lab_* 那一層，只對 is_admin / is_demo 開放，所以這一格預設
+         藏著：開頁後問一次 lab_social_state()，拿得到才把導覽那一格顯示出來。
+         一般使用者看不到它，也不會點進一個只會回 lab_forbidden 的分頁。
+         形狀先在 lab/lab.html 定下來（三個分段、加入好友的三個子頁），
+         這裡是同一份設計搬過來，共用 App 既有的圖示與配色。 -->
+    <section id="view-friends" class="app-view">
+      <div class="view-head"><h2>好友</h2></div>
+
+      <div class="fr-seg" role="tablist" aria-label="好友分頁">
+        <button role="tab" data-fseg="friends" aria-selected="true">好友</button>
+        <button role="tab" data-fseg="groups"  aria-selected="false">群組</button>
+        <button role="tab" data-fseg="add"     aria-selected="false">加入好友</button>
+      </div>
+
+      <div class="fr-pane" id="fr-pane-friends">
+        <div class="panel-card fr-card" id="fr-sec-requests" style="display:none">
+          <h3 class="fr-h">好友邀請</h3>
+          <ul class="fr-list" id="fr-requests-in"></ul>
+        </div>
+        <div class="panel-card fr-card">
+          <h3 class="fr-h">好友</h3>
+          <ul class="fr-list" id="fr-friends"></ul>
+        </div>
+        <div class="panel-card fr-card" id="fr-sec-requests-out" style="display:none">
+          <h3 class="fr-h">等待對方確認</h3>
+          <ul class="fr-list" id="fr-requests-out"></ul>
+        </div>
+      </div>
+
+      <div class="fr-pane" id="fr-pane-groups" style="display:none">
+        <div class="panel-card fr-card">
+          <div class="fr-row fr-between">
+            <h3 class="fr-h" style="margin:0">群組</h3>
+            <button class="btn btn-sm btn-primary" id="fr-btn-new-group">新增群組</button>
+          </div>
+          <ul class="fr-list" id="fr-groups"></ul>
+        </div>
+        <div class="panel-card fr-card" id="fr-new-group" style="display:none">
+          <h3 class="fr-h">新增群組</h3>
+          <input class="fr-input" id="fr-group-name" placeholder="群組名稱" maxlength="40">
+          <div class="fr-hint">選成員（只能從好友裡選）</div>
+          <ul class="fr-list" id="fr-group-pick"></ul>
+          <div class="fr-row">
+            <button class="btn btn-sm btn-primary" id="fr-btn-create-group">建立</button>
+            <button class="btn btn-sm btn-outline-light" id="fr-btn-cancel-group">取消</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="fr-pane" id="fr-pane-add" style="display:none">
+        <div class="panel-card fr-card">
+          <div class="fr-seg" role="tablist" aria-label="加入好友的方式">
+            <button role="tab" data-fadd="qr" aria-selected="true">顯示行動條碼</button>
+            <button role="tab" data-fadd="id" aria-selected="false">顯示 ID</button>
+            <button role="tab" data-fadd="search" aria-selected="false">搜尋</button>
+          </div>
+
+          <div class="fr-pane" id="fr-add-qr">
+            <div id="fr-qr-box"></div>
+            <p class="fr-hint fr-center">請對方用相機掃描，或改用「顯示 ID」複製給他。</p>
+          </div>
+
+          <div class="fr-pane" id="fr-add-id" style="display:none">
+            <div class="fr-hint">我的 ID</div>
+            <div class="fr-handle" id="fr-my-handle">—</div>
+            <div class="fr-row">
+              <button class="btn btn-sm btn-outline-light" id="fr-btn-copy-id">複製</button>
+              <button class="btn btn-sm btn-outline-light" id="fr-btn-rotate-id">重新產生</button>
+            </div>
+            <p class="fr-hint" id="fr-hint-rotate">
+              加好友認的是這串，不是名字——暱稱會重複、也能隨時改。
+              貼錯地方、開始收到陌生邀請，就按「重新產生」：舊的立刻失效，
+              你的帳號、自選股、歷史通知都不受影響。
+            </p>
+          </div>
+
+          <div class="fr-pane" id="fr-add-search" style="display:none">
+            <div class="fr-row">
+              <input class="fr-input" id="fr-search-id" placeholder="貼上對方的 ID"
+                     autocomplete="off" spellcheck="false" autocapitalize="characters" maxlength="20">
+              <button class="btn btn-sm btn-primary" id="fr-btn-search">搜尋</button>
+            </div>
+            <div id="fr-search-result"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-card fr-card" id="fr-sec-shares-in" style="display:none">
+        <h3 class="fr-h">收到的設定</h3>
+        <ul class="fr-list" id="fr-shares-in"></ul>
+      </div>
+    </section>
+
   </div><!-- /main-section -->
 </div><!-- /container -->
 
@@ -502,7 +596,15 @@
     <span class="bn-icon" data-icon="bell"></span><span>通知</span>
     <span class="bn-badge" id="inbox-badge"></span>
   </button>
+  <!-- 第四格：lab 成員才顯示（initFriendsTab 決定），見 view-friends 的註解 -->
+  <button class="bottom-nav-item" data-tab="friends" id="nav-friends"
+          style="display:none" onclick="switchTab('friends')">
+    <span class="bn-icon" data-icon="friends"></span><span>好友</span>
+    <span class="bn-badge" id="friends-badge"></span>
+  </button>
 </nav>
+
+<div id="fr-toast"></div>
 
 <!-- ── 進階訊號：清單與編輯器共用同一個面板 ────────────────────────
      兩個 modal 互相切換時，Bootstrap 得先把上層淡出、backdrop 收掉，
@@ -1415,6 +1517,18 @@ const ICON_GIFT   = _svg('<rect x="2.6" y="6.4" width="10.8" height="7" rx="1.5"
 const ICON_WARN   = _svg('<path d="M8 2.6 14 13.2H2z"/><path d="M8 6.6v3.1"/><path d="M8 11.4v.1"/>');
 const ICON_LOCK   = _svg('<rect x="3.4" y="7" width="9.2" height="6.4" rx="1.6"/><path d="M5.8 7V5.5a2.2 2.2 0 0 1 4.4 0V7"/>');
 const ICON_USER   = _svg('<circle cx="8" cy="5.7" r="2.6"/><path d="M3.1 13.4a4.9 4.9 0 0 1 9.8 0"/>', 14);
+// 好友分頁（第四格）。好友＝兩個人、群組＝三個人：只差一顆頭的話在 18px
+// 底部導覽裡分不出來，所以群組那顆把前排兩人縮小、後面再補一個，輪廓才不同。
+const ICON_FRIENDS = _svg('<circle cx="6.1" cy="5.6" r="2.5"/><path d="M1.6 13.2a4.6 4.6 0 0 1 9 0"/><path d="M11 3.4a2.5 2.5 0 0 1 0 4.8"/><path d="M12.1 9.6a4.1 4.1 0 0 1 2.3 3.6"/>');
+const ICON_GROUP   = _svg('<circle cx="5.3" cy="6" r="2.1"/><circle cx="10.7" cy="6" r="2.1"/><path d="M1.8 12.8a3.7 3.7 0 0 1 7 0"/><path d="M7.2 12.8a3.7 3.7 0 0 1 7 0"/>', 14);
+const ICON_ADDUSER = _svg('<circle cx="6.4" cy="5.7" r="2.6"/><path d="M1.9 13.4a4.6 4.6 0 0 1 9 0"/><path d="M12.6 6.2v4.4M10.4 8.4h4.4"/>', 14);
+const ICON_QR      = _svg('<rect x="2.4" y="2.4" width="4.4" height="4.4" rx="0.9"/><rect x="9.2" y="2.4" width="4.4" height="4.4" rx="0.9"/><rect x="2.4" y="9.2" width="4.4" height="4.4" rx="0.9"/><path d="M9.2 9.2h2v2h-2z"/><path d="M13.6 9.2v1.4M13.6 13.6h-2.2M13.6 12.4v.1"/>', 14);
+const ICON_IDCARD  = _svg('<rect x="1.9" y="3.6" width="12.2" height="8.8" rx="1.7"/><circle cx="5.9" cy="7.6" r="1.5"/><path d="M3.6 11a2.6 2.6 0 0 1 4.6 0"/><path d="M10 7h2.6M10 9.6h2.6"/>', 14);
+const ICON_COPY    = _svg('<rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.6"/><path d="M10.6 5.4V4a1.6 1.6 0 0 0-1.6-1.6H4a1.6 1.6 0 0 0-1.6 1.6v5a1.6 1.6 0 0 0 1.6 1.6h1.4"/>', 14);
+const ICON_ROTATE  = _svg('<path d="M13.3 7.1A5.4 5.4 0 0 0 3.5 5.4"/><path d="M2.7 8.9a5.4 5.4 0 0 0 9.8 1.7"/><path d="M3.2 2.4v3h3"/><path d="M12.8 13.6v-3h-3"/>', 14);
+const ICON_CHECK   = _svg('<path d="M3.2 8.4 6.4 11.6 12.8 4.8"/>', 14);
+const ICON_SEND    = _svg('<path d="M13.6 2.4 7.2 8.8"/><path d="M13.6 2.4 9.5 13.6 7.2 8.8 2.4 6.5z"/>', 14);
+const ICON_PLUS    = _svg('<path d="M8 3.4v9.2M3.4 8h9.2"/>', 14);
 const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2.9-1z"/><path d="M11.5 8.6l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z"/>');
 
 // 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
@@ -1428,7 +1542,7 @@ const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2
   // 底部導覽、首頁分頁、區塊標題的圖示：一律線條 SVG（2026-09-22 起不用 emoji 當圖示）
   const ICONS_BY_NAME = { home: ICON_HOME, chart: ICON_CHART, bell: ICON_BELL, star: ICON_STAR,
                           news: ICON_EVENTS, calendar: ICON_CAL, moon: ICON_MOON, gear: ICON_GEAR,
-                          filter: ICON_FILTER };
+                          filter: ICON_FILTER, friends: ICON_FRIENDS };
   document.querySelectorAll("[data-icon]").forEach(el => {
     const ic = ICONS_BY_NAME[el.dataset.icon];
     if (ic) el.innerHTML = ic;
@@ -1438,7 +1552,7 @@ const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2
 // ── PWA v2: App Shell 狀態 ──
 // 首頁是三個分頁（盤中／盤後／設定），三者都是獨立的 view，由頂端那條 .home-tabs 切換；
 // 底部導覽只有「首頁」一格，三頁都算它亮著（HOME_GROUP）
-const APP_TABS = ["home", "scores", "inbox", "watch", "post"];
+const APP_TABS = ["home", "scores", "inbox", "watch", "post", "friends"];
 const HOME_GROUP = ["home", "post", "watch"];
 let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc，近 INBOX_HISTORY_DAYS 天）
@@ -4031,6 +4145,9 @@ async function showMain() {
   document.getElementById("nav-refresh-btn").style.display = "inline-flex";
   document.body.classList.add("has-bottom-nav");
   document.getElementById("bottom-nav").style.display = "flex";
+  // 好友（第四格）：問一次後端這個帳號能不能用，不能就讓那一格繼續藏著。
+  // 不 await——它只決定一顆導覽鈕要不要出現，不該擋住整個登入流程。
+  initFriendsTab().catch(() => {});
 
   // 從手機通知點進來（視窗原本沒開）：網址帶 ?alert=<event_key>#inbox。
   // 先記下要定位的那則，等 refreshInbox 抓回列表再置中；參數用完就從網址拿掉
@@ -4437,6 +4554,10 @@ async function manualRefresh() {
 
 function switchTab(tab, silent = false) {
   if (!APP_TABS.includes(tab)) tab = "home";
+  // 好友那一格只有 lab 成員看得到，但網址列打得出 #friends、通知也可能帶著
+  // 舊的 hash 回來。導覽鈕藏著不等於進不去，所以這裡也要擋一次，
+  // 否則會進到一個什麼都沒有的空殼頁。
+  if (tab === "friends" && !frEnabled) tab = "home";
   const changed = currentTab !== tab;
   if (changed && currentTab) trackActivity("tab_view", { tab });   // 開頁第一格算 app_open，不重複計
   currentTab = tab;
@@ -4489,6 +4610,7 @@ function renderCurrentTab() {
   else if (currentTab === "scores") renderScores();
   else if (currentTab === "inbox") renderInbox();
   else if (currentTab === "post") renderPost();
+  else if (currentTab === "friends") renderFriends();
   else renderWatchlist(watchlistRows);
 }
 
@@ -12100,8 +12222,445 @@ function _showPwaInstructionsModal(afterWait = false) {
     if (banner) banner.style.display = 'flex';
   }
 })();
+
+// ══ 好友分頁（第四格）══════════════════════════════════════════
+// 後端是 lab_* 那一層（migrate_lab_social*.sql / migrate_lab_handles.sql），
+// 目前只對 is_admin / is_demo 開放。所以這一格**預設藏著**：登入後問一次
+// lab_social_state()，拿得到才把導覽那一格顯示出來。一般使用者既看不到它，
+// 也不會點進一個只會回 lab_forbidden 的分頁。
+//
+// 形狀在 lab/lab.html 定好之後搬過來，圖示與配色改用 App 既有那一套。
+// 要對一般使用者開放時，改的是後端的 lab_caller()，這裡不用動。
+
+let frState   = null;    // lab_social_state()
+let frHandle  = null;    // lab_my_handle() → { handle, formatted }
+let frEnabled = false;   // 這個帳號是不是 lab 成員
+let frIdMode  = null;    // "handle"（有代號表）｜"uuid"（舊 schema）
+
+// PostgREST 找不到函式時回 404 + PGRST202。「函式不存在」和「函式存在但
+// 出錯」是兩件事，混在一起就只能看到 404——migration 還沒跑的那段期間，
+// 分不開會變成整頁壞掉而且看不出原因。
+const FR_RPC_MISSING = Symbol("fr_rpc_missing");
+
+const FR_HANDLE_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$/;
+const FR_UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const frNorm = s => String(s || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+const frFmt  = h => (String(h || "").length === 12
+  ? `${h.slice(0, 4)}-${h.slice(4, 8)}-${h.slice(8)}` : h);
+
+const FR_ERRORS = {
+  lab_forbidden:     "這個帳號還不能用好友功能",
+  handle_invalid:    "ID 格式不對，應該是 12 碼（可含連字號）",
+  handle_is_mine:    "那是你自己的 ID",
+  id_invalid:        "ID 格式不對",
+  id_is_mine:        "那是你自己的 ID",
+  user_not_found:    "查無此人",
+  not_lab_member:    "對方還不能用好友功能",
+  already_friends:   "已經是好友了",
+  not_friends:       "只能分享給好友",
+  request_not_found: "邀請已被處理或不存在",
+  share_not_found:   "這則分享已被處理或不存在",
+  name_invalid:      "群組名稱要 1–40 個字",
+};
+
+const FR_FLAG_LABELS = {
+  alert_break_support: "跌破支撐", alert_near_support: "逼近支撐",
+  alert_break_resistance: "突破壓力", alert_near_resistance: "逼近壓力",
+  alert_volume_spike: "顯著增量", alert_limit_up: "漲停", alert_limit_down: "跌停",
+  alert_inst_buy: "法人連買", alert_inst_sell: "法人連賣",
+  alert_margin_up: "融資增加", alert_margin_down: "融資減少",
+};
+
+async function frRpc(fn, params) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: sbHeaders(state.accessToken),
+    body: JSON.stringify(params || {}),
+  });
+  const text = await r.text();
+  if (r.status === 404 && text.includes("PGRST202")) return FR_RPC_MISSING;
+  if (!r.ok) throw new Error(`RPC ${fn} HTTP ${r.status}`);
+  return text ? JSON.parse(text) : null;
+}
+
+let _frToastTimer = null;
+function frToast(msg, bad) {
+  const el = document.getElementById("fr-toast");
+  if (!el) return;
+  el.textContent = msg;
+  el.className = bad ? "bad show" : "show";
+  clearTimeout(_frToastTimer);
+  _frToastTimer = setTimeout(() => { el.className = ""; }, 3200);
+}
+
+function frOk(res) {
+  if (res === FR_RPC_MISSING) { frToast("這個功能還沒上線", true); return false; }
+  if (res && res.error) { frToast(FR_ERRORS[res.error] || `錯誤：${res.error}`, true); return false; }
+  return true;
+}
+
+// 登入後問一次：這個帳號能不能用好友功能。拿不到就讓第四格繼續藏著。
+async function initFriendsTab() {
+  frEnabled = false;
+  try {
+    const s = await frRpc("lab_social_state");
+    if (s === FR_RPC_MISSING || !s || s.error) return;
+    frState = s;
+    frEnabled = true;
+  } catch { return; }
+  const nav = document.getElementById("nav-friends");
+  if (nav) nav.style.display = "";
+  frRenderBadge();
+}
+
+// 導覽那一格的紅點：待確認的好友邀請＋收到的設定。通知匣已經有自己的
+// 未讀數，這裡只數「等著我做決定」的東西，不然兩個紅點會互相干擾。
+function frRenderBadge() {
+  const el = document.getElementById("friends-badge");
+  if (!el || !frState) return;
+  const n = (frState.requests_in || []).length + (frState.shares_in || []).length;
+  el.textContent = n > 99 ? "99+" : String(n || "");
+  el.style.display = n ? "" : "none";
+}
+
+async function frReload() {
+  const s = await frRpc("lab_social_state");
+  if (!frOk(s)) return false;
+  frState = s;
+  frRender();
+  frRenderBadge();
+  return true;
+}
+
+async function renderFriends() {
+  if (!frEnabled) return;
+  if (!frState) { await frReload(); return; }
+  frRender();
+}
+
+function frPerson(name, tag) {
+  return `${escapeHtml(name || "（無名稱）")}<span class="fr-tag"> #${escapeHtml(tag || "")}</span>`;
+}
+
+function frTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? "" : `${d.getMonth() + 1}/${d.getDate()} `
+    + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function frList(id, rows, rowHtml, emptyText) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = (rows && rows.length)
+    ? rows.map(rowHtml).join("")
+    : `<li class="fr-empty">${escapeHtml(emptyText || "（無）")}</li>`;
+}
+
+function frFlagSummary(payload) {
+  const p = payload || {};
+  const keys = Object.keys(FR_FLAG_LABELS);
+  const on = keys.filter(k => p[k]);
+  const parts = [on.length === keys.length ? "全部開啟"
+    : on.length ? `開啟 ${on.length}／${keys.length}：` + on.map(k => FR_FLAG_LABELS[k]).join("、")
+    : "全部關閉"];
+  if (p.target_price_high != null) parts.push(`目標高 ${p.target_price_high}`);
+  if (p.target_price_low  != null) parts.push(`目標低 ${p.target_price_low}`);
+  return escapeHtml(parts.join("　"));
+}
+
+function frRender() {
+  if (!frState) return;
+  // 紅點跟著畫面一起更新：只在 frReload() 裡呼叫的話，任何「有換資料但沒走
+  // reload」的路徑都會讓導覽上的數字停在舊值。畫面與徽章同一個來源、同一刻。
+  frRenderBadge();
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? "" : "none"; };
+
+  const rin = frState.requests_in || [];
+  show("fr-sec-requests", rin.length > 0);
+  frList("fr-requests-in", rin, r => `
+    <li>
+      <span class="fr-avatar">${ICON_USER}</span>
+      <span class="fr-grow">
+        ${frPerson(r.name, r.tag)}
+        <div class="fr-id">${escapeHtml(r.handle || r.user_id || "")}</div>
+        <div class="fr-hint">${frTime(r.at)}</div>
+      </span>
+      <button class="btn btn-sm btn-primary" data-fr="req-yes" data-id="${escapeHtml(r.request_id)}">${ICON_CHECK}同意</button>
+      <button class="btn btn-sm btn-outline-light" data-fr="req-no" data-id="${escapeHtml(r.request_id)}">拒絕</button>
+    </li>`);
+
+  frList("fr-friends", frState.friends, f => `
+    <li>
+      <span class="fr-avatar">${ICON_USER}</span>
+      <span class="fr-grow">${frPerson(f.name, f.tag)}
+        <div class="fr-hint">好友自 ${frTime(f.since)}</div></span>
+    </li>`, "還沒有好友。到「加入好友」給對方你的行動條碼或 ID。");
+
+  const rout = frState.requests_out || [];
+  show("fr-sec-requests-out", rout.length > 0);
+  frList("fr-requests-out", rout, r => `
+    <li><span class="fr-avatar">${ICON_USER}</span>
+      <span class="fr-grow">${frPerson(r.name, r.tag)}
+        <div class="fr-hint">${frTime(r.at)} 送出</div></span></li>`);
+
+  frList("fr-groups", frState.groups, g => `
+    <li>
+      <span class="fr-avatar">${ICON_GROUP}</span>
+      <span class="fr-grow">${escapeHtml(g.name)}
+        <div class="fr-hint">${(g.members || []).length} 人 · ${g.is_owner ? "我建立的" : "我是成員"}</div>
+        <div class="fr-hint">${(g.members || []).map(m => escapeHtml(m.name || "（無名稱）")).join("、")}</div>
+      </span>
+    </li>`, "還沒有群組。");
+
+  frList("fr-group-pick", frState.friends, f => `
+    <li><label class="fr-row fr-pick">
+      <input type="checkbox" class="fr-gp" value="${escapeHtml(f.user_id)}">
+      <span class="fr-grow">${frPerson(f.name, f.tag)}</span>
+    </label></li>`, "先加好友才能建群組。");
+
+  const sin = frState.shares_in || [];
+  show("fr-sec-shares-in", sin.length > 0);
+  frList("fr-shares-in", sin, s => `
+    <li>
+      <span class="fr-grow">
+        <b>${escapeHtml(s.stock_id)}</b> ${escapeHtml(s.stock_name)}
+        <div class="fr-hint">來自 ${frPerson(s.from_name, s.from_tag)} · ${frTime(s.at)}</div>
+        <div class="fr-hint">${frFlagSummary(s.payload)}</div>
+        ${s.note ? `<div class="fr-hint">「${escapeHtml(s.note)}」</div>` : ""}
+      </span>
+      <button class="btn btn-sm btn-primary" data-fr="sh-yes" data-id="${escapeHtml(s.share_id)}">${ICON_CHECK}套用</button>
+      <button class="btn btn-sm btn-outline-light" data-fr="sh-no" data-id="${escapeHtml(s.share_id)}">忽略</button>
+    </li>`);
+}
+
+// ── 分段切換 ──
+function frSwitchSeg(name) {
+  document.querySelectorAll('#view-friends .fr-seg button[data-fseg]').forEach(b =>
+    b.setAttribute("aria-selected", String(b.dataset.fseg === name)));
+  for (const k of ["friends", "groups", "add"]) {
+    const el = document.getElementById(`fr-pane-${k}`);
+    if (el) el.style.display = k === name ? "" : "none";
+  }
+  if (name === "add") frRenderAdd().catch(e => frToast(String(e.message || e), true));
+  if (name === "groups") { const n = document.getElementById("fr-new-group"); if (n) n.style.display = "none"; }
+}
+
+function frSwitchAdd(name) {
+  document.querySelectorAll('#view-friends .fr-seg button[data-fadd]').forEach(b =>
+    b.setAttribute("aria-selected", String(b.dataset.fadd === name)));
+  for (const k of ["qr", "id", "search"]) {
+    const el = document.getElementById(`fr-add-${k}`);
+    if (el) el.style.display = k === name ? "" : "none";
+  }
+  if (name === "qr") frRenderQr();
+}
+
+// ── 我的 ID ──
+// 兩種 schema 都要能動：有 lab_my_handle 就用可換的 12 碼代號，沒有就退回
+// users.id（那時「重新產生」沒有意義，所以整顆藏起來而不是讓它報錯）。
+async function frDetectIdMode() {
+  if (frIdMode) return frIdMode;
+  const r = await frRpc("lab_my_handle", { p_rotate: false });
+  if (r === FR_RPC_MISSING) { frIdMode = "uuid"; return frIdMode; }
+  if (!frOk(r)) throw new Error("lab_my_handle");
+  frHandle = r;
+  frIdMode = "handle";
+  return frIdMode;
+}
+
+function frMyId() {
+  return frIdMode === "handle"
+    ? { raw: frHandle.handle, shown: frHandle.formatted }
+    : { raw: frState.me.user_id, shown: frState.me.user_id };
+}
+
+async function frRenderAdd() {
+  await frDetectIdMode();
+  const id = frMyId();
+  const el = document.getElementById("fr-my-handle");
+  if (el) {
+    el.textContent = id.shown;
+    el.classList.toggle("is-uuid", frIdMode !== "handle");   // UUID 36 字，字級要縮
+  }
+  const rot = document.getElementById("fr-btn-rotate-id");
+  if (rot) rot.style.display = frIdMode === "handle" ? "" : "none";
+  const hint = document.getElementById("fr-hint-rotate");
+  if (hint) hint.style.display = frIdMode === "handle" ? "" : "none";
+  const inp = document.getElementById("fr-search-id");
+  if (inp) {
+    inp.placeholder = frIdMode === "handle" ? "貼上對方的 ID（12 碼）" : "貼上對方的 ID";
+    inp.maxLength = frIdMode === "handle" ? 20 : 40;
+  }
+  const sel = document.querySelector('#view-friends .fr-seg button[data-fadd][aria-selected="true"]');
+  frSwitchAdd(sel ? sel.dataset.fadd : "qr");
+}
+
+async function frRotateHandle() {
+  const r = await frRpc("lab_my_handle", { p_rotate: true });
+  if (!frOk(r)) return;
+  frHandle = r;
+  const el = document.getElementById("fr-my-handle");
+  if (el) el.textContent = r.formatted;
+  const qrPane = document.getElementById("fr-add-qr");
+  if (qrPane && qrPane.style.display !== "none") frRenderQr();
+  frToast("已產生新的 ID，舊的立刻失效");
+}
+
+// 行動條碼只放 ID 本身，不放網址：掃到的人多半還沒裝 App，給他一個深連結
+// 反而要先處理「沒安裝怎麼辦」。純 ID 貼進「搜尋」就行。
+// qrcode-generator 是另外載的，載不到就說清楚而不是留一塊空白。
+function frRenderQr() {
+  const box = document.getElementById("fr-qr-box");
+  if (!box) return;
+  if (typeof qrcode !== "function") {
+    box.innerHTML = `<div class="fr-hint fr-center">行動條碼載入失敗，請改用「顯示 ID」</div>`;
+    return;
+  }
+  if (!frIdMode) { box.innerHTML = ""; return; }
+  const qr = qrcode(0, "M");
+  qr.addData(frMyId().raw);
+  qr.make();
+  box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 0, scalable: true });
+}
+
+// ── 搜尋 ──
+async function frSearch() {
+  await frDetectIdMode();
+  const box = document.getElementById("fr-search-result");
+  const typed = (document.getElementById("fr-search-id").value || "").trim();
+
+  // 格式明顯不對就擋在前端：送出去只會把「打錯字」和「查無此人」畫成同一個結果
+  let r;
+  if (frIdMode === "handle") {
+    const h = frNorm(typed);
+    if (!FR_HANDLE_RE.test(h)) { frToast("ID 格式不對，應該是 12 碼（可含連字號）", true); return; }
+    r = await frRpc("lab_lookup_handle", { p_handle: h });
+  } else {
+    if (!FR_UUID_RE.test(typed)) { frToast("ID 格式不對", true); return; }
+    r = await frRpc("lab_lookup_user", { p_user_id: typed });
+  }
+
+  if (r === FR_RPC_MISSING) { frOk(r); return; }
+  if (r && r.error) {
+    box.innerHTML = `<div class="fr-empty">${escapeHtml(FR_ERRORS[r.error] || r.error)}</div>`;
+    return;
+  }
+
+  const key = frIdMode === "handle"
+    ? `data-handle="${escapeHtml(r.handle)}"`
+    : `data-uid="${escapeHtml(r.user_id)}"`;
+  const shown = frIdMode === "handle" ? frFmt(r.handle) : r.user_id;
+  const btn = r.already_friends
+    ? `<button class="btn btn-sm btn-outline-light" disabled>${ICON_CHECK}已經是好友</button>`
+    : r.pending_out
+      ? `<button class="btn btn-sm btn-outline-light" disabled>${ICON_SEND}邀請已送出</button>`
+      : `<button class="btn btn-sm btn-primary" data-fr="invite" ${key}>${ICON_SEND}${r.pending_in ? "同意並加好友" : "發出邀請"}</button>`;
+  box.innerHTML = `
+    <ul class="fr-list"><li>
+      <span class="fr-avatar">${ICON_USER}</span>
+      <span class="fr-grow">${frPerson(r.name, r.tag)}<div class="fr-id">${escapeHtml(shown)}</div></span>
+      ${btn}
+    </li></ul>`;
+}
+
+async function frCreateGroup() {
+  const nameEl = document.getElementById("fr-group-name");
+  const name = (nameEl.value || "").trim();
+  if (!name) { frToast("先填群組名稱", true); return; }
+  const members = Array.from(document.querySelectorAll("#view-friends .fr-gp:checked")).map(c => c.value);
+  const r = await frRpc("lab_group_create", { p_name: name, p_members: members });
+  if (!frOk(r)) return;
+  nameEl.value = "";
+  document.getElementById("fr-new-group").style.display = "none";
+  frToast(`已建立「${r.name}」，${r.members} 人`);
+  await frReload();
+}
+
+// ── 動作（事件委派；只認 #view-friends 裡的按鈕）──
+document.addEventListener("click", async e => {
+  const btn = e.target.closest("#view-friends [data-fr], #fr-search-result [data-fr]");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  btn.disabled = true;
+  try {
+    let res;
+    switch (btn.dataset.fr) {
+      case "req-yes": res = await frRpc("lab_friend_respond", { p_request_id: id, p_accept: true });  break;
+      case "req-no":  res = await frRpc("lab_friend_respond", { p_request_id: id, p_accept: false }); break;
+      case "sh-yes":  res = await frRpc("lab_share_respond",  { p_share_id: id,   p_accept: true });  break;
+      case "sh-no":   res = await frRpc("lab_share_respond",  { p_share_id: id,   p_accept: false }); break;
+      case "invite":
+        res = btn.dataset.handle
+          ? await frRpc("lab_friend_request_by_handle", { p_handle: btn.dataset.handle })
+          : await frRpc("lab_friend_request_by_id", { p_user_id: btn.dataset.uid });
+        break;
+      default: btn.disabled = false; return;
+    }
+    if (!frOk(res)) { btn.disabled = false; return; }
+    const act = btn.dataset.fr;
+    if (act === "invite") {
+      frToast(res.friends ? "對方也邀過你，直接成為好友"
+              : res.pending_already ? "邀請已經在等待中" : "邀請已送出，等對方確認");
+      document.getElementById("fr-search-result").innerHTML = "";
+      document.getElementById("fr-search-id").value = "";
+    } else if (act === "sh-yes" || act === "sh-no") {
+      // 自選股上限是軟的：超過上限的列存在但被 active_watchlist 濾掉，不會發訊號
+      if (res.over_limit) frToast(`已套用，但自選股 ${res.count} 檔超過方案上限 ${res.watch_limit}`);
+      else frToast(res.accepted ? "已套用到你的自選股" : "已忽略");
+      if (res.accepted) loadWatchlist().catch(() => {});
+    } else {
+      frToast(res.accepted ? "已加入好友" : "已拒絕");
+    }
+    await frReload();
+  } catch (err) {
+    frToast(String(err.message || err), true);
+    btn.disabled = false;
+  }
+});
+
+// ── 靜態圖示與事件（這段 script 排在節點之後，不必等 DOMContentLoaded）──
+{
+  const put = (sel, html) => { const el = document.querySelector(sel); if (el) el.insertAdjacentHTML("afterbegin", html); };
+  put('#view-friends .fr-seg button[data-fseg="friends"]', ICON_FRIENDS);
+  put('#view-friends .fr-seg button[data-fseg="groups"]',  ICON_GROUP);
+  put('#view-friends .fr-seg button[data-fseg="add"]',     ICON_ADDUSER);
+  put('#view-friends .fr-seg button[data-fadd="qr"]',      ICON_QR);
+  put('#view-friends .fr-seg button[data-fadd="id"]',      ICON_IDCARD);
+  put('#view-friends .fr-seg button[data-fadd="search"]',  ICON_SEARCH);
+  put('#fr-btn-copy-id',     ICON_COPY);
+  put('#fr-btn-rotate-id',   ICON_ROTATE);
+  put('#fr-btn-new-group',   ICON_PLUS);
+  put('#fr-btn-create-group', ICON_CHECK);
+  put('#fr-btn-search',      ICON_SEARCH);
+
+  document.querySelectorAll('#view-friends .fr-seg button[data-fseg]').forEach(b =>
+    b.addEventListener("click", () => frSwitchSeg(b.dataset.fseg)));
+  document.querySelectorAll('#view-friends .fr-seg button[data-fadd]').forEach(b =>
+    b.addEventListener("click", () => frSwitchAdd(b.dataset.fadd)));
+
+  const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+  on("fr-btn-new-group", "click", () => {
+    const n = document.getElementById("fr-new-group");
+    n.style.display = n.style.display === "none" ? "" : "none";
+    if (n.style.display !== "none") document.getElementById("fr-group-name").focus();
+  });
+  on("fr-btn-cancel-group", "click", () => { document.getElementById("fr-new-group").style.display = "none"; });
+  on("fr-btn-create-group", "click", () => frCreateGroup().catch(e => frToast(String(e.message || e), true)));
+  on("fr-btn-search", "click", () => frSearch().catch(e => frToast(String(e.message || e), true)));
+  on("fr-search-id", "keydown", e => { if (e.key === "Enter") document.getElementById("fr-btn-search").click(); });
+  on("fr-btn-rotate-id", "click", () => frRotateHandle().catch(e => frToast(String(e.message || e), true)));
+  on("fr-btn-copy-id", "click", async () => {
+    if (!frIdMode) return;
+    try { await navigator.clipboard.writeText(frMyId().shown); frToast("已複製"); }
+    catch { frToast("複製失敗，請手動選取", true); }
+  });
+}
+
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- 行動條碼（好友分頁）。載不到時 frRenderQr() 會顯示「請改用顯示 ID」，不留空白。 -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 
 <!-- 右下角那顆 🤖 浮動 AI 問答鈕與它的面板 2026-09-23 移除（Howard）：AI 目前還不支援。
      stock-qa Edge Function 留著，要回來時把按鈕、面板、toggleQaPanel／sendQaQuestion

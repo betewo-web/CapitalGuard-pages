@@ -4212,3 +4212,73 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 }
 
 .rules-toolbar .btn.btn-accent-sm svg { width: 16px; height: 16px; }
+
+/* ══ 好友分頁（第四格）══════════════════════════════════════════
+   後端是 lab_* 那一層，只對 is_admin / is_demo 開放，所以這一整區在
+   一般使用者的畫面上永遠不會出現（導覽那一格由 initFriendsTab 決定）。
+   類別一律 fr- 開頭：這一頁已經 4200 行，沒有前綴遲早撞名。 */
+
+.fr-seg { display: flex; gap: 6px; margin-bottom: 14px; }
+.fr-seg button {
+	flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+	padding: 9px 4px; font-size: 14px; border-radius: 8px;
+	background: transparent; border: 1px solid transparent; color: var(--text-muted);
+	cursor: pointer;
+}
+.fr-seg button[aria-selected="true"] {
+	background: var(--surface); border-color: var(--border); color: var(--text-0);
+}
+
+.fr-card { padding: 14px; margin-bottom: 12px; }
+.fr-h { font-size: 14px; color: var(--text-muted); font-weight: 600; margin: 0 0 10px; }
+.fr-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.fr-center { text-align: center; }
+.fr-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.fr-between { justify-content: space-between; margin-top: 0; margin-bottom: 10px; }
+.fr-input {
+	flex: 1 1 140px; font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 8px;
+	border: 1px solid var(--border); background: var(--bg-1); color: var(--text-0);
+}
+.fr-pick { flex: 1; cursor: pointer; margin: 0; }
+.fr-pick input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; }
+
+.fr-list { list-style: none; margin: 0; padding: 0; }
+.fr-list li {
+	padding: 11px 0; border-top: 1px solid var(--border);
+	display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+}
+.fr-list li:first-child { border-top: 0; }
+.fr-grow { flex: 1 1 180px; min-width: 0; }
+.fr-empty { color: var(--text-muted); font-size: 13px; padding: 10px 0; }
+.fr-avatar {
+	width: 36px; height: 36px; border-radius: 50%; background: var(--surface-2);
+	border: 1px solid var(--border); display: grid; place-items: center; color: var(--text-muted);
+	flex: 0 0 auto;
+}
+.fr-tag { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-muted); }
+.fr-id {
+	font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px;
+	color: var(--text-muted); letter-spacing: .04em; word-break: break-all;
+}
+
+/* 自己的 ID：12 碼代號是主角，所以大。退回舊 schema 的 36 字 UUID 時
+   同一個字級會爆版，.is-uuid 把它縮回去。 */
+.fr-handle {
+	font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 20px;
+	letter-spacing: .08em; color: var(--accent); margin: 2px 0;
+}
+.fr-handle.is-uuid { font-size: 13px; letter-spacing: 0; word-break: break-all; }
+
+/* 行動條碼一定要白底：QR 畫在深色底上，多數掃描器讀不出來 */
+#fr-qr-box { background: #fff; padding: 12px; border-radius: 10px; width: max-content; margin: 2px auto 6px; }
+#fr-qr-box svg { display: block; width: 190px; height: 190px; }
+
+#fr-toast {
+	position: fixed; left: 50%; transform: translateX(-50%);
+	bottom: calc(var(--bottom-nav-h) + 16px + env(safe-area-inset-bottom));
+	background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+	padding: 9px 16px; font-size: 14px; max-width: 90vw; z-index: 1080;
+	display: none; color: var(--text-0);
+}
+#fr-toast.show { display: block; }
+#fr-toast.bad { border-color: var(--danger); }
