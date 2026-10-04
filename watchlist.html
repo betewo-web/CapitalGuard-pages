@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="252">
+  <meta name="app-version" content="253">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=252" rel="stylesheet">
+  <link href="watchlist.css?v=253" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -606,14 +606,28 @@
             <select class="fr-input" id="fr-share-stock"></select>
             <div class="fr-hint" id="fr-share-preview"></div>
 
+            <!-- 分享對象：好友與群組各一頁可以瀏覽的清單（Howard 2026-10-04）。
+                 原本是兩種混在一起的一小段勾選清單，好友一多就只能一直往下捲、
+                 也看不出群組裡有誰。兩份清單都留在 DOM 裡（切頁只是藏起來），
+                 所以在好友頁勾的，切到群組頁再切回來還在。 -->
             <label class="fr-label">分享對象</label>
-            <ul class="fr-list fr-picklist" id="fr-share-pick"></ul>
+            <div class="fr-picker">
+              <div class="fr-seg fr-seg-sub" role="tablist" aria-label="分享對象">
+                <button role="tab" data-fpick="friends" aria-selected="true">好友<span class="fr-count" id="fr-pick-n-friends"></span></button>
+                <button role="tab" data-fpick="groups"  aria-selected="false">群組<span class="fr-count" id="fr-pick-n-groups"></span></button>
+              </div>
+              <input class="fr-input fr-pick-search" id="fr-pick-search" type="search"
+                     placeholder="搜尋名稱" autocomplete="off" spellcheck="false" aria-label="搜尋好友或群組">
+              <ul class="fr-list fr-picklist" id="fr-pick-friends"></ul>
+              <ul class="fr-list fr-picklist" id="fr-pick-groups" style="display:none"></ul>
+              <div class="fr-pick-summary" id="fr-pick-summary"></div>
+            </div>
 
             <label class="fr-label" for="fr-share-date">終止日期</label>
             <div class="fr-row" style="margin-top:0">
               <label class="fr-row fr-pick" style="flex:0 0 auto; margin-top:0">
                 <input type="checkbox" id="fr-share-forever" checked>
-                <span>永遠</span>
+                <span>永不終止</span>
               </label>
               <input class="fr-input" type="date" id="fr-share-date" disabled>
             </div>
@@ -6733,6 +6747,15 @@ let detailRow = null;   // 目前開啟詳情的通知 row
 function openInboxItem(rowId) {
   const row = inboxRows.find(r => String(r.id) === String(rowId));
   if (!row) return;
+  // 分享類（好友邀請、分享邀請／更新／終止）：跳到「分享」分頁的那一則並閃 3 秒。
+  // 這些通知要的是一個動作（同意、接受、確認），開一張只有文字的詳情卡是死路。
+  if (String(row.source || "") === "share" && frEnabled) {
+    _markInboxRowRead(row);
+    trackActivity("inbox_open", { source: "share" });
+    frOpenFromInbox(row).then(handled => { if (!handled) openInboxDetail(rowId); })
+      .catch(() => openInboxDetail(rowId));
+    return;
+  }
   const target = inboxRadarTargetOf(row);
   if (!target) { openInboxDetail(rowId); return; }
   _markInboxRowRead(row);
@@ -6752,7 +6775,7 @@ const INBOX_RADAR_SOURCES = ["monitor", "rule"];
 // 內文那句「點這則通知查看方案」在這裡就變成死路（2026-10-03）。
 const INBOX_PLAN_SOURCES = ["trial"];
 // 來源徽章平常直接印 source（monitor／rule…）；新來源給個看得懂的字
-const INBOX_SOURCE_LABEL = { trial: "方案" };
+const INBOX_SOURCE_LABEL = { trial: "方案", share: "分享" };
 
 // 這一則能不能在盤中雷達上指出來。**找得到對應的那一顆才回 true**——
 // 找不到就照舊開通知詳情，不要把人丟到一張寫著「沒有這天的紀錄」的空卡片上。
@@ -12551,7 +12574,7 @@ function frDate(iso) {
   return isNaN(d) ? "" : `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-const frExpiry = iso => (iso ? `到期 ${frDate(iso)}` : "永遠");
+const frExpiry = iso => (iso ? `到期 ${frDate(iso)}` : "永不終止");
 
 function frList(id, rows, rowHtml, emptyText) {
   const el = document.getElementById(id);
@@ -12608,7 +12631,7 @@ function frRenderFriends() {
   const rin = frState.requests_in || [];
   frShow("fr-sec-requests", rin.length > 0);
   frList("fr-requests-in", rin, r => `
-    <li>
+    <li class="${frFlashClass("request", r.request_id).trim()}" data-flash-id="${escapeHtml(r.request_id)}">
       <span class="fr-avatar">${ICON_USER}</span>
       <span class="fr-grow">
         ${frPerson(r.name, r.tag)}
@@ -12735,39 +12758,60 @@ function frShareDetailHtml(s) {
 }
 
 // 「好友分享給我」。等你決定的（pending／held）放上面；已接受的放下面。
+// 每一則是直排的一張卡：內容在上、說明框在中間、按鈕在最下面一排。
+// 原本按鈕擠在右邊，遇到要解釋「為什麼接受不了」的那幾則，字和按鈕會互相擠壓
+// （Howard 2026-10-04）。
 function frRenderSharesIn() {
   const inc = (frShare && frShare.incoming) || [];
   const waiting = inc.filter(x => x.status === "pending" || x.status === "held");
   const accepted = inc.filter(x => x.status === "accepted");
   const u = (frShare && frShare.usage) || {};
+  const sid = s => escapeHtml(s.share_id);
 
   frShow("fr-sec-invites", waiting.length > 0);
   frList("fr-shares-pending", waiting, s => {
-    // 保留中的邀請：說明為什麼接受不了、給出能解決它的路。邀請本身一直留著。
-    let hold = "";
-    if (s.status === "held" && s.hold_reason === "limit") {
-      hold = `<div class="fr-hold">名額已滿（${u.used}／${u.limit}，自選股與分享合計）。移除一檔自選股或升級方案後，再按一次「接受」。
-        <div class="fr-row">
-          <button class="btn btn-sm btn-outline-light" data-fr="go-watch">${ICON_GEAR}管理自選股</button>
-          <button class="btn btn-sm btn-outline-light" data-fr="go-plan">${ICON_STAR}升級方案</button>
-        </div></div>`;
-    } else if (s.status === "held" && s.hold_reason === "duplicate") {
-      hold = `<div class="fr-hold">你已經有 ${escapeHtml(s.stock_id)} 了（在自選股，或另一位好友的分享裡）。同一檔只能有一個來源：移除原本的，再按一次「接受」。
-        <div class="fr-row">
-          <button class="btn btn-sm btn-outline-light" data-fr="go-watch">${ICON_GEAR}管理自選股</button>
-        </div></div>`;
+    const c = s.conflict;       // 這位使用者已經有同一檔：{kind: watchlist|share, label, from_name, has_holding}
+    let box = "", actions;
+    if (c) {
+      // 直接列出撞到的是哪一個，並給一步解決的按鈕——不要叫人自己去找、自己去刪
+      const what = c.kind === "watchlist"
+        ? `<div class="fr-conflict-item"><span class="fr-chip">自選股</span><b>${escapeHtml(c.label)}</b></div>
+           ${c.has_holding ? `<div class="fr-hint fr-warn">這一列記有持股，移除後持股紀錄也會一起移除。</div>` : ""}`
+        : `<div class="fr-conflict-item"><span class="fr-chip">好友分享</span><b>${escapeHtml(c.label)}</b>
+             <span class="fr-hint">來自 ${escapeHtml(c.from_name || "好友")}</span></div>`;
+      box = `<div class="fr-hold">
+          <div>你已經有這一檔了。同一檔股票只能有一個來源：</div>
+          ${what}
+          <div class="fr-hint">要改用這則分享的設定，可以直接幫你移除原本的。</div>
+        </div>`;
+      actions = `
+        <button class="btn btn-sm btn-primary" data-fr="in-replace" data-id="${sid(s)}"
+                data-kind="${escapeHtml(c.kind)}" data-old="${escapeHtml(c.label)}"
+                data-from="${escapeHtml(s.from_name || "好友")}" data-holding="${c.has_holding ? "1" : ""}">${ICON_CHECK}移除並接受</button>
+        <button class="btn btn-sm btn-outline-light" data-fr="in-decline" data-id="${sid(s)}">${ICON_CLOSE}拒絕</button>`;
+    } else {
+      if (s.status === "held" && s.hold_reason === "limit") {
+        box = `<div class="fr-hold">
+            <div>名額已滿（${u.used}／${u.limit}，自選股與分享合計）。移除一檔自選股或升級方案後，再按一次「接受」。</div>
+            <div class="fr-row">
+              <button class="btn btn-sm btn-outline-light" data-fr="go-watch">${ICON_GEAR}管理自選股</button>
+              <button class="btn btn-sm btn-outline-light" data-fr="go-plan">${ICON_STAR}升級方案</button>
+            </div></div>`;
+      }
+      actions = `
+        <button class="btn btn-sm btn-primary" data-fr="in-accept" data-id="${sid(s)}">${ICON_CHECK}接受</button>
+        <button class="btn btn-sm btn-outline-light" data-fr="in-decline" data-id="${sid(s)}">${ICON_CLOSE}拒絕</button>`;
     }
     return `
-    <li>
-      <span class="fr-grow">
+    <li class="fr-in-card${frFlashClass("share", s.share_id)}" data-flash-id="${sid(s)}">
+      <div class="fr-in-main">
         <b>${escapeHtml(s.label)}</b>
         <div class="fr-hint">來自 ${frPerson(s.from_name, s.from_tag)} · ${frExpiry(s.expires_at)}</div>
         <div class="fr-hint">${frFlagSummary(s.base)}</div>
         <div class="fr-hint">${frRulesSummary(s.rules)}</div>
-        ${hold}
-      </span>
-      <button class="btn btn-sm btn-primary" data-fr="in-accept" data-id="${escapeHtml(s.share_id)}">${ICON_CHECK}接受</button>
-      <button class="btn btn-sm btn-outline-light" data-fr="in-decline" data-id="${escapeHtml(s.share_id)}">${ICON_CLOSE}拒絕</button>
+      </div>
+      ${box}
+      <div class="fr-in-actions">${actions}</div>
     </li>`;
   });
 
@@ -12777,21 +12821,68 @@ function frRenderSharesIn() {
       ? `<div class="fr-hint fr-warn">進階訊號 ${s.rules_active}／${s.rules_total} 條生效，其餘升級方案後生效</div>` : "";
     // 對方更新了：不能拒絕這次更新（要嘛接受、要嘛整個移除），但一定要讓他知道
     const ack = s.needs_ack
-      ? `<div class="fr-hold">${escapeHtml(s.from_name || "好友")} 更新了這則分享的設定（第 ${s.version} 版），已經套用。
-          <div class="fr-row"><button class="btn btn-sm btn-primary" data-fr="in-ack" data-id="${escapeHtml(s.share_id)}">${ICON_CHECK}我知道了</button></div></div>` : "";
+      ? `<div class="fr-hold"><div>${escapeHtml(s.from_name || "好友")} 更新了這則分享的設定（第 ${s.version} 版），已經套用。</div>
+          <div class="fr-row"><button class="btn btn-sm btn-primary" data-fr="in-ack" data-id="${sid(s)}">${ICON_CHECK}我知道了</button></div></div>` : "";
     return `
-    <li>
-      <span class="fr-grow">
+    <li class="fr-in-card${frFlashClass("share", s.share_id)}" data-flash-id="${sid(s)}">
+      <div class="fr-in-main">
         <b>${escapeHtml(s.label)}</b>
         <div class="fr-hint">來自 ${frPerson(s.from_name, s.from_tag)} · ${frExpiry(s.expires_at)}</div>
         <div class="fr-hint">${frFlagSummary(s.base)}</div>
         <div class="fr-hint">${frRulesSummary(s.rules)}</div>
-        ${rulesNote}${ack}
-      </span>
-      <button class="btn btn-sm btn-outline-light fr-quiet" data-fr="in-remove" data-id="${escapeHtml(s.share_id)}"
-              data-name="${escapeHtml(s.label)}">${ICON_TRASH}移除</button>
+        ${rulesNote}
+      </div>
+      ${ack}
+      <div class="fr-in-actions">
+        <button class="btn btn-sm btn-outline-light fr-quiet" data-fr="in-remove" data-id="${sid(s)}"
+                data-name="${escapeHtml(s.label)}">${ICON_TRASH}移除</button>
+      </div>
     </li>`;
   }, "還沒有好友分享給你的股票。");
+}
+
+// ── 從通知匣點進來：跳到對應的那一則並閃 3 秒 ──
+// 閃爍是狀態（frFlash），不是直接往 DOM 加 class：這一頁每次重抓都會整個重畫，
+// 加在節點上的 class 一重畫就不見了（通知點開跳到該則那次學到的，v103／v115）。
+const FR_FLASH_MS = 3000;
+let frFlash = null;          // { kind: "share"|"request", id, until }
+let _frFlashTimer = null;
+
+function frFlashClass(kind, id) {
+  return (frFlash && frFlash.kind === kind && frFlash.id === id && Date.now() < frFlash.until) ? " is-flash" : "";
+}
+
+// event_key 的形狀（migrate_stock_shares.sql 的 share_notify 呼叫）：
+//   share:<share_id>:invite[:vN]｜share:<share_id>:update:vN｜share:<share_id>:terminated
+//   friend:<request_id>:request
+// 回 true＝這則已經處理（跳過去了，或告訴使用者它已經不在了）；false＝不是分享類，照舊開詳情。
+async function frOpenFromInbox(row) {
+  const m = String((row && row.event_key) || "").match(/^(share|friend):([0-9a-f-]{36})/i);
+  if (!frEnabled || !m) return false;
+  const isFriend = m[1].toLowerCase() === "friend", id = m[2];
+
+  switchTab("friends");
+  await frReload().catch(() => {});      // 先拿最新的：那一則可能剛被對方終止、或自己已經處理過
+  let found;
+  if (isFriend) {
+    frSwitchSeg("friends");
+    found = ((frState && frState.requests_in) || []).some(r => r.request_id === id);
+  } else {
+    frSwitchSeg("shares");
+    frSwitchShare("in");
+    found = ((frShare && frShare.incoming) || []).some(s => s.share_id === id);
+  }
+  if (!found) {
+    frToast(isFriend ? "這則好友邀請已經處理過了" : "這則分享已經結束，或你已經處理過了");
+    return true;
+  }
+  frFlash = { kind: isFriend ? "request" : "share", id, until: Date.now() + FR_FLASH_MS };
+  frRender();
+  const el = document.querySelector(`#view-friends [data-flash-id="${id}"]`);
+  if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  clearTimeout(_frFlashTimer);
+  _frFlashTimer = setTimeout(() => { frFlash = null; frRender(); }, FR_FLASH_MS + 100);
+  return true;
 }
 
 // ── 分段切換 ──
@@ -12970,17 +13061,9 @@ function frOpenShareForm() {
       }).join("")
     : `<option value="">（自選股是空的）</option>`;
 
-  const friends = frState.friends || [], groups = frState.groups || [];
-  document.getElementById("fr-share-pick").innerHTML =
-    friends.map(f => `<li><label class="fr-row fr-pick">
-        <input type="checkbox" class="fr-sh-friend" value="${escapeHtml(f.user_id)}">
-        <span class="fr-grow">${frPerson(f.name, f.tag)}</span></label></li>`).join("")
-    + groups.map(g => `<li><label class="fr-row fr-pick">
-        <input type="checkbox" class="fr-sh-group" value="${escapeHtml(g.group_id)}">
-        <span class="fr-grow">${ICON_GROUP} ${escapeHtml(g.name)}<span class="fr-hint">（${(g.members || []).length} 人）</span></span></label></li>`).join("")
-    || `<li class="fr-empty">還沒有好友或群組。先到「加好友」。</li>`;
+  frRenderSharePick();
 
-  // 終止日期：預設「永遠」。日期最早是明天——今天到期的分享送出去就結束了。
+  // 終止日期：預設「永不終止」。日期最早是明天——今天到期的分享送出去就結束了。
   const dateEl = document.getElementById("fr-share-date");
   const tomorrow = new Date(Date.now() + 86400000);
   dateEl.min = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
@@ -12990,6 +13073,60 @@ function frOpenShareForm() {
   document.getElementById("fr-share-msg").textContent = "";
   frUpdateSharePreview();
   frShow("fr-share-form", true);
+}
+
+// 分享對象：好友一頁、群組一頁，各自可以捲、可以搜尋。
+function frRenderSharePick() {
+  const friends = frState.friends || [], groups = frState.groups || [];
+  document.getElementById("fr-pick-friends").innerHTML = friends.length
+    ? friends.map(f => `<li data-pick-name="${escapeHtml((f.name || "").toLowerCase())}"><label class="fr-row fr-pick">
+        <span class="fr-avatar">${ICON_USER}</span>
+        <span class="fr-grow">${frPerson(f.name, f.tag)}</span>
+        <input type="checkbox" class="fr-sh-friend" value="${escapeHtml(f.user_id)}" data-label="${escapeHtml(f.name || "（無名稱）")}">
+      </label></li>`).join("")
+    : `<li class="fr-empty">還沒有好友。先到「加好友」。</li>`;
+  // 群組那一頁把成員列出來：選群組等於選裡面每一個人，要看得到是哪些人
+  document.getElementById("fr-pick-groups").innerHTML = groups.length
+    ? groups.map(g => {
+        const others = (g.members || []).filter(m => !m.is_me);
+        return `<li data-pick-name="${escapeHtml((g.name || "").toLowerCase())}"><label class="fr-row fr-pick">
+          <span class="fr-avatar">${ICON_GROUP}</span>
+          <span class="fr-grow">${escapeHtml(g.name)}
+            <div class="fr-hint">${others.length} 人：${others.map(m => escapeHtml(m.name || "（無名稱）")).join("、") || "（沒有其他成員）"}</div></span>
+          <input type="checkbox" class="fr-sh-group" value="${escapeHtml(g.group_id)}" data-label="${escapeHtml(g.name)}" data-n="${others.length}">
+        </label></li>`;
+      }).join("")
+    : `<li class="fr-empty">還沒有群組。到「群組」建立一個。</li>`;
+  document.getElementById("fr-pick-n-friends").textContent = friends.length ? ` ${friends.length}` : "";
+  document.getElementById("fr-pick-n-groups").textContent  = groups.length ? ` ${groups.length}` : "";
+  document.getElementById("fr-pick-search").value = "";
+  frSwitchPick("friends");
+  frUpdatePickSummary();
+}
+
+function frSwitchPick(name) {
+  document.querySelectorAll('#fr-share-form .fr-seg button[data-fpick]').forEach(b =>
+    b.setAttribute("aria-selected", String(b.dataset.fpick === name)));
+  frShow("fr-pick-friends", name === "friends");
+  frShow("fr-pick-groups", name === "groups");
+}
+
+// 兩頁的勾選合起來寫成一行：切到另一頁時，才不會忘了剛才在這一頁勾了誰
+function frUpdatePickSummary() {
+  const fr = Array.from(document.querySelectorAll("#fr-pick-friends .fr-sh-friend:checked"));
+  const gr = Array.from(document.querySelectorAll("#fr-pick-groups .fr-sh-group:checked"));
+  const el = document.getElementById("fr-pick-summary");
+  if (!fr.length && !gr.length) { el.innerHTML = `<span class="fr-hint">還沒有選任何對象</span>`; return; }
+  const chips = fr.map(c => `<span class="fr-chip">${escapeHtml(c.dataset.label)}</span>`)
+    .concat(gr.map(c => `<span class="fr-chip">${ICON_GROUP} ${escapeHtml(c.dataset.label)}（${escapeHtml(c.dataset.n)} 人）</span>`));
+  el.innerHTML = `<span>已選 ${fr.length ? `好友 ${fr.length} 位` : ""}${fr.length && gr.length ? "、" : ""}${gr.length ? `群組 ${gr.length} 個` : ""}：</span>${chips.join("")}`;
+}
+
+function frFilterPick(q) {
+  const needle = String(q || "").trim().toLowerCase();
+  document.querySelectorAll("#fr-pick-friends li[data-pick-name], #fr-pick-groups li[data-pick-name]").forEach(li => {
+    li.style.display = !needle || li.dataset.pickName.includes(needle) ? "" : "none";
+  });
 }
 
 function frUpdateSharePreview() {
@@ -13006,15 +13143,15 @@ function frUpdateSharePreview() {
 async function frSendShare() {
   const msg = document.getElementById("fr-share-msg");
   const sid = document.getElementById("fr-share-stock").value;
-  const friends = Array.from(document.querySelectorAll("#fr-share-pick .fr-sh-friend:checked")).map(c => c.value);
-  const groups  = Array.from(document.querySelectorAll("#fr-share-pick .fr-sh-group:checked")).map(c => c.value);
+  const friends = Array.from(document.querySelectorAll("#fr-pick-friends .fr-sh-friend:checked")).map(c => c.value);
+  const groups  = Array.from(document.querySelectorAll("#fr-pick-groups .fr-sh-group:checked")).map(c => c.value);
   const forever = document.getElementById("fr-share-forever").checked;
   const date = document.getElementById("fr-share-date").value;
   msg.className = "fr-form-msg";
 
   if (!sid) { msg.textContent = "先選一檔股票"; msg.classList.add("bad"); return; }
   if (!friends.length && !groups.length) { msg.textContent = "請至少選一位好友或一個群組"; msg.classList.add("bad"); return; }
-  if (!forever && !date) { msg.textContent = "請選終止日期，或勾「永遠」"; msg.classList.add("bad"); return; }
+  if (!forever && !date) { msg.textContent = "請選終止日期，或勾「永不終止」"; msg.classList.add("bad"); return; }
 
   // 到期日算到那一天的最後一刻（台北時間）
   const expires = forever ? null : new Date(`${date}T23:59:59+08:00`).toISOString();
@@ -13064,6 +13201,14 @@ document.addEventListener("click", async e => {
     "share-terminate": `立即終止「${name}」的分享？對方會收到通知，之後不會再收到這檔的分享訊號。`,
     "in-remove":       `移除「${name}」？之後不會再收到這檔的分享訊號。`,
   };
+  // 取代原有的：要刪的是他自己的東西，確認框把會失去什麼講清楚
+  if (act === "in-replace") {
+    const old = btn.dataset.old || "", from = btn.dataset.from || "好友";
+    confirms[act] = btn.dataset.kind === "watchlist"
+      ? `移除你自選股裡的「${old}」，改用 ${from} 分享的設定？\n\n你原本為這一檔設定的訊號與目標價會一起移除`
+        + (btn.dataset.holding ? "，**持股紀錄也會移除**" : "") + "。"
+      : `移除原本那一則「${old}」，改用 ${from} 這一則？`;
+  }
   if (confirms[act] && !window.confirm(confirms[act])) return;
 
   btn.disabled = true;
@@ -13091,6 +13236,7 @@ document.addEventListener("click", async e => {
         break;
       }
       case "in-accept":  res = await frRpc("share_respond", { p_share_id: id, p_accept: true });  break;
+      case "in-replace": res = await frRpc("share_accept_replace", { p_share_id: id }); break;
       case "in-decline": res = await frRpc("share_respond", { p_share_id: id, p_accept: false }); break;
       case "in-ack":     res = await frRpc("share_ack",     { p_share_id: id }); break;
       case "in-remove":  res = await frRpc("share_remove",  { p_share_id: id }); break;
@@ -13115,6 +13261,11 @@ document.addEventListener("click", async e => {
       case "in-decline":      frToast("已拒絕"); break;
       case "in-ack":          frToast("已確認"); break;
       case "in-remove":       frToast("已移除"); break;
+      case "in-replace":
+        if (res.held === "limit") frToast("名額已滿，沒有移除任何東西", true);
+        else frToast("已移除原有的，並接受這則分享");
+        if (res.replaced === "watchlist") loadWatchlist().catch(() => {});   // 自選股少了一檔
+        break;
       case "in-accept":
         // 接受被擋不是失敗：邀請轉成保留，畫面上會出現原因與解法
         if (res.held === "limit") frToast("名額已滿，邀請先保留著", true);
@@ -13141,6 +13292,8 @@ document.addEventListener("click", async e => {
   put('#view-friends .fr-seg button[data-fadd="search"]',  ICON_SEARCH);
   put('#view-friends .fr-seg button[data-fshare="out"]',   ICON_SEND);
   put('#view-friends .fr-seg button[data-fshare="in"]',    ICON_INBOX);
+  put('#fr-share-form .fr-seg button[data-fpick="friends"]', ICON_FRIENDS);
+  put('#fr-share-form .fr-seg button[data-fpick="groups"]',  ICON_GROUP);
   put('#fr-btn-copy-id',      ICON_COPY);
   put('#fr-btn-rotate-id',    ICON_ROTATE);
   put('#fr-btn-new-group',    ICON_PLUS);
@@ -13181,6 +13334,12 @@ document.addEventListener("click", async e => {
   on("fr-btn-cancel-share", "click", () => frShow("fr-share-form", false));
   on("fr-btn-send-share", "click", guard(frSendShare));
   on("fr-share-stock", "change", frUpdateSharePreview);
+  document.querySelectorAll('#fr-share-form .fr-seg button[data-fpick]').forEach(b =>
+    b.addEventListener("click", () => frSwitchPick(b.dataset.fpick)));
+  on("fr-pick-search", "input", e => frFilterPick(e.target.value));
+  on("fr-share-form", "change", e => {
+    if (e.target.matches(".fr-sh-friend, .fr-sh-group")) frUpdatePickSummary();
+  });
   on("fr-share-forever", "change", e => {
     const d = document.getElementById("fr-share-date");
     d.disabled = e.target.checked;

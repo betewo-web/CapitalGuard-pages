@@ -4396,3 +4396,59 @@ select.fr-input { width: 100%; }
 	border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px;
 }
 .rule-filter-bar .hs-link { flex: 0 0 auto; background: none; border: 0; padding: 0; }
+
+/* ── 分享倉庫整頁放大（Howard 2026-10-04 晚）──────────────────────
+   標題、說明、按鈕、輸入框都大一級。用 #fr-pane-shares 圈住：其他三頁
+   （好友／群組／加好友）的清單密度不變。id 選擇器的權重比上面那些 .fr-* 高，
+   所以這裡是明確的覆寫，不是靠「寫在後面」。 */
+#fr-pane-shares .fr-h { font-size: 1.22rem; color: var(--text-1); }
+#fr-pane-shares .fr-hint { font-size: 1.03rem; line-height: 1.6; }
+#fr-pane-shares .fr-label { font-size: 1.12rem; font-weight: 600; color: var(--text-1); margin: 18px 0 7px; }
+#fr-pane-shares .fr-list li b,
+#fr-pane-shares .fr-share-head b { font-size: 1.24rem; }
+#fr-pane-shares .btn { font-size: 1.1rem; padding: 12px 18px; border-radius: 10px; }
+#fr-pane-shares .fr-input { font-size: 1.1rem; padding: 12px 12px; }
+#fr-pane-shares .fr-chip { font-size: 0.92rem; padding: 2px 10px; }
+#fr-pane-shares .fr-caret { font-size: 1rem; }
+#fr-pane-shares .fr-form-msg { font-size: 1.05rem; }
+#fr-pane-shares .fr-hold { font-size: 1.05rem; line-height: 1.6; padding: 13px 14px; }
+#fr-pane-shares .fr-details > summary { font-size: 1.08rem; padding: 5px 0; }
+
+/* 分享對象：好友／群組各一頁可以捲的清單，整列都是點擊範圍，勾選框在右邊 */
+.fr-picker { border: 1px solid var(--border); border-radius: 12px; padding: 10px; }
+.fr-picker .fr-seg { margin-bottom: 10px; }
+.fr-pick-search { width: 100%; margin-bottom: 4px; }
+.fr-picker .fr-picklist { max-height: 264px; }
+.fr-picker .fr-picklist li { padding: 10px 2px; }
+.fr-picker .fr-pick { gap: 10px; margin-top: 0; }
+.fr-picker .fr-pick input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); }
+.fr-count { font-weight: 500; opacity: 0.75; }
+.fr-pick-summary {
+	display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+	margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+	font-size: 1.03rem; color: var(--text-1);
+}
+.fr-pick-summary .fr-chip { margin-left: 0; }
+
+/* 「好友分享給我」的一則：直排。內容 → 說明框 → 最下面一排按鈕。
+   按鈕各佔一半寬：不會擠在右邊、也不會因為字長短不同而忽大忽小。 */
+.fr-list li.fr-in-card { display: block; padding: 14px 0; border-radius: 12px; }
+.fr-in-actions { display: flex; gap: 10px; margin-top: 12px; }
+.fr-in-actions .btn { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.fr-conflict-item {
+	display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+	margin: 8px 0 6px; padding: 9px 11px; border-radius: 10px;
+	background: rgba(146, 146, 163, 0.12);
+}
+.fr-conflict-item .fr-chip { margin-left: 0; }
+
+/* 從通知匣跳過來：那一則閃 3 秒（0.6 秒 × 5 次）。
+   不喜歡動畫的人（系統設定）改成 3 秒的靜態外框，資訊一樣、不閃。 */
+@keyframes fr-flash {
+	0%, 100% { background: transparent; box-shadow: none; }
+	50% { background: rgba(139, 124, 255, 0.28); box-shadow: 0 0 0 2px var(--accent); }
+}
+.fr-list li.is-flash { animation: fr-flash 0.6s ease-in-out 5; border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) {
+	.fr-list li.is-flash { animation: none; box-shadow: 0 0 0 2px var(--accent); }
+}
