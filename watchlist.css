@@ -1859,7 +1859,7 @@ body.modal-blocking .modal-backdrop.show {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	flex-wrap: wrap;          /* 窄螢幕：標題＋撥片＋入口鈕擠不下時讓入口鈕換行，不要溢出 */
+	flex-wrap: wrap;          /* 窄螢幕：標題＋入口鈕擠不下時讓入口鈕換行，不要溢出 */
 	row-gap: 0.4rem;
 	font-size: 1.05rem;
 	font-weight: 700;
@@ -2046,7 +2046,7 @@ body.modal-blocking .modal-backdrop.show {
 	min-width: 0;
 }
 
-/* 標題左半（文字＋「持股」撥片）是一個 flex 項目，右邊的入口鈕才靠得住最右邊 */
+/* 標題左半（圖示＋文字）是一個 flex 項目，右邊的入口鈕才靠得住最右邊 */
 .hs-head {
 	display: inline-flex;
 	align-items: center;
@@ -2054,78 +2054,52 @@ body.modal-blocking .modal-backdrop.show {
 	min-width: 0;
 }
 
-/* 「只列持股」撥片（2026-09-23 Howard 三版）：撥片裡直接寫「開／關」，字在撥片沒佔到的那半邊
-   ——關＝撥片在左、字在右；開＝撥片在右、字在左。設定頁那顆 Bootstrap form-switch 塞不進文字，
-   所以這裡自己畫。整顆都用 inline-flex + align-items: center 對齊，撥片不會比字高。 */
-.hs-switch {
+/* 「股票雷達」要看哪一種：自選／持股／分享（2026-10-04 Howard，取代原本的「只列持股」撥片）。
+   自己一排、三格等寬。選中的那一格是紫色粗邊＋淡紫底，不是實心紫——上面那條
+   「盤中／盤後／設定」已經是實心紫了，兩排實心疊在一起反而看不出哪一排是「我在哪一頁」、
+   哪一排是「這一頁裡看哪一種」（分享中心的第二層分段是同一個道理）。 */
+.hs-seg {
+	display: flex;
+	gap: 8px;
+	margin: 0 0 0.75rem;
+}
+
+.hs-seg button {
+	flex: 1 1 0;
+	min-width: 0;
 	display: inline-flex;
 	align-items: center;
-	gap: 0.4rem;
-	margin: 0;
-	padding: 0;
-	border: 0;
-	background: none;
-	line-height: 1;
-	cursor: pointer;
-}
-
-.hs-switch-label {
-	font-size: 0.82rem;
-	font-weight: 500;
-	line-height: 1;
+	justify-content: center;
+	gap: 5px;
+	padding: 0.55rem 0.25rem;
+	border: 1.5px solid var(--border);
+	border-radius: 12px;
+	background: transparent;
 	color: var(--text-muted);
+	font-family: inherit;
+	font-size: 0.95rem;
+	font-weight: 600;
+	line-height: 1.2;
 	white-space: nowrap;
+	cursor: pointer;
+	transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 }
 
-.hs-switch-track {
-	position: relative;
-	flex: 0 0 auto;
-	width: 56px;
-	height: 26px;
-	border: 1px solid rgba(128, 154, 212, 0.6);
-	border-radius: 999px;
-	background: rgba(24, 35, 63, 0.95);
-	transition: background 0.15s, border-color 0.15s;
-}
+.hs-seg button [data-icon] { display: inline-flex; }
+.hs-seg button .ic { width: 15px; height: 15px; }
 
-.hs-switch-knob {
-	position: absolute;
-	top: 50%;
-	left: 3px;
-	width: 20px;
-	height: 20px;
-	border-radius: 50%;
-	background: var(--text-1);
-	transform: translateY(-50%);
-	transition: left 0.15s, background 0.15s;
-}
-
-.hs-switch-state {
-	position: absolute;
-	top: 50%;
-	right: 8px;                /* 關：撥片在左，字靠右 */
-	transform: translateY(-50%);
-	font-size: 0.76rem;
+.hs-seg button.is-on {
+	background: rgba(139, 124, 255, 0.2);
+	border-color: var(--accent);
+	color: var(--text-0);
 	font-weight: 700;
-	line-height: 1;
-	color: var(--text-muted);
 }
 
-.hs-switch-state::after { content: "關"; }
+/* 每一格後面的檔數：比字小一級、淡一點；0 檔時是空的，整顆收起來不佔間距 */
+.hs-seg-n { font-size: 0.82rem; font-weight: 500; opacity: 0.75; }
+.hs-seg-n:empty { display: none; }
 
-.hs-switch.is-on .hs-switch-label { color: var(--text-0); }
-.hs-switch.is-on .hs-switch-track { border-color: var(--accent); background: var(--accent); }
-.hs-switch.is-on .hs-switch-knob { left: calc(100% - 23px); background: #fff; }
-
-.hs-switch.is-on .hs-switch-state {
-	right: auto;
-	left: 8px;                 /* 開：撥片移到右邊，字換到左邊 */
-	color: #fff;
-}
-
-.hs-switch.is-on .hs-switch-state::after { content: "開"; }
-
-/* 標題右邊的入口鈕（例：我的自選 → 新增自選股）。跟 .hs-link 一樣是紫的「可點」，
+/* 標題右邊的入口鈕（例：股票雷達 → 新增自選股）。跟 .hs-link 一樣是紫的「可點」，
    但這是要按的東西，所以給它框與可按的面積（色彩語彙規則：橘留給需要注意的事）。 */
 .hs-btn {
 	flex: 0 0 auto;
@@ -2303,10 +2277,10 @@ body.modal-blocking .modal-backdrop.show {
 	box-shadow: 0 10px 26px rgba(139, 124, 255, 0.28);
 }
 .btn-cta-lg:active { background: #7a6bf0; }
-/* 空清單時標題列右上那顆與「只列持股」撥片一起收起來：同一句話在同一塊裡
+/* 空清單時標題列右上那顆與「自選／持股／分享」那一排一起收起來：同一句話在同一塊裡
    出現兩次，小的那顆反而比置中的大按鈕更搶眼 */
 .home-sec.is-empty .home-sec-title .hs-btn,
-.home-sec.is-empty .home-sec-title .hs-switch { display: none; }
+.home-sec.is-empty .hs-seg { display: none; }
 
 .home-dir {
 	font-size: 0.8rem;
@@ -2392,7 +2366,7 @@ body.modal-blocking .modal-backdrop.show {
 	margin-bottom: 0.9rem;
 }
 
-/* 搬進「我的自選」區塊後（2026-09-24 Howard），它夾在標題列與自選清單之間。
+/* 搬進「股票雷達」（當時叫「我的自選」）區塊後（2026-09-24 Howard），它夾在標題列與自選清單之間。
    上下間距都取 0.7rem（＝標題列的 margin-bottom），三者才像同一塊，
    而不是浮在中間的另一張卡。 */
 .home-sec > .home-nudge { margin-bottom: 0.7rem; }
@@ -4353,10 +4327,24 @@ select.fr-input { width: 100%; }
 /* 一則分享：整列是一顆可以展開的按鈕 */
 .fr-list li.fr-share { display: block; padding: 0; }
 .fr-share-head {
-	width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 0;
+	width: 100%; display: flex; align-items: center; gap: 14px; padding: 11px 0;
 	background: none; border: 0; color: inherit; text-align: left; font: inherit; cursor: pointer;
 }
-.fr-caret { font-size: 12px; color: var(--text-muted); flex: 0 0 auto; }
+/* 「展開／收合」：右邊一顆有框的小膠囊，帶箭頭（Howard 2026-10-04 第四輪）。
+   原本只是一行灰字，緊貼著左邊的說明——說明一換行，它看起來就像說明的最後兩個字。
+   現在有自己的框、與說明之間留 14px，而且不換行、不被壓扁；左邊的說明欄可以縮
+   （flex-basis 0），長說明在自己的欄裡折行，不會把膠囊擠下去。 */
+.fr-share-head .fr-grow { flex: 1 1 0; }
+.fr-share-head .fr-hint { margin-top: 4px; }
+.fr-caret {
+	flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px;
+	padding: 6px 10px 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+	background: rgba(146, 146, 163, 0.12); color: var(--text-1);
+	font-size: 12px; font-weight: 600; line-height: 1.2; white-space: nowrap;
+}
+.fr-caret .ic { width: 14px; height: 14px; transition: transform 0.15s ease; }
+.fr-share-head[aria-expanded="true"] .fr-caret { border-color: var(--accent); color: var(--text-0); }
+.fr-share-head[aria-expanded="true"] .fr-caret .ic { transform: rotate(180deg); }
 .fr-share.is-ended .fr-share-head b { color: var(--text-muted); }
 .fr-share-body { padding: 0 0 12px; }
 
@@ -4409,7 +4397,8 @@ select.fr-input { width: 100%; }
 #fr-pane-shares .btn { font-size: 1.1rem; padding: 12px 18px; border-radius: 10px; }
 #fr-pane-shares .fr-input { font-size: 1.1rem; padding: 12px 12px; }
 #fr-pane-shares .fr-chip { font-size: 0.92rem; padding: 2px 10px; }
-#fr-pane-shares .fr-caret { font-size: 1rem; }
+#fr-pane-shares .fr-caret { font-size: 1rem; padding: 8px 12px 8px 14px; }
+#fr-pane-shares .fr-caret .ic { width: 16px; height: 16px; }
 #fr-pane-shares .fr-form-msg { font-size: 1.05rem; }
 #fr-pane-shares .fr-hold { font-size: 1.05rem; line-height: 1.6; padding: 13px 14px; }
 #fr-pane-shares .fr-details > summary { font-size: 1.08rem; padding: 5px 0; }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="254">
+  <meta name="app-version" content="255">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=254" rel="stylesheet">
+  <link href="watchlist.css?v=255" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -287,17 +287,17 @@
              文字會變成另一個匿名項目，被 justify-content: space-between 推到右邊 -->
         <div class="home-sec-title">
           <span class="hs-head">
-            <span class="hs-label"><i data-icon="star"></i>我的自選</span>
-            <!-- 打開＝只看持股，關閉＝全部自選股。撥片裡直接寫「開／關」（2026-09-23 Howard），
-                 所以沒有沿用設定頁那顆 Bootstrap 的 form-switch——那一顆塞不進文字 -->
-            <button type="button" class="hs-switch" id="home-holdings-only" role="switch"
-                    aria-checked="false" title="只顯示有持股的自選股"
-                    onclick="setHomeHoldingsOnly(!homeHoldingsOnly)">
-              <span class="hs-switch-label">只列持股</span>
-              <span class="hs-switch-track"><span class="hs-switch-state"></span><span class="hs-switch-knob"></span></span>
-            </button>
+            <span class="hs-label"><i data-icon="radar"></i>股票雷達</span>
           </span>
           <button type="button" class="hs-btn" onclick="switchTab('watch')">新增自選股</button>
+        </div>
+        <!-- 要看哪一種（2026-10-04 Howard）：自選／持股／分享 三選一，取代原本的「只列持股」撥片。
+             自己一排、三格等寬：塞在標題列裡的話，字級調大時三格加上右邊的入口鈕會擠不下。
+             每一格後面的檔數由 renderHome 填（syncHomeFilter）；選了哪一格記在本機（HOME_FILTER_KEY）。 -->
+        <div class="hs-seg" id="home-filter" role="radiogroup" aria-label="股票雷達要看哪一種">
+          <button type="button" role="radio" data-hf="mine" aria-checked="true" onclick="setHomeFilter('mine')"><i data-icon="star"></i>自選<span class="hs-seg-n"></span></button>
+          <button type="button" role="radio" data-hf="held" aria-checked="false" onclick="setHomeFilter('held')"><i data-icon="wallet"></i>持股<span class="hs-seg-n"></span></button>
+          <button type="button" role="radio" data-hf="shared" aria-checked="false" onclick="setHomeFilter('shared')"><i data-icon="share"></i>分享<span class="hs-seg-n"></span></button>
         </div>
 
         <!-- 進階訊號推薦：規則數未達 RULE_NUDGE_TARGET 條時顯示一行，內容由 renderRuleNudge() 畫；
@@ -1606,6 +1606,7 @@ const ICON_SEND    = _svg('<path d="M13.6 2.4 7.2 8.8"/><path d="M13.6 2.4 9.5 1
 const ICON_PLUS    = _svg('<path d="M8 3.4v9.2M3.4 8h9.2"/>', 14);
 const ICON_SHARE   = _svg('<circle cx="4.2" cy="8" r="1.9"/><circle cx="11.8" cy="3.9" r="1.9"/><circle cx="11.8" cy="12.1" r="1.9"/><path d="M5.9 7.1 10.1 4.8M5.9 8.9l4.2 2.3"/>', 14);
 const ICON_INBOX   = _svg('<path d="M2.4 9.2 4 3.6h8l1.6 5.6"/><path d="M2.4 9.2v3.2h11.2V9.2h-3.3a2.3 2.3 0 0 1-4.6 0z"/>', 14);
+const ICON_CHEVRON = _svg('<path d="M4 6.2 8 10.2 12 6.2"/>', 14);
 const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2.9-1z"/><path d="M11.5 8.6l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z"/>');
 
 // 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
@@ -1619,7 +1620,8 @@ const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2
   // 底部導覽、首頁分頁、區塊標題的圖示：一律線條 SVG（2026-09-22 起不用 emoji 當圖示）
   const ICONS_BY_NAME = { home: ICON_HOME, chart: ICON_CHART, bell: ICON_BELL, star: ICON_STAR,
                           news: ICON_EVENTS, calendar: ICON_CAL, moon: ICON_MOON, gear: ICON_GEAR,
-                          filter: ICON_FILTER, friends: ICON_FRIENDS };
+                          filter: ICON_FILTER, friends: ICON_FRIENDS,
+                          radar: ICON_RADAR, wallet: ICON_WALLET, share: ICON_SHARE };
   document.querySelectorAll("[data-icon]").forEach(el => {
     const ic = ICONS_BY_NAME[el.dataset.icon];
     if (ic) el.innerHTML = ic;
@@ -1657,17 +1659,34 @@ let intradayOptionalCols = ["levels", "quote_at", "signals_today"];
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
 let scoresFilter = "screen";    // screen / picks / mine（2026-09-23 預設改成統計結果）
-// 首頁「只列持股」撥片：打開只留有部位的自選股。記在本機——換分頁、重開 App 都維持
-// （2026-09-23 Howard：這個不要跟著分頁回預設，統計／通知那兩排篩選籤才要）
+// 首頁「股票雷達」要看哪一種（2026-10-04 Howard）：自選／持股／分享 三選一，取代原本的
+// 「只列持股」撥片。記在本機——換分頁、重開 App 都維持（2026-09-23 Howard：這個不要
+// 跟著分頁回預設，統計／通知那兩排篩選籤才要）。
+//   mine   自己加的自選股（預設）
+//   held   有部位的那幾檔
+//   shared 好友分享給我、已接受的
+const HOME_FILTER_KEY = "cg-home-filter";
+// 舊撥片存的值。只在還沒選過新的那一排時拿來接續：原本開著「只列持股」的人，升版後停在「持股」
 const HOLDINGS_ONLY_KEY = "cg-home-holdings-only";
+const HOME_FILTERS = ["mine", "held", "shared"];
+// 選到的那一種一檔都沒有時要講清楚是為什麼——空白是篩選造成的，不是資料沒來
+const HOME_FILTER_EMPTY = {
+  mine:   "還沒有自選股。按右上的「新增自選股」加入；好友分享給你的股票在「分享」那一格。",
+  held:   "沒有持股部位。持股在「設定」分頁填股數，或連券商同步。",
+  shared: "還沒有好友分享給你的股票。好友分享後，到「分享」分頁的「好友分享給我」接受，就會出現在這裡。",
+};
 // 今日股票資訊彙整預設收合，只留第一條（Howard 2026-09-24）。刻意不寫進 localStorage：
-// 「只列持股」是使用者對清單的長期偏好，這個只是「這一次想不想多看幾條」，
+// 「自選／持股／分享」是使用者對清單的長期偏好，這個只是「這一次想不想多看幾條」，
 // 重開 App 回到收合才對——不然某天展開過，之後每天一進來都是一長串事件。
 // （2026-09-27 這一區從首頁搬到盤後分頁，變數跟著改名）
 let postNewsExpanded = false;
 
-let homeHoldingsOnly = (() => {
-  try { return localStorage.getItem(HOLDINGS_ONLY_KEY) === "1"; } catch { return false; }
+let homeFilter = (() => {
+  try {
+    const v = localStorage.getItem(HOME_FILTER_KEY);
+    if (HOME_FILTERS.includes(v)) return v;
+    return localStorage.getItem(HOLDINGS_ONLY_KEY) === "1" ? "held" : "mine";
+  } catch { return "mine"; }
 })();
 
 // ── 事件彙整功能（Feature 2）────────────────────────────────────
@@ -4654,8 +4673,8 @@ function switchTab(tab, silent = false) {
   // 外觀，畫面交給下面的 renderCurrentTab()，免得同一次切換畫兩遍。
   if (changed && tab === "scores") { scoresFilter = "screen"; syncFilterChips("scores-filters", "screen"); }
   if (changed && tab === "inbox") { inboxFilter = "all"; syncFilterChips("inbox-filters", "all"); }
-  // 首頁的「只列持股」撥片刻意不在這裡重設：Howard 2026-09-23 要它記住，換分頁、
-  // 重開 App 都維持（存在 localStorage，見 HOLDINGS_ONLY_KEY）
+  // 首頁「自選／持股／分享」那一排刻意不在這裡重設：Howard 2026-09-23 要它記住，換分頁、
+  // 重開 App 都維持（存在 localStorage，見 HOME_FILTER_KEY）
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
   if (changed && tab === "home") _refreshQuotesIfStale();   // 盤中報價只在首頁與字卡輪詢：回來時太舊就補一次
@@ -5905,7 +5924,7 @@ function renderRuleNudge() {
   if (!show) return;
   // 一行就好（2026-09-20 把大卡拿掉）：新用戶第一眼要看到的是自己的股票，不是設定教學。
   // 範本一鍵加入仍在規則編輯器與開機彈窗（renderRuleNudgePopup）裡
-  // 動作鈕改成 .hs-btn，與「我的自選」旁的「新增自選股」同一顆（Howard 2026-09-24）：
+  // 動作鈕改成 .hs-btn，與「股票雷達」旁的「新增自選股」同一顆（Howard 2026-09-24）：
   // 原本那顆只寫「設定」，看不出按下去會發生什麼。左邊只留條數，名稱交給按鈕講——
   // 左右都寫一次在 390px 手機上會擠成兩行。圖示用 ICON_RULES，不用已淘汰的 emoji。
   body.innerHTML = `
@@ -7013,17 +7032,24 @@ function renderHome() {
   // 頁面層級再數一次「幾檔有訊號」只是重複；狀態（盤中／收盤、資料時間、自選檔數）留在上面那一行。
 
   // 自選方塊：一檔一列（2026-09-22 Howard）。
-  // 「只列持股」撥片打開就只留有部位的那幾檔（2026-09-23 Howard）——排序與內容完全一樣，只是少幾列。
-  syncHomeHoldingsSwitch();
-  const held = homeHoldingsOnly ? holdingBySid() : null;
-  const shown = held ? rows.filter(r => held.has(r.sid)) : rows;
+  // 要看哪一種由標題下面那一排決定（2026-10-04 Howard，取代原本的「只列持股」撥片）：
+  // 自選＝自己加的；持股＝有部位的那幾檔；分享＝好友分享給我、已接受的。
+  // 三種都只是少幾列——排序與每一列的內容完全一樣。
+  const heldMap = holdingBySid();
+  const byFilter = {
+    mine:   rows.filter(r => !r.shared),
+    held:   rows.filter(r => heldMap.has(r.sid)),
+    shared: rows.filter(r => r.shared),
+  };
+  syncHomeFilter({ mine: byFilter.mine.length, held: byFilter.held.length, shared: byFilter.shared.length });
+  const shown = byFilter[homeFilter] || byFilter.mine;
   const listEl = document.getElementById("home-watchlist");
-  // 範例列是給「完全沒有歷史格子」的新帳號看的，照全部自選股判斷；
-  // 篩到只剩持股時不放——那時的空白是篩選造成的，不是沒資料
-  const example = !homeHoldingsOnly && showcaseWanted(rows);
-  // 一檔自選股都沒有＝新帳號進來的第一個畫面。只留一行灰字的話，他要自己找到
+  // 範例列是給「完全沒有歷史格子」的新帳號看的，照全部股票判斷；
+  // 只放在「自選」那一格——切到持股或分享時的空白是篩選造成的，不是沒資料
+  const example = homeFilter === "mine" && showcaseWanted(rows);
+  // 一檔都沒有（自選與分享都是空的）＝新帳號進來的第一個畫面。只留一行灰字的話，他要自己找到
   // 標題列右上那顆小按鈕；改成置中的大按鈕（Howard 2026-09-24），同時把右上那顆
-  // 與「只列持股」撥片收起來（.home-sec.is-empty），免得同一句話出現兩次、
+  // 與「自選／持股／分享」那一排收起來（.home-sec.is-empty），免得同一句話出現兩次、
   // 而且小的那顆反而更顯眼。篩選造成的空白不算——那時要講的是篩選，不是新增。
   const noWatchlist = rows.length === 0;
   const secEl = listEl && listEl.closest(".home-sec");
@@ -7035,7 +7061,7 @@ function renderHome() {
            <button type="button" class="btn-cta-lg" onclick="focusAddStock()">＋ 新增自選股</button>
            <div class="hec-sub">加入之後，這裡會顯示每一檔今天有沒有事。</div>
          </div>`
-      : `<div class="home-tile-empty">自選股裡沒有持股部位。持股在「設定」分頁填股數，或連券商同步。</div>`;
+      : `<div class="home-tile-empty">${HOME_FILTER_EMPTY[homeFilter] || HOME_FILTER_EMPTY.mine}</div>`;
     listEl.innerHTML = (shown.length
       ? shown.map(r => homeTileHtml(r)).join("")
       : emptyHtml)
@@ -7297,7 +7323,6 @@ function setScoresFilter(f) {
   renderScores();
 }
 
-// 首頁的「只列持股」撥片（2026-09-23 Howard）：打開只顯示有部位的自選股，關閉顯示全部
 // ── 文字大小（2026-09-24 Howard）─────────────────────────────────────────────
 // 改的是根字級，不是個別字級：全站 251 條 font-size 都是 rem，間距也多半是 rem，
 // 所以整頁等比放大，版面比例不變。只放大字會把行距與內距擠爆。
@@ -7333,11 +7358,12 @@ function syncAppFontSize() {
   syncFilterChips("font-size-chips", k);
 }
 
-function setHomeHoldingsOnly(on) {
-  homeHoldingsOnly = !!on;
-  try { localStorage.setItem(HOLDINGS_ONLY_KEY, homeHoldingsOnly ? "1" : "0"); } catch {}
-  syncHomeHoldingsSwitch();
-  trackActivity("home_holdings_filter", { on: homeHoldingsOnly ? 1 : 0 });
+// 首頁「股票雷達」切換要看哪一種（自選／持股／分享）。埋點名稱沿用 home_holdings_filter：
+// 改了名，admin 儀表板上以前的資料就對不到標籤。內容從 {on} 換成 {mode}——選了哪一種。
+function setHomeFilter(mode) {
+  homeFilter = HOME_FILTERS.includes(mode) ? mode : "mine";
+  try { localStorage.setItem(HOME_FILTER_KEY, homeFilter); } catch {}
+  trackActivity("home_holdings_filter", { mode: homeFilter });
   renderHome();
 }
 
@@ -7350,12 +7376,16 @@ function togglePostNews() {
   renderTodayNews();
 }
 
-// 撥片的外觀跟著變數走。renderHome 每次都叫一次，開 App 時記住的狀態才會顯示在撥片上
-function syncHomeHoldingsSwitch() {
-  const el = document.getElementById("home-holdings-only");
-  if (!el) return;
-  el.classList.toggle("is-on", homeHoldingsOnly);
-  el.setAttribute("aria-checked", homeHoldingsOnly ? "true" : "false");
+// 那一排的外觀跟著變數走，順便把每一格的檔數填上（0 不寫——「分享 0」對沒有好友的人
+// 只是雜訊）。renderHome 每次都叫一次，開 App 時記住的那一格才會亮著
+function syncHomeFilter(counts) {
+  document.querySelectorAll("#home-filter [data-hf]").forEach(b => {
+    const on = b.dataset.hf === homeFilter;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+    const n = b.querySelector(".hs-seg-n");
+    if (n && counts) n.textContent = counts[b.dataset.hf] > 0 ? String(counts[b.dataset.hf]) : "";
+  });
 }
 
 // ── 統計結果（使用者自己設的排序與條件，存在本機） ──
@@ -12708,7 +12738,7 @@ function frRenderSharesOut() {
           <b>${escapeHtml(s.label)}</b>${ended ? `<span class="fr-chip">${ended}</span>` : ""}
           <div class="fr-hint">建立 ${frDate(s.created_at)} · ${frExpiry(s.expires_at)} · ${rec.length} 人（${accepted} 已接受）${s.version > 1 ? ` · 第 ${s.version} 版` : ""}</div>
         </span>
-        <span class="fr-caret">${open ? "收合" : "展開"}</span>
+        <span class="fr-caret">${open ? "收合" : "展開"}${ICON_CHEVRON}</span>
       </button>
       ${open ? frShareDetailHtml(s) : ""}
     </li>`;
@@ -12787,7 +12817,7 @@ function frRenderSharesIn() {
           <b>${escapeHtml(frShareName(s))}</b>
           <div class="fr-hint">來自 ${escapeHtml(s.from_name || "好友")} · ${frExpiry(s.expires_at)}</div>
         </span>
-        <span class="fr-caret">${open ? "收合" : "展開"}</span>
+        <span class="fr-caret">${open ? "收合" : "展開"}${ICON_CHEVRON}</span>
       </button>`;
   };
   const detail = (s, extra) => frOpenIn !== s.share_id ? "" : `
@@ -13299,7 +13329,7 @@ document.addEventListener("click", async e => {
         // 接受被擋不是失敗：邀請轉成保留，畫面上會出現原因與解法
         if (res.held === "limit") frToast("名額已滿，邀請先保留著", true);
         else if (res.held === "duplicate") frToast("你已經有這檔了，邀請先保留著", true);
-        else frToast("已接受，這檔會出現在盤中雷達");
+        else frToast("已接受，這檔會出現在盤中「股票雷達」的「分享」那一格");
         break;
     }
     await frReload();     // 裡面的 frSyncRadar() 會在分享的股票有進出時重抓雷達資料
