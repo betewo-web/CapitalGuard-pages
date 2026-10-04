@@ -4218,16 +4218,45 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
    一般使用者的畫面上永遠不會出現（導覽那一格由 initFriendsTab 決定）。
    類別一律 fr- 開頭：這一頁已經 4200 行，沒有前綴遲早撞名。 */
 
-.fr-seg { display: flex; gap: 6px; margin-bottom: 14px; }
+/* 第一層分段（好友／群組／加好友／分享倉庫）：跟首頁「盤中／盤後／設定」同一套
+   視覺——外框裡一排，選中的那一格是實心紫底白字。Howard 2026-10-04：按鈕要放大、
+   目前在哪一頁要看得清楚。原本選中只是淡淡一層底色，在深色背景上幾乎分不出來。 */
+.fr-seg {
+	display: flex; margin: 0 0 14px; padding: 4px;
+	border: 1px solid var(--border); border-radius: 14px;
+	background: rgba(146, 146, 163, 0.1);
+}
 .fr-seg button {
-	flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-	padding: 9px 4px; font-size: 14px; border-radius: 8px;
-	background: transparent; border: 1px solid transparent; color: var(--text-muted);
-	cursor: pointer;
+	position: relative; flex: 1 1 0; min-width: 0;
+	display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+	padding: 12px 4px; border: none; border-radius: 10px;
+	background: transparent; color: var(--text-muted);
+	font-size: 1.02rem; font-weight: 600; line-height: 1.2; white-space: nowrap;
+	cursor: pointer; transition: color 0.15s ease, background 0.15s ease;
 }
+.fr-seg button .ic { width: 16px; height: 16px; }
 .fr-seg button[aria-selected="true"] {
-	background: var(--surface); border-color: var(--border); color: var(--text-0);
+	background: var(--accent); color: #fff; font-weight: 700;
+	box-shadow: 0 2px 8px rgba(139, 124, 255, 0.35);
 }
+
+/* 第二層分段（加好友底下的三顆、分享倉庫底下的兩顆）：各自獨立的框，選中的是
+   紫色粗邊＋淡紫底。刻意不跟第一層用同一種實心——兩排實心紫疊在一起，
+   反而看不出哪一排是「我在哪一頁」、哪一排是「這一頁裡的哪一塊」。 */
+.fr-seg-sub { padding: 0; border: 0; background: transparent; gap: 8px; }
+.fr-seg-sub button {
+	padding: 12px 6px; border: 1.5px solid var(--border); border-radius: 12px;
+	font-size: 1rem;
+}
+.fr-seg-sub button[aria-selected="true"] {
+	background: rgba(139, 124, 255, 0.2); border-color: var(--accent);
+	color: var(--text-0); box-shadow: none;
+}
+
+/* 加好友那一頁的按鈕與輸入框整體放大（Howard 2026-10-04）：複製、重新產生、搜尋、
+   發出邀請。這一頁的動作都是一次性的大動作，不是清單裡的小按鈕。 */
+#fr-pane-add .btn { font-size: 1rem; padding: 10px 18px; border-radius: 10px; }
+#fr-pane-add .fr-input { font-size: 1rem; padding: 11px 12px; }
 
 .fr-card { padding: 14px; margin-bottom: 12px; }
 .fr-h { font-size: 14px; color: var(--text-muted); font-weight: 600; margin: 0 0 10px; }
@@ -4286,8 +4315,11 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 /* ── 分享股（2026-10-04）──────────────────────────────────────────
    四個分段擠在一列：字級與左右內距都比三個分段時小一階，圖示留著
    （Howard：所有按鈕都要線條圖示）。 */
-.fr-seg-4 button { font-size: 13px; padding: 9px 2px; gap: 4px; white-space: nowrap; min-width: 0; }
-.fr-seg button { position: relative; }
+/* 四顆擠一列時橫排（圖示＋字）沒有放大的空間——「分享倉庫」四個字加圖示已經貼邊。
+   改成圖示在上、字在下：字可以再大一級，點擊面積也從 41px 高變成 60px 左右。 */
+.fr-seg-4 button { flex-direction: column; gap: 5px; font-size: 1.1rem; padding: 10px 2px 9px; }
+.fr-seg-4 button .ic { width: 21px; height: 21px; }
+.fr-seg-4 .fr-dot { position: absolute; top: 7px; right: 18%; margin: 0; }
 
 /* 分段上的小紅點：有東西等著決定。不放數字——數字在底部導覽那一格。 */
 .fr-dot {

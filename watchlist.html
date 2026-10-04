@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="251">
+  <meta name="app-version" content="252">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=251" rel="stylesheet">
+  <link href="watchlist.css?v=252" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -488,7 +488,7 @@
     </section>
 
     <!-- ── 分享（第四格）─────────────────────────────────────────────────
-         好友、群組、加入好友、分享股。設計見 FRIENDS.md。
+         好友、群組、加好友、分享倉庫。設計見 FRIENDS.md。
          後端目前只對 is_admin / is_demo 開放，所以這一格預設藏著：登入後
          initFriendsTab() 問一次後端，拿得到才把導覽那一格顯示出來。
          內部代號仍是 friends（APP_TABS、#friends、fr- 前綴）——改名只改
@@ -502,8 +502,8 @@
       <div class="fr-seg fr-seg-4" role="tablist" aria-label="分享分頁">
         <button role="tab" data-fseg="friends" aria-selected="true">好友</button>
         <button role="tab" data-fseg="groups"  aria-selected="false">群組</button>
-        <button role="tab" data-fseg="add"     aria-selected="false">加入好友</button>
-        <button role="tab" data-fseg="shares"  aria-selected="false">分享股<span class="fr-dot" id="fr-dot-shares"></span></button>
+        <button role="tab" data-fseg="add"     aria-selected="false">加好友</button>
+        <button role="tab" data-fseg="shares"  aria-selected="false">分享倉庫<span class="fr-dot" id="fr-dot-shares"></span></button>
       </div>
 
       <!-- ── 好友 ── -->
@@ -512,8 +512,9 @@
           <h3 class="fr-h">好友邀請</h3>
           <ul class="fr-list" id="fr-requests-in"></ul>
         </div>
+        <!-- 這張卡沒有標題：上面選中的分段就寫著「好友」，再寫一次是多的
+             （Howard 2026-10-04）。邀請與等待確認那兩張有標題，分得出來。 -->
         <div class="panel-card fr-card">
-          <h3 class="fr-h">好友</h3>
           <ul class="fr-list" id="fr-friends"></ul>
         </div>
         <div class="panel-card fr-card" id="fr-sec-requests-out" style="display:none">
@@ -546,8 +547,8 @@
       <!-- ── 加入好友 ── -->
       <div class="fr-pane" id="fr-pane-add" style="display:none">
         <div class="panel-card fr-card">
-          <div class="fr-seg" role="tablist" aria-label="加入好友的方式">
-            <button role="tab" data-fadd="qr" aria-selected="true">顯示行動條碼</button>
+          <div class="fr-seg fr-seg-sub" role="tablist" aria-label="加好友的方式">
+            <button role="tab" data-fadd="qr" aria-selected="true">顯示條碼</button>
             <button role="tab" data-fadd="id" aria-selected="false">顯示 ID</button>
             <button role="tab" data-fadd="search" aria-selected="false">搜尋</button>
           </div>
@@ -584,7 +585,7 @@
 
       <!-- ── 分享股 ── -->
       <div class="fr-pane" id="fr-pane-shares" style="display:none">
-        <div class="fr-seg" role="tablist" aria-label="分享股">
+        <div class="fr-seg fr-seg-sub" role="tablist" aria-label="分享倉庫">
           <button role="tab" data-fshare="out" aria-selected="true">我分享出去</button>
           <button role="tab" data-fshare="in"  aria-selected="false">好友分享給我<span class="fr-dot" id="fr-dot-in"></span></button>
         </div>
@@ -635,7 +636,7 @@
             <ul class="fr-list" id="fr-shares-pending"></ul>
           </div>
           <div class="panel-card fr-card">
-            <h3 class="fr-h">好友分享給我</h3>
+            <h3 class="fr-h">已接受</h3>
             <ul class="fr-list" id="fr-shares-in"></ul>
           </div>
         </div>
@@ -11431,7 +11432,7 @@ async function addStock() {
       msgEl.innerHTML = limitPromptHtml("watchlist", e);
     } else if (String(e.message).includes("dup:share")) {
       // 一檔只能有一個來源：這檔已經由好友分享給他了
-      msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已由好友分享給你。到「分享 → 分享股」移除那則分享，才能加入自選股</span>`;
+      msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已由好友分享給你。到「分享 → 分享倉庫」移除那則分享，才能加入自選股</span>`;
     } else if (e.message.includes("23505") || e.message.includes("unique")) {
       msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已在清單中</span>`;
     } else {
@@ -12621,12 +12622,11 @@ function frRenderFriends() {
   frList("fr-friends", frState.friends, f => `
     <li>
       <span class="fr-avatar">${ICON_USER}</span>
-      <span class="fr-grow">${frPerson(f.name, f.tag)}
-        <div class="fr-hint">好友自 ${frTime(f.since)}</div></span>
+      <span class="fr-grow">${frPerson(f.name, f.tag)}</span>
       <button class="btn btn-sm btn-outline-light fr-quiet" data-fr="friend-remove"
               data-id="${escapeHtml(f.user_id)}" data-name="${escapeHtml(f.name || "")}"
               aria-label="刪除好友 ${escapeHtml(f.name || "")}">${ICON_TRASH}刪除</button>
-    </li>`, "還沒有好友。到「加入好友」給對方你的行動條碼或 ID。");
+    </li>`, "還沒有好友。到「加好友」給對方你的條碼或 ID。");
 
   const rout = frState.requests_out || [];
   frShow("fr-sec-requests-out", rout.length > 0);
@@ -12877,7 +12877,7 @@ function frRenderQr() {
   const box = document.getElementById("fr-qr-box");
   if (!box) return;
   if (typeof qrcode !== "function") {
-    box.innerHTML = `<div class="fr-hint fr-center">行動條碼載入失敗，請改用「顯示 ID」</div>`;
+    box.innerHTML = `<div class="fr-hint fr-center">條碼載入失敗，請改用「顯示 ID」</div>`;
     return;
   }
   if (!frIdMode) { box.innerHTML = ""; return; }
@@ -12978,7 +12978,7 @@ function frOpenShareForm() {
     + groups.map(g => `<li><label class="fr-row fr-pick">
         <input type="checkbox" class="fr-sh-group" value="${escapeHtml(g.group_id)}">
         <span class="fr-grow">${ICON_GROUP} ${escapeHtml(g.name)}<span class="fr-hint">（${(g.members || []).length} 人）</span></span></label></li>`).join("")
-    || `<li class="fr-empty">還沒有好友或群組。先到「加入好友」。</li>`;
+    || `<li class="fr-empty">還沒有好友或群組。先到「加好友」。</li>`;
 
   // 終止日期：預設「永遠」。日期最早是明天——今天到期的分享送出去就結束了。
   const dateEl = document.getElementById("fr-share-date");
