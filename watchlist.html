@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="255">
+  <meta name="app-version" content="256">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=255" rel="stylesheet">
+  <link href="watchlist.css?v=256" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -187,6 +187,10 @@
         <div id="login-inapp-hint" class="alert py-2 small text-start ob-inapp" style="display:none">
           🌐 你在 <b id="login-inapp-name">LINE</b> 的內建瀏覽器裡。請點右上角「⋮」→「以其他瀏覽器開啟」，用 Chrome／Safari 開啟本站，通知與安裝才會正常。
         </div>
+
+        <!-- 用手機相機掃了好友條碼、但這個瀏覽器沒登入（iPhone 的相機一律開 Safari，而主畫面上的
+             App 與 Safari 的登入狀態不共用）：講清楚要去哪裡掃。內容由 renderFriendIntentHint() 填 -->
+        <div id="login-friend-hint" class="alert py-2 small text-start ob-inapp" style="display:none"></div>
 
         <!-- 短碼登入（ONBOARDING.md）：LINE 官方帳號傳來的 8 碼；加好友或傳「登入」就會收到 -->
         <div id="short-code-wrap" class="text-start mb-4">
@@ -547,15 +551,36 @@
       <!-- ── 加入好友 ── -->
       <div class="fr-pane" id="fr-pane-add" style="display:none">
         <div class="panel-card fr-card">
-          <div class="fr-seg fr-seg-sub" role="tablist" aria-label="加好友的方式">
+          <!-- 四種方式（2026-10-04 Howard 第五輪加「掃描條碼」）：條碼一組（給人掃／掃別人）、
+               ID 一組（給人抄／找別人）。四格放一排、圖示在字上面——與最上面那排同一種排法。 -->
+          <div class="fr-seg fr-seg-sub fr-seg-add" role="tablist" aria-label="加好友的方式">
             <button role="tab" data-fadd="qr" aria-selected="true">顯示條碼</button>
+            <button role="tab" data-fadd="scan" aria-selected="false">掃描條碼</button>
             <button role="tab" data-fadd="id" aria-selected="false">顯示 ID</button>
             <button role="tab" data-fadd="search" aria-selected="false">搜尋</button>
           </div>
 
           <div class="fr-pane" id="fr-add-qr">
             <div id="fr-qr-box"></div>
-            <p class="fr-hint fr-center">請對方用相機掃描，或改用「顯示 ID」複製給他。</p>
+            <p class="fr-hint fr-center">請對方打開 App，到「加好友」的「掃描條碼」來掃。<br>用手機相機掃也可以：Android 會直接開 App；iPhone 會開到 Safari，要回 App 裡掃。</p>
+          </div>
+
+          <!-- App 內的掃描器。iPhone 的系統相機掃到連結只會開 Safari，進不了主畫面上的 App
+               （兩邊的登入狀態也不共用），所以一定要有這一頁；Android 兩條路都通。
+               相機開不了（沒給權限、內建瀏覽器不支援）時還有「拍照或選相片」——那顆是系統的
+               檔案選擇器，任何瀏覽器都有，也能選別人傳來的條碼截圖。
+               video 的三個屬性缺一不可：少了 playsinline，iPhone 會把相機畫面彈成全螢幕播放器。 -->
+          <div class="fr-pane" id="fr-add-scan" style="display:none">
+            <div class="fr-scan-box" id="fr-scan-box" style="display:none">
+              <video id="fr-scan-video" playsinline muted autoplay></video>
+              <div class="fr-scan-frame" aria-hidden="true"></div>
+            </div>
+            <p class="fr-hint fr-center" id="fr-scan-msg">按「開啟相機」掃對方的條碼，或按「拍照或選相片」。</p>
+            <div class="fr-row fr-scan-actions">
+              <button class="btn btn-sm btn-primary" id="fr-btn-scan-start">開啟相機</button>
+              <button class="btn btn-sm btn-outline-light" id="fr-btn-scan-photo">拍照或選相片</button>
+            </div>
+            <input type="file" id="fr-scan-file" accept="image/*" style="display:none">
           </div>
 
           <div class="fr-pane" id="fr-add-id" style="display:none">
@@ -1607,6 +1632,9 @@ const ICON_PLUS    = _svg('<path d="M8 3.4v9.2M3.4 8h9.2"/>', 14);
 const ICON_SHARE   = _svg('<circle cx="4.2" cy="8" r="1.9"/><circle cx="11.8" cy="3.9" r="1.9"/><circle cx="11.8" cy="12.1" r="1.9"/><path d="M5.9 7.1 10.1 4.8M5.9 8.9l4.2 2.3"/>', 14);
 const ICON_INBOX   = _svg('<path d="M2.4 9.2 4 3.6h8l1.6 5.6"/><path d="M2.4 9.2v3.2h11.2V9.2h-3.3a2.3 2.3 0 0 1-4.6 0z"/>', 14);
 const ICON_CHEVRON = _svg('<path d="M4 6.2 8 10.2 12 6.2"/>', 14);
+const ICON_SCAN    = _svg('<path d="M2.6 5.6V3.8a1.2 1.2 0 0 1 1.2-1.2h1.8M10.4 2.6h1.8a1.2 1.2 0 0 1 1.2 1.2v1.8M13.4 10.4v1.8a1.2 1.2 0 0 1-1.2 1.2h-1.8M5.6 13.4H3.8a1.2 1.2 0 0 1-1.2-1.2v-1.8"/><path d="M4.6 8h6.8"/>');
+const ICON_CAMERA  = _svg('<path d="M2.4 5.6h2.3l1-1.6h4.6l1 1.6h2.3v7H2.4z"/><circle cx="8" cy="8.9" r="2.3"/>', 14);
+const ICON_IMAGE   = _svg('<rect x="2.4" y="3" width="11.2" height="10" rx="1.6"/><circle cx="5.8" cy="6.4" r="1.1"/><path d="M2.8 11.6 6.4 8.6l2.4 2 2-1.6 2.6 2.4"/>', 14);
 const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2.9-1z"/><path d="M11.5 8.6l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z"/>');
 
 // 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
@@ -4056,6 +4084,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   const qs = new URLSearchParams(location.search);
   stashPlanIntent(qs);   // 官網「開啟 App 升級」帶的 ?plan=：先收起來，登入與精靈之後再開
+  stashFriendIntent(qs); // 好友條碼／連結帶的 ?friend=：一樣先收起來，分享功能確認能用之後再帶出那個人
+  renderFriendIntentHint();   // 這個瀏覽器沒登入的話，登入畫面上要講清楚去哪裡掃（登入後那一區整個藏起來）
   // 從 URL ?code= 一次性登入碼登入（LIFF 驗證後跳轉、LINE 邀請連結、報告推播）。
   // 碼用過即刪，不像舊的 ?token= 會把長期 token 留在通知中心與伺服器紀錄裡。
   const urlCode = qs.get("code");
@@ -4673,6 +4703,7 @@ function switchTab(tab, silent = false) {
   // 外觀，畫面交給下面的 renderCurrentTab()，免得同一次切換畫兩遍。
   if (changed && tab === "scores") { scoresFilter = "screen"; syncFilterChips("scores-filters", "screen"); }
   if (changed && tab === "inbox") { inboxFilter = "all"; syncFilterChips("inbox-filters", "all"); }
+  if (changed && tab !== "friends") frScanStop();   // 「加好友 → 掃描條碼」開著相機時換分頁：相機要關
   // 首頁「自選／持股／分享」那一排刻意不在這裡重設：Howard 2026-09-23 要它記住，換分頁、
   // 重開 App 都維持（存在 localStorage，見 HOME_FILTER_KEY）
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
@@ -12545,6 +12576,7 @@ async function initFriendsTab() {
   if (nav) nav.style.display = "";
   frRenderBadge();
   frSyncRadar();     // 開 App 時自選股那批報價已經在抓了，這裡補上分享的那幾檔
+  consumeFriendIntent().catch(() => {});   // 從好友條碼／連結進來的：帶出那個人
 }
 
 // 導覽紅點只數「等著我做決定」的：好友邀請、分享邀請（含保留中的）、對方更新了
@@ -12944,6 +12976,7 @@ function frSwitchSeg(name) {
   document.querySelectorAll('#view-friends .fr-seg button[data-fseg]').forEach(b =>
     b.setAttribute("aria-selected", String(b.dataset.fseg === name)));
   for (const k of ["friends", "groups", "add", "shares"]) frShow(`fr-pane-${k}`, k === name);
+  if (name !== "add") frScanStop();
   if (name === "add") frRenderAdd().catch(e => frToast(String(e.message || e), true));
   if (name === "groups") frShow("fr-new-group", false);
   if (name === "shares") {
@@ -12956,8 +12989,11 @@ function frSwitchSeg(name) {
 function frSwitchAdd(name) {
   document.querySelectorAll('#view-friends .fr-seg button[data-fadd]').forEach(b =>
     b.setAttribute("aria-selected", String(b.dataset.fadd === name)));
-  for (const k of ["qr", "id", "search"]) frShow(`fr-add-${k}`, k === name);
+  for (const k of ["qr", "scan", "id", "search"]) frShow(`fr-add-${k}`, k === name);
   if (name === "qr") frRenderQr();
+  // 掃描那一格：看得到就開相機，離開就關（相機燈不能在別的頁面還亮著）
+  if (name === "scan" && frScanPaneVisible()) frScanStart().catch(() => {});
+  else frScanStop();
 }
 
 function frSwitchShare(name) {
@@ -13016,8 +13052,8 @@ async function frRotateHandle() {
   frToast("已產生新的 ID，舊的立刻失效");
 }
 
-// 行動條碼只放 ID 本身，不放網址：掃到的人多半還沒裝 App，給深連結反而要先
-// 處理「沒安裝怎麼辦」。qrcode-generator 是另外載的，載不到就說清楚。
+// 行動條碼裡放的是連結（frFriendLink），不是光一串 ID：見下面「好友條碼裡放什麼」。
+// qrcode-generator 是另外載的，載不到就說清楚。
 function frRenderQr() {
   const box = document.getElementById("fr-qr-box");
   if (!box) return;
@@ -13027,9 +13063,292 @@ function frRenderQr() {
   }
   if (!frIdMode) { box.innerHTML = ""; return; }
   const qr = qrcode(0, "M");
-  qr.addData(frMyId().raw);
+  qr.addData(frFriendLink(frMyId().raw));
   qr.make();
   box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 0, scalable: true });
+}
+
+// ── 好友條碼裡放什麼：連結，不是光一串 ID（v256，Howard 2026-10-04）──
+// 光是 ID 的話，手機相機掃到只會顯示一串字，什麼都不會發生。放連結之後：
+//   · Android：相機掃到連結會開 App 或 Chrome，兩邊登入狀態共用 → 開頁時 stashFriendIntent()
+//     收下 ID，登入確認後 consumeFriendIntent() 直接帶出那位好友。
+//   · iPhone：相機一律開 Safari，進不了主畫面上的 App，登入狀態也不共用 → 登入畫面上提示
+//     「到 App 裡用掃描條碼」（renderFriendIntentHint）。iPhone 的正路是下面的 App 內掃描器。
+// 兩種寫法都認：連結，或整段就是 ID（v255 以前的條碼截圖、手抄的 ID）。
+const FR_FRIEND_PARAM = "friend";
+const FR_INTENT_KEY = "cg-friend-intent";
+const FR_INTENT_TTL_MS = 24 * 3600 * 1000;   // 隔天才登入的話，那個條碼早就不是他當下要做的事
+
+function frFriendLink(id) {
+  const u = new URL("watchlist.html", location.href);
+  u.search = "";
+  u.hash = "";
+  u.searchParams.set(FR_FRIEND_PARAM, id);
+  return u.toString();
+}
+
+// 從掃到的文字（或網址參數）裡取出好友 ID；不是好友條碼就回 null
+function frParseFriendCode(text) {
+  const s = String(text || "").trim();
+  if (!s) return null;
+  let cand = s;
+  if (/^https?:/i.test(s)) {
+    try { cand = new URL(s).searchParams.get(FR_FRIEND_PARAM) || ""; } catch { cand = ""; }
+  }
+  if (FR_UUID_RE.test(cand)) return cand.toLowerCase();
+  const h = frNorm(cand);
+  return FR_HANDLE_RE.test(h) ? h : null;
+}
+
+// 開頁時網址帶 ?friend=：先收起來（登入、精靈之後才用得到），參數從網址拿掉——
+// 留著的話重新整理會再跳一次。
+function stashFriendIntent(qs) {
+  const raw = qs.get(FR_FRIEND_PARAM);
+  if (raw === null) return;
+  const id = frParseFriendCode(raw);
+  if (id) { try { localStorage.setItem(FR_INTENT_KEY, JSON.stringify({ id, at: Date.now() })); } catch {} }
+  qs.delete(FR_FRIEND_PARAM);
+  const q = qs.toString();
+  history.replaceState(null, "", location.pathname + (q ? `?${q}` : "") + location.hash);
+}
+
+function frPeekFriendIntent() {
+  try {
+    const o = JSON.parse(localStorage.getItem(FR_INTENT_KEY) || "null");
+    if (o && o.id && Date.now() - Number(o.at) < FR_INTENT_TTL_MS) return String(o.id);
+    if (o) localStorage.removeItem(FR_INTENT_KEY);
+  } catch {}
+  return null;
+}
+
+// 登入畫面上的提示：用手機相機掃了好友條碼、但這個瀏覽器沒登入。
+// iPhone 幾乎一定走到這裡（相機開的是 Safari，App 的登入不在這裡），所以要講清楚去哪裡掃。
+function renderFriendIntentHint() {
+  const el = document.getElementById("login-friend-hint");
+  if (!el) return;
+  const id = frPeekFriendIntent();
+  if (!id) { el.style.display = "none"; el.innerHTML = ""; return; }
+  const shown = FR_HANDLE_RE.test(id) ? frFmt(id) : id;
+  el.innerHTML = `<b>你掃到一個好友條碼</b>（ID：${escapeHtml(shown)}）<br>
+    已經在用 CapitalGuard：請打開主畫面上的 App，到「分享」的「加好友 → 掃描條碼」再掃一次——
+    手機相機開的是瀏覽器，進不了已安裝的 App。<br>
+    也可以直接在這裡登入，登入後會自動帶出這位好友。`;
+  el.style.display = "";
+}
+
+// 登入後（分享功能確定能用）把收著的好友 ID 拿出來：跳到「加好友 → 搜尋」、帶出那個人，
+// 由使用者自己按「發出邀請」。不自動送出：一條連結就能替人發邀請的話，任何人都能做一個
+// 連結讓別人對他發邀請；而且送出之前該先看到對方是誰。
+let _frIntentRetries = 0;
+async function consumeFriendIntent() {
+  if (!frEnabled || !state.accessToken) return false;
+  const id = frPeekFriendIntent();
+  if (!id) return false;
+  const gate = document.getElementById("onboard-gate");
+  // 精靈、免責同意、別的視窗還開著：晚一點再試（最多一分鐘），不要疊在它們上面
+  if ((gate && gate.style.display && gate.style.display !== "none") || _screenIsBusy()) {
+    if (_frIntentRetries++ < 15) setTimeout(() => consumeFriendIntent().catch(() => {}), 4000);
+    return false;
+  }
+  try { localStorage.removeItem(FR_INTENT_KEY); } catch {}
+  renderFriendIntentHint();
+  trackActivity("friend_link_open");
+  switchTab("friends");
+  await frOpenFriendCode(id);
+  return true;
+}
+
+// 掃到／點到一個好友 ID：停在「加好友 → 搜尋」，把 ID 填進去並查出那個人。
+// 先把子分頁選成「搜尋」再切到「加好友」：frSwitchSeg 會照「目前選的那一格」重畫，
+// 順序反過來的話，上次停在「掃描條碼」的人會看到相機先閃一下。
+async function frOpenFriendCode(id) {
+  if (!frState) await frReload();
+  frSwitchAdd("search");
+  frSwitchSeg("add");
+  await frDetectIdMode();
+  frSwitchAdd("search");
+  const inp = document.getElementById("fr-search-id");
+  if (inp) inp.value = FR_HANDLE_RE.test(id) ? frFmt(id) : id;
+  await frSearch();
+}
+
+// ── App 內掃描條碼 ──
+// 為什麼要自己做：iPhone 的系統相機掃到連結只會開 Safari，進不了主畫面上的 App。
+// 解碼兩條路：瀏覽器有 BarcodeDetector（Android Chrome）就用它；沒有（iPhone、Windows）
+// 就另外載 jsQR 自己解。相機開不了（沒給權限、內建瀏覽器不支援）還有「拍照或選相片」——
+// 那是系統的檔案選擇器，到處都有，也能選別人傳來的條碼截圖。
+const FR_JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+const frScan = { stream: null, timer: null, gen: 0, detector: null, detTried: false, canvas: null };
+let _frJsQrLoading = null;
+
+function frLoadJsQr() {
+  if (typeof jsQR === "function") return Promise.resolve(true);
+  if (!_frJsQrLoading) {
+    _frJsQrLoading = new Promise(resolve => {
+      const s = document.createElement("script");
+      s.src = FR_JSQR_URL;
+      s.onload = () => resolve(typeof jsQR === "function");
+      s.onerror = () => { _frJsQrLoading = null; resolve(false); };   // 下次再按可以重試
+      document.head.appendChild(s);
+    });
+  }
+  return _frJsQrLoading;
+}
+
+async function frScanInitDetector() {
+  if (frScan.detTried) return;
+  frScan.detTried = true;
+  try {
+    if ("BarcodeDetector" in window) {
+      const fmts = await BarcodeDetector.getSupportedFormats();
+      if (fmts.includes("qr_code")) frScan.detector = new BarcodeDetector({ formats: ["qr_code"] });
+    }
+  } catch {}
+  if (!frScan.detector) frLoadJsQr();      // 先載起來，相機開好就能用
+}
+
+// 讀出一張畫面裡的條碼文字；讀不到回 null。source 是 <video>、圖片或 ImageBitmap。
+// jsQR 吃的是像素：畫到 canvas 上再取，長邊縮到 maxSide 以內——相機給的 1280×720
+// 原尺寸解一張要上百毫秒，縮過之後一秒可以看五六張。
+async function frDecodeQr(source, w, h, maxSide = 800) {
+  if (frScan.detector) {
+    try {
+      const codes = await frScan.detector.detect(source);
+      return codes && codes.length ? (codes[0].rawValue || null) : null;
+    } catch { frScan.detector = null; }     // 這台的原生解碼器不能用（少數 Android）：改走 jsQR
+  }
+  if (typeof jsQR !== "function" && !(await frLoadJsQr())) throw new Error("jsqr_unavailable");
+  const scale = Math.min(1, maxSide / Math.max(w, h));
+  const cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+  const c = frScan.canvas || (frScan.canvas = document.createElement("canvas"));
+  c.width = cw;
+  c.height = ch;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(source, 0, 0, cw, ch);
+  const hit = jsQR(ctx.getImageData(0, 0, cw, ch).data, cw, ch, { inversionAttempts: "dontInvert" });
+  return hit && hit.data ? hit.data : null;
+}
+
+function frScanMsg(text, bad) {
+  const el = document.getElementById("fr-scan-msg");
+  if (el) { el.textContent = text; el.classList.toggle("fr-warn", !!bad); }
+}
+
+function frScanPaneVisible() {
+  const shown = id => { const el = document.getElementById(id); return !!el && el.style.display !== "none"; };
+  return currentTab === "friends" && !document.hidden && shown("fr-pane-add") && shown("fr-add-scan");
+}
+
+// 關相機。離開這一頁的每一條路都要走到這裡（換子分頁、換分段、換分頁、App 退到背景、掃到了）：
+// 串流不關的話相機燈會一直亮著，iPhone 上還會擋住別的 App 用相機。
+function frScanStop() {
+  frScan.gen++;                      // 讓還在等相機／還在解碼的那一輪知道自己過期了
+  clearTimeout(frScan.timer);
+  frScan.timer = null;
+  if (frScan.stream) { frScan.stream.getTracks().forEach(t => t.stop()); frScan.stream = null; }
+  const video = document.getElementById("fr-scan-video");
+  if (video) { try { video.pause(); } catch {} video.srcObject = null; }
+  frShow("fr-scan-box", false);
+  frShow("fr-btn-scan-start", true);
+  frScanMsg("按「開啟相機」掃對方的條碼，或按「拍照或選相片」。");
+}
+
+async function frScanStart() {
+  frScanStop();
+  const gen = ++frScan.gen;
+  const md = navigator.mediaDevices;
+  if (!md || !md.getUserMedia) {
+    frShow("fr-btn-scan-start", false);
+    frScanMsg("這個瀏覽器不能在頁面裡開相機。請按「拍照或選相片」，拍一張對方的條碼。", true);
+    return;
+  }
+  frScanMsg("正在開啟相機…");
+  frScanInitDetector();              // 不等它：相機開好之前多半就準備好了
+  let stream;
+  try {
+    stream = await md.getUserMedia({ audio: false,
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+  } catch (e) {
+    if (gen !== frScan.gen) return;
+    const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+    frScanMsg(denied
+      ? "相機沒有開啟權限。到手機的設定允許這個 App 使用相機後再按「開啟相機」，或按「拍照或選相片」。"
+      : "找不到可用的相機。請按「拍照或選相片」，拍一張對方的條碼。", true);
+    return;
+  }
+  // 等相機的這段時間使用者已經離開這一頁：拿到的串流要馬上關掉，不然相機燈會一直亮著
+  if (gen !== frScan.gen || !frScanPaneVisible()) { stream.getTracks().forEach(t => t.stop()); return; }
+  frScan.stream = stream;
+  const video = document.getElementById("fr-scan-video");
+  video.srcObject = stream;
+  frShow("fr-scan-box", true);
+  frShow("fr-btn-scan-start", false);
+  try { await video.play(); } catch {}
+  if (gen !== frScan.gen) return;
+  frScanMsg("把對方的條碼放進框裡");
+  frScanTick(gen);
+}
+
+async function frScanTick(gen) {
+  if (gen !== frScan.gen || !frScan.stream) return;
+  const video = document.getElementById("fr-scan-video");
+  let text = null;
+  if (video && video.readyState >= 2 && video.videoWidth) {
+    try { text = await frDecodeQr(video, video.videoWidth, video.videoHeight); }
+    catch {
+      if (gen !== frScan.gen) return;
+      frScanStop();
+      frScanMsg("條碼解碼元件載入失敗（網路不穩？）。請再按一次「開啟相機」，或改用「搜尋」貼上對方的 ID。", true);
+      return;
+    }
+  }
+  if (gen !== frScan.gen) return;
+  if (text && (await frScanGot(text, false))) return;
+  if (gen !== frScan.gen) return;
+  frScan.timer = setTimeout(() => frScanTick(gen), 180);
+}
+
+// 讀到一個條碼。是好友條碼就關相機、帶出那個人；不是就說一聲、繼續掃
+async function frScanGot(text, fromPhoto) {
+  const id = frParseFriendCode(text);
+  if (!id) { frScanMsg("這不是 CapitalGuard 的好友條碼", true); return false; }
+  frScanStop();
+  try { if (navigator.vibrate) navigator.vibrate(60); } catch {}
+  trackActivity("friend_scan", { via: fromPhoto ? "photo" : "camera" });
+  await frOpenFriendCode(id);
+  return true;
+}
+
+// 「拍照或選相片」：一張靜態相片。條碼在相片裡可能只佔一小塊，縮太小會解不出來，
+// 所以由小到大試幾種尺寸（原生解碼器不需要，試一次就夠）。
+async function frScanPhoto(file) {
+  if (!file) return;
+  frScanStop();
+  frScanMsg("正在讀取相片…");
+  await frScanInitDetector();
+  let src = null, w = 0, h = 0, url = null;
+  try {
+    if (window.createImageBitmap) { try { src = await createImageBitmap(file); } catch { src = null; } }
+    if (src) { w = src.width; h = src.height; }
+    else {
+      url = URL.createObjectURL(file);
+      const img = new Image();
+      await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = url; });
+      src = img; w = img.naturalWidth; h = img.naturalHeight;
+    }
+    let text = null;
+    for (const side of [1000, 1600, 2400]) {
+      text = await frDecodeQr(src, w, h, side);
+      if (text || frScan.detector || side >= Math.max(w, h)) break;
+    }
+    if (!text) { frScanMsg("相片裡找不到條碼。請讓條碼佔滿畫面、對焦清楚後再拍一次。", true); return; }
+    await frScanGot(text, true);
+  } catch {
+    frScanMsg("這張相片讀不出來。請再拍一次，或改用「搜尋」貼上對方的 ID。", true);
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+    if (src && src.close) { try { src.close(); } catch {} }
+  }
 }
 
 // ── 搜尋 ──
@@ -13347,6 +13666,9 @@ document.addEventListener("click", async e => {
   put('#view-friends .fr-seg button[data-fseg="add"]',     ICON_ADDUSER);
   put('#view-friends .fr-seg button[data-fseg="shares"]',  ICON_SHARE);
   put('#view-friends .fr-seg button[data-fadd="qr"]',      ICON_QR);
+  put('#view-friends .fr-seg button[data-fadd="scan"]',    ICON_SCAN);
+  put('#fr-btn-scan-start',   ICON_CAMERA);
+  put('#fr-btn-scan-photo',   ICON_IMAGE);
   put('#view-friends .fr-seg button[data-fadd="id"]',      ICON_IDCARD);
   put('#view-friends .fr-seg button[data-fadd="search"]',  ICON_SEARCH);
   put('#view-friends .fr-seg button[data-fshare="out"]',   ICON_SEND);
@@ -13379,6 +13701,15 @@ document.addEventListener("click", async e => {
   on("fr-btn-cancel-group", "click", () => { frShow("fr-new-group", false); frGroupEdit = null; });
   on("fr-btn-create-group", "click", guard(frSaveGroup));
   on("fr-btn-search", "click", guard(frSearch));
+  on("fr-btn-scan-start", "click", guard(frScanStart));
+  on("fr-btn-scan-photo", "click", () => { const f = document.getElementById("fr-scan-file"); if (f) f.click(); });
+  on("fr-scan-file", "change", e => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";            // 同一張相片要能再選一次
+    guard(() => frScanPhoto(file))();
+  });
+  // App 退到背景（或切到別的分頁）就關相機：iPhone 回來時串流多半已經被系統收走，留著只會是黑畫面
+  document.addEventListener("visibilitychange", () => { if (document.hidden) frScanStop(); });
   on("fr-search-id", "keydown", e => { if (e.key === "Enter") document.getElementById("fr-btn-search").click(); });
   on("fr-btn-rotate-id", "click", guard(frRotateHandle));
   on("fr-btn-copy-id", "click", async () => {
