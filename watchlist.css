@@ -4452,3 +4452,13 @@ select.fr-input { width: 100%; }
 @media (prefers-reduced-motion: reduce) {
 	.fr-list li.is-flash { animation: none; box-shadow: 0 0 0 2px var(--accent); }
 }
+
+/* 第三輪（2026-10-04）：「新增」在方框外、清單上方靠右；「好友分享給我」的下一層 */
+.fr-toolbar { display: flex; justify-content: flex-end; margin: 0 0 10px; }
+.fr-in-card .fr-share-head { padding: 0; }
+.fr-in-detail {
+	margin-top: 10px; padding: 10px 12px; border-radius: 10px;
+	background: rgba(146, 146, 163, 0.1);
+}
+.fr-in-detail .fr-in-actions { margin-top: 12px; }
+.fr-in-detail .fr-in-actions .btn { flex: 0 0 auto; }

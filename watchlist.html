@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="253">
+  <meta name="app-version" content="254">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=253" rel="stylesheet">
+  <link href="watchlist.css?v=254" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -488,14 +488,14 @@
     </section>
 
     <!-- ── 分享（第四格）─────────────────────────────────────────────────
-         好友、群組、加好友、分享倉庫。設計見 FRIENDS.md。
+         好友、群組、加好友、分享管理。設計見 FRIENDS.md。
          後端目前只對 is_admin / is_demo 開放，所以這一格預設藏著：登入後
          initFriendsTab() 問一次後端，拿得到才把導覽那一格顯示出來。
          內部代號仍是 friends（APP_TABS、#friends、fr- 前綴）——改名只改
          使用者看得到的字，免得為了一個標籤去動路由與埋點。 -->
     <section id="view-friends" class="app-view">
       <div class="view-head">
-        <h2>分享</h2>
+        <h2>分享中心</h2>
         <span class="fr-usage" id="fr-usage" title="自選股＋我分享出去＋好友分享給我"></span>
       </div>
 
@@ -503,7 +503,7 @@
         <button role="tab" data-fseg="friends" aria-selected="true">好友</button>
         <button role="tab" data-fseg="groups"  aria-selected="false">群組</button>
         <button role="tab" data-fseg="add"     aria-selected="false">加好友</button>
-        <button role="tab" data-fseg="shares"  aria-selected="false">分享倉庫<span class="fr-dot" id="fr-dot-shares"></span></button>
+        <button role="tab" data-fseg="shares"  aria-selected="false">分享管理<span class="fr-dot" id="fr-dot-shares"></span></button>
       </div>
 
       <!-- ── 好友 ── -->
@@ -585,18 +585,18 @@
 
       <!-- ── 分享股 ── -->
       <div class="fr-pane" id="fr-pane-shares" style="display:none">
-        <div class="fr-seg fr-seg-sub" role="tablist" aria-label="分享倉庫">
-          <button role="tab" data-fshare="out" aria-selected="true">我分享出去</button>
+        <div class="fr-seg fr-seg-sub" role="tablist" aria-label="分享管理">
+          <button role="tab" data-fshare="out" aria-selected="true">我分享出去的</button>
           <button role="tab" data-fshare="in"  aria-selected="false">好友分享給我<span class="fr-dot" id="fr-dot-in"></span></button>
         </div>
 
-        <!-- 我分享出去 -->
+        <!-- 我分享出去的。「新增」在方框外面、清單上方（Howard 2026-10-04 第三輪）：
+             它是這一頁的主要動作，不是清單的一部分；方框裡也不再重複寫一次分頁名稱。 -->
         <div class="fr-pane" id="fr-share-out">
+          <div class="fr-toolbar">
+            <button class="btn btn-sm btn-primary" id="fr-btn-new-share">新增</button>
+          </div>
           <div class="panel-card fr-card">
-            <div class="fr-row fr-between">
-              <h3 class="fr-h" style="margin:0">我分享出去</h3>
-              <button class="btn btn-sm btn-primary" id="fr-btn-new-share">新增</button>
-            </div>
             <ul class="fr-list" id="fr-shares-out"></ul>
           </div>
 
@@ -650,7 +650,6 @@
             <ul class="fr-list" id="fr-shares-pending"></ul>
           </div>
           <div class="panel-card fr-card">
-            <h3 class="fr-h">已接受</h3>
             <ul class="fr-list" id="fr-shares-in"></ul>
           </div>
         </div>
@@ -11455,7 +11454,7 @@ async function addStock() {
       msgEl.innerHTML = limitPromptHtml("watchlist", e);
     } else if (String(e.message).includes("dup:share")) {
       // 一檔只能有一個來源：這檔已經由好友分享給他了
-      msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已由好友分享給你。到「分享 → 分享倉庫」移除那則分享，才能加入自選股</span>`;
+      msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已由好友分享給你。到「分享 → 分享管理」移除那則分享，才能加入自選股</span>`;
     } else if (e.message.includes("23505") || e.message.includes("unique")) {
       msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已在清單中</span>`;
     } else {
@@ -12383,7 +12382,8 @@ let frShare   = null;    // share_state()：我分享出去、好友分享給我
 let frHandle  = null;    // lab_my_handle() → { handle, formatted }
 let frEnabled = false;   // 這個帳號能不能用
 let frIdMode  = null;    // "handle"（有代號表）｜"uuid"（舊 schema）
-let frOpenShare = null;  // 「我分享出去」目前展開的那一則
+let frOpenShare = null;  // 「我分享出去的」目前展開的那一則
+let frOpenIn    = null;  // 「好友分享給我」目前展開的那一則
 let frGroupEdit = null;  // 群組表單：null＝新增；group_id＝調整那個群組的成員
 
 // PostgREST 找不到函式時回 404 + PGRST202。「函式不存在」和「函式存在但出錯」
@@ -12758,15 +12758,45 @@ function frShareDetailHtml(s) {
 }
 
 // 「好友分享給我」。等你決定的（pending／held）放上面；已接受的放下面。
-// 每一則是直排的一張卡：內容在上、說明框在中間、按鈕在最下面一排。
-// 原本按鈕擠在右邊，遇到要解釋「為什麼接受不了」的那幾則，字和按鈕會互相擠壓
-// （Howard 2026-10-04）。
+//
+// 每一則平常只有三樣東西：股票名稱、來自誰、終止日（Howard 2026-10-04 第三輪）。
+// 訊號設定的摘要收在下一層，點那一則才展開——清單是用來找「哪一檔、誰給的、
+// 到什麼時候」，不是用來讀設定的。股票代號也拿掉：收件人認的是名稱。
+//
+// 例外是「需要他做決定才看得懂的說明」：撞到既有股票、名額滿、對方更新了。
+// 這些不收進下一層——按鈕就在旁邊，說明藏起來的話他不知道自己在按什麼。
+function frShareName(s) {
+  // label 是「2330 台積電 #2」。名稱優先；同一位好友對同一檔的第二則保留 #2 才分得開。
+  const seq = (String(s.label || "").match(/ #\d+$/) || [""])[0];
+  return (s.stock_name || s.stock_id || "") + seq;
+}
+
 function frRenderSharesIn() {
   const inc = (frShare && frShare.incoming) || [];
   const waiting = inc.filter(x => x.status === "pending" || x.status === "held");
   const accepted = inc.filter(x => x.status === "accepted");
   const u = (frShare && frShare.usage) || {};
   const sid = s => escapeHtml(s.share_id);
+
+  // 每一則共用的頭（整列可點，展開／收合）與下一層（設定摘要）
+  const head = s => {
+    const open = frOpenIn === s.share_id;
+    return `
+      <button class="fr-share-head" data-fr="in-open" data-id="${sid(s)}" aria-expanded="${open}">
+        <span class="fr-grow">
+          <b>${escapeHtml(frShareName(s))}</b>
+          <div class="fr-hint">來自 ${escapeHtml(s.from_name || "好友")} · ${frExpiry(s.expires_at)}</div>
+        </span>
+        <span class="fr-caret">${open ? "收合" : "展開"}</span>
+      </button>`;
+  };
+  const detail = (s, extra) => frOpenIn !== s.share_id ? "" : `
+      <div class="fr-in-detail">
+        <div class="fr-hint">${escapeHtml(s.stock_id)} · ${frPerson(s.from_name, s.from_tag)}</div>
+        <div class="fr-hint">${frFlagSummary(s.base)}</div>
+        <div class="fr-hint">${frRulesSummary(s.rules)}</div>
+        ${extra || ""}
+      </div>`;
 
   frShow("fr-sec-invites", waiting.length > 0);
   frList("fr-shares-pending", waiting, s => {
@@ -12804,12 +12834,8 @@ function frRenderSharesIn() {
     }
     return `
     <li class="fr-in-card${frFlashClass("share", s.share_id)}" data-flash-id="${sid(s)}">
-      <div class="fr-in-main">
-        <b>${escapeHtml(s.label)}</b>
-        <div class="fr-hint">來自 ${frPerson(s.from_name, s.from_tag)} · ${frExpiry(s.expires_at)}</div>
-        <div class="fr-hint">${frFlagSummary(s.base)}</div>
-        <div class="fr-hint">${frRulesSummary(s.rules)}</div>
-      </div>
+      ${head(s)}
+      ${detail(s)}
       ${box}
       <div class="fr-in-actions">${actions}</div>
     </li>`;
@@ -12823,20 +12849,17 @@ function frRenderSharesIn() {
     const ack = s.needs_ack
       ? `<div class="fr-hold"><div>${escapeHtml(s.from_name || "好友")} 更新了這則分享的設定（第 ${s.version} 版），已經套用。</div>
           <div class="fr-row"><button class="btn btn-sm btn-primary" data-fr="in-ack" data-id="${sid(s)}">${ICON_CHECK}我知道了</button></div></div>` : "";
+    // 「移除」收在下一層：它是偶爾才用的動作，放在每一列上只會讓清單變吵
+    const remove = `
+        <div class="fr-in-actions">
+          <button class="btn btn-sm btn-outline-light fr-quiet" data-fr="in-remove" data-id="${sid(s)}"
+                  data-name="${escapeHtml(frShareName(s))}">${ICON_TRASH}移除</button>
+        </div>`;
     return `
     <li class="fr-in-card${frFlashClass("share", s.share_id)}" data-flash-id="${sid(s)}">
-      <div class="fr-in-main">
-        <b>${escapeHtml(s.label)}</b>
-        <div class="fr-hint">來自 ${frPerson(s.from_name, s.from_tag)} · ${frExpiry(s.expires_at)}</div>
-        <div class="fr-hint">${frFlagSummary(s.base)}</div>
-        <div class="fr-hint">${frRulesSummary(s.rules)}</div>
-        ${rulesNote}
-      </div>
+      ${head(s)}
       ${ack}
-      <div class="fr-in-actions">
-        <button class="btn btn-sm btn-outline-light fr-quiet" data-fr="in-remove" data-id="${sid(s)}"
-                data-name="${escapeHtml(s.label)}">${ICON_TRASH}移除</button>
-      </div>
+      ${detail(s, rulesNote + remove)}
     </li>`;
   }, "還沒有好友分享給你的股票。");
 }
@@ -12876,6 +12899,7 @@ async function frOpenFromInbox(row) {
     frToast(isFriend ? "這則好友邀請已經處理過了" : "這則分享已經結束，或你已經處理過了");
     return true;
   }
+  if (!isFriend) frOpenIn = id;      // 跳過來的那一則直接展開：他點通知就是要看內容
   frFlash = { kind: isFriend ? "request" : "share", id, until: Date.now() + FR_FLASH_MS };
   frRender();
   const el = document.querySelector(`#view-friends [data-flash-id="${id}"]`);
@@ -13117,8 +13141,12 @@ function frUpdatePickSummary() {
   const gr = Array.from(document.querySelectorAll("#fr-pick-groups .fr-sh-group:checked"));
   const el = document.getElementById("fr-pick-summary");
   if (!fr.length && !gr.length) { el.innerHTML = `<span class="fr-hint">還沒有選任何對象</span>`; return; }
-  const chips = fr.map(c => `<span class="fr-chip">${escapeHtml(c.dataset.label)}</span>`)
+  // 選了很多人時只列前幾個：摘要是提醒「我勾了誰」，不是再列一次整份名單
+  const MAX_CHIPS = 6;
+  const all = fr.map(c => `<span class="fr-chip">${escapeHtml(c.dataset.label)}</span>`)
     .concat(gr.map(c => `<span class="fr-chip">${ICON_GROUP} ${escapeHtml(c.dataset.label)}（${escapeHtml(c.dataset.n)} 人）</span>`));
+  const chips = all.length > MAX_CHIPS
+    ? all.slice(0, MAX_CHIPS).concat(`<span class="fr-hint">…還有 ${all.length - MAX_CHIPS} 個</span>`) : all;
   el.innerHTML = `<span>已選 ${fr.length ? `好友 ${fr.length} 位` : ""}${fr.length && gr.length ? "、" : ""}${gr.length ? `群組 ${gr.length} 個` : ""}：</span>${chips.join("")}`;
 }
 
@@ -13189,6 +13217,7 @@ document.addEventListener("click", async e => {
 
   // 不打後端的
   if (act === "share-open") { frOpenShare = frOpenShare === id ? null : id; frRenderSharesOut(); return; }
+  if (act === "in-open")    { frOpenIn = frOpenIn === id ? null : id; frRenderSharesIn(); return; }
   if (act === "group-edit") { frOpenGroupForm(id); return; }
   if (act === "go-watch")   { switchTab("watch"); return; }
   if (act === "go-plan")    { openPlanModal(); return; }
