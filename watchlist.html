@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="266">
+  <meta name="app-version" content="267">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=266" rel="stylesheet">
+  <link href="watchlist.css?v=267" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -502,6 +502,12 @@
         <h2>分享中心</h2>
         <span class="fr-usage" id="fr-usage" title="自選股＋好友分享給我（已接受的）。我分享出去的不算。"></span>
       </div>
+
+      <!-- 邀請好友安裝（2026-10-05 Howard）：這一格的四頁都假設對方已經在用 App，
+           可是要先有人裝才有好友可加。所以放在四格上面、一顆寬的——它是進這一格的
+           第一件事，不是第五個分頁。點開的視窗給兩條路：傳官網網址，或讓對方直接
+           掃 LINE 條碼（加好友當下就會收到安裝連結與登入碼）。 -->
+      <button type="button" class="btn btn-primary fr-invite-cta" id="fr-btn-invite">邀請好友安裝股市雷達</button>
 
       <div class="fr-seg fr-seg-4" role="tablist" aria-label="分享分頁">
         <button role="tab" data-fseg="friends" aria-selected="true">好友</button>
@@ -1144,6 +1150,42 @@
   </div>
 </div>
 
+<!-- ── 邀請好友安裝（分享 → 最上面那顆寬按鈕開）2026-10-05 Howard ──
+     兩條路各一塊：上面是官網網址（複製或叫系統的分享面板），下面是官方帳號的行動條碼
+     （當面給對方掃最快，不必打字、不必傳訊息）。條碼與「顯示條碼」那一頁的畫法共用
+     frQrInto()，但內容不同：這裡是官方帳號的加好友連結，那裡是我自己的好友 ID。 -->
+<div class="modal fade sheet-modal" id="frInviteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">邀請好友安裝股市雷達</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body p-3" id="fr-invite-body">
+        <h3 class="fr-h">把網址傳給他</h3>
+        <div class="fr-invite-url" id="fr-invite-url">—</div>
+        <div class="fr-row">
+          <button type="button" class="btn btn-sm btn-primary" id="fr-btn-invite-send">傳送網址</button>
+          <button type="button" class="btn btn-sm btn-outline-light" id="fr-btn-invite-copy">複製網址</button>
+        </div>
+        <p class="fr-hint">官網上有安裝說明與方案。對方照著加 LINE 好友，帳號當下就建立好。</p>
+
+        <div class="fr-invite-sep"></div>
+
+        <h3 class="fr-h">或者讓他直接掃 LINE 條碼</h3>
+        <div id="fr-invite-qr" class="fr-invite-qr"></div>
+        <p class="fr-hint fr-center">
+          請對方用 LINE 的「加入好友 → 行動條碼」掃這一個（手機相機掃也可以）。<br>
+          加好友的當下就會收到安裝連結與登入碼，不用再傳別的東西給他。
+        </p>
+        <div class="fr-row fr-invite-line">
+          <a class="btn btn-sm btn-outline-light" id="fr-invite-line-link" href="https://line.me/R/ti/p/@408csebn" target="_blank" rel="noopener">用 LINE 開加好友頁</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade sheet-modal" id="stockEventsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content kline-modal-content">
@@ -1594,6 +1636,10 @@ const BILLING_REFUND_URL = "https://betewo-web.github.io/betewo-site/pricing.htm
 const AI_FEATURES_LIVE = false;
 // 官網（分享與深連結的另一端）
 const SITE_BASE_URL = "https://betewo-web.github.io/betewo-site/";
+// 官方帳號：加好友連結（分享分頁的邀請條碼）與搜尋用的 ID。登入畫面上那顆
+// 「加 LINE 好友，取得登入碼」是靜態 HTML，href 裡寫著同一串，改帳號時要一起改。
+const LINE_OA_ID = "@408csebn";
+const LINE_ADD_FRIEND_URL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
 const PLAN_COMING_SOON_NOTE = "AI 資料白話仍在開發，目前不包含在任何方案裡；完成後會先公告。";
 // 付款紀錄裡非公開方案的名字
 const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達（專業版）", premium: "廣域追蹤雷達（旗艦版）" };
@@ -12900,7 +12946,8 @@ function frRenderUsage() {
   const u = frShare && frShare.usage;
   if (!el) return;
   if (!u) { el.textContent = ""; return; }
-  el.textContent = `自選+分享 ${u.used}／${u.limit}`;
+  // 「9／10」看不出哪個是上限、哪個是已用（Howard 2026-10-05）：兩個數字都標上名字
+  el.textContent = `自選+分享 總量 : ${u.limit} 已用 : ${u.used}`;
   el.classList.toggle("is-full", u.used >= u.limit);
 }
 
@@ -13414,19 +13461,65 @@ async function frRotateHandle() {
 }
 
 // 行動條碼裡放的是連結（frFriendLink），不是光一串 ID：見下面「好友條碼裡放什麼」。
-// qrcode-generator 是另外載的，載不到就說清楚。
 function frRenderQr() {
   const box = document.getElementById("fr-qr-box");
   if (!box) return;
+  if (!frIdMode) { box.innerHTML = ""; return; }
+  frQrInto(box, frFriendLink(frMyId().raw), "條碼載入失敗，請改用「顯示 ID」");
+}
+
+// 把一段文字畫成行動條碼。qrcode-generator 是另外載的（頁尾 script），載不到就說清楚，
+// 不要留一塊空白——條碼是這些畫面唯一的內容，沒畫出來看起來像壞掉。
+function frQrInto(box, text, failMsg) {
+  if (!box) return;
   if (typeof qrcode !== "function") {
-    box.innerHTML = `<div class="fr-hint fr-center">條碼載入失敗，請改用「顯示 ID」</div>`;
+    box.innerHTML = `<div class="fr-hint fr-center">${escapeHtml(failMsg)}</div>`;
     return;
   }
-  if (!frIdMode) { box.innerHTML = ""; return; }
   const qr = qrcode(0, "M");
-  qr.addData(frFriendLink(frMyId().raw));
+  qr.addData(text);
   qr.make();
   box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 0, scalable: true });
+}
+
+// ── 邀請好友安裝（分享分頁最上面那顆寬按鈕）2026-10-05 Howard ──
+// 兩條路：網址（傳訊息給不在身邊的人）、官方帳號條碼（人就在旁邊，掃完就裝）。
+// 網址沿用 shareInvite() 那一組文字與 ?ref=app——官網的分析看得出來人是從 App 來的。
+const FR_INVITE_URL = `${SITE_BASE_URL}?ref=app`;
+const FR_INVITE_TEXT = "CapitalGuard-股市雷達：自選股跌破關鍵價位、帶量上漲、漲跌停，訊號推到手機。加 LINE 好友就能免費開始。";
+
+function frOpenInvite() {
+  const u = document.getElementById("fr-invite-url");
+  if (u) u.textContent = FR_INVITE_URL;
+  const link = document.getElementById("fr-invite-line-link");
+  if (link) link.href = LINE_ADD_FRIEND_URL;
+  // 條碼裡放官方帳號的加好友連結（不是我自己的好友 ID）：對方還沒裝 App，
+  // 第一步是加 LINE 好友拿登入碼，加好友的事等他裝好再做。
+  frQrInto(document.getElementById("fr-invite-qr"), LINE_ADD_FRIEND_URL,
+           `條碼載入失敗，請改傳上面的網址，或請對方在 LINE 搜尋 ${LINE_OA_ID}`);
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("frInviteModal")).show();
+}
+
+async function frInviteCopy() {
+  try {
+    await navigator.clipboard.writeText(`${FR_INVITE_TEXT}\n${FR_INVITE_URL}`);
+    trackActivity("invite_share", { via: "copy", from: "friends" });
+    frToast("已複製介紹文字與網址，貼給朋友就行");
+  } catch {
+    frToast("複製失敗，請手動選取上面的網址", true);
+  }
+}
+
+// 「傳送網址」：手機上叫系統的分享面板（LINE、訊息都在裡面），桌機多半沒有 → 退回複製。
+async function frInviteSend() {
+  if (!navigator.share) { await frInviteCopy(); return; }
+  try {
+    await navigator.share({ title: "CapitalGuard-股市雷達", text: FR_INVITE_TEXT, url: FR_INVITE_URL });
+    trackActivity("invite_share", { via: "share", from: "friends" });
+  } catch (e) {
+    if (e && e.name === "AbortError") return;   // 使用者自己取消分享面板，不是失敗
+    await frInviteCopy();                       // 面板打不開：至少把網址複製給他，不要按了沒反應
+  }
 }
 
 // ── 好友條碼裡放什麼：連結，不是光一串 ID（v256，Howard 2026-10-04）──
@@ -14090,6 +14183,10 @@ document.addEventListener("click", async e => {
   put('#fr-btn-cancel-share', ICON_CLOSE);
   put('#fr-btn-limit-watch',  ICON_GEAR);
   put('#fr-btn-limit-plan',   ICON_STAR);
+  put('#fr-btn-invite',       ICON_ADDUSER);
+  put('#fr-btn-invite-send',  ICON_SEND);
+  put('#fr-btn-invite-copy',  ICON_COPY);
+  put('#fr-invite-line-link', ICON_SHARE);
 
   document.querySelectorAll('#view-friends .fr-seg button[data-fseg]').forEach(b =>
     b.addEventListener("click", () => frSwitchSeg(b.dataset.fseg)));
@@ -14127,6 +14224,9 @@ document.addEventListener("click", async e => {
     try { await navigator.clipboard.writeText(frMyId().shown); frToast("已複製"); }
     catch { frToast("複製失敗，請手動選取", true); }
   });
+  on("fr-btn-invite", "click", frOpenInvite);
+  on("fr-btn-invite-send", "click", guard(frInviteSend));
+  on("fr-btn-invite-copy", "click", guard(frInviteCopy));
   on("fr-btn-new-share", "click", frOpenShareForm);
   // 「取消」與右上的叉是 data-bs-dismiss，不必另外接。上限提示的兩顆：先關視窗再走
   on("fr-btn-limit-watch", "click", () => frCloseShareForm(() => switchTab("watch")));

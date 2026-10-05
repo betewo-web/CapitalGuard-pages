@@ -4307,8 +4307,8 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 /* 行動條碼一定要白底：QR 畫在深色底上，多數掃描器讀不出來。
    v256 起條碼裡是連結（格子變多、變細），所以畫大一點；四周的白邊要有四格寬
    （QR 規格的靜區），少了的話貼著深色背景時有些掃描器找不到定位點。 */
-#fr-qr-box { background: #fff; padding: 20px; border-radius: 12px; width: max-content; margin: 2px auto 8px; }
-#fr-qr-box svg { display: block; width: 216px; height: 216px; }
+#fr-qr-box, .fr-invite-qr { background: #fff; padding: 20px; border-radius: 12px; width: max-content; margin: 2px auto 8px; }
+#fr-qr-box svg, .fr-invite-qr svg { display: block; width: 216px; height: 216px; }
 
 /* 加好友底下四格（顯示條碼／掃描條碼／顯示 ID／搜尋）：圖示在字上面，四格才放得進一排 */
 .fr-seg-add button { flex-direction: column; gap: 5px; padding: 10px 2px 9px; font-size: 0.95rem; }
@@ -4351,11 +4351,34 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	background: var(--sig-red); margin-left: 4px; vertical-align: middle;
 }
 
+/* 用量標籤 2026-10-05 起寫「總量 : 10 已用 : 9」（原本是 9／10）：字變長了，整個籤
+   不要在中間斷行——view-head 本身會 wrap，放不下就整籤掉到下一行。 */
 .view-head .fr-usage {
 	margin-left: auto; font-size: 12px; color: var(--text-muted);
 	border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px;
+	white-space: nowrap;
 }
 .view-head .fr-usage.is-full { color: var(--sig-orange); border-color: var(--sig-orange); }
+
+/* ── 邀請好友安裝：分享那一格最上面一顆寬按鈕，與它點開的視窗 ── */
+.fr-invite-cta {
+	display: flex; width: 100%; align-items: center; justify-content: center; gap: 8px;
+	margin: 0 0 12px; padding: 13px 12px; border-radius: 14px;
+	font-size: 1.08rem; font-weight: 700; line-height: 1.2;
+}
+.fr-invite-cta .ic { width: 20px; height: 20px; }
+/* 網址要看得完整（不是省略號）：等寬字、可以斷行、整段可以選取來手動複製 */
+.fr-invite-url {
+	font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;
+	color: var(--text-1); word-break: break-all; user-select: all;
+	border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+	background: rgba(146, 146, 163, 0.1);
+}
+/* 兩條路之間一條線：上面是傳網址、下面是掃條碼，不是同一件事的兩個步驟 */
+.fr-invite-sep { height: 1px; background: var(--border); margin: 18px 0 16px; }
+.fr-invite-line { justify-content: center; }
+#frInviteModal .btn { font-size: 1rem; padding: 10px 18px; border-radius: 10px; }
+#frInviteModal .fr-hint { font-size: 1.03rem; line-height: 1.6; }
 
 .fr-label { display: block; font-size: 12px; color: var(--text-muted); margin: 12px 0 4px; }
 .fr-picklist { max-height: 220px; overflow-y: auto; }
