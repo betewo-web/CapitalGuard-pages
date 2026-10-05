@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="258">
+  <meta name="app-version" content="259">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=258" rel="stylesheet">
+  <link href="watchlist.css?v=259" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -4730,7 +4730,7 @@ function switchTab(tab, silent = false) {
   // 外觀，畫面交給下面的 renderCurrentTab()，免得同一次切換畫兩遍。
   if (changed && tab === "scores") { scoresFilter = "screen"; syncFilterChips("scores-filters", "screen"); }
   if (changed && tab === "inbox") { inboxFilter = "all"; syncFilterChips("inbox-filters", "all"); }
-  if (changed && tab !== "friends") frScanStop();   // 「加好友 → 掃描條碼」開著相機時換分頁：相機要關
+  if (changed && tab !== "friends") { frScanStop(); frWatchStop(); }   // 離開分享分頁：相機要關、等待中的詢問要停
   // 首頁「自選／持股／分享」那一排刻意不在這裡重設：Howard 2026-09-23 要它記住，換分頁、
   // 重開 App 都維持（存在 localStorage，見 HOME_FILTER_KEY）
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
@@ -12055,6 +12055,9 @@ if ('serviceWorker' in navigator) {
     // 推播在視窗開著時到達：守門員把內容丟過來，先插進通知匣與雷達，不等下一輪讀倉庫（F1）
     if (e.data && e.data.type === 'push-received') {
       ingestPushedAlert(e.data.alert);
+      // 分享類（好友邀請、分享邀請／更新／終止）：通知匣那一則插進去了，分享分頁的紅點與清單
+      // 也要跟上——以前要等使用者自己走進那一頁才會重抓
+      if (e.data.alert && e.data.alert.src === 'share') frRefreshQuiet();
     }
   });
   // addEventListener（而非 onmessage）不會隱式啟動訊息佇列，SW 送的訊息會一直排隊，
@@ -12631,7 +12634,7 @@ function frRenderBadge() {
 async function frReload() {
   const [s, sh] = await Promise.all([frRpc("lab_social_state"), frRpc("share_state")]);
   if (!frOk(s)) return false;
-  frState = s;
+  frApplySocial(s);
   frShare = (sh && sh !== FR_RPC_MISSING && !sh.error) ? sh : frShare;
   frRender();
   frSyncRadar();
@@ -12707,6 +12710,7 @@ function frRender() {
   frRenderGroups();
   frRenderSharesOut();
   frRenderSharesIn();
+  frWatchSync();     // 資料換了：還在等待的畫面上就繼續問，不是就停
 }
 
 function frRenderUsage() {
@@ -13006,6 +13010,129 @@ async function frOpenFromInbox(row) {
   return true;
 }
 
+// ── 等待回覆時的即時更新（2026-10-05 Howard）──
+// 好友邀請送出之後，對方的回應沒有任何管道會推進這個畫面：推播是另一台機器每分鐘撿一次
+// （0–60 秒），而且只通知「收到邀請」的那一方；送出的人要自己離開這一頁再回來才看得到結果。
+// 面對面掃條碼時兩個人都盯著手機，那一分鐘就是整段等待。
+//
+// 這裡只在「人就停在等待的畫面上」時去問伺服器：
+//   sent  「好友」那一頁，而且有剛送出（10 分鐘內）、還在等對方確認的邀請
+//   qr    「加好友 → 顯示條碼」開著——正在讓人掃，邀請隨時會進來
+// 而且 App 要在前景。前 60 秒每 3 秒問一次，之後每 6 秒，最多 3 分鐘就停；離開畫面、
+// 退到背景立刻停，回來重新計時。問的只有 lab_social_state 一支，一次等待最多 40 個請求。
+// 刻意不做成全站輪詢或 Realtime 訂閱：Supabase 的用量只在有人真的在等的那幾分鐘才動。
+const FR_WATCH_FAST_MS     = 3000;
+const FR_WATCH_SLOW_MS     = 6000;
+const FR_WATCH_FAST_FOR_MS = 60 * 1000;
+const FR_WATCH_MAX_MS      = 3 * 60 * 1000;
+const FR_WATCH_RECENT_MS   = 10 * 60 * 1000;
+const frWatch = { why: "", since: 0, timer: null, busy: false, expired: false };
+
+// 現在是不是停在等待的畫面上；回傳在等什麼（"sent"／"qr"），不是就回空字串
+function frWatchReason() {
+  if (!frEnabled || !frState || !state.accessToken || document.hidden || currentTab !== "friends") return "";
+  const shown = id => { const el = document.getElementById(id); return !!el && el.style.display !== "none"; };
+  if (shown("fr-pane-add") && shown("fr-add-qr")) return "qr";
+  if (shown("fr-pane-friends")) {
+    const now = Date.now();
+    if ((frState.requests_out || []).some(r => now - new Date(r.at).getTime() < FR_WATCH_RECENT_MS)) return "sent";
+  }
+  return "";
+}
+
+function frWatchStop() {
+  clearTimeout(frWatch.timer);
+  frWatch.timer = null;
+  frWatch.why = "";
+  frWatch.since = 0;
+  frWatch.expired = false;
+}
+
+// 畫面或資料變了就叫一次：該等就開始等、不該等就停。重複叫沒有副作用。
+function frWatchSync() {
+  const why = frWatchReason();
+  if (!why) { frWatchStop(); return; }
+  if (why !== frWatch.why) {               // 換了一件事在等（或剛開始）：重新計時
+    frWatchStop();
+    frWatch.why = why;
+    frWatch.since = Date.now();
+  }
+  if (frWatch.expired || frWatch.timer || frWatch.busy) return;
+  const age = Date.now() - frWatch.since;
+  if (age >= FR_WATCH_MAX_MS) { frWatch.expired = true; return; }   // 等太久就不再問；離開再回來才重新開始
+  frWatch.timer = setTimeout(frWatchTick, age < FR_WATCH_FAST_FOR_MS ? FR_WATCH_FAST_MS : FR_WATCH_SLOW_MS);
+}
+
+async function frWatchTick() {
+  frWatch.timer = null;
+  if (!frWatchReason()) { frWatchStop(); return; }      // 先看還在不在等：離開了就不發這個請求
+  frWatch.busy = true;
+  let s = null;
+  try { s = await frRpc("lab_social_state"); } catch { /* 網路抖一下：下一輪再問 */ }
+  frWatch.busy = false;
+  if (s && s !== FR_RPC_MISSING && !s.error) frApplySocial(s, { live: true });
+  frWatchSync();
+}
+
+// 兩份 lab_social_state 之間發生了什麼。requests_out 沒有對方的 user_id，用 #標籤 對人
+// （標籤是 user_id 的雜湊前六碼，在一個人的往來對象裡撞號的機會可以不計）。
+function frDiffSocial(prev, next) {
+  const ev = { accepted: [], incoming: [], sentNew: false };
+  if (!prev || !next) return ev;
+  const ids = (list, key) => new Set((list || []).map(x => x[key]));
+  const nextOut = ids(next.requests_out, "request_id"), prevOut = ids(prev.requests_out, "request_id");
+  const prevIn = ids(prev.requests_in, "request_id");
+  const prevFriendTags = ids(prev.friends, "tag"), nextFriendTags = ids(next.friends, "tag");
+  // 我送出的邀請不見了，而且對方現在在好友清單裡＝對方同意了（不見但沒成為好友＝被拒絕，不特別講）
+  for (const r of prev.requests_out || []) {
+    if (!nextOut.has(r.request_id) && nextFriendTags.has(r.tag) && !prevFriendTags.has(r.tag)) ev.accepted.push(r);
+  }
+  for (const r of next.requests_in || []) if (!prevIn.has(r.request_id)) ev.incoming.push(r);
+  ev.sentNew = (next.requests_out || []).some(r => !prevOut.has(r.request_id));
+  return ev;
+}
+
+// 換上新的好友資料。一般的重抓（frReload）只換資料，畫面由呼叫的人畫；
+// live＝等待中問到的：有變才重畫（每 3 秒整頁重畫一次會打斷正在按的按鈕），並把發生的事講出來。
+function frApplySocial(next, opts) {
+  const ev = frDiffSocial(frState, next);
+  const changed = !frState || JSON.stringify(frState) !== JSON.stringify(next);
+  frState = next;
+  if (ev.sentNew && frWatch.why === "sent") { frWatch.since = Date.now(); frWatch.expired = false; }   // 又送了一則：重新計時
+  if (!(opts && opts.live) || !changed) return ev;
+
+  if (ev.incoming.length && frWatch.why === "qr") {
+    // 正在給人掃條碼，邀請進來了：直接帶到「好友」那一頁、把那一則閃給他看，同意鈕就在下面
+    const r = ev.incoming[ev.incoming.length - 1];
+    frFlash = { kind: "request", id: r.request_id, until: Date.now() + FR_FLASH_MS };
+    clearTimeout(_frFlashTimer);
+    _frFlashTimer = setTimeout(() => { frFlash = null; frRender(); }, FR_FLASH_MS + 100);
+    frSwitchSeg("friends");
+  }
+  frRender();
+  const who = list => (list[0].name || "對方") + (list.length > 1 ? ` 等 ${list.length} 人` : "");
+  if (ev.accepted.length) frToast(`${who(ev.accepted)} 已同意，你們現在是好友了`);
+  else if (ev.incoming.length) frToast(`${who(ev.incoming)} 想加你為好友`);
+  return ev;
+}
+
+// 不出聲的重抓：分享類的推播在 App 開著時到達、或 App 從背景回到這一頁。
+// 都是「有事發生才讀一次」，不是輪詢；失敗就算了，不跳錯誤（使用者沒有按任何東西）。
+let _frQuietAt = 0;
+async function frRefreshQuiet() {
+  if (!frEnabled || !state.accessToken) return;
+  if (Date.now() - _frQuietAt < 2000) return;        // 幾則推播一起到：抓一次就夠
+  _frQuietAt = Date.now();
+  try {
+    const [s, sh] = await Promise.all([frRpc("lab_social_state"), frRpc("share_state")]);
+    if (!s || s === FR_RPC_MISSING || s.error) return;
+    frApplySocial(s);
+    if (sh && sh !== FR_RPC_MISSING && !sh.error) frShare = sh;
+    frRender();
+    frSyncRadar();
+  } catch { /* 下次進這一頁還會重抓 */ }
+}
+
 // ── 分段切換 ──
 function frSwitchSeg(name) {
   document.querySelectorAll('#view-friends .fr-seg button[data-fseg]').forEach(b =>
@@ -13018,6 +13145,7 @@ function frSwitchSeg(name) {
     // 有等著決定的東西就直接落在「好友分享給我」，不要讓人自己找
     if (frPendingCounts().shares) frSwitchShare("in");
   }
+  frWatchSync();
 }
 
 function frSwitchAdd(name) {
@@ -13028,6 +13156,7 @@ function frSwitchAdd(name) {
   // 掃描那一格：看得到就開相機，離開就關（相機燈不能在別的頁面還亮著）
   if (name === "scan" && frScanPaneVisible()) frScanStart().catch(() => {});
   else frScanStop();
+  frWatchSync();     // 「顯示條碼」開著＝正在讓人掃：開始等邀請進來
 }
 
 function frSwitchShare(name) {
@@ -13788,7 +13917,11 @@ document.addEventListener("click", async e => {
     guard(() => frScanPhoto(file))();
   });
   // App 退到背景（或切到別的分頁）就關相機：iPhone 回來時串流多半已經被系統收走，留著只會是黑畫面
-  document.addEventListener("visibilitychange", () => { if (document.hidden) frScanStop(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { frScanStop(); frWatchStop(); return; }
+    // 回到前景而且人在分享分頁：離開的這段時間對方可能已經回應，抓一次；之後由 frRender 決定要不要繼續等
+    if (frEnabled && currentTab === "friends") frRefreshQuiet();
+  });
   on("fr-search-id", "keydown", e => { if (e.key === "Enter") document.getElementById("fr-btn-search").click(); });
   on("fr-btn-rotate-id", "click", guard(frRotateHandle));
   on("fr-btn-copy-id", "click", async () => {
