@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="262">
+  <meta name="app-version" content="263">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=262" rel="stylesheet">
+  <link href="watchlist.css?v=263" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2980,7 +2980,7 @@ function subscriptionStatusHtml() {
   if (s.provider === "trial") {
     const left = tradingDaysLeftFrom(s.current_period_end);
     const freeName = freePlanName();
-    return `<div class="plan-status">${ICON_GIFT}免費體驗中，到 <b>${trialLastDayLabel(s.current_period_end)}</b> 收盤為止${left !== null ? `（還剩 ${left} 個交易日）` : ""}，之後自動回到${escapeHtml(freeName)}，不會扣款。想繼續用不中斷，隨時可以升級。</div>`;
+    return `<div class="plan-status">${ICON_GIFT}免費體驗中，<b>${trialLastDayLabel(s.current_period_end)}</b> 整天都還是完整功能${left !== null ? `（還剩 ${left} 個交易日）` : ""}，隔天凌晨 0 點過後自動回到${escapeHtml(freeName)}，不會扣款。想繼續用不中斷，隨時可以升級。</div>`;
   }
   if (s.provider === "manual") {
     return `<div class="plan-status">由管理員指派${s.note ? `（${escapeHtml(s.note)}）` : ""}，有效至 <b>${until}</b>。</div>`;
@@ -3309,7 +3309,7 @@ function cancelSubscription() {
   const agreementOpen = !!(s && s.provider === "ecpay" && s.provider_ref && !s.cancel_requested_at);
   if (s && s.provider === "trial" && s.status === "active" && new Date(s.current_period_end) > new Date()) {
     showBillingResult({ tone: "info", title: "體驗不需要取消",
-      lines: [`免費體驗到 ${trialLastDayLabel(s.current_period_end)} 收盤為止，之後自動回到${freePlanName()}，沒有任何扣款。`] });
+      lines: [`免費體驗到 ${trialLastDayLabel(s.current_period_end)} 這天結束為止，隔天凌晨 0 點過後自動回到${freePlanName()}，沒有任何扣款。`] });
     return;
   }
   if (s && s.provider === "manual") {
@@ -7627,17 +7627,26 @@ function trialOfferAvailable() {
   return !!(planState.ready && planState.trial && planState.trial.available === true);
 }
 
-// period_end 是「最後一個交易日的隔日 00:00（台北）」：退一秒才是最後一天
-function trialLastDayLabel(iso) {
+// period_end 是「最後一個交易日的隔天 00:01（台北）」＝最後一天整天都還在體驗期內，
+// 跨過午夜那一分鐘才退回免費版（migrate_trial.sql 的 trial_period_end、後端 TRIAL_GRACE）。
+// 退掉寬限再退一秒才落回最後一天；2026-10-05 之前的舊資料（隔天 00:00）算出來一樣。
+const TRIAL_GRACE_MS = 60 * 1000;
+
+function trialLastDayAt(iso) {
   const d = new Date(iso);
-  if (isNaN(d)) return "—";
-  return fmtPlanDate(new Date(d.getTime() - 1000).toISOString());
+  return isNaN(d) ? null : new Date(d.getTime() - TRIAL_GRACE_MS - 1000);
+}
+
+function trialLastDayLabel(iso) {
+  const last = trialLastDayAt(iso);
+  if (!last) return "—";
+  return fmtPlanDate(last.toISOString());
 }
 
 function tradingDaysLeftFrom(iso) {
-  const end = new Date(iso);
-  if (isNaN(end)) return null;
-  const last = taipeiDateKey(new Date(end.getTime() - 1000));
+  const lastAt = trialLastDayAt(iso);
+  if (!lastAt) return null;
+  const last = taipeiDateKey(lastAt);
   let d = taipeiDateKey(new Date());
   let n = 0;
   for (let i = 0; i < 40 && d <= last; i++) {
@@ -7658,7 +7667,7 @@ function trialOfferHtml(highlight) {
   const until = t.offer_until ? `<span class="plan-trial-until">優惠至 ${escapeHtml(t.offer_until)}</span>` : "";
   return `<div class="plan-trial${highlight ? " is-focus" : ""}" id="plan-trial">
     <div class="plan-trial-title">${ICON_GIFT}免費體驗 ${t.trading_days} 個交易日的${escapeHtml(name)}</div>
-    <div class="plan-trial-text">體驗期間就是完整的${escapeHtml(name)}，到 ${trialLastDayLabel(t.would_end)} 收盤為止，之後自動回到${escapeHtml(planState.plan.name)}。不需要付款資料、不會扣款，每個帳號一次。</div>
+    <div class="plan-trial-text">體驗期間就是完整的${escapeHtml(name)}，到 ${trialLastDayLabel(t.would_end)} 這天結束為止（隔天凌晨 0 點過後回到${escapeHtml(planState.plan.name)}）。不需要付款資料、不會扣款，每個帳號一次。</div>
     ${rows}
     <button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center" id="plan-trial-go" onclick="claimTrial()">開始免費體驗</button>
     ${until}
@@ -7678,8 +7687,8 @@ async function claimTrial() {
     showBillingResult({
       tone: "ok", title: "體驗已開始",
       lines: [
-        `${planNameOf(r.plan_code)}的功能已全部開放，到 ${trialLastDayLabel(r.period_end)} 收盤為止（${r.trading_days} 個交易日）。`,
-        `到期會自動回到${freePlanName()}，不會扣款；想繼續用，隨時可以在這裡升級。`,
+        `${planNameOf(r.plan_code)}的功能已全部開放，到 ${trialLastDayLabel(r.period_end)} 這天結束為止（${r.trading_days} 個交易日）。`,
+        `隔天凌晨 0 點過後自動回到${freePlanName()}，不會扣款；想繼續用，隨時可以在這裡升級。`,
       ],
     });
   } catch (e) {
