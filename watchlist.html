@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="257">
+  <meta name="app-version" content="258">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=257" rel="stylesheet">
+  <link href="watchlist.css?v=258" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -492,7 +492,7 @@
     </section>
 
     <!-- ── 分享（第四格）─────────────────────────────────────────────────
-         好友、群組、加好友、分享管理。設計見 FRIENDS.md。
+         好友、群組、加好友、分享股票。設計見 FRIENDS.md。
          後端目前只對 is_admin / is_demo 開放，所以這一格預設藏著：登入後
          initFriendsTab() 問一次後端，拿得到才把導覽那一格顯示出來。
          內部代號仍是 friends（APP_TABS、#friends、fr- 前綴）——改名只改
@@ -500,14 +500,14 @@
     <section id="view-friends" class="app-view">
       <div class="view-head">
         <h2>分享中心</h2>
-        <span class="fr-usage" id="fr-usage" title="自選股＋我分享出去＋好友分享給我"></span>
+        <span class="fr-usage" id="fr-usage" title="自選股＋好友分享給我（已接受的）。我分享出去的不算。"></span>
       </div>
 
       <div class="fr-seg fr-seg-4" role="tablist" aria-label="分享分頁">
         <button role="tab" data-fseg="friends" aria-selected="true">好友</button>
         <button role="tab" data-fseg="groups"  aria-selected="false">群組</button>
         <button role="tab" data-fseg="add"     aria-selected="false">加好友</button>
-        <button role="tab" data-fseg="shares"  aria-selected="false">分享管理<span class="fr-dot" id="fr-dot-shares"></span></button>
+        <button role="tab" data-fseg="shares"  aria-selected="false">分享股票<span class="fr-dot" id="fr-dot-shares"></span></button>
       </div>
 
       <!-- ── 好友 ── -->
@@ -610,7 +610,7 @@
 
       <!-- ── 分享股 ── -->
       <div class="fr-pane" id="fr-pane-shares" style="display:none">
-        <div class="fr-seg fr-seg-sub" role="tablist" aria-label="分享管理">
+        <div class="fr-seg fr-seg-sub" role="tablist" aria-label="分享股票">
           <button role="tab" data-fshare="out" aria-selected="true">我分享出去的</button>
           <button role="tab" data-fshare="in"  aria-selected="false">好友分享給我<span class="fr-dot" id="fr-dot-in"></span></button>
         </div>
@@ -625,47 +625,6 @@
             <ul class="fr-list" id="fr-shares-out"></ul>
           </div>
 
-          <div class="panel-card fr-card" id="fr-share-form" style="display:none">
-            <h3 class="fr-h">新增分享</h3>
-            <label class="fr-label" for="fr-share-stock">股票（從自選股選）</label>
-            <select class="fr-input" id="fr-share-stock"></select>
-            <div class="fr-hint" id="fr-share-preview"></div>
-
-            <!-- 分享對象：好友與群組各一頁可以瀏覽的清單（Howard 2026-10-04）。
-                 原本是兩種混在一起的一小段勾選清單，好友一多就只能一直往下捲、
-                 也看不出群組裡有誰。兩份清單都留在 DOM 裡（切頁只是藏起來），
-                 所以在好友頁勾的，切到群組頁再切回來還在。 -->
-            <label class="fr-label">分享對象</label>
-            <div class="fr-picker">
-              <div class="fr-seg fr-seg-sub" role="tablist" aria-label="分享對象">
-                <button role="tab" data-fpick="friends" aria-selected="true">好友<span class="fr-count" id="fr-pick-n-friends"></span></button>
-                <button role="tab" data-fpick="groups"  aria-selected="false">群組<span class="fr-count" id="fr-pick-n-groups"></span></button>
-              </div>
-              <input class="fr-input fr-pick-search" id="fr-pick-search" type="search"
-                     placeholder="搜尋名稱" autocomplete="off" spellcheck="false" aria-label="搜尋好友或群組">
-              <ul class="fr-list fr-picklist" id="fr-pick-friends"></ul>
-              <ul class="fr-list fr-picklist" id="fr-pick-groups" style="display:none"></ul>
-              <div class="fr-pick-summary" id="fr-pick-summary"></div>
-            </div>
-
-            <label class="fr-label" for="fr-share-date">終止日期</label>
-            <div class="fr-row" style="margin-top:0">
-              <label class="fr-row fr-pick" style="flex:0 0 auto; margin-top:0">
-                <input type="checkbox" id="fr-share-forever" checked>
-                <span>永不終止</span>
-              </label>
-              <input class="fr-input" type="date" id="fr-share-date" disabled>
-            </div>
-            <p class="fr-hint">
-              送出的是這檔目前的基礎訊號與進階訊號設定。持有股數與成本不會送出。
-              分享會佔用你一個名額，直到終止或到期。
-            </p>
-            <div class="fr-row">
-              <button class="btn btn-sm btn-primary" id="fr-btn-send-share">送出</button>
-              <button class="btn btn-sm btn-outline-light" id="fr-btn-cancel-share">取消</button>
-            </div>
-            <div class="fr-form-msg" id="fr-share-msg"></div>
-          </div>
         </div>
 
         <!-- 好友分享給我 -->
@@ -1112,6 +1071,74 @@
         <div class="hold-hint">兩欄留空＝純觀察，不計算損益。</div>
         <div id="hold-msg" class="small mt-2 text-muted"></div>
         <button type="button" class="btn btn-primary w-100 mt-2" onclick="saveHoldings()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 新增分享（分享 → 分享股票 → 我分享出去的 →「新增」開）──
+     2026-10-05 Howard：從頁面裡接在清單下面的一張卡，改成跳出來的視窗。卡片排在清單下面，
+     清單一長就要捲到底才看得到，按了「新增」像是沒反應。
+     最上面那一格（#fr-share-limit）只在「自選+分享」已達上限時出現，給兩條出路：管理自選股、
+     升級方案。它不擋送出——分享自己的自選股不佔用量（同一天定案）；這裡回答的是
+     「那我要怎麼再加自選股、再接受好友的分享」。
+     內層 id 沿用 fr-share-form：選對象、送出那些程式認的都是這個 id。 -->
+<div class="modal fade sheet-modal" id="frShareModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">新增分享</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body p-3" id="fr-share-form">
+        <div class="fr-hold" id="fr-share-limit" style="display:none">
+          <div id="fr-share-limit-text"></div>
+          <div class="fr-in-actions">
+            <button type="button" class="btn btn-sm btn-outline-light" id="fr-btn-limit-watch">管理自選股</button>
+            <button type="button" class="btn btn-sm btn-outline-light" id="fr-btn-limit-plan">升級方案</button>
+          </div>
+        </div>
+
+        <label class="fr-label" for="fr-share-stock">股票（從自選股選）</label>
+        <select class="fr-input" id="fr-share-stock"></select>
+        <div class="fr-hint" id="fr-share-preview"></div>
+
+        <!-- 分享對象：好友與群組各一頁可以瀏覽的清單（Howard 2026-10-04）。
+             原本是兩種混在一起的一小段勾選清單，好友一多就只能一直往下捲、
+             也看不出群組裡有誰。兩份清單都留在 DOM 裡（切頁只是藏起來），
+             所以在好友頁勾的，切到群組頁再切回來還在。 -->
+        <label class="fr-label">分享對象</label>
+        <div class="fr-picker">
+          <div class="fr-seg fr-seg-sub" role="tablist" aria-label="分享對象">
+            <button role="tab" data-fpick="friends" aria-selected="true">好友<span class="fr-count" id="fr-pick-n-friends"></span></button>
+            <button role="tab" data-fpick="groups"  aria-selected="false">群組<span class="fr-count" id="fr-pick-n-groups"></span></button>
+          </div>
+          <input class="fr-input fr-pick-search" id="fr-pick-search" type="search"
+                 placeholder="搜尋名稱" autocomplete="off" spellcheck="false" aria-label="搜尋好友或群組">
+          <ul class="fr-list fr-picklist" id="fr-pick-friends"></ul>
+          <ul class="fr-list fr-picklist" id="fr-pick-groups" style="display:none"></ul>
+          <div class="fr-pick-summary" id="fr-pick-summary"></div>
+        </div>
+
+        <label class="fr-label" for="fr-share-date">終止日期</label>
+        <div class="fr-row" style="margin-top:0">
+          <label class="fr-row fr-pick" style="flex:0 0 auto; margin-top:0">
+            <input type="checkbox" id="fr-share-forever" checked>
+            <span>永不終止</span>
+          </label>
+          <input class="fr-input" type="date" id="fr-share-date" disabled>
+        </div>
+        <p class="fr-hint">
+          送出的是這檔目前的基礎訊號與進階訊號設定。持有股數與成本不會送出。
+          分享出去不佔你的「自選+分享」用量；對方接受後算在對方那邊。
+        </p>
+      </div>
+      <!-- 送出／取消固定在視窗底部：內容一長（好友很多）也不必捲到最下面才按得到。
+           錯誤訊息跟按鈕放在一起——送出就遇到問題要讓人知道（設計第 4 點），不能捲出畫面。 -->
+      <div class="modal-footer py-2 fr-share-footer">
+        <div class="fr-form-msg" id="fr-share-msg"></div>
+        <button type="button" class="btn btn-sm btn-outline-light" id="fr-btn-cancel-share" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-sm btn-primary" id="fr-btn-send-share">送出</button>
       </div>
     </div>
   </div>
@@ -11475,7 +11502,7 @@ async function addStock() {
   name = getPreferredStockName(sid, name) || name;
 
   // 方案上限：先在前端擋（少一次必失敗的請求），伺服器端 trigger 是真正的防線
-  // 名額是「自選股＋我分享出去＋好友分享給我」合計（frSlotsExtra）
+  // 用量是「自選股＋好友分享給我」合計（frSlotsExtra）；我分享出去的不算
   if (planState.ready && watchlistRows.length + frSlotsExtra() >= planState.plan.watch_limit
       && !watchlistRows.some(r => String(r.stock_id).trim() === sid)) {
     msgEl.innerHTML = limitPromptHtml("watchlist");
@@ -11515,7 +11542,7 @@ async function addStock() {
       msgEl.innerHTML = limitPromptHtml("watchlist", e);
     } else if (String(e.message).includes("dup:share")) {
       // 一檔只能有一個來源：這檔已經由好友分享給他了
-      msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已由好友分享給你。到「分享 → 分享管理」移除那則分享，才能加入自選股</span>`;
+      msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已由好友分享給你。到「分享 → 分享股票」移除那則分享，才能加入自選股</span>`;
     } else if (e.message.includes("23505") || e.message.includes("unique")) {
       msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已在清單中</span>`;
     } else {
@@ -12439,7 +12466,7 @@ function _showPwaInstructionsModal(afterWait = false) {
 // CSS 類別不跟著改名——那些改了只有風險沒有好處。
 
 let frState   = null;    // lab_social_state()：好友、邀請、群組
-let frShare   = null;    // share_state()：我分享出去、好友分享給我、名額
+let frShare   = null;    // share_state()：我分享出去、好友分享給我、用量（自選+分享）
 let frHandle  = null;    // lab_my_handle() → { handle, formatted }
 let frEnabled = false;   // 這個帳號能不能用
 let frIdMode  = null;    // "handle"（有代號表）｜"uuid"（舊 schema）
@@ -12476,7 +12503,7 @@ const FR_ERRORS = {
   no_recipients:      "請至少選一位好友或一個群組",
   not_in_watchlist:   "這檔不在你的自選股裡",
   expires_in_past:    "終止日期要在今天之後",
-  limit:              "名額已滿（自選股與分享合計）",
+  limit:              "「自選+分享」已達上限",
 };
 
 const FR_FLAG_LABELS = {
@@ -12525,12 +12552,14 @@ function frOk(res) {
   return true;
 }
 
-// 名額：自選股之外，分享佔掉的格數（我分享出去＋好友分享給我）。
+// 用量「自選+分享」：自選股之外，好友分享給我、已接受的那幾檔。
+// **我分享出去的不算**（2026-10-05 Howard）：能分享的只有自己的自選股，那一檔本來就算在
+// 自選股裡，分享出去不該再多算一次。
 // 加自選股的前端預檢與方案面板的用量條都要加上它——伺服器端的 trigger 才是真正的
-// 防線，這裡只是讓畫面上的數字跟伺服器算的一致。
+// 防線（share_slots），這裡只是讓畫面上的數字跟伺服器算的一致。
 function frSlotsExtra() {
   const u = frShare && frShare.usage;
-  return u ? (Number(u.shared_out) || 0) + (Number(u.shared_in) || 0) : 0;
+  return u ? (Number(u.shared_in) || 0) : 0;
 }
 
 // ── 給首頁盤中雷達用的 ──
@@ -12685,23 +12714,29 @@ function frRenderUsage() {
   const u = frShare && frShare.usage;
   if (!el) return;
   if (!u) { el.textContent = ""; return; }
-  el.textContent = `名額 ${u.used}／${u.limit}`;
+  el.textContent = `自選+分享 ${u.used}／${u.limit}`;
   el.classList.toggle("is-full", u.used >= u.limit);
 }
 
 function frRenderFriends() {
+  // 收到的邀請：人在上面，「同意／拒絕」在下面一排、各佔一半寬（2026-10-05 Howard）。
+  // 原本兩顆跟名字擠在同一列，手機上放不下就折到下一行，一大一小、靠左不齊。
   const rin = frState.requests_in || [];
   frShow("fr-sec-requests", rin.length > 0);
   frList("fr-requests-in", rin, r => `
-    <li class="${frFlashClass("request", r.request_id).trim()}" data-flash-id="${escapeHtml(r.request_id)}">
-      <span class="fr-avatar">${ICON_USER}</span>
-      <span class="fr-grow">
-        ${frPerson(r.name, r.tag)}
-        <div class="fr-id">${escapeHtml(r.handle || r.user_id || "")}</div>
-        <div class="fr-hint">${frTime(r.at)}</div>
-      </span>
-      <button class="btn btn-sm btn-primary" data-fr="req-yes" data-id="${escapeHtml(r.request_id)}">${ICON_CHECK}同意</button>
-      <button class="btn btn-sm btn-outline-light" data-fr="req-no" data-id="${escapeHtml(r.request_id)}">${ICON_CLOSE}拒絕</button>
+    <li class="fr-in-card${frFlashClass("request", r.request_id)}" data-flash-id="${escapeHtml(r.request_id)}">
+      <div class="fr-req-head">
+        <span class="fr-avatar">${ICON_USER}</span>
+        <span class="fr-grow">
+          ${frPerson(r.name, r.tag)}
+          <div class="fr-id">${escapeHtml(r.handle || r.user_id || "")}</div>
+          <div class="fr-hint">${frTime(r.at)}</div>
+        </span>
+      </div>
+      <div class="fr-in-actions">
+        <button class="btn btn-sm btn-primary" data-fr="req-yes" data-id="${escapeHtml(r.request_id)}">${ICON_CHECK}同意</button>
+        <button class="btn btn-sm btn-outline-light" data-fr="req-no" data-id="${escapeHtml(r.request_id)}">${ICON_CLOSE}拒絕</button>
+      </div>
     </li>`);
 
   frList("fr-friends", frState.friends, f => `
@@ -12825,7 +12860,7 @@ function frShareDetailHtml(s) {
 // 訊號設定的摘要收在下一層，點那一則才展開——清單是用來找「哪一檔、誰給的、
 // 到什麼時候」，不是用來讀設定的。股票代號也拿掉：收件人認的是名稱。
 //
-// 例外是「需要他做決定才看得懂的說明」：撞到既有股票、名額滿、對方更新了。
+// 例外是「需要他做決定才看得懂的說明」：撞到既有股票、用量滿了、對方更新了。
 // 這些不收進下一層——按鈕就在旁邊，說明藏起來的話他不知道自己在按什麼。
 function frShareName(s) {
   // label 是「2330 台積電 #2」。名稱優先；同一位好友對同一檔的第二則保留 #2 才分得開。
@@ -12884,7 +12919,7 @@ function frRenderSharesIn() {
     } else {
       if (s.status === "held" && s.hold_reason === "limit") {
         box = `<div class="fr-hold">
-            <div>名額已滿（${u.used}／${u.limit}，自選股與分享合計）。移除一檔自選股或升級方案後，再按一次「接受」。</div>
+            <div>「自選+分享」已達上限（${u.used}／${u.limit}）。移除一檔自選股或升級方案後，再按一次「接受」。</div>
             <div class="fr-row">
               <button class="btn btn-sm btn-outline-light" data-fr="go-watch">${ICON_GEAR}管理自選股</button>
               <button class="btn btn-sm btn-outline-light" data-fr="go-plan">${ICON_STAR}升級方案</button>
@@ -12980,7 +13015,6 @@ function frSwitchSeg(name) {
   if (name === "add") frRenderAdd().catch(e => frToast(String(e.message || e), true));
   if (name === "groups") frShow("fr-new-group", false);
   if (name === "shares") {
-    frShow("fr-share-form", false);
     // 有等著決定的東西就直接落在「好友分享給我」，不要讓人自己找
     if (frPendingCounts().shares) frSwitchShare("in");
   }
@@ -13466,7 +13500,31 @@ function frOpenShareForm() {
   document.getElementById("fr-share-forever").checked = true;
   document.getElementById("fr-share-msg").textContent = "";
   frUpdateSharePreview();
-  frShow("fr-share-form", true);
+  frRenderShareLimit();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("frShareModal")).show();
+}
+
+// 「自選+分享」已達上限時，「新增分享」視窗最上面給兩條出路（管理自選股／升級方案）。
+// 不擋送出：分享自己的自選股不佔用量（2026-10-05 Howard），所以這裡講的是
+// 「想再加自選股或接受好友的分享」要怎麼騰出空間。
+function frRenderShareLimit() {
+  const u = frShare && frShare.usage;
+  const full = !!u && Number(u.limit) > 0 && Number(u.used) >= Number(u.limit);
+  frShow("fr-share-limit", full);
+  if (!full) return;
+  document.getElementById("fr-share-limit-text").textContent =
+    `「自選+分享」已達上限（${u.used}／${u.limit}）。分享自己的自選股不佔用量，可以照常送出；`
+    + "要再加自選股或接受好友的分享，請先移除一檔自選股，或升級方案。";
+}
+
+// 關掉「新增分享」視窗。then 等它真的關完才跑：接著要開另一個視窗（方案面板）時，
+// 兩個同時在轉場，先關的那個收尾時會把後開的那個的背景捲動鎖一起解掉。
+function frCloseShareForm(then) {
+  const el = document.getElementById("frShareModal");
+  const m = el && window.bootstrap ? bootstrap.Modal.getInstance(el) : null;
+  if (!m || !el.classList.contains("show")) { if (then) then(); return; }
+  if (then) el.addEventListener("hidden.bs.modal", () => then(), { once: true });
+  m.hide();
 }
 
 // 分享對象：好友一頁、群組一頁，各自可以捲、可以搜尋。
@@ -13561,13 +13619,11 @@ async function frSendShare() {
     // 送出就遇到問題要讓人知道（設計第 4 點）：錯誤留在表單上，不是一閃而過的提示
     const err = frErrText(r);
     if (err) {
-      msg.textContent = r.error === "limit" && r.usage
-        ? `名額已滿（${r.usage.used}／${r.usage.limit}，自選股與分享合計）。移除一檔自選股、終止一則分享，或升級方案。`
-        : err;
+      msg.textContent = err;
       msg.classList.add("bad");
       return;
     }
-    frShow("fr-share-form", false);
+    frCloseShareForm();
     frToast(`已分享 ${r.label} 給 ${r.recipients} 人`);
     trackActivity("share_create", { stock: sid, n: r.recipients });
     await frReload();
@@ -13661,13 +13717,13 @@ document.addEventListener("click", async e => {
       case "in-ack":          frToast("已確認"); break;
       case "in-remove":       frToast("已移除"); break;
       case "in-replace":
-        if (res.held === "limit") frToast("名額已滿，沒有移除任何東西", true);
+        if (res.held === "limit") frToast("「自選+分享」已達上限，沒有移除任何東西", true);
         else frToast("已移除原有的，並接受這則分享");
         if (res.replaced === "watchlist") loadWatchlist().catch(() => {});   // 自選股少了一檔
         break;
       case "in-accept":
         // 接受被擋不是失敗：邀請轉成保留，畫面上會出現原因與解法
-        if (res.held === "limit") frToast("名額已滿，邀請先保留著", true);
+        if (res.held === "limit") frToast("「自選+分享」已達上限，邀請先保留著", true);
         else if (res.held === "duplicate") frToast("你已經有這檔了，邀請先保留著", true);
         else frToast("已接受，這檔會出現在盤中「股票雷達」的「分享」那一格");
         break;
@@ -13705,6 +13761,8 @@ document.addEventListener("click", async e => {
   put('#fr-btn-new-share',    ICON_PLUS);
   put('#fr-btn-send-share',   ICON_SEND);
   put('#fr-btn-cancel-share', ICON_CLOSE);
+  put('#fr-btn-limit-watch',  ICON_GEAR);
+  put('#fr-btn-limit-plan',   ICON_STAR);
 
   document.querySelectorAll('#view-friends .fr-seg button[data-fseg]').forEach(b =>
     b.addEventListener("click", () => frSwitchSeg(b.dataset.fseg)));
@@ -13738,11 +13796,10 @@ document.addEventListener("click", async e => {
     try { await navigator.clipboard.writeText(frMyId().shown); frToast("已複製"); }
     catch { frToast("複製失敗，請手動選取", true); }
   });
-  on("fr-btn-new-share", "click", () => {
-    const open = document.getElementById("fr-share-form").style.display !== "none";
-    if (open) frShow("fr-share-form", false); else frOpenShareForm();
-  });
-  on("fr-btn-cancel-share", "click", () => frShow("fr-share-form", false));
+  on("fr-btn-new-share", "click", frOpenShareForm);
+  // 「取消」與右上的叉是 data-bs-dismiss，不必另外接。上限提示的兩顆：先關視窗再走
+  on("fr-btn-limit-watch", "click", () => frCloseShareForm(() => switchTab("watch")));
+  on("fr-btn-limit-plan", "click", () => frCloseShareForm(() => openPlanModal()));
   on("fr-btn-send-share", "click", guard(frSendShare));
   on("fr-share-stock", "change", frUpdateSharePreview);
   document.querySelectorAll('#fr-share-form .fr-seg button[data-fpick]').forEach(b =>
