@@ -3355,6 +3355,16 @@ body.modal-blocking .modal-backdrop.show {
    （JS 只拿它估文字寬度，畫出來的大小以這裡為準）。 */
 /* 桌機的字卡有 560px 寬，SVG 再跟著撐大就會比內文還大——圖固定最寬 400px、置中 */
 .rtl-svg { display: block; width: 100%; max-width: 400px; margin: 0 auto; height: auto; font-family: inherit; }
+/* 2026-10-05（Howard）：時間軸左右可捲、縱軸釘住。以前整張圖固定 320 單位寬，訊號一多就
+   塞不下，碰撞避讓只好把標記往 y 搬——而 y 是價格軸，搬一步就把價格講錯（奇鋐 3017 的
+   「年高」被畫到昨收與月線底下 306 元）。現在時間軸自己捲，價格標籤與「現在 hh:mm」
+   留在右邊那一欄不動。兩張 SVG 都用自己的 width／height 屬性（1 單位＝1px），縮放比例
+   才會一致——讓其中一張跟著容器縮放，兩邊的 y 就對不起來了。 */
+.rtl-chart-row { display: flex; align-items: flex-start; justify-content: center; }
+.rtl-scroll { flex: 0 1 auto; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.rtl-svg-plot { width: auto; max-width: none; margin: 0; }
+.rtl-svg-gutter { flex: 0 0 auto; width: auto; max-width: none; margin: 0; }
+.rtl-swipe { font-size: 11.5px; color: var(--text-muted); text-align: center; padding-top: 4px; }
 .rtl-svg text { fill: var(--text-muted); font-size: 12px; }
 .rtl-line { stroke: rgba(201, 201, 212, 0.45); stroke-width: 1.1; stroke-dasharray: 5 4; }
 .rtl-line-prev { stroke: rgba(146, 146, 163, 0.45); stroke-dasharray: 2 3; }

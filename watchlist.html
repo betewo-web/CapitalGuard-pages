@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="260">
+  <meta name="app-version" content="261">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=260" rel="stylesheet">
+  <link href="watchlist.css?v=261" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -8211,6 +8211,7 @@ function openStockCard(sid, opts = {}) {
   const sidKey = String(sid || "").trim();
   if (!sidKey) return;
   const date = opts.date;
+  _rtlScrollKey = "";     // 每次打開字卡，時間軸都從最右邊（現在）開始——上次捲到哪裡不算數
   radarTimelineSid = sidKey;
   _refreshQuotesIfStale();      // 在別的分頁待了一陣子才開字卡：報價可能是幾分鐘前的
   radarTimelineDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) && date !== radarSessionDate() ? date : null;
@@ -8369,6 +8370,29 @@ function _paintRtlTarget() {
   }
 }
 
+// ── 時間軸的左右捲動位置 ───────────────────────────────────────────────────
+// 預設停在最右邊＝「現在」（Howard 2026-10-05）：打開字卡先看到最新的那幾則與現在的游標，
+// 往左滑才是回頭看開盤。重畫（5 秒一次的報價輪詢）要維持人手動捲到的位置，
+// 但本來就停在最右邊的話要跟著新訊號繼續停在最右邊。
+let _rtlScrollKey = "";
+function _rtlReadScroll(key) {
+  const el = document.querySelector("#rtl-chart-wrap .rtl-scroll");
+  const same = key === _rtlScrollKey;
+  _rtlScrollKey = key;
+  if (!el || !same) return null;            // 換股票／換日期／第一次畫＝回到最右邊
+  const max = el.scrollWidth - el.clientWidth;
+  return { left: el.scrollLeft, atEnd: max <= 0 || el.scrollLeft >= max - 2 };
+}
+function _rtlApplyScroll(prev, retry = true) {
+  const el = document.querySelector("#rtl-chart-wrap .rtl-scroll");
+  if (!el) return;
+  // modal 還在淡入時寬度是 0，捲了也沒用（跟 _paintRtlItem 的捲動同一個坑）：下一幀再試一次
+  if (!el.clientWidth && retry) { requestAnimationFrame(() => _rtlApplyScroll(prev, false)); return; }
+  const max = el.scrollWidth - el.clientWidth;
+  if (max <= 0) return;
+  el.scrollLeft = (!prev || prev.atEnd) ? max : Math.min(prev.left, max);
+}
+
 // 點軸上的標記 → 捲到故事列裡那一則並亮一下
 function rtlFocusStory(i) {
   const el = document.getElementById(`rtl-item-${i}`);
@@ -8426,8 +8450,12 @@ function renderRadarTimeline(sid) {
   // 而是「我們沒有那天的紀錄」（還沒納入監控、寫入失敗、或這次沒載到）——
   // 兩者要分開講，不能把缺資料說成「所有條件都沒成立」（稽核 I13）。
   const covered = !past || !!hist;
+  // 時間軸會左右捲：重畫前先記住捲到哪裡（報價每 5 秒就重畫一次，不記的話人正在看
+  // 開盤那一段，手一放就被拉回去了）。換股票／換日期時 _rtlScrollKey 不同＝回到最右邊。
+  const prevScroll = _rtlReadScroll(`${sid}|${date}`);
   document.getElementById("rtl-chart-wrap").innerHTML =
     radarTimelineChartHtml(sid, intraday, ref, { past, covered, pending });
+  _rtlApplyScroll(prevScroll);
   const headEl = document.getElementById("rtl-story-head");
   if (headEl) headEl.textContent = past ? `${_mdOf(date)} 盤中發生了什麼` : "盤中發生了什麼";
   document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, { past, covered });
@@ -8518,7 +8546,7 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   const labelOf = r => `${r.label} ${fmtPrice(r.value)}`;
   const gutter = Math.min(RTL_GUTTER_MAX, Math.max(RTL_GUTTER_MIN,
     Math.max(0, ...lines.map(r => rtlTextWidth(labelOf(r), RTL_FONT.label))) + 12));
-  const x1 = RTL_VB_W - gutter;
+  const viewW = RTL_VB_W - gutter;   // 不必左右捲的時候的右界
 
   const n = marks.length;
   // 「現在」那條虛線固定畫在繪圖區的最右邊（Howard 2026-09-23）。它的意思是「到這裡為止」，
@@ -8529,6 +8557,13 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   const nowAt = new Date();
   const showNow = _isMarketOpenNow() && n > 0 && !opts.past;
   const lastAtNow = showNow && fmtTime(marks[n - 1].e.at) === fmtTime(nowAt);
+  // 橫向可捲（Howard 2026-10-05）：以前寬度固定 320 單位，訊號一多就塞不下，碰撞避讓
+  // 只好把標記往 y 搬——而 y 是價格軸，搬一步就等於把價格講錯 306 元（奇鋐 3017 的「年高」
+  // 被畫到昨收與月線底下）。現在每顆固定分到 RTL_SCROLL_STEP 的寬，放不下就把畫布加寬、
+  // 讓它左右捲，縱軸（參考線與價格標籤、「現在 hh:mm」）釘在右邊那一欄不動。
+  // 訊號少的日子寬度不變（Math.max 的另一邊），看起來跟以前一模一樣。
+  const x1 = Math.max(viewW, x0 + n * RTL_SCROLL_STEP + (showNow ? RTL_NOW_GAP : 0));
+  const svgW = x1 + 10;
   const mx1 = showNow && !lastAtNow ? x1 - RTL_NOW_GAP : x1;
   // 橫向：依發生順序等距排開，不照真實時間比例。台股訊號多半集中在開盤那半小時，
   // 照比例畫會把三四顆擠在最左邊一團（Howard：先顧閱讀體驗）；順序與各自的時間仍看得到
@@ -8563,13 +8598,15 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     placed.push({ x, y });
     marksSvg += rtlMarkerSvg(m.e, x, y, i, icon, fs);
   });
-  const linesSvg = lines.map(r => {
-    const y = r.y.toFixed(1), ly = r.ly.toFixed(1);
+  // 線畫在會捲的那張圖裡（橫線本來就跨滿整個寬度，捲到哪一段都看得到）
+  const linesSvg = lines.map(r =>
+    `<line class="rtl-line rtl-line-${r.cls}" x1="${x0}" y1="${r.y.toFixed(1)}" x2="${x1}" y2="${r.y.toFixed(1)}"/>`).join("");
+  // 價格標籤畫在釘住的那一欄：自己一張 SVG，座標原點在那一欄的左上角，y 與線同一套
+  const gutterSvg = lines.map(r => {
     const lead = Math.abs(r.ly - r.y) > 1.5
-      ? `<line class="rtl-lead rtl-line-${r.cls}" x1="${x1}" y1="${y}" x2="${(x1 + 6).toFixed(1)}" y2="${ly}"/>`
+      ? `<line class="rtl-lead rtl-line-${r.cls}" x1="0" y1="${r.y.toFixed(1)}" x2="6" y2="${r.ly.toFixed(1)}"/>`
       : "";
-    return `<line class="rtl-line rtl-line-${r.cls}" x1="${x0}" y1="${y}" x2="${x1}" y2="${y}"/>` + lead
-      + `<text class="rtl-line-label rtl-line-${r.cls}" x="${(x1 + 8).toFixed(1)}" y="${(r.ly + RTL_FONT.label * 0.35).toFixed(1)}">${escapeHtml(labelOf(r))}</text>`;
+    return lead + `<text class="rtl-line-label rtl-line-${r.cls}" x="8" y="${(r.ly + RTL_FONT.label * 0.35).toFixed(1)}">${escapeHtml(labelOf(r))}</text>`;
   }).join("");
   // 刻度＝每顆標記的時間。同一分鐘的只寫一次（開盤那批常常五顆都是 09:00，寫五次只是雜訊），
   // 擠不下的也不寫——每一則的時間在下面的故事列裡都有
@@ -8584,19 +8621,17 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     return `<line class="rtl-tick" x1="${x.toFixed(1)}" y1="${axisY - 4}" x2="${x.toFixed(1)}" y2="${axisY + 6}"/>`
       + (show ? `<text class="rtl-tick-label" x="${x.toFixed(1)}" y="${(axisY + RTL_FONT.tick + 7).toFixed(1)}" text-anchor="middle">${text}</text>` : "");
   }).join("");
-  let nowSvg = "";
+  let nowSvg = "", nowLabel = "";
   if (showNow) {
     // 橫軸是發生順序、不是時間比例，所以這條線只說「到這裡為止」——標籤寫「現在 11:44」，
     // 光寫一個時間沒人看得懂（Howard 2026-09-22 晶宏）。線就在繪圖區右緣（見上面 mx1），
     // 右邊沒有「還沒發生」的那塊了，原本的 .rtl-future 灰底一併拿掉。
     const label = `現在 ${fmtTime(nowAt)}`;
-    const lw = rtlTextWidth(label, RTL_FONT.now);
-    // 標籤壓在線的正上方（2026-09-23 Howard；以前整塊靠在線的左邊，看起來像在說左邊那一段）。
+    // 「現在 10:30」寫在釘住的那一欄（Howard 2026-10-05：現在時間與價格都要定住不滑動），
+    // 捲到上午哪一段都讀得到。會捲的那張圖裡只留那條虛線，它說的是「序列到這裡為止」。
     // 它畫在繪圖區上方 y0-8，那個高度右邊是空的——參考線的標籤都在 y0~y1 之間，不會撞到。
-    // 只有在 SVG 右緣真的放不下時才往左收。
-    const lx = Math.min(RTL_VB_W - lw / 2 - 2, x1);
-    nowSvg = `<line class="rtl-now" x1="${x1.toFixed(1)}" y1="${y0 - 2}" x2="${x1.toFixed(1)}" y2="${axisY}"/>`
-      + `<text class="rtl-now-label" x="${lx.toFixed(1)}" y="${(y0 - 8).toFixed(1)}" text-anchor="middle">${escapeHtml(label)}</text>`;
+    nowLabel = `<text class="rtl-now-label" x="8" y="${(y0 - 8).toFixed(1)}">${escapeHtml(label)}</text>`;
+    nowSvg = `<line class="rtl-now" x1="${x1.toFixed(1)}" y1="${y0 - 2}" x2="${x1.toFixed(1)}" y2="${axisY}"/>`;
   }
   let emptySvg = "";
   if (!n) {
@@ -8612,10 +8647,17 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
                      : (opts.covered ? "這天沒有訊號" : "沒有這天的紀錄");
     emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">${emptyLabel}</text>`;
   }
-  return `<div class="rtl-chart"><svg class="rtl-svg" viewBox="0 0 ${RTL_VB_W} ${RTL_VB_H}" role="img" aria-label="盤中時間軸">`
+  // 捲動區（時間軸）＋ 釘住的價格欄。價格欄是 flex 的固定欄、不在捲動區裡，
+  // 所以標記永遠不會捲到標籤底下，也不必在右邊留空白。
+  const needScroll = x1 > viewW;
+  const gw = showNow ? Math.max(gutter, RTL_GUTTER_NOW) : gutter;   // 至少放得下「現在 10:30」
+  return `<div class="rtl-chart"><div class="rtl-chart-row">`
+    + `<div class="rtl-scroll"><svg class="rtl-svg rtl-svg-plot" width="${svgW}" height="${RTL_VB_H}" viewBox="0 0 ${svgW} ${RTL_VB_H}" role="img" aria-label="盤中時間軸">`
     + linesSvg + nowSvg + emptySvg
     + `<line class="rtl-axis" x1="${x0}" y1="${axisY}" x2="${x1}" y2="${axisY}"/>` + ticksSvg + marksSvg
-    + `</svg></div>`;
+    + `</svg></div>`
+    + `<svg class="rtl-svg rtl-svg-gutter" width="${gw.toFixed(1)}" height="${RTL_VB_H}" viewBox="0 0 ${gw.toFixed(1)} ${RTL_VB_H}" aria-hidden="true">${nowLabel}${gutterSvg}</svg>`
+    + `</div>${needScroll ? `<div class="rtl-swipe">左右滑動看完整個上午</div>` : ""}</div>`;
 }
 
 // SVG 座標系。viewBox 寬 320 ≈ 手機上字卡裡的可用寬度（390px 螢幕：modal 374 − p-3 32 −
@@ -8625,6 +8667,10 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
 const RTL_VB_W = 320, RTL_VB_H = 284;
 const RTL_PLOT = { x0: 8, y0: 30, y1: 240 };   // x1 動態算（右邊留給參考線標籤）
 const RTL_GUTTER_MIN = 58, RTL_GUTTER_MAX = 124;
+const RTL_GUTTER_NOW = 76;   // 釘住那一欄的下限：要放得下「現在 10:30」
+// 橫向可捲時，每顆標記固定分到這麼寬：圖示 34 ＋ 間距，而最長的縮寫（MACD↑）在 12.5px 下
+// 是 45.5 單位，所以 52 放得下任何一顆——永遠不會互撞，也就永遠不必往 y（價格軸）搬。
+const RTL_SCROLL_STEP = 52;
 const RTL_AXIS_GAP = 13;    // 橫軸離繪圖區下緣
 const RTL_ICON = 34;        // 標記圖示邊長（訊號少的日子）
 const RTL_ICON_MIN = 24;    // 訊號多到一格塞不下時，圖示最小縮到這麼大
