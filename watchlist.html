@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="264">
+  <meta name="app-version" content="265">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=264" rel="stylesheet">
+  <link href="watchlist.css?v=265" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -4957,10 +4957,17 @@ async function openShowcase() {
 
 // 那天的共用日誌（內建訊號＋自動偵測）：今天讀 intraday_state.signals_today，過去讀 signal_history。
 // null＝沒有那天的序列（monitor 還沒升級、表還沒建、或那天不是交易日），雷達據此退回通知紀錄。
+// signalsDate 一定要比對：intraday_state 是以 stock_id 為鍵、不會換日清空的一張表，
+// 所有人都把某檔從自選股移掉之後，monitor 就不再更新那一列，而它掛著的 signals_today
+// 會原樣留在那裡。2026-10-05 的盤後覆核數出 41 列裡有 15 列不是當天的，其中 3037
+// （2026-09-24 的 rsi_above）、7744（09-22）、5392（09-25）還掛著舊訊號——誰把這幾檔
+// 加回自選股，雷達就會把九月那則當成今天的顯示。價格那邊的日期（tradeDate）不能拿來
+// 當這個判斷：輕量那條每 60 秒只更新價格與 updated_at、不重抓 signals_today，
+// 用 tradeDate 判會在跨日後把昨天的序列放行。
 function signalLogFor(sid, date) {
   if (date === radarSessionDate()) {
     const iq = intradayQuoteMap[sid] || null;
-    if (iq && Array.isArray(iq.signals)) return iq.signals;
+    if (iq && iq.signalsDate === date && Array.isArray(iq.signals)) return iq.signals;
   }
   const hist = signalHistoryMap?.[sid]?.[date];
   return hist ? hist.signals : null;
@@ -5087,6 +5094,8 @@ async function loadIntradayQuotes(force = false, opts) {
           prevClose,
           changePct,
           tradeDate:  taipeiDateKey(row.updated_at),
+          // signals_today 是哪一天的。與 tradeDate 分開記：見 signalLogFor 的說明
+          signalsDate: taipeiDateKey(row.updated_at),
           signal:     row.signal   || "none",
           severity:   row.severity || "none",
           level:      row.level    != null ? Number(row.level) : null,
@@ -12007,6 +12016,15 @@ const _pushedSignals = {};
 
 function _applyPushedSignal(iq, entry) {
   if (!iq) return false;
+  // 推播帶的日期才是真的。倉庫那列還掛著前幾天的序列時（monitor 已經不更新這一檔），
+  // 不能把今天推到的訊號疊在舊的上面——舊的整批丟掉，並把 signals_today 的日期改成
+  // 推播那天，雷達才看得見這一則（F1）。tradeDate 不動：那是價格的日期，
+  // 一列舊報價不會因為收到推播就變成今天的報價。
+  const day = taipeiDateKey(entry.at);
+  if (day && iq.signalsDate !== day) {
+    iq.signals = [];
+    iq.signalsDate = day;
+  }
   if (!Array.isArray(iq.signals)) iq.signals = [];
   if (iq.signals.some(s => s.kind === entry.kind)) return false;   // 倉庫已經有這一種
   iq.signals.push(entry);
