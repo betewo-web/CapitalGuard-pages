@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="259">
+  <meta name="app-version" content="260">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=259" rel="stylesheet">
+  <link href="watchlist.css?v=260" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -12743,8 +12743,9 @@ function frRenderFriends() {
       </div>
     </li>`);
 
+  // 好友那一列也能閃：點「○○ 已同意你的好友邀請」那則通知時，要指得出是清單裡的哪一位
   frList("fr-friends", frState.friends, f => `
-    <li>
+    <li class="${frFlashClass("friend", f.tag).trim()}" data-flash-id="${escapeHtml(f.tag || "")}">
       <span class="fr-avatar">${ICON_USER}</span>
       <span class="fr-grow">${frPerson(f.name, f.tag)}</span>
       <button class="btn btn-sm btn-outline-light fr-quiet" data-fr="friend-remove"
@@ -12978,32 +12979,46 @@ function frFlashClass(kind, id) {
 
 // event_key 的形狀（migrate_stock_shares.sql 的 share_notify 呼叫）：
 //   share:<share_id>:invite[:vN]｜share:<share_id>:update:vN｜share:<share_id>:terminated
-//   friend:<request_id>:request
+//   friend:<request_id>:request              有人想加我為好友 → 跳到那一則邀請
+//   friend:<request_id>:accepted:<#標籤>     對方同意了我的邀請 → 跳到好友清單裡的那一位
 // 回 true＝這則已經處理（跳過去了，或告訴使用者它已經不在了）；false＝不是分享類，照舊開詳情。
 async function frOpenFromInbox(row) {
-  const m = String((row && row.event_key) || "").match(/^(share|friend):([0-9a-f-]{36})/i);
+  const key = String((row && row.event_key) || "");
+  const m = key.match(/^(share|friend):([0-9a-f-]{36})/i);
   if (!frEnabled || !m) return false;
   const isFriend = m[1].toLowerCase() === "friend", id = m[2];
+  // 「對方同意了」那一則：邀請本身已經結束，要指的是好友清單裡的那個人
+  const accepted = isFriend ? key.match(/:accepted(?::([0-9a-f]{6}))?$/i) : null;
 
   switchTab("friends");
   await frReload().catch(() => {});      // 先拿最新的：那一則可能剛被對方終止、或自己已經處理過
-  let found;
-  if (isFriend) {
+  let kind, flashId, found;
+  if (accepted) {
     frSwitchSeg("friends");
+    kind = "friend";
+    flashId = (accepted[1] || "").toLowerCase();
+    found = !!flashId && ((frState && frState.friends) || []).some(f => f.tag === flashId);
+  } else if (isFriend) {
+    frSwitchSeg("friends");
+    kind = "request";
+    flashId = id;
     found = ((frState && frState.requests_in) || []).some(r => r.request_id === id);
   } else {
     frSwitchSeg("shares");
     frSwitchShare("in");
+    kind = "share";
+    flashId = id;
     found = ((frShare && frShare.incoming) || []).some(s => s.share_id === id);
   }
   if (!found) {
-    frToast(isFriend ? "這則好友邀請已經處理過了" : "這則分享已經結束，或你已經處理過了");
+    frToast(accepted ? "這位好友已經不在你的好友清單裡"
+            : isFriend ? "這則好友邀請已經處理過了" : "這則分享已經結束，或你已經處理過了");
     return true;
   }
-  if (!isFriend) frOpenIn = id;      // 跳過來的那一則直接展開：他點通知就是要看內容
-  frFlash = { kind: isFriend ? "request" : "share", id, until: Date.now() + FR_FLASH_MS };
+  if (kind === "share") frOpenIn = id;      // 跳過來的那一則直接展開：他點通知就是要看內容
+  frFlash = { kind, id: flashId, until: Date.now() + FR_FLASH_MS };
   frRender();
-  const el = document.querySelector(`#view-friends [data-flash-id="${id}"]`);
+  const el = document.querySelector(`#view-friends [data-flash-id="${flashId}"]`);
   if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
   clearTimeout(_frFlashTimer);
   _frFlashTimer = setTimeout(() => { frFlash = null; frRender(); }, FR_FLASH_MS + 100);
