@@ -3436,6 +3436,65 @@ body.modal-blocking .modal-backdrop.show {
 .rtl-divider { font-size: 13.12px; color: var(--text-muted); margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
 .rtl-none { padding: 14px 6px; font-size: 15.2px; color: var(--text-1); }
 .rtl-none span { font-size: 13.44px; color: var(--text-muted); }
+/* 每一則的「分享」鈕（2026-10-06）：做成淡的線框鈕，不要跟訊號本身搶注意力。
+   整列本身是連結，所以鈕的點擊在 JS 裡就先 stopPropagation（見 radarStoryListHtml）。 */
+.rtl-share {
+	flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; gap: 4px;
+	font-size: 12.32px; font-weight: 600; color: var(--text-1); padding: 4px 9px;
+	border: 1px solid var(--border); border-radius: 999px; background: transparent; cursor: pointer;
+}
+.rtl-share:hover { color: var(--text-0); border-color: rgba(139, 124, 255, 0.55); background: rgba(139, 124, 255, 0.1); }
+.rtl-share svg { width: 13px; height: 13px; }
+@media (max-width: 480px) {
+	/* 手機（含 430px 的大螢幕手機）：說明文字本來就只有 ~200px，鈕再占 76px 會把
+	   「現價 4840.00，壓力 4870.00（差 0.6%，強度 5.0）」擠成三行。只留圖示，
+	   aria-label 仍是「分享這則訊號」。桌機的字卡有 560px，留著文字比較好認。 */
+	.rtl-share span { display: none; }
+	.rtl-share { padding: 5px 7px; }
+}
+
+/* ── 分享圖片（signalShareSvg）裡的字樣與底色 ──────────────────────────────
+   這些規則只有產生圖片時用到：signalShareCss() 會把 :root 與所有 .rtl- 規則抽進
+   那張 SVG 裡（圖片進了 <img> 就吃不到外部樣式表）。寫在這裡而不是寫在 JS 裡，
+   是為了讓圖與畫面共用同一組顏色——各寫一份就會慢慢分岔，而分享出去的圖沒人會
+   回報「顏色不一樣」。 */
+.rtl-share-bg { fill: var(--bg-1); }
+.rtl-share-card { fill: var(--surface); stroke: var(--border); stroke-width: 1; }
+.rtl-share-gutter { fill: var(--bg-1); }
+.rtl-share-gutter-edge { stroke: var(--border); stroke-width: 1; }
+/* 被分享的那一則：圈起來，收圖的人才知道在講哪一顆 */
+.rtl-share-ring { fill: none; stroke: var(--accent); stroke-width: 2; }
+.rtl-svg text.rtl-share-brand { fill: var(--accent); font-size: 13px; font-weight: 700; }
+.rtl-svg text.rtl-share-meta  { fill: var(--text-muted); font-size: 12.5px; font-weight: 600; }
+.rtl-svg text.rtl-share-name  { fill: var(--text-0); font-size: 20px; font-weight: 700; }
+.rtl-svg text.rtl-share-title { fill: var(--text-0); font-size: 16px; font-weight: 700; }
+.rtl-svg tspan.rtl-share-time { fill: var(--text-1); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rtl-svg tspan.rtl-share-lvl  { fill: var(--text-1); font-size: 14px; font-weight: 500; }
+.rtl-svg text.rtl-share-desc  { fill: var(--text-1); font-size: 13px; }
+.rtl-svg text.rtl-share-src   { fill: var(--text-muted); font-size: 11.5px; font-weight: 600; }
+.rtl-svg text.rtl-share-foot  { fill: var(--text-muted); font-size: 11.5px; }
+
+/* ── 分享圖片的預覽視窗（#sigshare-gate）── */
+.sigshare-gate {
+	position: fixed; inset: 0; z-index: 20010; display: flex; align-items: center; justify-content: center;
+	padding: 1.1rem; overflow-y: auto; background: rgba(11, 11, 19, 0.92); backdrop-filter: blur(6px);
+}
+.sigshare-box {
+	width: 100%; max-width: 560px; margin: auto; padding: 14px;
+	border: 1px solid var(--border); border-radius: 16px; background: var(--bg-2); color: var(--text-0);
+}
+.sigshare-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.sigshare-title { font-size: 16px; font-weight: 700; flex: 1 1 auto; }
+/* 圖比畫面寬（整個橫軸都在裡面）：預覽縮到容器寬度，傳出去的 PNG 仍是原尺寸 */
+.sigshare-stage {
+	min-height: 120px; display: flex; align-items: center; justify-content: center;
+	border: 1px solid var(--border); border-radius: 12px; background: var(--bg-1);
+	padding: 8px; font-size: 13.5px; color: var(--text-1); text-align: center;
+}
+.sigshare-img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.sigshare-note { margin-top: 9px; font-size: 12.8px; line-height: 1.6; color: var(--text-muted); }
+.sigshare-actions { display: flex; gap: 8px; margin-top: 12px; }
+.sigshare-actions .btn { flex: 1 1 0; font-weight: 600; }
 
 /* ── 通知詳情「為什麼通知你」 ── */
 .why-box {

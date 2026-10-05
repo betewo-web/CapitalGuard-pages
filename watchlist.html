@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="267">
+  <meta name="app-version" content="268">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=267" rel="stylesheet">
+  <link href="watchlist.css?v=268" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1352,6 +1352,25 @@
         </div>
 
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 分享盤中訊號的圖片（故事列每一則的「分享」鈕；shareRadarEntry）═══
+     刻意不是 Bootstrap modal：它要蓋在個股字卡（那也是 modal）上面，兩層 modal 會搶
+     backdrop（方案面板踩過一次），而且關掉它應該回到剛才那張卡、不是回到首頁。
+     走全螢幕 div 這條路，z-index 疊在 modal 之上（同 .update-gate 那一類）。 -->
+<div id="sigshare-gate" class="sigshare-gate" style="display:none" role="dialog" aria-modal="true" aria-labelledby="sigshare-title">
+  <div class="sigshare-box">
+    <div class="sigshare-head">
+      <div class="sigshare-title" id="sigshare-title">分享這則訊號</div>
+      <button type="button" class="btn-close" aria-label="關閉" onclick="closeSignalShare()"></button>
+    </div>
+    <div class="sigshare-stage" id="sigshare-stage"></div>
+    <div class="sigshare-note" id="sigshare-note"></div>
+    <div class="sigshare-actions">
+      <button type="button" class="btn btn-primary btn-sm" id="sigshare-send" disabled onclick="sendSignalShare()">傳給 LINE 好友</button>
+      <button type="button" class="btn btn-outline-light btn-sm" id="sigshare-save" disabled onclick="saveSignalShare()">下載圖片</button>
     </div>
   </div>
 </div>
@@ -8617,11 +8636,17 @@ function renderRadarTimeline(sid) {
   _rtlApplyScroll(prevScroll);
   const headEl = document.getElementById("rtl-story-head");
   if (headEl) headEl.textContent = past ? `${_mdOf(date)} 盤中發生了什麼` : "盤中發生了什麼";
+  // 分享鈕要能把這張圖重畫成一張圖片：它要的東西跟時間軸一模一樣（哪一檔、哪一天、
+  // 那天的參考價位）。在這裡原封不動存一份，而不是等按下去再重算一次——重算就是
+  // 第二份真相，而分享出去的圖片沒人會回來核對（unknown-treated-as-known 那一類）。
+  _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending };
   document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, { past, covered });
   _paintRtlTarget();   // 重畫換掉了節點：正在閃的那一則要接著閃完
 }
 
 // opts.past：畫過去的某一天——不畫「現在」游標、不拿今天的報價與月線當參考、壓力／支撐用 iq.levels（那天存下的）
+// opts.export：回傳 { width, height, inner } 而不是 HTML——分享圖片要的那一張
+//              （整個橫軸畫成一張不會捲的圖）；opts.highlight 是要圈起來的那一則在 entries 裡的序號。
 function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   const liveQ = opts.past ? null : getQuote(sid);
   const priceRaw = Number(iq?.price ?? (opts.past ? NaN : liveQ?.price));
@@ -8816,10 +8841,32 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   // 所以標記永遠不會捲到標籤底下，也不必在右邊留空白。
   const needScroll = x1 > viewW;
   const gw = showNow ? Math.max(gutter, RTL_GUTTER_NOW) : gutter;   // 至少放得下「現在 10:30」
+  const axisSvg = `<line class="rtl-axis" x1="${x0}" y1="${axisY}" x2="${x1}" y2="${axisY}"/>`;
+
+  // 分享圖片（shareRadarEntry）：同一份幾何畫成一張「不會捲」的圖——整個橫軸都在裡面，
+  // 釘住的價格欄原樣接在右邊（translate 到 svgW）。圖片會離開 App，捲不動也點不開，
+  // 所以看不到的那半個上午一定要在圖裡（Howard 2026-10-06：圖片要加寬涵蓋整個橫軸）。
+  // 回傳的是「片段＋尺寸」，外框、頭部、免責由 signalShareSvg 組，這裡只管圖本身。
+  if (opts.export) {
+    const hl = placed[opts.highlight];   // highlight 不在這一天的序列裡（例如盤後提醒）＝不圈
+    const ring = hl
+      ? `<rect class="rtl-share-ring" x="${(hl.x - icon / 2 - 5).toFixed(1)}" y="${(hl.y - icon / 2 - 5).toFixed(1)}"`
+        + ` width="${(icon + 10).toFixed(1)}" height="${(icon + 10).toFixed(1)}" rx="${(11 * (icon / 48) + 5).toFixed(1)}"/>`
+      : "";
+    return {
+      width: svgW + gw, height: RTL_VB_H,
+      inner: linesSvg + nowSvg + emptySvg + axisSvg + ticksSvg + marksSvg + ring
+        // 價格欄的底色與左邊那條分隔線在畫面上是 CSS（.rtl-svg-gutter），SVG 裡要自己畫
+        + `<g transform="translate(${svgW} 0)">`
+        + `<rect class="rtl-share-gutter" x="0" y="0" width="${gw.toFixed(1)}" height="${RTL_VB_H}"/>`
+        + `<line class="rtl-share-gutter-edge" x1="0.5" y1="0" x2="0.5" y2="${RTL_VB_H}"/>`
+        + `${nowLabel}${gutterSvg}</g>`,
+    };
+  }
+
   return `<div class="rtl-chart"><div class="rtl-chart-row">`
     + `<div class="rtl-scroll"><svg class="rtl-svg rtl-svg-plot" width="${svgW}" height="${RTL_VB_H}" viewBox="0 0 ${svgW} ${RTL_VB_H}" role="img" aria-label="盤中時間軸">`
-    + linesSvg + nowSvg + emptySvg
-    + `<line class="rtl-axis" x1="${x0}" y1="${axisY}" x2="${x1}" y2="${axisY}"/>` + ticksSvg + marksSvg
+    + linesSvg + nowSvg + emptySvg + axisSvg + ticksSvg + marksSvg
     + `</svg></div>`
     + `<svg class="rtl-svg rtl-svg-gutter" width="${gw.toFixed(1)}" height="${RTL_VB_H}" viewBox="0 0 ${gw.toFixed(1)} ${RTL_VB_H}" aria-hidden="true">${nowLabel}${gutterSvg}</svg>`
     + `</div>${needScroll ? `<div class="rtl-swipe">← 往左滑，看更早的訊號</div>` : ""}</div>`;
@@ -8880,24 +8927,43 @@ function rtlTextWidth(text, fontSize) {
   return w;
 }
 
+// 五個來源籤都只寫字：進階訊號原本多一個 📐，在同一排裡只有它有圖示，
+// 而且 emoji 當圖示 2026-09-22 起已全站淘汰（Howard 2026-09-24）。
+// 提到模組層是因為分享圖片也要寫同一個籤（同一則訊號在兩個地方不該有兩種說法）。
+const RTL_SRC_LABEL = { builtin: "內建訊號", target: "自訂價位", auto: "自動偵測 · 未推播", rule: "進階訊號", post: "盤後提醒" };
+
+// 這一則在標題後面附的關卡數字。內建訊號與自訂價位講得出關卡的名字（「壓力 213.50」），
+// 其餘只寫數字。故事列與分享圖片共用。
+function rtlEntryLevelText(e) {
+  return (e.src === "builtin" || e.src === "target") ? _signalLevelLabel(e.key, e.level, true)
+       : (Number.isFinite(Number(e.level)) && e.level > 0 ? fmtPrice(e.level) : "");
+}
+
+// 這一則在圖示庫裡是哪一顆（故事列與分享圖片共用；軸上的標記也是同一組圖案）
+function rtlEntryIconRow(e) {
+  return { signal: e.key, severity: e.sev,
+           source: e.src === "rule" ? "rule" : e.src === "post" ? "post_market" : "monitor" };
+}
+
 function radarStoryListHtml(story, opts = {}) {
   const intraday = story.filter(e => e.src !== "post");
   const post = story.filter(e => e.src === "post");
-  // 五個來源籤都只寫字：進階訊號原本多一個 📐，在同一排裡只有它有圖示，
-  // 而且 emoji 當圖示 2026-09-22 起已全站淘汰（Howard 2026-09-24）
-  const srcLabel = { builtin: "內建訊號", target: "自訂價位", auto: "自動偵測 · 未推播", rule: "進階訊號", post: "盤後提醒" };
   const item = (e, i) => {
     const link = e.rowId ? ` role="button" tabindex="0" onclick="openInboxDetailFromRadar('${jsAttr(e.rowId)}')"` : "";
-    const lvl = (e.src === "builtin" || e.src === "target") ? _signalLevelLabel(e.key, e.level, true)
-              : (Number.isFinite(Number(e.level)) && e.level > 0 ? fmtPrice(e.level) : "");
+    const lvl = rtlEntryLevelText(e);
+    // 分享鈕（Howard 2026-10-06）：這一則變成一張圖，傳給 LINE 好友。整列本身是連結
+    // （點開通知詳情），所以鈕要先吃掉這次點擊，否則按分享會順便開詳情。
+    // 認的是 rtlEntryId 而不是 i：這張卡每輪報價都會重畫，序號會跟著當天的序列變動。
+    const share = `<button type="button" class="rtl-share" aria-label="分享這則訊號" title="分享這則訊號"`
+      + ` onclick="event.stopPropagation(); shareRadarEntry('${jsAttr(rtlEntryId(e))}')">${ICON_SHARE}<span>分享</span></button>`;
     return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-eid="${escapeHtml(rtlEntryId(e))}" data-sev="${e.sev}"${link}>
       <div class="rtl-time">${fmtTime(e.at)}</div>
-      ${signalIconSvg({ signal: e.key, severity: e.sev, source: e.src === "rule" ? "rule" : e.src === "post" ? "post_market" : "monitor" }, 38)}
+      ${signalIconSvg(rtlEntryIconRow(e), 38)}
       <div class="rtl-text">
         <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
         ${e.text ? `<div class="rtl-desc">${escapeHtml(e.text)}</div>` : ""}
-        <span class="rtl-src rtl-src-${e.src}">${srcLabel[e.src] || ""}</span>
-      </div></div>`;
+        <span class="rtl-src rtl-src-${e.src}">${RTL_SRC_LABEL[e.src] || ""}</span>
+      </div>${share}</div>`;
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
   if (!html) {
@@ -8919,6 +8985,237 @@ function radarStoryListHtml(story, opts = {}) {
   }
   if (post.length) html += `<div class="rtl-divider">收盤後</div>` + post.map((e, i) => item(e, intraday.length + i)).join("");
   return html;
+}
+
+// ── 分享這則訊號：做成一張圖片傳給 LINE 好友（Howard 2026-10-06）────────────────
+// 「圖片要加寬涵蓋整個橫軸」：畫面上的時間軸 v261 起是左右捲的，截圖只截得到看得見
+// 的那一段。分享圖片走 radarTimelineChartHtml 的 export 模式——整個橫軸（開盤到現在）
+// 畫成一張不會捲的圖，價格欄接在右邊，被分享的那一則圈起來。
+//
+// 產生的路徑：同一份 SVG 幾何 → 內嵌 .rtl-* 樣式 → data URL → canvas → PNG blob →
+// navigator.share({ files })。傳圖片只有 Web Share Level 2 這一條路（LINE 的分享網址
+// 只收文字），所以桌機與不支援的瀏覽器退回「下載圖片、自己貼到聊天室」。
+//
+// 圖裡一定有免責那一行：這張圖會離開 App，走到沒看過 #disclaimer-gate 的人面前
+// （COMPLIANCE.md 第 7 條「免責在 App 內」的同一個理由，只是方向相反）。
+let _rtlShareCtx = null;                                  // renderRadarTimeline 留下的那一份
+let _sigShare = { url: "", file: null, text: "", name: "", sid: "" };
+const SIGNAL_SHARE = { pad: 14, scale: 2, minW: 360, gap: 12, foot: 32, descLines: 3 };
+// 圖片裡的字體：SVG 一進 <img> 就載不到外部字型（Noto Sans TC 也一樣），只能點名
+// 各平台內建的中文字體——Android 的 Noto CJK、iOS 的 PingFang、Windows 的正黑。
+const SIGNAL_SHARE_FONT = "'Noto Sans TC','Noto Sans CJK TC','PingFang TC','Microsoft JhengHei',sans-serif";
+
+// 圖片裡的樣式：從已載入的 watchlist.css 抽 :root（顏色變數）與所有 .rtl- 規則。
+// 刻意不在 JS 裡再寫一份顏色——抄一份就會跟畫面慢慢分岔，而分享出去的圖片不會有人
+// 回來說「顏色跟 App 不一樣」。抽不到（樣式表還沒載好、或跨來源）時只給保底的字色，
+// 圖寧可樸素，也不要變成黑底黑字。
+const SIGNAL_SHARE_CSS_FLOOR = ".rtl-svg text{fill:#c9c9d4}";
+let _sigShareCss = "";
+function signalShareCss() {
+  if (_sigShareCss) return _sigShareCss;
+  let css = "";
+  for (const sheet of Array.from(document.styleSheets || [])) {
+    let rules = null;
+    try { rules = sheet.cssRules; } catch { continue; }   // CDN 的樣式表讀不到 cssRules
+    for (const rule of Array.from(rules || [])) {
+      const sel = rule.selectorText || "";
+      if (sel === ":root" || sel.includes(".rtl-")) css += `${rule.cssText}\n`;
+    }
+  }
+  // 抽到了才記住：樣式表還沒載好那一次若把保底版本快取起來，之後每一張圖都會是
+  // 沒有顏色的那一版（而圖已經傳出去了，沒有人會回來告訴你）
+  if (css.length > 200) _sigShareCss = css;
+  return _sigShareCss || SIGNAL_SHARE_CSS_FLOOR;
+}
+
+// SVG 的 <text> 不會自己折行：說明文字要自己切。超過 maxLines 行就用 … 收尾。
+function _sigShareWrap(text, maxW, fs, maxLines) {
+  const out = [];
+  let line = "";
+  for (const ch of Array.from(String(text || "").replace(/\s+/g, " ").trim())) {
+    if (rtlTextWidth(line + ch, fs) <= maxW) { line += ch; continue; }
+    if (out.length + 1 >= maxLines) {
+      out.push(Array.from(line).slice(0, -1).join("") + "…");
+      return out;
+    }
+    out.push(line);
+    line = ch;
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+// 一張完整的分享圖（SVG 字串）：頭部（品牌、哪一檔、哪一天）、被分享的那一則、
+// 整個橫軸的時間軸、底部免責。1 單位＝1px，輸出時整張乘 SIGNAL_SHARE.scale。
+function signalShareSvg(ctx, e) {
+  const { pad, gap, foot, minW, descLines } = SIGNAL_SHARE;
+  const chart = radarTimelineChartHtml(ctx.sid, ctx.intraday, ctx.ref, {
+    past: ctx.past, covered: ctx.covered, pending: ctx.pending, export: true,
+    highlight: ctx.intraday.findIndex(x => rtlEntryId(x) === rtlEntryId(e)),
+  });
+  const textX = pad + 58;                                 // 圖示 34 ＋ 左右間距
+  const lvl = rtlEntryLevelText(e);
+  // 標題那一行不折行（時間＋標題＋關卡），所以寬度要讓得下它：進階訊號的標題是
+  // 使用者自己取的規則名，長起來沒有上限，圖不加寬就會被切掉在邊緣外面。
+  const titleW = rtlTextWidth(fmtTime(e.at), 14) + 9 + rtlTextWidth(e.title || "", 16)
+               + (lvl ? 7 + rtlTextWidth(lvl, 14) : 0);
+  const W = Math.max(minW, chart.width + pad * 2, textX + titleW + pad + 12);
+  const lines = _sigShareWrap(e.text, W - textX - pad, 13, descLines);
+  const cardY = 64, cardH = 56 + lines.length * 18;
+  const chartY = cardY + cardH + gap;
+  const H = chartY + chart.height + foot;
+  // 日期一律寫出來，不寫「今天」：畫面上的「今天」有上下文，圖片沒有——它會被轉傳、
+  // 被明天的人打開，那時候「今天」講的是哪一天沒人知道
+  const day = `${_mdOf(ctx.date)}（${_weekdayZh(ctx.date)}）`;
+  const art = signalIconParts(rtlEntryIconRow(e));
+  const body = [
+    `<rect class="rtl-share-bg" x="0" y="0" width="${W}" height="${H}"/>`,
+    `<text class="rtl-share-brand" x="${pad}" y="25">CapitalGuard-股市雷達</text>`,
+    `<text class="rtl-share-meta" x="${W - pad}" y="25" text-anchor="end">${escapeHtml(day)} · ${ctx.intraday.length} 則訊號</text>`,
+    `<text class="rtl-share-name" x="${pad}" y="51">${escapeHtml(`${ctx.name} ${ctx.sid}`.trim())}</text>`,
+    `<rect class="rtl-share-card" x="${pad}" y="${cardY}" width="${W - pad * 2}" height="${cardH}" rx="14"/>`,
+    `<g transform="translate(${pad + 12} ${cardY + 13}) scale(${(34 / 48).toFixed(4)})">`
+      + `<rect width="48" height="48" rx="11" fill="${art.bg}"/>${art.inner}</g>`,
+    `<text class="rtl-share-title" x="${textX}" y="${cardY + 27}">`
+      + `<tspan class="rtl-share-time">${escapeHtml(fmtTime(e.at))}</tspan>`
+      + `<tspan dx="9">${escapeHtml(e.title)}</tspan>`
+      + (lvl ? `<tspan class="rtl-share-lvl" dx="7">${escapeHtml(lvl)}</tspan>` : "")
+      + `</text>`,
+    lines.map((t, i) => `<text class="rtl-share-desc" x="${textX}" y="${cardY + 48 + i * 18}">${escapeHtml(t)}</text>`).join(""),
+    `<text class="rtl-share-src" x="${textX}" y="${cardY + cardH - 10}">${escapeHtml(RTL_SRC_LABEL[e.src] || "")}</text>`,
+    `<g transform="translate(${pad} ${chartY})">`
+      + `<rect class="rtl-share-card" x="0" y="0" width="${chart.width.toFixed(1)}" height="${chart.height}" rx="12"/>`
+      + chart.inner + `</g>`,
+    `<text class="rtl-share-foot" x="${pad}" y="${H - 12}">公開市場資料整理，不是投資建議</text>`,
+  ].join("");
+  // 內容包在 <g class="rtl-svg"> 裡：整組樣式都以它當祖先（.rtl-svg text.rtl-abbr …）。
+  // 不能把 class 掛在 <svg> 根上——那條規則帶 max-width:400px，根元素吃到就把整張
+  // 寬圖壓回 400px。字體掛在根上（.rtl-svg 的 font-family 是 inherit）。
+  return {
+    width: W, height: H,
+    text: `<svg xmlns="http://www.w3.org/2000/svg" width="${W * SIGNAL_SHARE.scale}" height="${H * SIGNAL_SHARE.scale}"`
+      + ` viewBox="0 0 ${W} ${H}" font-family="${SIGNAL_SHARE_FONT}">`
+      + `<style><![CDATA[${signalShareCss()}]]></style>`
+      + `<g class="rtl-svg">${body}</g></svg>`,
+  };
+}
+
+// SVG 字串 → PNG blob。SVG 根已經帶了放大後的 width／height，所以 canvas 照 natural
+// 尺寸畫一次就是高解析度（手機看圖會放大，1 倍的圖會糊）。
+function _sigSharePng(svgText, w, h) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(w);
+      canvas.height = Math.round(h);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(b => (b ? resolve(b) : reject(new Error("這台裝置轉不出 PNG"))), "image/png");
+    };
+    img.onerror = () => reject(new Error("圖片畫不出來"));
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
+  });
+}
+
+async function buildSignalShareImage(ctx, e) {
+  const svg = signalShareSvg(ctx, e);
+  const blob = await _sigSharePng(svg.text, svg.width * SIGNAL_SHARE.scale, svg.height * SIGNAL_SHARE.scale);
+  const hhmm = fmtTime(e.at).replace(":", "");
+  const lvl = rtlEntryLevelText(e);
+  const day = _mdOf(ctx.date);        // 同上：訊息裡也不寫「今天」
+  const name = `capitalguard-${ctx.sid}-${ctx.date}-${hhmm}.png`;
+  return {
+    url: URL.createObjectURL(blob),
+    // File 不是每個瀏覽器都有（舊的 iOS 只有 Blob）：沒有就只剩下載那條路
+    file: typeof File === "function" ? new File([blob], name, { type: "image/png" }) : null,
+    name, sid: ctx.sid,
+    text: `${ctx.name} ${ctx.sid}｜${day} ${fmtTime(e.at)} ${e.title}${lvl ? ` ${lvl}` : ""}`
+      + `\nCapitalGuard-股市雷達（公開市場資料整理，不是投資建議）\n${FR_INVITE_URL}`,
+  };
+}
+
+function _sigShareCanSend() {
+  return !!(_sigShare.file && navigator.canShare && navigator.canShare({ files: [_sigShare.file] }));
+}
+
+function _sigShareReset() {
+  if (_sigShare.url) URL.revokeObjectURL(_sigShare.url);   // blob 不收會一直佔記憶體
+  _sigShare = { url: "", file: null, text: "", name: "", sid: "" };
+  for (const id of ["sigshare-send", "sigshare-save"]) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = true;
+  }
+}
+
+// 這張是全螢幕 div 而不是 Bootstrap modal（它蓋在個股字卡那張 modal 上面）：
+// Esc 要自己收，否則 Bootstrap 會拿去關掉底下的字卡，圖片還留在畫面上。
+function _sigShareKeydown(ev) {
+  if (ev.key !== "Escape") return;
+  ev.stopPropagation();
+  ev.preventDefault();
+  closeSignalShare();
+}
+
+async function shareRadarEntry(eid) {
+  const ctx = _rtlShareCtx;
+  const entry = (ctx && Array.isArray(ctx.story) ? ctx.story : []).find(x => rtlEntryId(x) === eid);
+  const gate = document.getElementById("sigshare-gate");
+  if (!ctx || !entry || !gate) return;
+  _sigShareReset();
+  const stage = document.getElementById("sigshare-stage");
+  stage.textContent = "圖片產生中…";
+  document.getElementById("sigshare-note").textContent = "";
+  gate.style.display = "flex";
+  document.addEventListener("keydown", _sigShareKeydown, true);
+  trackActivity("signal_share_open", { sid: ctx.sid, key: entry.key || "", src: entry.src || "" });
+  try {
+    _sigShare = await buildSignalShareImage(ctx, entry);
+    const img = document.createElement("img");
+    img.className = "sigshare-img";
+    img.alt = `${ctx.name} ${ctx.sid} ${fmtTime(entry.at)} ${entry.title}`;
+    img.src = _sigShare.url;
+    stage.replaceChildren(img);
+    document.getElementById("sigshare-note").textContent = _sigShareCanSend()
+      ? "按「傳給 LINE 好友」會打開手機的分享面板，選 LINE 再選好友或群組。圖裡是一整個上午的時間軸。"
+      : "這台裝置不能直接傳圖片：先下載，再到 LINE 的聊天室貼上這張圖。";
+  } catch (err) {
+    stage.textContent = `圖片產生失敗：${(err && err.message) || err}`;
+    return;
+  }
+  document.getElementById("sigshare-save").disabled = false;
+  document.getElementById("sigshare-send").disabled = false;
+}
+
+function closeSignalShare() {
+  const gate = document.getElementById("sigshare-gate");
+  if (gate) gate.style.display = "none";
+  document.removeEventListener("keydown", _sigShareKeydown, true);
+  document.getElementById("sigshare-stage")?.replaceChildren();
+  _sigShareReset();
+}
+
+async function sendSignalShare() {
+  if (!_sigShare.file) { saveSignalShare(); return; }
+  if (_sigShareCanSend()) {
+    try {
+      await navigator.share({ files: [_sigShare.file], text: _sigShare.text });
+      trackActivity("signal_share_send", { via: "share", sid: _sigShare.sid });
+      return;
+    } catch (err) {
+      if (err && err.name === "AbortError") return;        // 自己在分享面板按取消，不是失敗
+    }
+  }
+  saveSignalShare();                                       // 不支援或面板打不開：至少把圖存下來
+}
+
+function saveSignalShare() {
+  if (!_sigShare.url) return;
+  const a = document.createElement("a");
+  a.href = _sigShare.url;
+  a.download = _sigShare.name;
+  a.click();
+  trackActivity("signal_share_send", { via: "download", sid: _sigShare.sid });
+  document.getElementById("sigshare-note").textContent = "圖片已存到下載資料夾，到 LINE 的聊天室貼上就行。";
 }
 
 // 進階訊號通知的 event_key 形如 "2330:rule:{uuid}:2026-08-30"
