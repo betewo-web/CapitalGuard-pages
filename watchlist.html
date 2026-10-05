@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="265">
+  <meta name="app-version" content="266">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=265" rel="stylesheet">
+  <link href="watchlist.css?v=266" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7115,7 +7115,8 @@ function renderHome() {
   // 每檔自選股一列：方向、近 N 日每天的則數（與雷達列同一個 radarStoryOf，只是不畫縮寫）、
   // 今天的狀態、今天的事件數、貼著幾條關卡。評分 2026-09-22 從方塊上拿掉（Howard）——在 📊 統計 分頁看
   // 好友分享給我的（已接受、進行中）接在自選股後面，同一套欄位，多一個 shared。
-  // 一檔只有一個來源（後端保證），所以兩份清單不會有同一個代號。
+  // 同一檔可以同時是自己的自選股、又是好友分享來的（2026-10-05 起並存：設定可能不同，視為不同
+  // 項目）。所以同一個代號可能出現不只一列——「自選」與「分享」各看各的，只有「持股」要去重。
   const rows = watchlistRows.concat(sharedInRows()).map(row => {
     const sid = String(row.stock_id || "").trim();
     const name = getPreferredStockName(sid, row.stock_name) || sid;
@@ -7156,7 +7157,7 @@ function renderHome() {
   const heldMap = holdingBySid();
   const byFilter = {
     mine:   rows.filter(r => !r.shared),
-    held:   rows.filter(r => heldMap.has(r.sid)),
+    held:   homeHeldRows(rows, heldMap),
     shared: rows.filter(r => r.shared),
   };
   syncHomeFilter({ mine: byFilter.mine.length, held: byFilter.held.length, shared: byFilter.shared.length });
@@ -7190,6 +7191,19 @@ function renderHome() {
   // 當日事件的本機通知一天只發一次，而使用者多半停在這一頁——只在盤後頁發的話，
   // 沒點進盤後就永遠收不到。
   sendTodayImportantInfoNotification(_collectTodayEvents());
+}
+
+// 「持股」那一格：有部位的股票，一檔只列一次。同一檔可能同時是自選股與好友分享的（並存），
+// 持股是自己的事，所以自己的那一列優先；自己沒有那一檔才列分享來的（同一檔好幾則分享只列第一則）。
+function homeHeldRows(rows, heldMap) {
+  const own = new Set(rows.filter(r => !r.shared).map(r => r.sid));
+  const seen = new Set();
+  return rows.filter(r => {
+    if (!heldMap.has(r.sid)) return false;
+    if (r.shared && (own.has(r.sid) || seen.has(r.sid))) return false;
+    if (r.shared) seen.add(r.sid);
+    return true;
+  });
 }
 
 // 漲／平／跌：盤中即時（現價對前一日收盤），漲跌為零才是平——Howard 2026-09-20 定案：
@@ -7231,7 +7245,9 @@ function homeTileHtml(r) {
   // 與「🌙 盤後」頁。r.standout 仍用於排序（今天有事的排前面）。
   // 評分 2026-09-22 從方塊上拿掉（Howard）：首頁只講「今天誰有事」，評分變化在 📊 統計 分頁。
   // 沒有事件就連第二行都不畫，一列就是一行
-  return `<div class="home-tile${r.todayCount ? " is-hot" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}')">
+  // 分享來的那一格把 share_id 帶進字卡（自己的自選股帶空字串）：同一檔可能自己也有，
+  // 字卡要知道是從哪一個來源點進來的
+  return `<div class="home-tile${r.todayCount ? " is-hot" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
       <div class="home-tile-head">
         <span class="home-tile-name">${escapeHtml(r.name)}</span>${r.shared
           ? `<span class="home-tile-shared" title="好友分享給我">${ICON_SHARE}${escapeHtml(r.shared.from_name || "好友")}</span>` : ""}${dir}${live}
@@ -8248,6 +8264,9 @@ function radarStoryOf(sid, date = null) {
 // 刻意不畫價格路徑：這一頁講的是「發生了什麼」，走勢留給 K 線。
 let radarTimelineSid = null;
 let radarTimelineDate = null;  // null＝雷達的交易日；過去的日期＝從 signal_history 畫那天（點首頁格子／日期籤）
+// 這張字卡是從哪一則分享點進來的（share_id）；null＝不是從分享的那一格進來。
+// 同一檔可以同時是自選股與好友分享的，光看代號分不出要顯示哪一個的「來自誰、到何時」。
+let radarTimelineShare = null;
 const RTL_SESSION_MIN = 270;   // 09:00 → 13:30
 const RTL_TICKS = [["09:00", 0], ["10:00", 60], ["11:00", 120], ["12:00", 180], ["", 240], ["13:30", 270]];
 // 參考橫線的名稱：訊號自己講的那條線
@@ -8282,6 +8301,7 @@ function openStockCard(sid, opts = {}) {
   const date = opts.date;
   _rtlScrollKey = "";     // 每次打開字卡，時間軸都從最右邊（現在）開始——上次捲到哪裡不算數
   radarTimelineSid = sidKey;
+  radarTimelineShare = opts.share || null;
   _refreshQuotesIfStale();      // 在別的分頁待了一陣子才開字卡：報價可能是幾分鐘前的
   radarTimelineDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) && date !== radarSessionDate() ? date : null;
   trackActivity("radar_timeline_open", { stock: sidKey, date: radarTimelineDate || "" });
@@ -8293,8 +8313,8 @@ function openStockCard(sid, opts = {}) {
 }
 
 // 首頁方塊與雷達列的入口（名字沿用，呼叫的地方很多）：開卡片、停在「盤中雷達」
-function openRadarTimeline(sid, date = null) {
-  openStockCard(sid, { date });
+function openRadarTimeline(sid, date = null, share = null) {
+  openStockCard(sid, { date, share });
 }
 
 // 換分頁。K 線只有切到那一頁才載——ECharts 要有可見的容器才量得到高度，
@@ -8496,7 +8516,9 @@ function renderRadarTimeline(sid) {
   const date = radarTimelineDate || sessionDate;
   const past = date !== sessionDate;
   const wl = watchlistRows.find(w => String(w.stock_id || "").trim() === sid);
-  const shared = sharedInOf(sid);
+  // 從分享的那一格點進來：顯示那一則分享的資訊。不是的話，自己有這一檔就當成自己的；
+  // 自己沒有才退回「這一檔的第一則分享」（例如從通知點進一檔只有分享的股票）。
+  const shared = radarTimelineShare ? sharedInById(radarTimelineShare) : (wl ? null : sharedInOf(sid));
   const name = getPreferredStockName(sid, wl ? wl.stock_name
     : shared ? shared.stock_name
     : (showcase && showcase.stock_id === sid ? showcase.stock_name : "")) || sid;
@@ -11686,8 +11708,8 @@ async function addStock() {
     if (isLimitError(e, "watchlist")) {
       msgEl.innerHTML = limitPromptHtml("watchlist", e);
     } else if (String(e.message).includes("dup:share")) {
-      // 一檔只能有一個來源：這檔已經由好友分享給他了
-      msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已由好友分享給你。到「分享 → 分享股票」移除那則分享，才能加入自選股</span>`;
+      // 自選股與好友分享的同一檔可以並存，但設定一模一樣的不行（2026-10-05）——那只是同一件事佔兩格
+      msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已由好友分享給你，而且設定跟新加的自選股完全相同，不需要再加一次。</span>`;
     } else if (e.message.includes("23505") || e.message.includes("unique")) {
       msgEl.innerHTML = `<span class="text-warning">⚠️ ${sid} 已在清單中</span>`;
     } else {
@@ -12732,6 +12754,10 @@ function sharedInRows() {
                  _share: { share_id: x.share_id, from_name: x.from_name, expires_at: x.expires_at, label: x.label } }));
 }
 function sharedInSids() { return sharedInRows().map(r => String(r.stock_id || "").trim()); }
+function sharedInById(shareId) {
+  const row = sharedInRows().find(r => r._share.share_id === shareId);
+  return row ? { ...row._share, stock_name: row.stock_name } : null;
+}
 function sharedInOf(sid) {
   const row = sharedInRows().find(r => String(r.stock_id || "").trim() === String(sid || "").trim());
   return row ? { ...row._share, stock_name: row.stock_name } : null;
@@ -13061,6 +13087,7 @@ function frRenderSharesIn() {
     const c = s.conflict;       // 這位使用者已經有同一檔：{kind: watchlist|share, label, from_name, has_holding}
     let box = "", actions;
     if (c) {
+      // 同一檔可以並存；會走到這裡的只有「設定一模一樣」的（share_conflict，2026-10-05）。
       // 直接列出撞到的是哪一個，並給一步解決的按鈕——不要叫人自己去找、自己去刪
       const what = c.kind === "watchlist"
         ? `<div class="fr-conflict-item"><span class="fr-chip">自選股</span><b>${escapeHtml(c.label)}</b></div>
@@ -13068,9 +13095,9 @@ function frRenderSharesIn() {
         : `<div class="fr-conflict-item"><span class="fr-chip">好友分享</span><b>${escapeHtml(c.label)}</b>
              <span class="fr-hint">來自 ${escapeHtml(c.from_name || "好友")}</span></div>`;
       box = `<div class="fr-hold">
-          <div>你已經有這一檔了。同一檔股票只能有一個來源：</div>
+          <div>你已經有這一檔，而且設定跟這則分享完全相同：</div>
           ${what}
-          <div class="fr-hint">要改用這則分享的設定，可以直接幫你移除原本的。</div>
+          <div class="fr-hint">設定相同就不需要兩個。想改成跟著這則分享走（對方之後更新，你也會跟著變），可以幫你移除原本的。</div>
         </div>`;
       actions = `
         <button class="btn btn-sm btn-primary" data-fr="in-replace" data-id="${sid(s)}"
@@ -14024,7 +14051,7 @@ document.addEventListener("click", async e => {
       case "in-accept":
         // 接受被擋不是失敗：邀請轉成保留，畫面上會出現原因與解法
         if (res.held === "limit") frToast("「自選+分享」已達上限，邀請先保留著", true);
-        else if (res.held === "duplicate") frToast("你已經有這檔了，邀請先保留著", true);
+        else if (res.held === "duplicate") frToast("你已經有設定完全相同的這一檔，邀請先保留著", true);
         else frToast("已接受，這檔會出現在盤中「股票雷達」的「分享」那一格");
         break;
     }
