@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="263">
+  <meta name="app-version" content="264">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=263" rel="stylesheet">
+  <link href="watchlist.css?v=264" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1697,6 +1697,12 @@ let _alertFocusRetries = 0;
 let _pendingAlertFocusAt = 0;   // 何時開始等：等太久（換了分頁）就放棄，別在下次進通知頁時突然跳
 let _lastAlertClickAt = 0;      // 最後處理的那次點擊（SW 給的時間戳）：訊息與 Cache 備援兩條路只認一次
 let _alertJumpedThisBoot = false; // 這次開機是點通知進來的：別再疊推播／規則推薦視窗上去
+// 沒有 ?alert= 的通知（本機發的「今日股票資訊彙整」帶 #post）要去的分頁。
+// 以前這條路是「當場 switchTab 就算了」，所以兩種情況會把點擊整個吞掉：
+// 還沒登入完（switchTab 的條件不成立），以及回前景時正好要套用新版（_maybeReload
+// 只把 ?alert= 帶過重載，分頁目標就留在舊頁面裡跟著消失）。
+let pendingTabFocus = null;
+let _pendingTabFocusAt = 0;
 // 閃爍改成「狀態」而不是掛在 DOM 上：列表在閃爍中途重畫（報告資料回來、回前景重抓）
 // 會把整段 innerHTML 換掉，掛在舊元素上的動畫就此消失——這是「有時候不閃」的原因。
 let _inboxTargetRowId = null;
@@ -4321,10 +4327,25 @@ async function showMain() {
     const q = rest.toString();
     history.replaceState(null, "", location.pathname + (q ? `?${q}` : "") + (location.hash || "#inbox"));
   }
+  // 只指定分頁的通知（本機的「今日股票資訊彙整」→ #post）：_maybeReload 把目標帶成
+  // ?tab=，視窗沒開那條路則是 hash。網址上的優先，用完一樣從網址拿掉。
+  const urlTab = new URLSearchParams(location.search).get("tab");
   const hashTab = (location.hash || "").replace("#", "");
+  const notifTab = APP_TABS.includes(urlTab) ? urlTab
+                 : (pendingTabFocus && Date.now() - _pendingTabFocusAt <= 60000) ? pendingTabFocus
+                 : null;
+  const bootTab = notifTab || (APP_TABS.includes(hashTab) ? hashTab : "home");
+  pendingTabFocus = null;
+  if (urlTab) {
+    const rest = new URLSearchParams(location.search);
+    rest.delete("tab");
+    const q = rest.toString();
+    history.replaceState(null, "", location.pathname + (q ? `?${q}` : "") + `#${bootTab}`);
+  }
+  if (notifTab) _alertJumpedThisBoot = true;   // 點通知進來的這次不疊推薦視窗
   // 有要定位的通知就一定去通知頁：hash 被系統吃掉時（iOS 從主畫面啟動）
   // 只看 hash 會停在首頁，pendingAlertFocus 就永遠等不到它的分頁
-  switchTab(bootAlert ? "inbox" : (APP_TABS.includes(hashTab) ? hashTab : "home"), true);
+  switchTab(bootAlert ? "inbox" : bootTab, true);
   trackActivity("app_open", { tab: currentTab });
   // 網址上沒有參數：可能是 iOS 忽略了 openWindow 的網址，改問 SW 留在 Cache 的目標
   if (!bootAlert) _consumePendingAlertFromCache();
@@ -4601,6 +4622,15 @@ function _maybeReload() {
   const alertKey = pendingAlertFocus || _inboxTargetKey;
   if (alertKey) {
     location.replace(location.pathname + "?alert=" + encodeURIComponent(alertKey) + "#inbox");
+    return;
+  }
+  // 沒有 event_key、只指定分頁的通知（本機的「今日股票資訊彙整」→ #post）同樣要帶過重載。
+  // 用 ?tab= 而不是只換 hash：只差 fragment 的 location.replace 是同文件導覽，不會重載，
+  // 新版就套用不上去。showMain 會讀它、切過去、再從網址上拿掉。
+  if (pendingTabFocus) {
+    const tab = pendingTabFocus;
+    pendingTabFocus = null;
+    location.replace(location.pathname + "?tab=" + encodeURIComponent(tab) + "#" + tab);
     return;
   }
   location.reload();
@@ -6710,7 +6740,28 @@ function _handleNotificationClickUrl(url, at) {
     else localStorage.setItem("cg-plan-intent", plan);
     return;
   }
-  if (APP_TABS.includes(tab) && state.userId) switchTab(tab);
+  if (APP_TABS.includes(tab)) {
+    pendingTabFocus = tab;
+    _pendingTabFocusAt = Date.now();
+    _alertJumpedThisBoot = true;   // 這次開機是點通知進來的：別再把推播／規則推薦視窗疊上去
+    if (!state.userId) return;     // 還沒登入：留給 showMain 接手，別讓這次點擊白點
+    _applyPendingTabFocus();
+  }
+}
+
+// 切到通知指定的那一頁。與 focusInboxAlert 同樣先收掉蓋在上面的卡片：
+// 上次離開時停在 K 線／方案／規則面板上的話，底下換了分頁也看不到。
+function _applyPendingTabFocus() {
+  const tab = pendingTabFocus;
+  if (!tab) return;
+  // 等太久（使用者早就自己換到別的分頁做別的事）就放棄，別在下次開 App 時憑空跳一下
+  if (Date.now() - _pendingTabFocusAt > 60000) { pendingTabFocus = null; return; }
+  if (!state.userId) return;
+  _dismissOverlaysForAlertJump().then(() => {
+    if (pendingTabFocus !== tab) return;   // 等待期間又點了別的通知
+    pendingTabFocus = null;
+    switchTab(tab);
+  });
 }
 
 function updateInboxBadge() {
@@ -12135,7 +12186,9 @@ if ('serviceWorker' in navigator) {
     }
     // 視窗已開時點了手機通知：SW 只能 focus，跳到哪一則由頁面自己處理
     if (e.data && e.data.type === 'notification-click') {
-      _handleNotificationClickUrl(e.data.url);
+      // at 要一起傳：那是 SW 蓋在這一次點擊上的時間戳，少了它，回前景時 Cache
+      // 備援會把同一次點擊再處理一遍（跳兩次）
+      _handleNotificationClickUrl(e.data.url, e.data.at);
     }
     // 推播在視窗開著時到達：守門員把內容丟過來，先插進通知匣與雷達，不等下一輪讀倉庫（F1）
     if (e.data && e.data.type === 'push-received') {
