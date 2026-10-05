@@ -3363,8 +3363,30 @@ body.modal-blocking .modal-backdrop.show {
 .rtl-chart-row { display: flex; align-items: flex-start; justify-content: center; }
 .rtl-scroll { flex: 0 1 auto; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
 .rtl-svg-plot { width: auto; max-width: none; margin: 0; }
-.rtl-svg-gutter { flex: 0 0 auto; width: auto; max-width: none; margin: 0; }
-.rtl-swipe { font-size: 11.5px; color: var(--text-muted); text-align: center; padding-top: 4px; }
+/* 釘住的那一欄要看得出來是釘住的（Howard 2026-10-05：讓人知道該在左邊那一半滑）：
+   自己的底色＋一條分隔線，像走勢圖右邊的價格軸。顏色只做區隔、不帶任何意義。 */
+.rtl-svg-gutter {
+	flex: 0 0 auto; width: auto; max-width: none; margin: 0;
+	background: var(--bg-1); border-left: 1px solid var(--border); border-radius: 0 10px 10px 0;
+}
+/* 哪一邊還有東西，那一邊就淡出去——捲到底的那一側不淡，免得第一顆／最後一顆被糊掉 */
+.rtl-scroll.has-left {
+	-webkit-mask-image: linear-gradient(to right, transparent 0, #000 22px, #000 100%);
+	mask-image: linear-gradient(to right, transparent 0, #000 22px, #000 100%);
+}
+.rtl-scroll.has-right {
+	-webkit-mask-image: linear-gradient(to left, transparent 0, #000 22px, #000 100%);
+	mask-image: linear-gradient(to left, transparent 0, #000 22px, #000 100%);
+}
+.rtl-scroll.has-left.has-right {
+	-webkit-mask-image: linear-gradient(to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
+	mask-image: linear-gradient(to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
+}
+.rtl-swipe {
+	margin: 6px auto 0; width: fit-content; font-size: 12.5px; font-weight: 600;
+	color: var(--text-1); background: var(--bg-1); border: 1px solid var(--border);
+	border-radius: 999px; padding: 3px 12px;
+}
 .rtl-svg text { fill: var(--text-muted); font-size: 12px; }
 .rtl-line { stroke: rgba(201, 201, 212, 0.45); stroke-width: 1.1; stroke-dasharray: 5 4; }
 .rtl-line-prev { stroke: rgba(146, 146, 163, 0.45); stroke-dasharray: 2 3; }
