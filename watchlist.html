@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="271">
+  <meta name="app-version" content="272">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=271" rel="stylesheet">
+  <link href="watchlist.css?v=272" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7046,8 +7046,14 @@ function openInboxDetail(rowId) {
   document.getElementById("alert-history-view-stock-btn").style.display = sid ? "inline-flex" : "none";
   document.getElementById("alert-history-settings-btn").style.display = wl ? "inline-flex" : "none";
 
+  // 體驗期結束／降級之後，通知匣裡還留著體驗期間那幾則「每日分析報告」。按鈕照舊寫
+  // 「開啟分析報告」，按下去卻換成方案面板——看起來像跑錯頁（2026-10-06 Howard）。
+  // 報告確實是付費功能，所以不是放行，而是先把字講清楚。
   const isDailyReport = String(source || "").startsWith("daily_report");
-  document.getElementById("alert-history-open-report-btn").style.display = isDailyReport ? "inline-flex" : "none";
+  const reportBtn = document.getElementById("alert-history-open-report-btn");
+  reportBtn.style.display = isDailyReport ? "inline-flex" : "none";
+  reportBtn.textContent = isDailyReport && !planAllows("stats_enabled")
+    ? "分析報告（需升級方案）" : "開啟分析報告";
 
   document.getElementById("alert-history-open-plan-btn").style.display =
     INBOX_PLAN_SOURCES.includes(source) ? "inline-flex" : "none";

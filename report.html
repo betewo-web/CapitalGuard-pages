@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="271">
+  <meta name="app-version" content="272">
 <title>台股每日分析報告</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,6 +23,11 @@
   .btn-wl { background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.35);
              color:#fff; border-radius:6px; padding:4px 14px; font-size:.82rem; text-decoration:none; }
   .btn-wl:hover { background:rgba(255,255,255,.28); color:#fff; }
+  /* 關閉鈕是這一頁唯一的出口（見下方 setupCloseButton）：實色白底，不要做成
+     深色疊在深色頂條上——那就是 v269 那顆看不見的 ✕ */
+  .btn-x { background:#fff; border:0; color:#1a237e; border-radius:6px;
+           padding:4px 13px; font-size:.82rem; font-weight:700; cursor:pointer; }
+  .btn-x:hover { background:#e8eaf6; }
   .btn-logout { background:transparent; border:1px solid rgba(255,255,255,.35);
                 color:rgba(255,255,255,.75); border-radius:6px; padding:4px 10px;
                 font-size:.78rem; cursor:pointer; }
@@ -135,7 +140,8 @@
     <div class="brand">📊 台股每日分析報告</div>
     <div class="nav-right">
       <div id="date-tabs" class="d-flex gap-1"></div>
-      <a href="watchlist.html" class="btn-wl">自選股</a>
+      <a href="watchlist.html" class="btn-wl" id="back-wl">自選股</a>
+      <button class="btn-x" id="close-report" onclick="closeReport()" title="關閉報告">✕ 關閉</button>
       <button class="btn-logout" onclick="logout()">登出</button>
     </div>
   </div>
@@ -981,6 +987,38 @@ function _buildOption(pd, levels, period) {
     ]
   };
 }
+
+// ── 關閉這一頁 ──────────────────────────────────────────────────
+// App 裡的「開啟分析報告」是 window.open 開出來的，而 PWA 以獨立視窗模式跑的時候
+// 那個新視窗沒有網址列、沒有返回鍵：頁面自己不給出口，就只能把整個 App 關掉
+// （2026-10-06 Emma 實際遇到）。所以頂條固定放一顆「✕ 關閉」。
+// 關不掉的情況（直接點推播開的、自己輸入網址的視窗，瀏覽器不允許 script 關它）
+// 退回 App 首頁——至少不是死路。
+function reportIsPopup() {
+  try { return !!window.opener; } catch { return false; }
+}
+
+function closeReport() {
+  window.close();
+  // window.close() 對非 script 開啟的視窗是靜默無效的，沒有例外也沒有回傳值，
+  // 只能等一下再看視窗還在不在
+  setTimeout(() => { if (!window.closed) location.href = "watchlist.html"; }, 180);
+}
+
+function setupCloseButton() {
+  // 彈出視窗裡的「自選股」會在同一個視窗再開一份 App（兩個 App 畫面疊在一起，
+  // 更難找到回去的路）：那種情況只留「關閉」這一個出口。
+  if (reportIsPopup()) {
+    const back = document.getElementById("back-wl");
+    if (back) back.style.display = "none";
+  }
+  document.addEventListener("keydown", e => {
+    // Esc 關頁，但 Bootstrap modal 開著時那一下是給 modal 的
+    if (e.key === "Escape" && !document.querySelector(".modal.show")) closeReport();
+  });
+}
+
+setupCloseButton();
 
 // ── 啟動 ────────────────────────────────────────────────────────
 // 必須是這支 script 的最後一行。使用者已經有 token 時，bootAuth() 往下到
