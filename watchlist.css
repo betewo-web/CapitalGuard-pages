@@ -1832,12 +1832,88 @@ body.modal-blocking .modal-backdrop.show {
 	white-space: pre-line;
 }
 
+/* 右欄：時間在上、刪除鈕在下。排成一欄而不是一列，是因為橫著放會再吃掉 32px 寬，
+   窄螢幕的標題就只剩一半（2026-10-06） */
+.ib-side {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 0.3rem;
+}
+
 .ib-time {
 	font-size: 0.8rem;
 	color: var(--text-muted);
 	white-space: nowrap;
 	flex-shrink: 0;
 	margin-top: 3px;
+}
+
+/* 一則一則刪：顏色跟 .wl-icon-danger 同一套（平常是灰的，hover 才紅）——
+   每一列都有一顆，平常就紅會讓整頁看起來都在警告 */
+.ib-del {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: 1px solid rgba(140, 168, 220, 0.16);
+	border-radius: 10px;
+	background: rgba(255, 255, 255, 0.04);
+	color: #7e8aa4;
+	cursor: pointer;
+	transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.ib-del .ic { display: block; flex-shrink: 0; }
+
+.ib-del:hover {
+	border-color: rgba(255, 95, 133, 0.55);
+	background: rgba(255, 95, 133, 0.13);
+	color: #ff8ba5;
+}
+
+/* 刪掉之後的復原條（INBOX_UNDO_MS 內）：虛線框，讓它看起來不是一則通知 */
+.inbox-undo {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.6rem;
+	padding: 0.6rem 0.75rem;
+	margin-bottom: 0.5rem;
+	border: 1px dashed var(--border);
+	border-radius: 14px;
+	background: var(--surface-2);
+	color: var(--text-1);
+	font-size: 0.88rem;
+}
+
+.inbox-undo .iu-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.inbox-undo .iu-undo {
+	flex: 0 0 auto;
+	padding: 0.3rem 0.75rem;
+	border: 1px solid rgba(140, 168, 220, 0.3);
+	border-radius: 10px;
+	background: rgba(255, 255, 255, 0.04);
+	color: #cfdcf2;
+	font-size: 0.85rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.inbox-undo .iu-undo:hover {
+	border-color: rgba(86, 168, 255, 0.55);
+	background: rgba(86, 168, 255, 0.14);
 }
 
 .inbox-empty, .view-empty {

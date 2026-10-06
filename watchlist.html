@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="288">
+  <meta name="app-version" content="289">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=288" rel="stylesheet">
+  <link href="watchlist.css?v=289" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1281,6 +1281,8 @@
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-report-btn" style="display:none" onclick="openDailyReportFromHistory()">開啟分析報告</button>
         <button type="button" class="btn btn-sm btn-outline-danger" id="alert-history-stop-rule-btn" style="display:none" onclick="stopRuleFromDetail()">停用此規則</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-plan-btn" style="display:none" onclick="openPlanFromHistory()">查看方案與用量</button>
+        <!-- 列上的垃圾桶只有圖示，這裡給一個寫著字的同路入口（2026-10-06） -->
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteInboxFromDetail()">刪除這則</button>
         <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">關閉</button>
       </div>
     </div>
@@ -4943,6 +4945,8 @@ function switchTab(tab, silent = false) {
   // 否則會進到一個什麼都沒有的空殼頁。
   if (tab === "friends" && !frEnabled) tab = "home";
   const changed = currentTab !== tab;
+  // 離開通知頁：還在復原寬限內的那一則就地結案（復原條跟著畫面走，看不到了不能讓它吊著）
+  if (changed && currentTab === "inbox") _inboxCommitDelete();
   if (changed && currentTab) trackActivity("tab_view", { tab });   // 開頁第一格算 app_open，不重複計
   currentTab = tab;
   APP_TABS.forEach(t => {
@@ -7310,7 +7314,8 @@ async function refreshInbox(force = true) {
       rows = _inboxMergeRows(inboxRows.filter(r => r.pending), fresh, windowStart);
     }
     // F1：推播先到、倉庫那列還沒寫進來的暫存列留著，倉庫已有的就讓位（在 _inboxMergeRows 裡）
-    inboxRows = rows;
+    // 還在復原寬限內的那一則倉庫裡還在，整段重抓會把它撿回來——濾掉
+    inboxRows = _inboxDropDeleting(rows, _inboxDeleting && _inboxDeleting.row);
     const newestWarehouse = _inboxCursorsOf(inboxRows).cursor;
     _prunePendingSignalsCache(fresh.map(x => x.event_key).filter(Boolean),
                               _inboxTs(newestWarehouse)).catch(() => {});
@@ -7544,6 +7549,8 @@ function renderInbox() {
     return;
   }
 
+  // 剛刪掉那一則的復原條：刪掉最後一則時清單是空的，所以空狀態也要帶著它
+  const undo = _inboxUndoHtml();
   const rows = filteredInboxRows();
   if (!rows.length) {
     const hints = {
@@ -7552,11 +7559,11 @@ function renderInbox() {
       important: "沒有漲跌停、跌破關鍵價位或達到設定價格的通知",
       stocks: "你的持股／自選股尚無通知",
     };
-    listEl.innerHTML = `<div class="inbox-empty">${hints[inboxFilter] || hints.all}</div>`;
+    listEl.innerHTML = undo + `<div class="inbox-empty">${hints[inboxFilter] || hints.all}</div>`;
     return;
   }
 
-  let html = "";
+  let html = undo;
   let lastDay = null;
   for (const r of rows) {
     const day = dayLabelOf(r.sent_at);
@@ -7567,16 +7574,22 @@ function renderInbox() {
     const sev = inferSeverity(r);
     const unread = inboxSupportsRead && !r.read_at;
     const sid = String(r.stock_id || "").trim();
+    const title = escapeHtml(_titleWithoutSid(r.title, sid));
     html += `
       <div class="inbox-item${unread ? " unread" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
            onclick="openInboxItem('${jsAttr(String(r.id))}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxItem('${jsAttr(String(r.id))}');}">
         ${signalIconSvg(r, 34)}
         <div class="ib-main">
-          <div class="ib-title">${escapeHtml(_titleWithoutSid(r.title, sid))}</div>
+          <div class="ib-title">${title}</div>
           <div class="ib-body">${escapeHtml(r.body || "")}</div>
         </div>
-        <span class="ib-time">${fmtTime(r.sent_at, dayLabelOf(r.sent_at) !== "今天")}</span>
+        <div class="ib-side">
+          <span class="ib-time">${fmtTime(r.sent_at, dayLabelOf(r.sent_at) !== "今天")}</span>
+          <button type="button" class="ib-del" title="刪除這則通知" aria-label="刪除通知：${title}"
+                  onclick="event.stopPropagation();deleteInboxRow('${jsAttr(String(r.id))}')"
+                  onkeydown="event.stopPropagation()">${ICON_TRASH}</button>
+        </div>
       </div>`;
   }
   listEl.innerHTML = html;
@@ -7800,12 +7813,109 @@ async function clearAlertHistory() {
   try {
     await sbDelete("alert_history", { "user_id": `eq.${state.userId}` }, state.accessToken);
     inboxRows = [];
+    // 還在復原寬限內的那一則也沒了（倉庫整個清空了，再送一次 DELETE 沒有意義）
+    if (_inboxDeleting) { clearTimeout(_inboxDeleting.timer); _inboxDeleting = null; }
     _inboxSaveCache();       // 本機清掉、游標歸零；不需要再抓回來（倉庫已空）
     updateInboxBadge();
     renderInbox();
   } catch (e) {
     alert(`清空失敗：${e.message}`);
   }
+}
+
+// ── 一則一則刪（2026-10-06 Howard：原本只有「清空全部」）────────────────
+// 刪掉的那一則沒有第二個地方找得回來（alert_history 是唯一一份），而刪除鈕就貼在
+// 「點開」這個主要動作旁邊，一定會有人按錯。所以按下去先從畫面上拿掉、過
+// INBOX_UNDO_MS 才真的送 DELETE，寬限內清單最上面有一條「已刪除　復原」。
+// 同時只留一筆待刪：接著刪下一則就把前一則先結案，省掉「復原哪一則」的歧義。
+const INBOX_UNDO_MS = 5000;
+let _inboxDeleting = null;   // { row, userId, timer }：已按下刪除、還在復原寬限內的那一則
+
+// 純函式：整段重抓回來的列裡，把還在復原寬限內的那一則濾掉——倉庫那列此刻還沒刪，
+// 不濾就會在復原條還掛著的時候被撿回清單（refreshInbox 的總數比對本來就會觸發重抓）
+function _inboxDropDeleting(rows, deleting) {
+  if (!deleting) return rows || [];
+  const id = String(deleting.id || "");
+  const key = String(deleting.event_key || "");
+  return (rows || []).filter(r => String(r.id) !== id && !(key && r.event_key === key));
+}
+
+function _inboxUndoHtml() {
+  const row = _inboxDeleting && _inboxDeleting.row;
+  if (!row) return "";
+  const title = _titleWithoutSid(row.title, row.stock_id) || "這則通知";
+  return `<div class="inbox-undo">`
+       + `<span class="iu-text">已刪除「${escapeHtml(title)}」</span>`
+       + `<button type="button" class="iu-undo" onclick="undoInboxDelete()">復原</button>`
+       + `</div>`;
+}
+
+function deleteInboxRow(rowId) {
+  const row = inboxRows.find(r => String(r.id) === String(rowId));
+  if (!row) return;
+  _inboxCommitDelete();                      // 上一則先結案
+  inboxRows = inboxRows.filter(r => r !== row);
+  _inboxDeleting = { row, userId: state.userId, timer: setTimeout(_inboxCommitDelete, INBOX_UNDO_MS) };
+  _inboxSaveCache();
+  updateInboxBadge();
+  renderInbox();
+  trackActivity("inbox_delete", { source: row.source || "" });
+}
+
+function undoInboxDelete() {
+  const p = _inboxDeleting;
+  if (!p) return;
+  clearTimeout(p.timer);
+  _inboxDeleting = null;
+  inboxRows = _inboxSortRows(inboxRows.concat([p.row]));
+  _inboxSaveCache();
+  updateInboxBadge();
+  renderInbox();
+  trackActivity("inbox_delete_undo");
+}
+
+// 寬限到了、或離開通知頁／把 App 切到背景：真的送 DELETE。
+// 送不出去（離線、權限）就把列放回去並說一聲——「畫面上少一則、倉庫裡還留著」是最難懂的
+// 狀態，下一次整段重抓它又會自己冒出來。
+function _inboxCommitDelete() {
+  const p = _inboxDeleting;
+  if (!p) return;
+  clearTimeout(p.timer);
+  _inboxDeleting = null;
+  renderInbox();                             // 收掉復原條
+  _inboxDeleteServer(p.row, p.userId).catch(e => {
+    inboxRows = _inboxSortRows(inboxRows.concat([p.row]));
+    _inboxSaveCache();
+    updateInboxBadge();
+    renderInbox();
+    alert(`刪除失敗：${e.message || e}`);
+  });
+}
+
+async function _inboxDeleteServer(row, userId) {
+  if (!userId) return;
+  if (!row.pending) {
+    await sbDelete("alert_history", { "user_id": `eq.${userId}`, "id": `eq.${row.id}` }, state.accessToken);
+    return;
+  }
+  // 暫存列（推播先到、倉庫那列還沒抓到）沒有倉庫 id。倉庫那列多半已經寫進去了，用
+  // event_key 刪；守門員留在 Cache 的那一份也要拿掉，否則回前景又被 _consumePendingSignalsFromCache
+  // 撿回來。雷達那邊不動——內建訊號在 intraday_state 裡，刪倉庫列也不會讓它從雷達消失。
+  if (!row.event_key) return;
+  await sbDelete("alert_history",
+    { "user_id": `eq.${userId}`, "event_key": `eq.${row.event_key}` }, state.accessToken);
+  await _dropPendingSignalCache(row.event_key);
+}
+
+// 寬限還沒到就切到背景／關掉 App：立刻結案，不要留一則「看起來刪了其實沒刪」的列
+document.addEventListener("visibilitychange", () => { if (document.hidden) _inboxCommitDelete(); });
+window.addEventListener("pagehide", () => _inboxCommitDelete());
+
+function deleteInboxFromDetail() {
+  const id = detailRow && detailRow.id;
+  if (!id) return;
+  bootstrap.Modal.getInstance(document.getElementById("alertHistoryDetailModal"))?.hide();
+  deleteInboxRow(id);
 }
 
 // ── PWA v2: 🏠 首頁 Today ────────────────────────────────────────
@@ -13304,6 +13414,24 @@ async function _flushPushReceipts() {
     else await cache.put(PUSH_RECEIPTS_URL, new Response(JSON.stringify(failed),
                                                         { headers: { 'Content-Type': 'application/json' } }));
   } catch { /* 沒有 Cache API 或讀取失敗就算了 */ }
+}
+
+// 使用者把暫存列從通知匣刪掉時，只拿掉那一把 key（_prunePendingSignalsCache 是
+// 「倉庫已經有了／太舊了」的批次版）。不拿掉的話回前景又會被撿回清單。
+async function _dropPendingSignalCache(key) {
+  if (!key || !('caches' in window)) return;
+  try {
+    const cache = await caches.open(PUSH_SYNC_CACHE);
+    const res = await cache.match(PENDING_SIGNALS_URL);
+    if (!res) return;
+    const list = await res.json();
+    if (!Array.isArray(list)) return;
+    const keep = list.filter(a => a && a.key !== key);
+    if (keep.length === list.length) return;
+    if (!keep.length) { await cache.delete(PENDING_SIGNALS_URL); return; }
+    await cache.put(PENDING_SIGNALS_URL, new Response(JSON.stringify(keep),
+                                                      { headers: { 'Content-Type': 'application/json' } }));
+  } catch { /* 沒有 Cache API 或寫入失敗：下次 _prunePendingSignalsCache 會處理 */ }
 }
 
 // 倉庫已經有的就從暫存區拿掉，兩天前的也丟；倉庫已經有更新的列、它卻還沒出現的也丟
