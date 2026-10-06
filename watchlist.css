@@ -2038,45 +2038,71 @@ body.modal-blocking .modal-backdrop.show {
 	min-width: 0;
 }
 
-/* 「股票雷達」要看哪一種：自選／持股／分享（2026-10-04 Howard，取代原本的「只列持股」撥片）。
-   自己一排、三格等寬。選中的那一格是紫色粗邊＋淡紫底，不是實心紫——上面那條
-   「盤中／盤後／設定」已經是實心紫了，兩排實心疊在一起反而看不出哪一排是「我在哪一頁」、
-   哪一排是「這一頁裡看哪一種」（分享中心的第二層分段是同一個道理）。 */
+/* 「股票雷達」要看哪一種：自選／持股／好友分享（2026-10-04 Howard，取代原本的「只列持股」撥片）。
+   2026-10-06 Howard：「看不出這是分頁開關」。原本是三顆各自有框、中間空 8px 的按鈕——
+   那個樣子就是三顆互不相干的按鈕，沒有任何東西說「三選一」。改成有外框的軌道（.home-tabs／
+   .fr-seg 同一種容器：1px 框、淡灰底、4px 內距），三格貼在一起、中間用細線分隔，選中的那一格
+   是軌道裡被抬起來的一塊。**容器**才是「這是一組開關」的訊號，單看一顆按鈕永遠看不出來。
+   選中的那一格仍然不是實心紫（維持 2026-10-04 的判斷）：上面那條「盤中／盤後／設定」是實心紫
+   ＋白字，這一排是淡紫底＋紫框＋亮字——同一個色系、看得出是下一層，不會兩排搶「我在哪一頁」。 */
 .hs-seg {
 	display: flex;
-	gap: 8px;
 	margin: 0 0 0.75rem;
+	padding: 4px;
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	background: rgba(146, 146, 163, 0.1);
 }
 
 .hs-seg button {
+	position: relative;
 	flex: 1 1 0;
 	min-width: 0;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 5px;
-	padding: 0.55rem 0.25rem;
-	border: 1.5px solid var(--border);
-	border-radius: 12px;
+	gap: 4px;
+	padding: 0.5rem 0.2rem;
+	border: none;
+	border-radius: 10px;
 	background: transparent;
 	color: var(--text-muted);
 	font-family: inherit;
-	font-size: 0.95rem;
+	font-size: 0.92rem;
 	font-weight: 600;
-	line-height: 1.2;
-	white-space: nowrap;
+	line-height: 1.25;
+	text-align: center;
 	cursor: pointer;
-	transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+	transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
+
+/* 刻意不寫 white-space: nowrap：「好友分享」是四個字，字級調到最大、或 320px 的機子上
+   三格會擠不下。不換行＝橫向爆出軌道（會被切掉）；可以換行＝那一格變兩行、整排一起變高，
+   難看一點但三格永遠都在。 */
 
 .hs-seg button [data-icon] { display: inline-flex; }
 .hs-seg button .ic { width: 15px; height: 15px; }
 
+/* 段與段之間的細線（與首頁三分頁 .home-tab 同一招）：相鄰兩段都沒被選中時才畫，
+   選中的那一段自己有底色，旁邊再加一條線只會讓那一塊看起來被框住兩次。 */
+.hs-seg button + button::before {
+	content: "";
+	position: absolute;
+	left: -1px;
+	top: 22%;
+	height: 56%;
+	border-left: 1px solid rgba(146, 146, 163, 0.28);
+}
+
+.hs-seg button.is-on::before,
+.hs-seg button.is-on + button::before { border-left-color: transparent; }
+
 .hs-seg button.is-on {
-	background: rgba(139, 124, 255, 0.2);
-	border-color: var(--accent);
+	background: rgba(139, 124, 255, 0.26);
 	color: var(--text-0);
 	font-weight: 700;
+	/* 框用 inset shadow 而不是 border：border 會改變這一格的盒寬，切換時三格會各跳 3px */
+	box-shadow: inset 0 0 0 1.5px var(--accent), 0 1px 4px rgba(4, 6, 16, 0.45);
 }
 
 /* 每一格後面的檔數：比字小一級、淡一點；0 檔時是空的，整顆收起來不佔間距 */

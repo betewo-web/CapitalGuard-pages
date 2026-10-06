@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="282">
+  <meta name="app-version" content="283">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=282" rel="stylesheet">
+  <link href="watchlist.css?v=283" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -295,13 +295,17 @@
           </span>
           <button type="button" class="hs-btn" onclick="switchTab('watch')">新增自選股</button>
         </div>
-        <!-- 要看哪一種（2026-10-04 Howard）：自選／持股／分享 三選一，取代原本的「只列持股」撥片。
+        <!-- 要看哪一種（2026-10-04 Howard）：自選／持股／好友分享 三選一，取代原本的「只列持股」撥片。
              自己一排、三格等寬：塞在標題列裡的話，字級調大時三格加上右邊的入口鈕會擠不下。
+             整排包在一個軌道裡（2026-10-06 Howard：原本三顆各自有框，看不出是分頁開關）——
+             與首頁三分頁、分享中心第一層同一種容器，見 watchlist.css 的 .hs-seg。
+             第三格 2026-10-06 從「分享」改叫「好友分享」：底部導覽的「分享」是分享中心那一頁，
+             這一格是「好友分享給我的股票」，兩個都叫分享的時候分不出來。
              每一格後面的檔數由 renderHome 填（syncHomeFilter）；選了哪一格記在本機（HOME_FILTER_KEY）。 -->
         <div class="hs-seg" id="home-filter" role="radiogroup" aria-label="股票雷達要看哪一種">
           <button type="button" role="radio" data-hf="mine" aria-checked="true" onclick="setHomeFilter('mine')"><i data-icon="star"></i>自選<span class="hs-seg-n"></span></button>
           <button type="button" role="radio" data-hf="held" aria-checked="false" onclick="setHomeFilter('held')"><i data-icon="wallet"></i>持股<span class="hs-seg-n"></span></button>
-          <button type="button" role="radio" data-hf="shared" aria-checked="false" onclick="setHomeFilter('shared')"><i data-icon="share"></i>分享<span class="hs-seg-n"></span></button>
+          <button type="button" role="radio" data-hf="shared" aria-checked="false" onclick="setHomeFilter('shared')"><i data-icon="share"></i>好友分享<span class="hs-seg-n"></span></button>
         </div>
 
         <!-- 進階訊號推薦：規則數未達 RULE_NUDGE_TARGET 條時顯示一行，內容由 renderRuleNudge() 畫；
@@ -1819,7 +1823,7 @@ let intradayOptionalCols = ["levels", "quote_at", "signals_today"];
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
 let scoresFilter = "screen";    // screen / picks / mine（2026-09-23 預設改成統計結果）
-// 首頁「股票雷達」要看哪一種（2026-10-04 Howard）：自選／持股／分享 三選一，取代原本的
+// 首頁「股票雷達」要看哪一種（2026-10-04 Howard）：自選／持股／好友分享 三選一，取代原本的
 // 「只列持股」撥片。記在本機——換分頁、重開 App 都維持（2026-09-23 Howard：這個不要
 // 跟著分頁回預設，統計／通知那兩排篩選籤才要）。
 //   mine   自己加的自選股（預設）
@@ -1831,12 +1835,12 @@ const HOLDINGS_ONLY_KEY = "cg-home-holdings-only";
 const HOME_FILTERS = ["mine", "held", "shared"];
 // 選到的那一種一檔都沒有時要講清楚是為什麼——空白是篩選造成的，不是資料沒來
 const HOME_FILTER_EMPTY = {
-  mine:   "還沒有自選股。按右上的「新增自選股」加入；好友分享給你的股票在「分享」那一格。",
+  mine:   "還沒有自選股。按右上的「新增自選股」加入；好友分享給你的股票在「好友分享」那一格。",
   held:   "沒有持股部位。持股在「設定」分頁填股數，或連券商同步。",
   shared: "還沒有好友分享給你的股票。好友分享後，到「分享」分頁的「好友分享給我」接受，就會出現在這裡。",
 };
 // 今日股票資訊彙整預設收合，只留第一條（Howard 2026-09-24）。刻意不寫進 localStorage：
-// 「自選／持股／分享」是使用者對清單的長期偏好，這個只是「這一次想不想多看幾條」，
+// 「自選／持股／好友分享」是使用者對清單的長期偏好，這個只是「這一次想不想多看幾條」，
 // 重開 App 回到收合才對——不然某天展開過，之後每天一進來都是一長串事件。
 // （2026-09-27 這一區從首頁搬到盤後分頁，變數跟著改名）
 let postNewsExpanded = false;
@@ -4943,7 +4947,7 @@ function switchTab(tab, silent = false) {
   if (changed && tab === "scores") { scoresFilter = "screen"; syncFilterChips("scores-filters", "screen"); }
   if (changed && tab === "inbox") { inboxFilter = "all"; syncFilterChips("inbox-filters", "all"); }
   if (changed && tab !== "friends") { frScanStop(); frWatchStop(); }   // 離開分享分頁：相機要關、等待中的詢問要停
-  // 首頁「自選／持股／分享」那一排刻意不在這裡重設：Howard 2026-09-23 要它記住，換分頁、
+  // 首頁「自選／持股／好友分享」那一排刻意不在這裡重設：Howard 2026-09-23 要它記住，換分頁、
   // 重開 App 都維持（存在 localStorage，見 HOME_FILTER_KEY）
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
@@ -7796,7 +7800,7 @@ function renderHome() {
   // 今天的狀態、今天的事件數、貼著幾條關卡。評分 2026-09-22 從方塊上拿掉（Howard）——在 📊 統計 分頁看
   // 好友分享給我的（已接受、進行中）接在自選股後面，同一套欄位，多一個 shared。
   // 同一檔可以同時是自己的自選股、又是好友分享來的（2026-10-05 起並存：設定可能不同，視為不同
-  // 項目）。所以同一個代號可能出現不只一列——「自選」與「分享」各看各的，只有「持股」要去重。
+  // 項目）。所以同一個代號可能出現不只一列——「自選」與「好友分享」各看各的，只有「持股」要去重。
   const rows = watchlistRows.concat(sharedInRows()).map(row => {
     const sid = String(row.stock_id || "").trim();
     const name = getPreferredStockName(sid, row.stock_name) || sid;
@@ -7837,7 +7841,7 @@ function renderHome() {
 
   // 自選方塊：一檔一列（2026-09-22 Howard）。
   // 要看哪一種由標題下面那一排決定（2026-10-04 Howard，取代原本的「只列持股」撥片）：
-  // 自選＝自己加的；持股＝有部位的那幾檔；分享＝好友分享給我、已接受的。
+  // 自選＝自己加的；持股＝有部位的那幾檔；好友分享＝好友分享給我、已接受的。
   // 三種都只是少幾列——排序與每一列的內容完全一樣。
   const heldMap = holdingBySid();
   const byFilter = {
@@ -8186,7 +8190,7 @@ function syncAppFontSize() {
   syncFilterChips("font-size-chips", k);
 }
 
-// 首頁「股票雷達」切換要看哪一種（自選／持股／分享）。埋點名稱沿用 home_holdings_filter：
+// 首頁「股票雷達」切換要看哪一種（自選／持股／好友分享）。埋點名稱沿用 home_holdings_filter：
 // 改了名，admin 儀表板上以前的資料就對不到標籤。內容從 {on} 換成 {mode}——選了哪一種。
 function setHomeFilter(mode) {
   homeFilter = HOME_FILTERS.includes(mode) ? mode : "mine";
@@ -8204,7 +8208,7 @@ function togglePostNews() {
   renderTodayNews();
 }
 
-// 那一排的外觀跟著變數走，順便把每一格的檔數填上（0 不寫——「分享 0」對沒有好友的人
+// 那一排的外觀跟著變數走，順便把每一格的檔數填上（0 不寫——「好友分享 0」對沒有好友的人
 // 只是雜訊）。renderHome 每次都叫一次，開 App 時記住的那一格才會亮著
 function syncHomeFilter(counts) {
   document.querySelectorAll("#home-filter [data-hf]").forEach(b => {
@@ -15210,7 +15214,7 @@ document.addEventListener("click", async e => {
         // 接受被擋不是失敗：邀請轉成保留，畫面上會出現原因與解法
         if (res.held === "limit") frToast("「自選+分享」已達上限，邀請先保留著", true);
         else if (res.held === "duplicate") frToast("你已經有設定完全相同的這一檔，邀請先保留著", true);
-        else frToast("已接受，這檔會出現在盤中「股票雷達」的「分享」那一格");
+        else frToast("已接受，這檔會出現在盤中「股票雷達」的「好友分享」那一格");
         break;
     }
     await frReload();     // 裡面的 frSyncRadar() 會在分享的股票有進出時重抓雷達資料
