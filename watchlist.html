@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="289">
+  <meta name="app-version" content="290">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=289" rel="stylesheet">
+  <link href="watchlist.css?v=290" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5815,7 +5815,8 @@ const RULE_EXPLAIN = {
 // 一張卡：目前幾條、幾條可一鍵加入的範本、以及進編輯器的入口。
 // 範本只是「預先填好參數的目錄條目」：type 與參數名必須是 RULE_CATALOG 裡有的
 // （test_rule_ui_catalog.py 釘住），否則會存出後端看不懂、永遠不觸發的規則。
-// 名稱只描述條件、不下判斷（COMPLIANCE.md）。範本一律套用到全部自選股。
+// 名稱只描述條件、不下判斷（COMPLIANCE.md）。範本的套用範圍看入口：從進階訊號
+// 面板的個股範圍（設定頁某一列的「進階」）加進來就只套那一檔，其餘一律全部自選股。
 const RULE_NUDGE_TARGET = 3;
 // 依方案的目標條數（Howard 2026-09-28）：免費版沒用過進階訊號、專業版不到 3 條、
 // 旗艦版不到 5 條就提醒。代碼不在表裡的方案退回 RULE_NUDGE_TARGET，且永遠不超過方案上限。
@@ -5848,7 +5849,8 @@ let ruleNudge = { rules: null };
 async function loadRuleNudgeState() {
   if (!state.accessToken) return;
   try {
-    const rows = await sbGet("alert_rules", { select: "id,conditions", order: "created_at.asc" }, state.accessToken);
+    // stock_id 也要：範本建議與設定頁每一列的條數都要分得出「這一檔的」與「全部自選股的」
+    const rows = await sbGet("alert_rules", { select: "id,stock_id,conditions", order: "created_at.asc" }, state.accessToken);
     ruleNudge.rules = rows || [];
   } catch (e) {
     ruleNudge.rules = null;
@@ -5879,12 +5881,14 @@ function ruleRoomLeft() {
 // 一條一條 POST，不用一次送整個陣列：enforce_alert_rules_limit 是 BEFORE INSERT
 // FOR EACH ROW，同一個 statement 裡先插入的那幾列它數不到，一次送 10 條會整組
 // 繞過方案上限。撞到上限就停下來，回報真正寫進去幾條。
-async function insertRuleTemplates(tpls) {
+// stockId＝這批範本的套用範圍：null 是全部自選股，帶代號就只套那一檔
+// （設定頁某一列的「進階」進來時用，見 ruleScopeForCtx）。
+async function insertRuleTemplates(tpls, stockId = null) {
   let added = 0, limitHit = false;
   for (const t of tpls) {
     try {
       await sbPost("alert_rules", {
-        user_id: state.userId, name: t.name, stock_id: null, severity: null,
+        user_id: state.userId, name: t.name, stock_id: stockId || null, severity: null,
         conditions: t.conditions, enabled: true,
       }, state.accessToken, true);
       added++;
@@ -5896,14 +5900,36 @@ async function insertRuleTemplates(tpls) {
   return { added, limitHit };
 }
 
+// 一鍵加入（範本、讓系統幫我選）要套到哪些股票，只看入口：
+//   * 設定頁某一列的「進階」→ openRulesForStock 設了 rulesStockFilter → 只套那一檔
+//   * 標題列的「進階訊號」、首頁那一行、開機彈窗 → 全部自選股（stock_id = null）
+// 2026-10-07（Howard）：原本這幾個一鍵入口一律寫死 stock_id: null，
+// 所以在「2330 的進階」裡按＋加入，加出來的是套用到每一檔的規則——
+// 使用者從個股進來，加的卻是全域設定。範圍必須跟著入口。
+function ruleScopeForCtx(ctx) {
+  return ctx === "modal" ? (rulesStockFilter || null) : null;
+}
+
+// 範圍寫成人話，一鍵加入的提示與範本區共用（null＝全部自選股）
+function ruleScopeLabel(sid) {
+  if (!sid) return "全部自選股";
+  return `${sid} ${stockNameOf(sid)}`.trim();
+}
+
+// 「套用到…」整句。個股範圍要寫「只」——那一個字就是這次修正要讓使用者看到的事
+function ruleScopeSentence(sid) {
+  return sid ? `只套用到 ${ruleScopeLabel(sid)}` : "套用到全部自選股";
+}
+
 // 「讓系統幫我選」：用範本把剩下的額度補滿（跳過已有同型別的），撞到方案上限就停。
 // 首頁那一行、開機彈窗、進階訊號面板三處共用。
 async function autoPickRules(ctx, btn) {
   if (!state.userId) return;
   const msgEl = document.getElementById(
     ctx === "modal" ? "rules-msg" : ctx === "popup" ? "rule-popup-msg" : "rule-nudge-msg");
+  const scopeSid = ruleScopeForCtx(ctx);
   const room = ruleRoomLeft();
-  const tpls = ruleTemplateSuggestions(room);
+  const tpls = ruleTemplateSuggestions(room, scopeSid);
   if (!tpls.length) {
     // 兩種「沒得加」要分開講：額度滿了給升級提示，額度還在但範本用完了要指路去編輯器
     if (msgEl) {
@@ -5916,15 +5942,15 @@ async function autoPickRules(ctx, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "加入中…"; }
   let added = 0, limitHit = false;
   try {
-    ({ added, limitHit } = await insertRuleTemplates(tpls));
-    trackActivity("rule_autopick", { ctx, n: added });
+    ({ added, limitHit } = await insertRuleTemplates(tpls, scopeSid));
+    trackActivity("rule_autopick", { ctx, n: added, scoped: scopeSid ? 1 : 0 });
     await loadRuleNudgeState();
     if (added) { noteRuleAdded(); queuePushPromptAfterSignal(); }
     if (ctx === "modal") refreshRules(); else renderRuleNudge();
     const names = tpls.slice(0, added).map(t => `「${t.name}」`).join("");
     if (msgEl) {
       msgEl.innerHTML = added
-        ? `<span class="text-success">已加入 ${added} 條：${escapeHtml(names)}，套用到全部自選股，可在進階訊號面板調整或刪除。</span>${limitHit ? " " + limitPromptHtml("alert_rules") : ""}`
+        ? `<span class="text-success">已加入 ${added} 條：${escapeHtml(names)}，${escapeHtml(ruleScopeSentence(scopeSid))}，可在進階訊號面板調整或刪除。</span>${limitHit ? " " + limitPromptHtml("alert_rules") : ""}`
         : limitPromptHtml("alert_rules");
     }
   } catch (e) {
@@ -6670,10 +6696,13 @@ function renderRuleNudgePopup() {
     <div id="rule-popup-msg" class="small mt-2"></div>`;
 }
 
-// 使用者已有的條件型別不再推薦——同型別再加一條通常只是門檻不同，自己編輯比較合適
-function ruleTemplateSuggestions(max = 3) {
+// 使用者已有的條件型別不再推薦——同型別再加一條通常只是門檻不同，自己編輯比較合適。
+// scopeSid 帶代號時只看「會套用到那一檔」的規則（它自己的，加上全部自選股的）：
+// 2330 已經設過量能，不代表 2454 設過，別人那一檔的規則不該把這一檔的建議濾掉。
+function ruleTemplateSuggestions(max = 3, scopeSid = null) {
   const owned = new Set();
   for (const r of ruleNudge.rules || []) {
+    if (scopeSid && r.stock_id && String(r.stock_id).trim() !== scopeSid) continue;
     for (const c of (Array.isArray(r.conditions) ? r.conditions : [])) if (c && c.type) owned.add(c.type);
   }
   return RULE_TEMPLATES.filter(t => !t.conditions.some(c => owned.has(c.type))).slice(0, max);
@@ -6735,10 +6764,11 @@ async function addRuleTemplate(idx, ctx, btn) {
   if (!t || !state.userId) return;
   const msgEl = document.getElementById(
     ctx === "modal" ? "rules-msg" : ctx === "popup" ? "rule-popup-msg" : "rule-nudge-msg");
+  const scopeSid = ruleScopeForCtx(ctx);
   if (btn) { btn.disabled = true; btn.textContent = "加入中…"; }
   try {
     await sbPost("alert_rules", {
-      user_id: state.userId, name: t.name, stock_id: null, severity: null,
+      user_id: state.userId, name: t.name, stock_id: scopeSid, severity: null,
       conditions: t.conditions, enabled: true,
     }, state.accessToken, true);
   } catch (e) {
@@ -6760,7 +6790,7 @@ async function addRuleTemplate(idx, ctx, btn) {
   noteRuleAdded();
   queuePushPromptAfterSignal();
   if (ctx === "modal") {
-    setRulesMsg(`已加入「${t.name}」`);
+    setRulesMsg(`已加入「${t.name}」，${ruleScopeSentence(scopeSid)}`);
     refreshRules();
   } else if (ctx === "popup") {
     renderRuleNudge();
@@ -10177,9 +10207,34 @@ function openRulesForStock(sid) {
 
 // 設定頁每一列那顆「進階」旁邊的小數字：專屬這一檔的規則有幾條。
 // 套用到全部自選股的不算——那個數字每一列都一樣，放上去沒有資訊量。
+// 面板開過就有 alertRules（完整列），沒開過才退回登入時抓的 ruleNudge.rules
+// （select 已含 stock_id）：否則這個數字要等使用者先開一次面板才會出現。
+function ruleCountRows() {
+  if (alertRules && alertRules.length) return alertRules;
+  return Array.isArray(ruleNudge.rules) ? ruleNudge.rules : [];
+}
+
+function ruleCountOf(sid) {
+  return ruleCountRows().filter(r => r.stock_id && String(r.stock_id).trim() === sid).length;
+}
+
 function ruleCountBadge(sid) {
-  const n = (alertRules || []).filter(r => r.stock_id && String(r.stock_id).trim() === sid).length;
+  const n = ruleCountOf(sid);
   return n ? `<span class="wl-rule-n">${n}</span>` : "";
+}
+
+// 面板裡增刪之後，設定頁那一列的數字要跟著動（整列不重畫——重畫會把
+// 捲動位置與展開狀態一起打掉）。面板關著時這裡什麼都找不到，就是 no-op。
+function refreshRuleCountBadges() {
+  document.querySelectorAll("#wl-grid .wl-row").forEach(row => {
+    const btn = row.querySelector("[data-rules-btn]");
+    if (!btn) return;
+    const old = btn.querySelector(".wl-rule-n");
+    const n = ruleCountOf(String(row.dataset.sid || "").trim());
+    if (!n) { if (old) old.remove(); return; }
+    if (old) old.textContent = String(n);
+    else btn.insertAdjacentHTML("beforeend", `<span class="wl-rule-n">${n}</span>`);
+  });
 }
 
 function openRulesModal() {
@@ -10201,6 +10256,7 @@ async function refreshRules() {
     planState.activeRuleIds = activeIds;
     ruleNudge.rules = alertRules;   // 首頁推薦卡與面板看同一份，面板裡增刪後首頁跟著變
     renderRuleNudge();
+    refreshRuleCountBadges();   // 設定頁那一列的「進階 N」
   } catch (e) {
     // 表不存在（migration 未執行）時給明確指示，而不是空白畫面
     listEl.innerHTML = `<div class="view-empty">讀取失敗：${escapeHtml(String(e.message || e))}<br>
@@ -10214,15 +10270,25 @@ async function refreshRules() {
   // 專業版設滿 3 條後還有 3 格額度卻看不到任何入口）。清單本來就只列
   // 使用者還沒用過的條件型別（ruleTemplateSuggestions 濾掉 owned）。
   const room = ruleRoomLeft();
-  const tpls = room > 0 ? ruleTemplateSuggestions(room) : [];
+  const tpls = room > 0 ? ruleTemplateSuggestions(room, rulesStockFilter) : [];
+  // 範本與「讓系統幫我選」加出來的範圍＝這個面板的範圍（ruleScopeForCtx('modal')），
+  // 所以這一行必須照著寫，不能永遠是「全部自選股」
   const tplHtml = tpls.length ? `
-      <div class="rules-empty-sub">${alertRules.length ? `還可以再設 ${room} 條` : "或先從範本開始"}（套用到全部自選股）</div>
+      <div class="rules-empty-sub">${alertRules.length ? `還可以再設 ${room} 條` : "或先從範本開始"}（${escapeHtml(ruleScopeSentence(rulesStockFilter))}）</div>
       <div class="rules-autopick-row">
         <button type="button" class="btn btn-outline-info rule-autopick-btn" onclick="autoPickRules('modal', this)">讓系統幫我選</button></div>
       <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "modal")}</div>` : "";
 
+  // 個股範圍的說明列：清單是空的時候也要出現，否則從某一檔進來、畫面上
+  // 卻只有「尚無進階訊號」＋一排範本，看不出按下去加的是誰的設定
+  const filterHtml = rulesStockFilter ? `
+      <div class="rule-filter-bar">
+        <span>只列會套用到 <b>${escapeHtml(rulesStockFilter)} ${escapeHtml(stockNameOf(rulesStockFilter))}</b> 的訊號（含「全部自選股」的）。在這裡新增或一鍵加入的訊號，只會套用這一檔。</span>
+        <button type="button" class="hs-link" onclick="rulesStockFilter = null; showRulesPane('list')">看全部</button>
+      </div>` : "";
+
   if (!alertRules.length) {
-    listEl.innerHTML = `<div class="rules-empty">
+    listEl.innerHTML = filterHtml + `<div class="rules-empty">
       <div class="rules-empty-icon">${ICON_RULES}</div>
       <div class="rules-empty-title">尚無進階訊號</div>
       <div class="rules-empty-hint">用上面的「新增訊號」把條件組起來，<br>全部成立時才會通知你</div>
@@ -10234,15 +10300,12 @@ async function refreshRules() {
   const shownRules = rulesStockFilter
     ? alertRules.filter(r => !r.stock_id || String(r.stock_id).trim() === rulesStockFilter)
     : alertRules;
-  const filterHtml = rulesStockFilter ? `
-      <div class="rule-filter-bar">
-        <span>只列會套用到 <b>${escapeHtml(rulesStockFilter)} ${escapeHtml(stockNameOf(rulesStockFilter))}</b> 的訊號（含「全部自選股」的）。按「新增訊號」會預設只套用這一檔。</span>
-        <button type="button" class="hs-link" onclick="rulesStockFilter = null; showRulesPane('list')">看全部</button>
-      </div>` : "";
   if (rulesStockFilter && !shownRules.length) {
     listEl.innerHTML = filterHtml + `<div class="rules-empty">
       <div class="rules-empty-title">這一檔還沒有進階訊號</div>
-      <div class="rules-empty-hint">按上面的「新增訊號」，範圍會預設成這一檔</div></div>`;
+      <div class="rules-empty-hint">按上面的「新增訊號」，範圍會預設成這一檔</div>
+      ${tplHtml}
+    </div>`;
     return;
   }
 
@@ -10961,7 +11024,7 @@ function renderWatchlist(rows) {
         </div>
         <div class="wl-row-actions">
           <button class="wl-icon-btn" title="${escapeHtml(sid)} 的基礎訊號" aria-label="設定 ${escapeHtml(displayName)} ${escapeHtml(sid)} 的基礎訊號" onclick="openAlertSettingsForStock('${jsAttr(row.id)}')">${ICON_BELL}<span class="wl-ic-label">基礎</span></button>
-          <button class="wl-icon-btn" title="${escapeHtml(sid)} 的進階訊號" aria-label="設定 ${escapeHtml(displayName)} ${escapeHtml(sid)} 的進階訊號" onclick="openRulesForStock('${jsAttr(sid)}')">${ICON_RULES}<span class="wl-ic-label">進階</span>${ruleCountBadge(sid)}</button>
+          <button class="wl-icon-btn" data-rules-btn title="${escapeHtml(sid)} 的進階訊號" aria-label="設定 ${escapeHtml(displayName)} ${escapeHtml(sid)} 的進階訊號" onclick="openRulesForStock('${jsAttr(sid)}')">${ICON_RULES}<span class="wl-ic-label">進階</span>${ruleCountBadge(sid)}</button>
           <button class="wl-icon-btn wl-icon-danger wl-icon-only" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}</button>
         </div>
       </div>
