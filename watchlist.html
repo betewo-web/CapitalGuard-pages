@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="272">
+  <meta name="app-version" content="274">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=272" rel="stylesheet">
+  <link href="watchlist.css?v=274" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1370,9 +1370,12 @@
     <div class="sigshare-stage" id="sigshare-stage"></div>
     <div class="sigshare-note" id="sigshare-note"></div>
     <div class="sigshare-actions">
-      <button type="button" class="btn btn-primary btn-sm" id="sigshare-send" disabled onclick="sendSignalShare()">傳給 LINE 好友</button>
+      <button type="button" class="btn btn-primary btn-sm" id="sigshare-send" disabled onclick="sendSignalShare()">傳圖片給 LINE 好友</button>
       <button type="button" class="btn btn-outline-light btn-sm" id="sigshare-save" disabled onclick="saveSignalShare()">下載圖片</button>
     </div>
+    <!-- 第二條：只傳文字與網址。LINE 收到帶檔案的分享時只留圖片，所以圖與網址只能
+         各走各的（見 sendSignalShareLink 的註解）。 -->
+    <button type="button" class="btn btn-sm btn-success btn-line sigshare-link" id="sigshare-link" disabled onclick="sendSignalShareLink()">把網址也傳到 LINE</button>
     <!-- 回去的路要看得見（2026-10-06 Howard：點進去之後畫面無法返回）。四條都有：
          這顆、右上角的 ✕、點圖片外面的暗底、手機的返回鍵。 -->
     <button type="button" class="sigshare-back" onclick="closeSignalShare()">關閉，回到訊號列表</button>
@@ -9180,7 +9183,7 @@ function _sigShareReset() {
   if (_sigShare.url) URL.revokeObjectURL(_sigShare.url);   // blob 不收會一直佔記憶體
   _sigShare = { url: "", file: null, text: "", name: "", sid: "" };
   _sigShareGen += 1;   // 還在產生的那一張作廢（關掉之後才完成的圖沒人收，blob 會一直佔著）
-  for (const id of ["sigshare-send", "sigshare-save"]) {
+  for (const id of ["sigshare-send", "sigshare-save", "sigshare-link"]) {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = true;
   }
@@ -9230,16 +9233,18 @@ async function shareRadarEntry(eid) {
     img.alt = `${ctx.name} ${ctx.sid} ${fmtTime(entry.at)} ${entry.title}`;
     img.src = _sigShare.url;
     stage.replaceChildren(img);
+    // 兩顆鈕的分工要先講清楚：LINE 收到帶檔案的分享時只留圖片，網址得自己走一趟
     document.getElementById("sigshare-note").textContent = _sigShareCanSend()
-      ? "按「傳給 LINE 好友」會打開手機的分享面板，選 LINE 再選好友或群組。圖裡是一整個上午的時間軸。"
-      : "這台裝置不能直接傳圖片：先下載，再到 LINE 的聊天室貼上這張圖。";
+      ? "圖片走上面那顆（手機的分享面板選 LINE）；LINE 只收得到圖，網址要按下面那顆才會進聊天室。"
+      : "這台裝置不能直接傳圖片：先下載，再到 LINE 的聊天室貼上；網址按下面那顆傳。";
   } catch (err) {
     if (gen !== _sigShareGen) return;                      // 已經關掉了，不要把錯誤寫回畫面
     stage.textContent = `圖片產生失敗：${(err && err.message) || err}`;
     return;
   }
-  document.getElementById("sigshare-save").disabled = false;
-  document.getElementById("sigshare-send").disabled = false;
+  for (const id of ["sigshare-save", "sigshare-send", "sigshare-link"]) {
+    document.getElementById(id).disabled = false;
+  }
 }
 
 // opts.fromPop：是返回鍵把我們叫醒的，那一筆 history 已經退掉了，不要再 back 一次
@@ -9257,15 +9262,38 @@ function closeSignalShare(opts) {
 async function sendSignalShare() {
   if (!_sigShare.file) { saveSignalShare(); return; }
   if (_sigShareCanSend()) {
+    // 先複製再開分享面板：LINE 多半只收圖片（見 sendSignalShareLink），
+    // 文字已經在剪貼簿裡，貼到同一個聊天室就行。clipboard 要在手勢還有效時寫，
+    // 所以排在 await 前面——分享面板一開，這次點擊的授權就用掉了。
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(_sigShare.text);
+      copied = true;
+    } catch { /* 沒有剪貼簿權限：下面那顆「把網址傳到 LINE」仍然可用 */ }
     try {
       await navigator.share(_sigSharePayload());
       trackActivity("signal_share_send", { via: "share", sid: _sigShare.sid });
+      document.getElementById("sigshare-note").textContent = copied
+        ? "圖片傳出去了。LINE 多半只收圖片，網址已經幫你複製——貼到同一個聊天室，或按下面那顆直接傳。"
+        : "圖片傳出去了。LINE 多半只收圖片，網址要另外傳：按下面那顆。";
       return;
     } catch (err) {
       if (err && err.name === "AbortError") return;        // 自己在分享面板按取消，不是失敗
     }
   }
   saveSignalShare();                                       // 不支援或面板打不開：至少把圖存下來
+}
+
+// 只傳網址那一條（Howard 2026-10-06：分享出去時順便傳網站網址）。
+// 為什麼要分兩次：Web Share 帶 files 時，LINE 這個接收端只讀圖片、把 text 與 url
+// 丟掉——那是 LINE 端的行為，我們這邊三個欄位都給了也沒用。LINE 自己的分享網址
+// （line.me/R/share）則只收文字、不收圖片。所以「圖」與「網址」只能各走各的：
+// 圖片那顆傳圖，這顆把同一段文字（含網址）送進 LINE 的聊天室選單。
+function sendSignalShareLink() {
+  const text = _sigShare.text;
+  if (!text) return;
+  trackActivity("signal_share_send", { via: "line_link", sid: _sigShare.sid });
+  window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank", "noopener");
 }
 
 function saveSignalShare() {

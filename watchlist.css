@@ -3498,6 +3498,11 @@ body.modal-blocking .modal-backdrop.show {
 	filter: invert(1); opacity: 0.85; flex: 0 0 auto;
 	padding: 10px; margin: -6px -4px -6px 0; background-size: 14px;
 }
+/* 只傳網址那一顆：沿用登入頁「加 LINE 好友」的 .btn-line（LINE 綠是品牌色，
+   不是漲跌的綠——那組顏色只出現在數字上）。這裡只管版面，顏色交給 .btn-line。 */
+.sigshare-link { display: block; width: 100%; margin-top: 8px; }
+.sigshare-link:disabled { opacity: 0.45; }
+
 /* 第二條出口，寫清楚回去哪裡——手機上「✕」不是每個人都會去按 */
 .sigshare-back {
 	display: block; width: 100%; margin-top: 10px; padding: 9px 12px;
