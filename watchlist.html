@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="287">
+  <meta name="app-version" content="288">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=287" rel="stylesheet">
+  <link href="watchlist.css?v=288" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7225,8 +7225,14 @@ async function _inboxDeltaRpc(cursor, readCursor, windowStart) {
   }
 }
 
+// 純函式：由新到舊（sent_at）。暫存列與倉庫列排在同一條時間軸上——
+// 推播到的那一則「幾乎」都是最新的，但「幾乎」不是「總是」，而清單上方代表的是「最新」。
+function _inboxSortRows(rows) {
+  return (rows || []).slice().sort((a, b) => _inboxTs(b.sent_at) - _inboxTs(a.sent_at));
+}
+
 // 純函式：倉庫回來的列併進本機的。同 id 以倉庫為準（read_at 可能在別台裝置變了）、掉出
-// 30 天窗口的丟掉、暫存列（推播先到）在倉庫列出現後讓位。回傳 sent_at 由新到舊、暫存列在前。
+// 30 天窗口的丟掉、暫存列（推播先到）在倉庫列出現後讓位。回傳 sent_at 由新到舊。
 function _inboxMergeRows(local, fresh, windowStart) {
   const byId = new Map();
   for (const r of local || []) if (!r.pending && r.id) byId.set(String(r.id), r);
@@ -7235,8 +7241,16 @@ function _inboxMergeRows(local, fresh, windowStart) {
   const rows = [...byId.values()].filter(r => _inboxTs(r.sent_at) >= floor);
   rows.sort((a, b) => _inboxTs(b.sent_at) - _inboxTs(a.sent_at));
   const keys = new Set(rows.map(r => r.event_key).filter(Boolean));
-  const pending = (local || []).filter(r => r.pending && !(r.event_key && keys.has(r.event_key)));
-  return pending.concat(rows);
+  // 暫存列只在「推播到了、倉庫那列還沒抓到」這段空窗有意義。兩種情況要丟掉：
+  //   1. 倉庫那列到了（同 event_key）——讓位
+  //   2. 倉庫已經有更新的列，它卻還沒出現：那一列不會再來了（假訊號事後被清掉就是這樣），
+  //      再留著它只會一直佔著清單。寬限 10 分鐘＝sent_at 是倉庫寫入時刻、各列不保證依序到達
+  //      （同 INBOX_OVERLAP_MS 的理由）
+  const newest = rows.length ? _inboxTs(rows[0].sent_at) : 0;
+  const pending = (local || []).filter(r => r.pending
+    && !(r.event_key && keys.has(r.event_key))
+    && _inboxTs(r.sent_at) >= newest - INBOX_OVERLAP_MS);
+  return _inboxSortRows(pending.concat(rows));
 }
 
 function _inboxCursorsOf(rows) {
@@ -7297,7 +7311,9 @@ async function refreshInbox(force = true) {
     }
     // F1：推播先到、倉庫那列還沒寫進來的暫存列留著，倉庫已有的就讓位（在 _inboxMergeRows 裡）
     inboxRows = rows;
-    _prunePendingSignalsCache(fresh.map(x => x.event_key).filter(Boolean)).catch(() => {});
+    const newestWarehouse = _inboxCursorsOf(inboxRows).cursor;
+    _prunePendingSignalsCache(fresh.map(x => x.event_key).filter(Boolean),
+                              _inboxTs(newestWarehouse)).catch(() => {});
     _inboxSaveCache();
     inboxLoadedAt = Date.now();
     inboxSupportsRead = inboxRows.length === 0 || ("read_at" in inboxRows[0]);
@@ -13210,7 +13226,9 @@ function ingestPushedAlert(a) {
   _pushedSinceQuoteLoad = true;
   let changed = false;
   if (!inboxRows.some(r => r.event_key === a.key)) {
-    inboxRows.unshift(_pushedAlertToInboxRow(a));
+    // 不 unshift：排在最上面要是因為它最新，不是因為它剛到（Emma 2026-10-06：
+    // 視窗沒開時到的推播在 Cache 裡放到兩天後才淘汰，每次開 App 都被插回最上面）
+    inboxRows = _inboxSortRows(inboxRows.concat([_pushedAlertToInboxRow(a)]));
     changed = true;
   }
   // 雷達時間軸只記內建訊號與自動偵測（規則命中只進通知匣）。
@@ -13288,8 +13306,10 @@ async function _flushPushReceipts() {
   } catch { /* 沒有 Cache API 或讀取失敗就算了 */ }
 }
 
-// 倉庫已經有的就從暫存區拿掉，兩天前的也丟
-async function _prunePendingSignalsCache(knownKeys) {
+// 倉庫已經有的就從暫存區拿掉，兩天前的也丟；倉庫已經有更新的列、它卻還沒出現的也丟
+// （newestTs＝倉庫最新一列的 sent_at；同 _inboxMergeRows 第 2 種情況，不然每次回前景
+//  都會從 Cache 撿回來再被併掉，畫面閃一下）
+async function _prunePendingSignalsCache(knownKeys, newestTs) {
   if (!('caches' in window)) return;
   try {
     const cache = await caches.open(PUSH_SYNC_CACHE);
@@ -13299,7 +13319,9 @@ async function _prunePendingSignalsCache(knownKeys) {
     if (!Array.isArray(list)) return;
     const known = new Set(knownKeys || []);
     const cutoff = Date.now() - 2 * 864e5;
-    const keep = list.filter(a => a && a.key && !known.has(a.key) && (a.receivedAt || 0) >= cutoff);
+    const floor = Number.isFinite(newestTs) && newestTs ? newestTs - INBOX_OVERLAP_MS : 0;
+    const keep = list.filter(a => a && a.key && !known.has(a.key) && (a.receivedAt || 0) >= cutoff
+                                  && _inboxTs(a.at || a.receivedAt) >= floor);
     if (keep.length === list.length) return;
     if (!keep.length) { await cache.delete(PENDING_SIGNALS_URL); return; }
     await cache.put(PENDING_SIGNALS_URL, new Response(JSON.stringify(keep), { headers: { 'Content-Type': 'application/json' } }));
