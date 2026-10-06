@@ -3436,22 +3436,23 @@ body.modal-blocking .modal-backdrop.show {
 .rtl-divider { font-size: 13.12px; color: var(--text-muted); margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
 .rtl-none { padding: 14px 6px; font-size: 15.2px; color: var(--text-1); }
 .rtl-none span { font-size: 13.44px; color: var(--text-muted); }
-/* 每一則的「分享」鈕（2026-10-06）：做成淡的線框鈕，不要跟訊號本身搶注意力。
+/* 每一則的「分享」鈕（2026-10-06）。第一版是淡的線框鈕，Howard 看了手機說要放大、
+   要顯著的顏色——改成實色膠囊，用全站主要動作那組藍（同 .btn-primary，分享視窗裡
+   「傳給 LINE 好友」也是這一組），白字對 #4874ff 是 4.6:1。它不是訊號的顏色：
+   等級仍然只由左側邊條（橘／藍）表達，這顆講的是「可以按」。
+   浮右而不是占一欄：放大之後若還占著 flex 的第四欄，390px 上說明文字只剩 150px。
    整列本身是連結，所以鈕的點擊在 JS 裡就先 stopPropagation（見 radarStoryListHtml）。 */
 .rtl-share {
-	flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; gap: 4px;
-	font-size: 12.32px; font-weight: 600; color: var(--text-1); padding: 4px 9px;
-	border: 1px solid var(--border); border-radius: 999px; background: transparent; cursor: pointer;
+	float: right; margin: 1px 0 6px 10px;
+	display: inline-flex; align-items: center; gap: 5px;
+	font-size: 13.5px; font-weight: 700; color: #fff; padding: 7px 14px;
+	border: none; border-radius: 999px; cursor: pointer;
+	background: linear-gradient(145deg, #4874ff, #56a8ff);
+	box-shadow: 0 2px 8px rgba(72, 116, 255, 0.32);
 }
-.rtl-share:hover { color: var(--text-0); border-color: rgba(139, 124, 255, 0.55); background: rgba(139, 124, 255, 0.1); }
-.rtl-share svg { width: 13px; height: 13px; }
-@media (max-width: 480px) {
-	/* 手機（含 430px 的大螢幕手機）：說明文字本來就只有 ~200px，鈕再占 76px 會把
-	   「現價 4840.00，壓力 4870.00（差 0.6%，強度 5.0）」擠成三行。只留圖示，
-	   aria-label 仍是「分享這則訊號」。桌機的字卡有 560px，留著文字比較好認。 */
-	.rtl-share span { display: none; }
-	.rtl-share { padding: 5px 7px; }
-}
+.rtl-share:hover { filter: brightness(1.08); }
+.rtl-share:active { filter: brightness(0.92); }
+.rtl-share svg { width: 15px; height: 15px; }
 
 /* ── 分享圖片（signalShareSvg）裡的字樣與底色 ──────────────────────────────
    這些規則只有產生圖片時用到：signalShareCss() 會把 :root 與所有 .rtl- 規則抽進
@@ -3473,6 +3474,8 @@ body.modal-blocking .modal-backdrop.show {
 .rtl-svg text.rtl-share-desc  { fill: var(--text-1); font-size: 13px; }
 .rtl-svg text.rtl-share-src   { fill: var(--text-muted); font-size: 11.5px; font-weight: 600; }
 .rtl-svg text.rtl-share-foot  { fill: var(--text-muted); font-size: 11.5px; }
+/* 官網網址（圖片右下角）：比免責那行亮一階，收到圖的人要看得到去哪裡裝 */
+.rtl-svg text.rtl-share-site  { fill: var(--text-1); font-size: 11.5px; font-weight: 600; }
 
 /* ── 分享圖片的預覽視窗（#sigshare-gate）── */
 .sigshare-gate {

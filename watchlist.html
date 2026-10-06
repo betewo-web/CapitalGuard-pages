@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="269">
+  <meta name="app-version" content="270">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=269" rel="stylesheet">
+  <link href="watchlist.css?v=270" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2802,7 +2802,7 @@ function limitPromptHtml(kind, err) {
 // 每個升級提示後面都接這一句（還沒體驗過的帳號才有）：上限提示、功能提示、
 // 統計頁與 K 線的鎖頁。trial_status() 說 available 才畫；用過、體驗中、已付費都不畫。
 // 只在「體驗的那個方案真的有這一項」時才畫（Howard 2026-09-28）：體驗是 pro，
-// 混和訊號只有 premium 有，混和訊號的升級提示旁邊掛「免費體驗 5 天」會誤導。
+// 混和訊號只有 premium 有，混和訊號的升級提示旁邊掛「免費體驗 10 天」會誤導。
 // kind：watchlist／alert_rules（數量）或 PLAN_FEATURES 的旗標名（功能）。
 function trialCovers(kind) {
   if (!trialOfferAvailable()) return false;
@@ -8958,16 +8958,19 @@ function radarStoryListHtml(story, opts = {}) {
     // 分享鈕（Howard 2026-10-06）：這一則變成一張圖，傳給 LINE 好友。整列本身是連結
     // （點開通知詳情），所以鈕要先吃掉這次點擊，否則按分享會順便開詳情。
     // 認的是 rtlEntryId 而不是 i：這張卡每輪報價都會重畫，序號會跟著當天的序列變動。
+    // 擺在 .rtl-text 裡面靠 float 浮右（不是 flex 的第四欄）：鈕放大之後若還占著一欄，
+    // 390px 的手機上說明文字只剩 150px，一句話會斷成四五行；浮動讓文字繞過它、
+    // 底下那幾行照樣用滿整個寬度。
     const share = `<button type="button" class="rtl-share" aria-label="分享這則訊號" title="分享這則訊號"`
       + ` onclick="event.stopPropagation(); shareRadarEntry('${jsAttr(rtlEntryId(e))}')">${ICON_SHARE}<span>分享</span></button>`;
     return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-eid="${escapeHtml(rtlEntryId(e))}" data-sev="${e.sev}"${link}>
       <div class="rtl-time">${fmtTime(e.at)}</div>
       ${signalIconSvg(rtlEntryIconRow(e), 38)}
-      <div class="rtl-text">
+      <div class="rtl-text">${share}
         <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
         ${e.text ? `<div class="rtl-desc">${escapeHtml(e.text)}</div>` : ""}
         <span class="rtl-src rtl-src-${e.src}">${RTL_SRC_LABEL[e.src] || ""}</span>
-      </div>${share}</div>`;
+      </div></div>`;
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
   if (!html) {
@@ -9008,6 +9011,15 @@ const SIGNAL_SHARE = { pad: 14, scale: 2, minW: 360, gap: 12, foot: 32, descLine
 // 圖片裡的字體：SVG 一進 <img> 就載不到外部字型（Noto Sans TC 也一樣），只能點名
 // 各平台內建的中文字體——Android 的 Noto CJK、iOS 的 PingFang、Windows 的正黑。
 const SIGNAL_SHARE_FONT = "'Noto Sans TC','Noto Sans CJK TC','PingFang TC','Microsoft JhengHei',sans-serif";
+// 官網網址也要跟著圖走（Howard 2026-10-06）。帶檔案分享時，好幾個目標（LINE 在
+// Android 上就是）會把 text 丟掉只留圖片，所以網址走三條路：寫進圖片底部、放進
+// share 的 text、再放一次 url 欄位。印在圖上的那份不帶 ?ref=app（那是給點擊用的）。
+// 刻意不用 /^https?:\/\// 把協定拿掉：那個正則裡有連續兩個斜線，而 preview 的
+// 函式抽取器（build_stock_card._stmt）會把它當成行末註解、一路吞到下一個區塊結尾，
+// 變成「重複宣告」。同一個坑 radar-timeline-redesign 記過一次（MA_PERIODS）。
+const SIGNAL_SHARE_SITE = SITE_BASE_URL.replace(/^[a-z]+:/i, "").replace(/^\/+/, "").replace(/\/+$/, "");
+// 圖片底部左邊那一行（COMPLIANCE.md 第 7 條：圖會走到沒看過 App 免責同意的人面前）
+const SIGNAL_SHARE_FOOT = "公開市場資料整理，不是投資建議";
 
 // 圖片裡的樣式：從已載入的 watchlist.css 抽 :root（顏色變數）與所有 .rtl- 規則。
 // 刻意不在 JS 裡再寫一份顏色——抄一份就會跟畫面慢慢分岔，而分享出去的圖片不會有人
@@ -9063,7 +9075,9 @@ function signalShareSvg(ctx, e) {
   // 使用者自己取的規則名，長起來沒有上限，圖不加寬就會被切掉在邊緣外面。
   const titleW = rtlTextWidth(fmtTime(e.at), 14) + 9 + rtlTextWidth(e.title || "", 16)
                + (lvl ? 7 + rtlTextWidth(lvl, 14) : 0);
-  const W = Math.max(minW, chart.width + pad * 2, textX + titleW + pad + 12);
+  // 底部那一行是「免責 … 官網網址」，兩端對齊：放不下就把整張圖加寬，不要讓它們疊在一起
+  const footW = rtlTextWidth(SIGNAL_SHARE_FOOT, 11.5) + 16 + rtlTextWidth(SIGNAL_SHARE_SITE, 11.5);
+  const W = Math.max(minW, chart.width + pad * 2, textX + titleW + pad + 12, footW + pad * 2);
   const lines = _sigShareWrap(e.text, W - textX - pad, 13, descLines);
   const cardY = 64, cardH = 56 + lines.length * 18;
   const chartY = cardY + cardH + gap;
@@ -9087,10 +9101,13 @@ function signalShareSvg(ctx, e) {
       + `</text>`,
     lines.map((t, i) => `<text class="rtl-share-desc" x="${textX}" y="${cardY + 48 + i * 18}">${escapeHtml(t)}</text>`).join(""),
     `<text class="rtl-share-src" x="${textX}" y="${cardY + cardH - 10}">${escapeHtml(RTL_SRC_LABEL[e.src] || "")}</text>`,
-    `<g transform="translate(${pad} ${chartY})">`
+    // 時間軸是固定寬度（整條橫軸有多寬就多寬），而整張圖可能被標題或底部那行撐得更寬——
+    // 那時候要把它置中，不然右邊會空一塊、看起來像沒畫完
+    `<g transform="translate(${Math.max(pad, (W - chart.width) / 2).toFixed(1)} ${chartY})">`
       + `<rect class="rtl-share-card" x="0" y="0" width="${chart.width.toFixed(1)}" height="${chart.height}" rx="12"/>`
       + chart.inner + `</g>`,
-    `<text class="rtl-share-foot" x="${pad}" y="${H - 12}">公開市場資料整理，不是投資建議</text>`,
+    `<text class="rtl-share-foot" x="${pad}" y="${H - 12}">${SIGNAL_SHARE_FOOT}</text>`,
+    `<text class="rtl-share-site" x="${W - pad}" y="${H - 12}" text-anchor="end">${escapeHtml(SIGNAL_SHARE_SITE)}</text>`,
   ].join("");
   // 內容包在 <g class="rtl-svg"> 裡：整組樣式都以它當祖先（.rtl-svg text.rtl-abbr …）。
   // 不能把 class 掛在 <svg> 根上——那條規則帶 max-width:400px，根元素吃到就把整張
@@ -9140,6 +9157,15 @@ async function buildSignalShareImage(ctx, e) {
 
 function _sigShareCanSend() {
   return !!(_sigShare.file && navigator.canShare && navigator.canShare({ files: [_sigShare.file] }));
+}
+
+// 要送出去的那一份。網址放進 url 欄位，不只寫在 text 裡：帶檔案時有些分享目標只收
+// 其中一個欄位（LINE 在 Android 上常常只留圖）。目標不吃 files+url 的組合時
+// （canShare 會回 false）退回 files+text，網址在 text 裡與圖片底部都還有。
+function _sigSharePayload() {
+  const base = { files: [_sigShare.file], text: _sigShare.text };
+  const withUrl = { files: [_sigShare.file], text: _sigShare.text, url: FR_INVITE_URL };
+  return (navigator.canShare && navigator.canShare(withUrl)) ? withUrl : base;
 }
 
 function _sigShareReset() {
@@ -9224,7 +9250,7 @@ async function sendSignalShare() {
   if (!_sigShare.file) { saveSignalShare(); return; }
   if (_sigShareCanSend()) {
     try {
-      await navigator.share({ files: [_sigShare.file], text: _sigShare.text });
+      await navigator.share(_sigSharePayload());
       trackActivity("signal_share_send", { via: "share", sid: _sigShare.sid });
       return;
     } catch (err) {
