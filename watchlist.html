@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="278">
+  <meta name="app-version" content="279">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=278" rel="stylesheet">
+  <link href="watchlist.css?v=279" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5722,19 +5722,23 @@ const RULE_NUDGE_TARGET = 3;
 const RULE_NUDGE_TARGET_BY_PLAN = { free: 1, pro: 3, premium: 5 };
 const RULE_NUDGE_SNOOZE_KEY = "cg-rule-nudge-snooze-until";
 const RULE_NUDGE_SNOOZE_DAYS = 7;
+// 2026-09-29 補到 10 組＝旗艦版的額度上限：原本只有 6 組，旗艦版六種型別都加過之後
+// 還剩 4 格額度，面板卻沒有建議可給。
+// 2026-10-06（Howard）起這個順序同時是「預設進階訊號」的發放順序（seedDefaultRules）：
+// 免費版（額度 1）拿第 1 條、專業版（6）拿第 1–6 條、旗艦版（10）全拿。
+// 同日依 Howard 指示把第 4↔7、第 6↔9 對調，讓前 6 條（專業版拿到的那組）涵蓋
+// 盤中／技術／籌碼三層，而不是把兩條「前高、均線」擠在一起、把基本面排到第 6。
+// 改順序＝改每一階拿到什麼，不要順手調整。
 const RULE_TEMPLATES = [
   { name: "跌幅超過 2%",            conditions: [{ type: "change_pct_below", value: 2 }] },
   { name: "量能達 20 日均量 2 倍",  conditions: [{ type: "volume_vs_ma", window: 20, ratio: 2, op: "above" }] },
   { name: "三大法人連續買超 3 天",  conditions: [{ type: "consec_net_buy", who: "total", days: 3 }] },
-  { name: "突破 20 日前高",         conditions: [{ type: "break_prior_high", window: 20 }] },
-  { name: "跌破 20 日均線",         conditions: [{ type: "price_vs_ma", period: 20, dir: "down" }] },
-  { name: "月營收 YoY 高於 30%",    conditions: [{ type: "revenue_yoy", value: 30 }] },
-  // 2026-09-29 補到 10 組＝旗艦版的額度上限：原本只有 6 組，旗艦版六種型別都加過之後
-  // 還剩 4 格額度，面板卻沒有建議可給。順序不動前 6 個——免費版只補第 1 條、
-  // 專業版（額度 6）補到第 6 條，兩者的結果跟以前一樣。
   { name: "漲幅超過 2%",            conditions: [{ type: "change_pct_above", value: 2 }] },
-  { name: "外資買超超過 1000 張",   conditions: [{ type: "net_buy_above", who: "foreign", lots: 1000 }] },
+  { name: "跌破 20 日均線",         conditions: [{ type: "price_vs_ma", period: 20, dir: "down" }] },
   { name: "MA5 向上穿越 MA20",      conditions: [{ type: "ma_cross", fast: 5, slow: 20, dir: "up" }] },
+  { name: "突破 20 日前高",         conditions: [{ type: "break_prior_high", window: 20 }] },
+  { name: "外資買超超過 1000 張",   conditions: [{ type: "net_buy_above", who: "foreign", lots: 1000 }] },
+  { name: "月營收 YoY 高於 30%",    conditions: [{ type: "revenue_yoy", value: 30 }] },
   { name: "創 52 週新高",           conditions: [{ type: "break_52w_high" }] },
 ];
 
@@ -5771,6 +5775,27 @@ function ruleRoomLeft() {
   return limit === null ? RULE_TEMPLATES.length : Math.max(0, limit - have);
 }
 
+// 範本寫進 alert_rules 的唯一一段（「讓系統幫我選」與第一次登入的預設訊號共用）。
+// 一條一條 POST，不用一次送整個陣列：enforce_alert_rules_limit 是 BEFORE INSERT
+// FOR EACH ROW，同一個 statement 裡先插入的那幾列它數不到，一次送 10 條會整組
+// 繞過方案上限。撞到上限就停下來，回報真正寫進去幾條。
+async function insertRuleTemplates(tpls) {
+  let added = 0, limitHit = false;
+  for (const t of tpls) {
+    try {
+      await sbPost("alert_rules", {
+        user_id: state.userId, name: t.name, stock_id: null, severity: null,
+        conditions: t.conditions, enabled: true,
+      }, state.accessToken, true);
+      added++;
+    } catch (e) {
+      if (isLimitError(e, "alert_rules")) { limitHit = true; break; }
+      throw e;
+    }
+  }
+  return { added, limitHit };
+}
+
 // 「讓系統幫我選」：用範本把剩下的額度補滿（跳過已有同型別的），撞到方案上限就停。
 // 首頁那一行、開機彈窗、進階訊號面板三處共用。
 async function autoPickRules(ctx, btn) {
@@ -5791,18 +5816,7 @@ async function autoPickRules(ctx, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "加入中…"; }
   let added = 0, limitHit = false;
   try {
-    for (const t of tpls) {
-      try {
-        await sbPost("alert_rules", {
-          user_id: state.userId, name: t.name, stock_id: null, severity: null,
-          conditions: t.conditions, enabled: true,
-        }, state.accessToken, true);
-        added++;
-      } catch (e) {
-        if (isLimitError(e, "alert_rules")) { limitHit = true; break; }
-        throw e;
-      }
-    }
+    ({ added, limitHit } = await insertRuleTemplates(tpls));
     trackActivity("rule_autopick", { ctx, n: added });
     await loadRuleNudgeState();
     if (added) { noteRuleAdded(); queuePushPromptAfterSignal(); }
@@ -5818,6 +5832,109 @@ async function autoPickRules(ctx, btn) {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "讓系統幫我選"; }
   }
+}
+
+// ── 預設進階訊號：登入時依方案額度自動開好（Howard 2026-10-06）──────────
+// 發放順序就是 RULE_TEMPLATES 的順序；額度就是 plans.rule_limit（免費 1／專業 6／旗艦 10）。
+//
+// 水位制，不是「數一數現在幾條」：user_rule_seed.seeded_limit 記「已經自動發到第幾條」。
+//   * 發過的那幾條永遠不再自動發——使用者把它刪掉、停用、改掉條件之後，
+//     系統不會在下次登入又塞回來（Howard：「只自動加這一次」）。
+//     用「目前 0 條就補」做判斷會壞在這裡：免費版的人刪掉那一條，下次登入就補第 2 條，
+//     刪一條補一條，變成趕不走的訊號。
+//   * 升級＝額度變大，只補水位以上新開的那幾格（1→6 補第 2–6 條），水位跟著推上去。
+//     降級再升回來不會重發（水位只前進）。
+//   * 第一次就已經自己設過規則的人（≥1 條）：只記水位、不發任何東西。那份清單是他自己挑的。
+//   * 同型別已經有規則的範本跳過（與「讓系統幫我選」同一個判斷），不要塞兩條只差門檻的。
+//
+// 開的是「進階訊號」本身（enabled=true＝會被評估、成立就發通知）。使用者收不收得到
+// 推播是另一回事（瀏覽器通知權限＋Web Push 訂閱），所以發完照樣走
+// queuePushPromptAfterSignal()，讓沒訂閱的人當下就被問一次。
+const RULE_SEED_KEY = "cg-rule-seed-limit";
+
+function _ruleSeedMemo() {
+  try { return Number(localStorage.getItem(`${RULE_SEED_KEY}:${state.userId}`)); } catch { return NaN; }
+}
+
+function _rememberRuleSeed(limit) {
+  try { localStorage.setItem(`${RULE_SEED_KEY}:${state.userId}`, String(limit)); } catch {}
+}
+
+// 水位寫回 DB。本機備忘只在 DB 真的寫成功之後才記——反過來的話
+// 本機以為發過了，DB 其實還是 0，換一台裝置就會再發一次。
+async function _saveRuleSeedLimit(limit, isNew) {
+  try {
+    if (isNew) {
+      try {
+        await sbPost("user_rule_seed",
+          { user_id: state.userId, seeded_limit: limit }, state.accessToken, true);
+      } catch (e) {
+        // 另一個分頁／裝置同時間剛建好那一列（409）：改成更新
+        await sbPatch("user_rule_seed", { user_id: `eq.${state.userId}` },
+          { seeded_limit: limit, updated_at: new Date().toISOString() }, state.accessToken);
+      }
+    } else {
+      await sbPatch("user_rule_seed", { user_id: `eq.${state.userId}` },
+        { seeded_limit: limit, updated_at: new Date().toISOString() }, state.accessToken);
+    }
+    _rememberRuleSeed(limit);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function seedDefaultRules() {
+  if (!state.userId || !planState.ready) return;
+  // rules 不是陣列＝還沒載到或 alert_rules 讀不到：不知道他現在有幾條就不要發，
+  // 不然「已經自己設過的人不發」這一條會變成「全部的人都發」
+  if (!Array.isArray(ruleNudge.rules)) return;
+  const limit = planLimitOf("alert_rules");
+  // 上限為 null＝不限，就發完整組範本
+  const want = limit === null ? RULE_TEMPLATES.length : Math.min(limit, RULE_TEMPLATES.length);
+  if (want <= 0) return;
+  // 本機備忘追上額度就不必問 DB：loadWatchlist 每次都會經過這裡（登入、回前景、手動更新）
+  const memo = _ruleSeedMemo();
+  if (Number.isFinite(memo) && memo >= want) return;
+
+  let row = null;
+  try {
+    const rows = await sbGet("user_rule_seed", { select: "seeded_limit" }, state.accessToken);
+    row = rows && rows.length ? rows[0] : null;
+  } catch (e) {
+    return;   // 表還不存在（migrate_default_rules_seed.sql 未執行）：什麼都不做
+  }
+  const isNew = !row;
+  const from = row ? Math.max(0, Number(row.seeded_limit) || 0) : 0;
+  if (from >= want) { _rememberRuleSeed(from); return; }
+
+  const have = (ruleNudge.rules || []).length;
+  // 第一次就有規則的人只記水位；其餘取水位到額度之間那幾條，跳過同型別已有的
+  const owned = new Set();
+  for (const r of ruleNudge.rules || []) {
+    for (const c of (Array.isArray(r.conditions) ? r.conditions : [])) if (c && c.type) owned.add(c.type);
+  }
+  const tpls = (isNew && have > 0)
+    ? []
+    : RULE_TEMPLATES.slice(from, want).filter(t => !t.conditions.some(c => owned.has(c.type)));
+
+  let added = 0, limitHit = false;
+  if (tpls.length) {
+    try {
+      ({ added, limitHit } = await insertRuleTemplates(tpls));
+    } catch (e) {
+      return;   // 不是上限的問題（離線、500）：水位不動，下次登入再試
+    }
+  }
+  // 撞到上限代表方案狀態比 DB 舊，水位只推到真的寫進去的那一條，剩下的下次再補
+  await _saveRuleSeedLimit(limitHit ? from + added : want, isNew);
+  if (!added) return;
+  trackActivity("rule_seed", { n: added, from, to: want });
+  await loadRuleNudgeState();
+  noteRuleAdded();
+  queuePushPromptAfterSignal();   // 規則開了但沒訂閱推播＝等於沒開，當下問一次
+  renderRuleNudge();
+  if (document.getElementById("rulesModal")?.classList.contains("show") && _rulesPane === "list") refreshRules();
 }
 
 function ruleNudgeSnoozed() {
@@ -10167,6 +10284,9 @@ async function loadWatchlist() {
   }
   planState.activeWatchIds = activeIds;
   watchlistRows = applyPreferredNames(rows);
+  // 預設進階訊號：方案與目前規則數都在手上了才判斷得出要發哪幾條。
+  // 不等它（本機備忘命中時連請求都不發），畫面照常先畫出來。
+  seedDefaultRules().catch(() => {});
   prefetchWatchlistDetail();   // A3：自選股所在的報告分片先抓（沒有分層就是 no-op）
   renderCurrentTab();
   scheduleQuoteHydration();
