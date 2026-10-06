@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="285">
+  <meta name="app-version" content="286">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=285" rel="stylesheet">
+  <link href="watchlist.css?v=286" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7971,7 +7971,12 @@ function homeTileHtml(r) {
 // 機器一停畫面上的價就凍住而且看起來完全正常，這是最危險的失效模式，一定要有地方講出來。
 function homeStatusText() {
   const sharedN = sharedInRows().length;
-  const n = sharedN ? `${watchlistRows.length}＋分享 ${sharedN}` : watchlistRows.length;
+  const ownN = watchlistRows.length;
+  // 兩邊共用同一份額度，所以自選與好友分享各自的檔數都要看得見，後面再給合計；
+  // 沒有分享的人只看到「自選 N 檔」，不該冒出一個「好友分享 0 檔」
+  const n = sharedN
+    ? `自選（${ownN} 檔）＋好友分享（${sharedN} 檔）：共 ${ownN + sharedN} 檔`
+    : `自選 ${ownN} 檔`;
   let latestQuoteAt = null, latestAt = null;
   for (const iq of Object.values(intradayQuoteMap || {})) {
     if (iq?.quote_at && (!latestQuoteAt || iq.quote_at > latestQuoteAt)) latestQuoteAt = iq.quote_at;
@@ -7985,15 +7990,15 @@ function homeStatusText() {
   // 那不是「報價已停止更新」（那句講的是取價主機掛了）。同一句話用在兩件事上，
   // 使用者會以為系統壞了，然後去按一個其實沒有問題的東西。
   if (isOpen && !liveQuotesAllowed()) {
-    return `⏸ 盤中不自動更新（${planTierLabel()}）${freshnessAt ? ` · 報價 ${fmtClock(freshnessAt)}` : ""} · 自選 ${n} 檔`;
+    return `⏸ 盤中不自動更新（${planTierLabel()}）${freshnessAt ? ` · 報價 ${fmtClock(freshnessAt)}` : ""} · ${n}`;
   }
   const quoteStale = isOpen && quoteAge !== null && quoteAge >= QUOTE_STALE_MS;
-  if (quoteStale) return `🟠 報價已停止更新 · 最後 ${fmtClock(freshnessAt)}（${fmtAgeRough(quoteAge)}）· 自選 ${n} 檔`;
+  if (quoteStale) return `🟠 報價已停止更新 · 最後 ${fmtClock(freshnessAt)}（${fmtAgeRough(quoteAge)}）· ${n}`;
   // 剛加入的那幾檔還在等監控納入：它們那一列的「訊號 0 / 逼近關卡 0」不是今天的結論
   const pendingN = _monitorPendingSids().length;
   const pendingNote = pendingN ? ` · ${pendingN} 檔資訊尚未同步` : "";
-  if (isOpen) return `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : latestAt ? ` · 資料 ${fmtTime(latestAt)}` : ""}${pendingNote} · 自選 ${n} 檔`;
-  return `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · 自選 ${n} 檔`;
+  if (isOpen) return `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : latestAt ? ` · 資料 ${fmtTime(latestAt)}` : ""}${pendingNote} · ${n}`;
+  return `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · ${n}`;
 }
 
 // 接下來 7 天：stock_events 裡事件日在明天起 7 天內的日程（除權息、法說會、財報…）。
@@ -9880,9 +9885,10 @@ async function shareRadarEntry(eid) {
     img.alt = `${ctx.name} ${ctx.sid} ${fmtTime(entry.at)} ${entry.title}`;
     img.src = _sigShare.url;
     stage.replaceChildren(img);
-    // 兩顆鈕的分工要先講清楚：LINE 收到帶檔案的分享時只留圖片，網址得自己走一趟
+    // 能直接傳圖的裝置不留說明（Howard 2026-10-06）：兩顆鈕上的字已經講完分工了。
+    // 不能傳圖的那種還是要講，不然按下去什麼都不會發生
     document.getElementById("sigshare-note").textContent = _sigShareCanSend()
-      ? "圖片走上面那顆（手機的分享面板選 LINE）；LINE 只收得到圖，網址要按下面那顆才會進聊天室。"
+      ? ""
       : "這台裝置不能直接傳圖片：先下載，再到 LINE 的聊天室貼上；網址按下面那顆傳。";
   } catch (err) {
     if (gen !== _sigShareGen) return;                      // 已經關掉了，不要把錯誤寫回畫面
