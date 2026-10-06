@@ -3485,6 +3485,21 @@ body.modal-blocking .modal-backdrop.show {
 }
 .sigshare-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .sigshare-title { font-size: 16px; font-weight: 700; flex: 1 1 auto; }
+/* Bootstrap 的 .btn-close 是一張**深色**的 ✕（這一頁沒有 data-bs-theme="dark"），
+   疊在深色面板上等於看不見——2026-10-06 Howard 回報「點進去之後畫面無法返回」就是
+   這個：出口在那裡，只是畫成黑色的。K 線那張 modal 早就這樣處理（.kline-modal-content
+   .btn-close），這裡比照。點擊範圍也放大：手機上 ✕ 本身只有 16px。 */
+.sigshare-head .btn-close {
+	filter: invert(1); opacity: 0.85; flex: 0 0 auto;
+	padding: 10px; margin: -6px -4px -6px 0; background-size: 14px;
+}
+/* 第二條出口，寫清楚回去哪裡——手機上「✕」不是每個人都會去按 */
+.sigshare-back {
+	display: block; width: 100%; margin-top: 10px; padding: 9px 12px;
+	font-size: 13.5px; font-weight: 600; color: var(--text-1);
+	background: transparent; border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
+}
+.sigshare-back:hover { color: var(--text-0); background: rgba(146, 146, 163, 0.12); }
 /* 圖比畫面寬（整個橫軸都在裡面）：預覽縮到容器寬度，傳出去的 PNG 仍是原尺寸 */
 .sigshare-stage {
 	min-height: 120px; display: flex; align-items: center; justify-content: center;

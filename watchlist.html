@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="268">
+  <meta name="app-version" content="269">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=268" rel="stylesheet">
+  <link href="watchlist.css?v=269" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1360,7 +1360,8 @@
      刻意不是 Bootstrap modal：它要蓋在個股字卡（那也是 modal）上面，兩層 modal 會搶
      backdrop（方案面板踩過一次），而且關掉它應該回到剛才那張卡、不是回到首頁。
      走全螢幕 div 這條路，z-index 疊在 modal 之上（同 .update-gate 那一類）。 -->
-<div id="sigshare-gate" class="sigshare-gate" style="display:none" role="dialog" aria-modal="true" aria-labelledby="sigshare-title">
+<div id="sigshare-gate" class="sigshare-gate" style="display:none" role="dialog" aria-modal="true" aria-labelledby="sigshare-title"
+     onclick="if (event.target === this) closeSignalShare()">
   <div class="sigshare-box">
     <div class="sigshare-head">
       <div class="sigshare-title" id="sigshare-title">分享這則訊號</div>
@@ -1372,6 +1373,9 @@
       <button type="button" class="btn btn-primary btn-sm" id="sigshare-send" disabled onclick="sendSignalShare()">傳給 LINE 好友</button>
       <button type="button" class="btn btn-outline-light btn-sm" id="sigshare-save" disabled onclick="saveSignalShare()">下載圖片</button>
     </div>
+    <!-- 回去的路要看得見（2026-10-06 Howard：點進去之後畫面無法返回）。四條都有：
+         這顆、右上角的 ✕、點圖片外面的暗底、手機的返回鍵。 -->
+    <button type="button" class="sigshare-back" onclick="closeSignalShare()">關閉，回到訊號列表</button>
   </div>
 </div>
 
@@ -9141,6 +9145,7 @@ function _sigShareCanSend() {
 function _sigShareReset() {
   if (_sigShare.url) URL.revokeObjectURL(_sigShare.url);   // blob 不收會一直佔記憶體
   _sigShare = { url: "", file: null, text: "", name: "", sid: "" };
+  _sigShareGen += 1;   // 還在產生的那一張作廢（關掉之後才完成的圖沒人收，blob 會一直佔著）
   for (const id of ["sigshare-send", "sigshare-save"]) {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = true;
@@ -9156,20 +9161,36 @@ function _sigShareKeydown(ev) {
   closeSignalShare();
 }
 
+// 手機的返回鍵／邊緣滑動要關掉這張圖，而不是離開 App（Howard 2026-10-06 回報
+// 「點進去後畫面無法返回」——當時只有一顆看不見的 ✕）。開的時候推一筆 history，
+// 返回就落在自己的 popstate 上；關的時候那一筆還在就自己退回去，不讓它越疊越多。
+let _sigShareGen = 0;            // 產圖的世代：關掉之後才完成的那張要自己作廢
+function _sigSharePop() {
+  closeSignalShare({ fromPop: true });
+}
+
 async function shareRadarEntry(eid) {
   const ctx = _rtlShareCtx;
   const entry = (ctx && Array.isArray(ctx.story) ? ctx.story : []).find(x => rtlEntryId(x) === eid);
   const gate = document.getElementById("sigshare-gate");
   if (!ctx || !entry || !gate) return;
   _sigShareReset();
+  const gen = _sigShareGen;
   const stage = document.getElementById("sigshare-stage");
   stage.textContent = "圖片產生中…";
   document.getElementById("sigshare-note").textContent = "";
   gate.style.display = "flex";
   document.addEventListener("keydown", _sigShareKeydown, true);
+  // 返回鍵的那一筆（見 _sigSharePop）。pushState 被擋掉也不影響其他三條出口。
+  try {
+    history.pushState({ sigshare: 1 }, "");
+    window.addEventListener("popstate", _sigSharePop);
+  } catch { /* 少數瀏覽器限制 pushState：返回鍵那條路沒有，✕／關閉鈕／點暗底都還在 */ }
   trackActivity("signal_share_open", { sid: ctx.sid, key: entry.key || "", src: entry.src || "" });
   try {
-    _sigShare = await buildSignalShareImage(ctx, entry);
+    const built = await buildSignalShareImage(ctx, entry);
+    if (gen !== _sigShareGen) { URL.revokeObjectURL(built.url); return; }   // 中途關掉或換了一則
+    _sigShare = built;
     const img = document.createElement("img");
     img.className = "sigshare-img";
     img.alt = `${ctx.name} ${ctx.sid} ${fmtTime(entry.at)} ${entry.title}`;
@@ -9179,6 +9200,7 @@ async function shareRadarEntry(eid) {
       ? "按「傳給 LINE 好友」會打開手機的分享面板，選 LINE 再選好友或群組。圖裡是一整個上午的時間軸。"
       : "這台裝置不能直接傳圖片：先下載，再到 LINE 的聊天室貼上這張圖。";
   } catch (err) {
+    if (gen !== _sigShareGen) return;                      // 已經關掉了，不要把錯誤寫回畫面
     stage.textContent = `圖片產生失敗：${(err && err.message) || err}`;
     return;
   }
@@ -9186,12 +9208,16 @@ async function shareRadarEntry(eid) {
   document.getElementById("sigshare-send").disabled = false;
 }
 
-function closeSignalShare() {
+// opts.fromPop：是返回鍵把我們叫醒的，那一筆 history 已經退掉了，不要再 back 一次
+function closeSignalShare(opts) {
   const gate = document.getElementById("sigshare-gate");
-  if (gate) gate.style.display = "none";
+  if (!gate || gate.style.display === "none") return;
+  gate.style.display = "none";
   document.removeEventListener("keydown", _sigShareKeydown, true);
+  window.removeEventListener("popstate", _sigSharePop);
   document.getElementById("sigshare-stage")?.replaceChildren();
   _sigShareReset();
+  if (!(opts && opts.fromPop) && history.state && history.state.sigshare) history.back();
 }
 
 async function sendSignalShare() {
