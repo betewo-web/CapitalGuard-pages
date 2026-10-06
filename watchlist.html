@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="279">
+  <meta name="app-version" content="280">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=279" rel="stylesheet">
+  <link href="watchlist.css?v=280" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -692,6 +692,30 @@
         <button type="button" class="btn btn-sm btn-outline-light" onclick="snoozeRuleNudgeFromPopup()">稍後</button>
         <button type="button" class="btn btn-sm btn-outline-info" onclick="autoPickRules('popup', this)">讓系統幫我選</button>
         <button type="button" class="btn btn-sm btn-success btn-accent-sm" onclick="openRulesFromPopup()">新增進階訊號</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新手起步清單：一檔都沒有的人在開 App 時（以及安裝精靈走完的那一刻）跳一次，
+     列出市值最大的幾檔讓他直接加入。內容由 renderWatchSeedPopup() 畫，清單來自
+     web/largecap.json（largecap_pick.py 依公開資料的市值排序，不是我們挑的）。
+     與另兩個提醒同為 blocking-modal：一檔股票都沒有的帳號等於沒有這個 App，
+     點旁邊跳過＝他永遠不知道第一步要做什麼。出口有三個（稍後／自己搜尋／加入）。 -->
+<div class="modal fade sheet-modal blocking-modal" id="watchSeedModal" tabindex="-1" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">⭐ 先加幾檔開始追蹤</h5>
+      </div>
+      <div class="modal-body p-3" id="watch-seed-popup-body"></div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-light" id="watch-seed-later-btn"
+                onclick="snoozeWatchSeedFromPopup()">稍後</button>
+        <button type="button" class="btn btn-sm btn-outline-info" onclick="openWatchSearchFromSeed()">自己搜尋</button>
+        <button type="button" class="btn btn-sm btn-success btn-accent-sm" id="watch-seed-all-btn"
+                onclick="addWatchSeed('popup', this)">全部加入</button>
       </div>
     </div>
   </div>
@@ -4194,6 +4218,9 @@ function finishOnboarding(extra) {
   document.getElementById("onboard-gate").style.display = "none";
   initPushUI();
   setTimeout(consumePlanIntent, 600);   // 從官網定價頁一路走到這裡的人，精靈結束就開方案面板
+  // 精靈走完卻一檔股票都沒有＝通知開好了也不會響。這是起步清單最該出現的那一刻；
+  // 方案面板可能剛被上面那一行打開，所以是排隊（畫面空了再跳），不是直接跳。
+  queueWatchSeedPopup();
 }
 
 // 本地跳一則通知讓他親眼看到；真正的端到端（伺服器 → 推播服務 → 這台裝置）
@@ -4474,13 +4501,20 @@ async function showMain() {
   // 兩邊共用同一個請求（_sigHistLoadingPromise），本機有今天那份就完全不發請求（K2）
   loadSignalHistory(false).then(() => renderCurrentTab()).catch(() => {});
   loadShowcase().then(s => { if (s && currentTab === "home") renderHome(); }).catch(() => {});   // 範例股
+  // 新手起步清單（市值最大的幾檔）：首頁與設定頁的空清單那一排要它才畫得出來
+  ensureLargecap().then(d => { if (d && watchSeedFirstUse()) renderCurrentTab(); }).catch(() => {});
   // 延後再跳：免責聲明閘、強制更新閘、金流導回的方案面板都在這之前處理，
   // 直接跳會疊在它們上面（_screenIsBusy 會擋，但那樣這次就白白錯過了）
-  // 一次開機只跳一個視窗：推播提醒優先，跳了就略過這次的規則推薦
+  // 一次開機只跳一個視窗：推播提醒優先，跳了就略過後面兩個
   // 點通知進來的那次不跳：使用者要看的是剛閃爍的那則，推薦視窗會正好蓋在上面
+  //
+  // 起步清單排在進階訊號推薦之前：一檔股票都沒有的時候，進階訊號無處可套
+  // （ruleNudgeShouldPrompt 本來就要求有自選股），而且「先挑幾檔」是他的第一步。
   setTimeout(async () => {
     if (_alertJumpedThisBoot) return;
-    if (!(await maybeShowPushNudgePopup())) maybeShowRuleNudgePopup();
+    if (await maybeShowPushNudgePopup()) return;
+    if (await maybeShowWatchSeedPopup()) return;
+    maybeShowRuleNudgePopup();
   }, 1800);
   _lastRefreshAt = Date.now();
   _lastInboxRefreshAt = Date.now();
@@ -6044,6 +6078,371 @@ function openRuleEditorFromNudge() {
   openRuleEditor(null);
 }
 
+// ── 新手起步清單（watch seed，Howard 2026-10-06）────────────────────
+// 第一次使用的人自選股是空的，而這個 App 的每一件事都從自選股長出來：沒有股票就沒有
+// 盤中訊號、沒有通知、首頁連一格都沒有。所以主動給他一份可以直接加入的清單，數量是
+// 方案上限的一半（免費 3→2、專業 10→5、旗艦 30→15）——另一半留給他自己想追的股票
+// 與好友分享的股票（分享與自選共用同一個額度，frSlotsExtra）。
+//
+// 清單來自 web/largecap.json：市值由大到小的前 30 檔（largecap_pick.py，夜間用公開
+// 資料算出來的市值）。**不挑、不評分、不看漲跌、不看訊號**——市值排序是誰算都一樣的
+// 事實，手挑名單是對個股的意見，而對個股的意見就是投顧業務（COMPLIANCE.md）。前端只
+// 做兩件事：跳過他已經有的，以及同一產業不要連著給太多檔。使用者看到的字也照這個邊界
+// 寫：「市值前段的大型股」、明寫「不是推薦名單」。
+//
+// 刻意**不自動加進自選股**（與同日上線的預設進階訊號不同）：訊號是設定，自選股是
+// 「我在看哪幾檔」，還會佔掉方案額度與分享的格子。所以一律要使用者自己按——
+// 一顆「全部加入」加上每一檔的「＋加入」。
+const LARGECAP_URL = "largecap.json";
+const WATCH_SEED_SNOOZE_KEY = "cg-watch-seed-snooze-until";
+const WATCH_SEED_SNOOZE_DAYS = 7;
+const WATCH_SEED_POPUP_KEY = "cg-watch-seed-popup";
+const WATCH_SEED_POPUP_MAX = 3;
+const WATCH_SEED_POPUP_GAP_DAYS = 3;
+
+let largecap = null;          // null＝還沒載到或讀不到（舊版部署沒有這個檔）
+let _largecapPromise = null;
+
+async function loadLargecap() {
+  try {
+    const r = await fetch(LARGECAP_URL, { cache: "no-cache" });
+    if (r.ok) {
+      const d = await r.json();
+      if (d && Array.isArray(d.items) && d.items.length) largecap = d;
+    }
+  } catch { largecap = null; }
+  return largecap;
+}
+
+// 同一次開機只抓一次；抓失敗（離線、舊版部署沒這個檔）就把記憶清掉，
+// 下一次真的需要清單時再試一次
+function ensureLargecap() {
+  if (largecap) return Promise.resolve(largecap);
+  if (!_largecapPromise) {
+    _largecapPromise = loadLargecap().finally(() => { if (!largecap) _largecapPromise = null; });
+  }
+  return _largecapPromise;
+}
+
+// 剩下幾格可以加：方案上限扣掉自選股與好友分享（伺服器端 share_slots 才是真正的防線）
+function watchSeedRoomLeft() {
+  const limit = planLimitOf("watchlist");
+  if (!limit) return 0;
+  return Math.max(0, limit - watchlistRows.length - frSlotsExtra());
+}
+
+// 推薦幾檔＝方案上限的一半，四捨五入（3→2、10→5、30→15），且不超過剩下的格子。
+// 一半是上限不是目標：給滿會讓他第一天就沒有空位加自己認得的股票，也接不了好友分享。
+function watchSeedCount() {
+  const limit = planLimitOf("watchlist");
+  if (!limit) return 0;
+  return Math.min(Math.max(1, Math.round(limit / 2)), watchSeedRoomLeft());
+}
+
+// 挑哪幾檔：市值順序往下拿，跳過已經在自選或好友分享裡的，**同一產業最多 ceil(n/3) 檔**
+// （2→1、5→2、15→5）。市值前段有一半是半導體與金融，照順序硬拿會變成「五檔同產業」，
+// 第一次使用的人看不出這個 App 在追蹤什麼。產業別取 universe.json 的 i（largecap.json
+// 裡那一份只是備援），沒有產業別的自成一類、不佔別人的名額。
+function watchSeedPicks(n) {
+  if (!(n > 0) || !largecap) return [];
+  const have = watchSeedAlreadyHave();
+  const perIndustry = Math.max(1, Math.ceil(n / 3));
+  const used = {};
+  const picks = [];
+  for (const it of largecap.items) {
+    if (picks.length >= n) break;
+    const sid = String(it.id || "").trim();
+    // ETF 也是四碼（0050）：isStockId 認得它，但起步清單只給公司（largecap.json 本來就
+    // 不含 ETF，這裡是第二道——清單換來源時不要悄悄多出一檔 0050）
+    if (!isStockId(sid) || isEtfId(sid) || have.has(sid)) continue;
+    const ind = (universe[sid] && universe[sid].i) || it.i || "";
+    const key = ind || `_${sid}`;
+    if ((used[key] || 0) >= perIndustry) continue;
+    used[key] = (used[key] || 0) + 1;
+    picks.push({
+      id: sid,
+      name: getPreferredStockName(sid, it.n) || (universe[sid] && universe[sid].n) || it.n || sid,
+      industry: ind,
+    });
+  }
+  // 產業名額把清單用完時寧可少給幾檔（例如只剩金融股）：少一檔沒關係，連給五檔同產業有關係
+  return picks;
+}
+
+// 已經在追蹤的代號：自己的自選股，加上好友分享給我的（那幾檔也在跑訊號、也佔著額度）
+function watchSeedAlreadyHave() {
+  const have = new Set(watchlistRows.map(r => String(r.stock_id || "").trim()));
+  for (const r of sharedInRows()) have.add(String(r.stock_id || "").trim());
+  return have;
+}
+
+// 「第一次使用」＝一檔都沒有在追蹤。好友分享給我的也算在內：那些股票本來就在跑訊號，
+// 他不是空手，不需要起步清單。
+function watchSeedFirstUse() {
+  return planState.ready && watchlistRows.length === 0 && frSlotsExtra() === 0;
+}
+
+function watchSeedSnoozed() {
+  try { return Number(localStorage.getItem(WATCH_SEED_SNOOZE_KEY) || 0) > Date.now(); } catch { return false; }
+}
+
+function watchSeedShouldPrompt() {
+  return watchSeedFirstUse() && !watchSeedSnoozed() && watchSeedPicks(watchSeedCount()).length > 0;
+}
+
+function snoozeWatchSeed() {
+  try { localStorage.setItem(WATCH_SEED_SNOOZE_KEY, String(Date.now() + WATCH_SEED_SNOOZE_DAYS * 86400e3)); } catch {}
+  renderCurrentTab();
+}
+
+function snoozeWatchSeedFromPopup() {
+  hideWatchSeedPopup();
+  snoozeWatchSeed();
+}
+
+// 加過任何一檔就不再主動跳：他已經不是「一檔都沒有」的狀態了，而首頁與設定頁的空清單
+// 那一排本來就只在真的空的時候才畫，所以不必另外記什麼。
+function noteWatchSeedAdded() {
+  snoozeWatchSeed();
+}
+
+// ── 寫入 ──
+// 基礎訊號預設全開（2026-09-28 Howard，DB 預設同步改）。這 11 個旗標只能有一份：
+// 新增自選股的兩條路（搜尋列與起步清單）都讀這裡，不要在第二個地方再抄一次。
+const WATCH_SIGNAL_DEFAULTS = {
+  alert_break_support:    true,
+  alert_near_support:     true,
+  alert_break_resistance: true,
+  alert_near_resistance:  true,
+  alert_volume_spike:     true,
+  alert_limit_up:         true,
+  alert_limit_down:       true,
+  alert_inst_buy:         true,
+  alert_inst_sell:        true,
+  alert_margin_up:        true,
+  alert_margin_down:      true,
+};
+
+// 一檔一列 POST，不送整個陣列：enforce_watchlist_limit 是 BEFORE INSERT FOR EACH ROW，
+// 同一個 statement 裡先插入的那幾列它數不到，一次送 15 檔會整組繞過方案上限
+// （與 insertRuleTemplates 同一個理由）。撞到上限就停，回報真正寫進去幾檔。
+async function insertWatchStocks(picks) {
+  const done = [];            // 真的寫進去的那幾檔（不是「試了幾檔」：訊息列的是這一份）
+  let limitHit = false, dup = 0;
+  for (const p of picks) {
+    try {
+      await sbPost("watchlist", {
+        user_id: state.userId, stock_id: p.id, stock_name: p.name, ...WATCH_SIGNAL_DEFAULTS,
+      }, state.accessToken, true);
+      done.push(p);
+      trackActivity("watch_add", { stock: p.id, from: "seed" });
+    } catch (e) {
+      if (isLimitError(e, "watchlist")) { limitHit = true; break; }
+      // 已經有了（另一台裝置剛加、或同一檔好友分享過來）：不是錯誤，跳過
+      if (/23505|unique|dup:share/.test(String(e.message || e))) { dup++; continue; }
+      throw e;
+    }
+  }
+  return { done, limitHit, dup };
+}
+
+function _watchSeedMsgEl(ctx) {
+  return document.getElementById(ctx === "popup" ? "watch-seed-popup-msg" : `watch-seed-msg-${ctx}`);
+}
+
+// 按鈕按的是「畫面上這幾檔」，不是當場重算一次：加完第一檔之後 watchSeedFirstUse() 就
+// 變成 false、剩下的格子也少一格，重算的話同一排裡其他的「＋加入」會變成按了沒反應。
+// 真正的上限仍由 DB 的 enforce_watchlist_limit 擋（撞到就顯示升級提示）。
+let _watchSeedShown = [];
+
+async function addWatchSeed(ctx, btn, only) {
+  if (!state.userId) return;
+  const msgEl = _watchSeedMsgEl(ctx);
+  const have = watchSeedAlreadyHave();
+  const picks = _watchSeedShown.filter(p => (!only || p.id === only) && !have.has(p.id));
+  if (!picks.length) return;
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "加入中…"; }
+  let res = { done: [], limitHit: false, dup: 0 };
+  try {
+    res = await insertWatchStocks(picks);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+    if (msgEl) msgEl.innerHTML = `<span class="text-danger">加入失敗：${escapeHtml(String(e.message || e))}</span>`;
+    return;
+  }
+  trackActivity("watch_seed", { ctx, n: res.done.length, asked: picks.length });
+  await loadWatchlist();          // 清單、首頁格子、方案用量都跟著更新
+  loadPlanState().catch(() => {});
+  if (res.done.length) {
+    noteWatchSeedAdded();
+    // 加了股票就等於開了 11 個基礎訊號，沒訂閱推播的話成立了也沒人告訴他。
+    // 只有今天還沒問過推播的人才問：安裝精靈裡剛問過的，不要隔 20 秒再問一次。
+    let askedToday = false;
+    try { askedToday = pushNudgeState().last === taipeiDateKey(new Date()); } catch {}
+    if (!askedToday) queuePushPromptAfterSignal();
+  }
+  const names = res.done.map(p => `${p.name}（${p.id}）`).join("、");
+  if (msgEl) {
+    msgEl.innerHTML = res.done.length
+      ? `<span class="text-success">已加入 ${res.done.length} 檔：${escapeHtml(names)}。基礎訊號已全部開啟，可在「設定」分頁調整。</span>`
+        + (res.limitHit ? " " + limitPromptHtml("watchlist") : "")
+      : (res.limitHit ? limitPromptHtml("watchlist") : "這幾檔都已經在你的清單裡了。");
+  }
+  if (ctx === "popup") renderWatchSeedPopupList();
+  if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = label; }
+}
+
+// ── 畫面 ──
+// 一句話的理由 → 清單 → 出口。文案只講「市值前段的大型股」這個事實，
+// 並明寫不是推薦名單（COMPLIANCE.md 第 4 條用的是同一句話）。
+function watchSeedLeadHtml(picks) {
+  const limit = planLimitOf("watchlist");
+  const planLine = planState.ready
+    ? `${escapeHtml(planState.plan.name)}可追蹤 ${limit} 檔，這裡先給一半。`
+    : "";
+  // 「市值前段的大型股」而不是「市值最大的 N 檔」：產業上限會讓第 N 檔不一定是市值第 N 名，
+  // 他已經有的那幾檔也會被跳過。寫成排名就是寫了一句會變成假的話。
+  return `<div class="wseed-lead">
+      先加幾檔開始追蹤：下面這 ${picks.length} 檔是台股市值前段的大型股（依公開資料的市值排序，
+      同一產業不重複太多檔）。這不是推薦名單，只是讓 App 跑起來的起點——
+      你隨時可以移除，也可以自己搜尋想追蹤的股票。${planLine}
+    </div>`;
+}
+
+// withAdd＝每一列各自一顆「＋加入」。只有彈窗有：彈窗會留在畫面上，加一檔之後其餘幾檔
+// 還在原地可以繼續按。首頁與設定頁那一排長在「還沒有自選股」的空狀態裡，加進第一檔的
+// 那一刻整個空狀態就被真正的清單取代了——那裡給逐檔的按鈕會變成「按一下清單就消失」。
+function watchSeedListHtml(picks, ctx, withAdd) {
+  const have = watchSeedAlreadyHave();
+  return `<div class="wseed-list">${picks.map(p => `
+      <div class="wseed-item">
+        <div class="wseed-text">
+          <span class="wseed-name">${escapeHtml(p.name)}</span>
+          <span class="wseed-sid">${escapeHtml(p.id)}</span>
+          ${p.industry ? `<span class="wseed-ind">${escapeHtml(p.industry)}</span>` : ""}
+        </div>
+        ${!withAdd ? "" : have.has(p.id)
+          ? `<span class="wseed-done">已加入</span>`
+          : `<button type="button" class="btn btn-sm btn-outline-light btn-ghost wseed-add"
+                onclick="addWatchSeed('${jsAttr(ctx)}', this, '${jsAttr(p.id)}')">＋ 加入</button>`}
+      </div>`).join("")}</div>`;
+}
+
+// 首頁與設定頁的空清單那一排：不是彈窗，所以不吃次數上限也不會被錯過。
+// 彈窗按過「稍後」的 7 天內這一排也收起來——兩個開關各自記狀態遲早會出現「關了還在」。
+// 「自己搜尋」不用再給一次：上面的空狀態本來就有一顆「＋ 新增自選股」。
+function watchSeedStripHtml(ctx) {
+  if (!watchSeedShouldPrompt()) return "";
+  const picks = watchSeedPicks(watchSeedCount());
+  _watchSeedShown = picks;
+  return `<div class="wseed-strip">
+      ${watchSeedLeadHtml(picks)}
+      ${watchSeedListHtml(picks, ctx, false)}
+      <div class="wseed-actions">
+        <button type="button" class="btn btn-sm btn-success btn-accent-sm"
+                onclick="addWatchSeed('${jsAttr(ctx)}', this)">全部加入（${picks.length} 檔）</button>
+        <span class="hs-link" onclick="snoozeWatchSeed()" title="7 天內不再顯示">稍後</span>
+      </div>
+      <div id="watch-seed-msg-${jsAttr(ctx)}" class="small mt-1"></div>
+    </div>`;
+}
+
+function renderWatchSeedPopup() {
+  const body = document.getElementById("watch-seed-popup-body");
+  if (!body) return;
+  _watchSeedShown = watchSeedPicks(watchSeedCount());
+  body.innerHTML = watchSeedLeadHtml(_watchSeedShown)
+    + `<div id="watch-seed-list"></div>`
+    + `<div id="watch-seed-popup-msg" class="small mt-2"></div>`;
+  renderWatchSeedPopupList();
+}
+
+// 只重畫清單與出口，不重新挑股票：挑一次就固定（_watchSeedShown），加過的那幾列改成
+// 「已加入」留在原地。重新挑會把剛加的那一檔從清單裡抽掉，看起來像按鈕把它吃了。
+function renderWatchSeedPopupList() {
+  const el = document.getElementById("watch-seed-list");
+  if (el) el.innerHTML = watchSeedListHtml(_watchSeedShown, "popup", true);
+  renderWatchSeedPopupFooter();
+}
+
+// 加完之後的出口：擋住畫面的提醒沒有 ✕，「稍後」是唯一的出口——加完了還寫「稍後」
+// 讀起來像沒加成功，改成「完成」；清單裡的都加過了就把「全部加入」收起來。
+function renderWatchSeedPopupFooter() {
+  const have = watchSeedAlreadyHave();
+  const left = _watchSeedShown.filter(p => !have.has(p.id)).length;
+  const allBtn = document.getElementById("watch-seed-all-btn");
+  const laterBtn = document.getElementById("watch-seed-later-btn");
+  if (allBtn) {
+    allBtn.style.display = left ? "" : "none";
+    allBtn.textContent = `全部加入（${left} 檔）`;
+  }
+  if (laterBtn) laterBtn.textContent = left ? "稍後" : "完成";
+}
+
+function hideWatchSeedPopup() {
+  const el = document.getElementById("watchSeedModal");
+  const inst = el && bootstrap.Modal.getInstance(el);
+  if (inst) inst.hide();
+}
+
+function openWatchSearchFromSeed() {
+  hideWatchSeedPopup();
+  snoozeWatchSeed();   // 他選擇自己找，7 天內不要再跳同一個視窗
+  setTimeout(focusAddStock, 220);   // 等前一個 modal 的淡出跑完，不然 body 的捲動鎖會留著
+}
+
+// 與進階訊號推薦同樣的四重節流：一輩子最多 WATCH_SEED_POPUP_MAX 次、兩次至少隔
+// WATCH_SEED_POPUP_GAP_DAYS 天、按「稍後」靜音 WATCH_SEED_SNOOZE_DAYS 天、
+// 加了任何一檔就不再跳。兩把鑰匙都在 localStorage，所以是「這台裝置」的狀態；
+// 換裝置重新算的那次，條件仍然是「一檔都沒有」，再問一次是對的。
+function watchSeedPopupState() {
+  try { return JSON.parse(localStorage.getItem(WATCH_SEED_POPUP_KEY) || "{}") || {}; } catch { return {}; }
+}
+
+function noteWatchSeedPopupShown() {
+  const st = watchSeedPopupState();
+  try {
+    localStorage.setItem(WATCH_SEED_POPUP_KEY,
+      JSON.stringify({ n: Number(st.n || 0) + 1, last: Date.now() }));
+  } catch {}
+}
+
+async function maybeShowWatchSeedPopup() {
+  if (!watchSeedFirstUse() || watchSeedSnoozed()) return false;
+  const st = watchSeedPopupState();
+  if (Number(st.n || 0) >= WATCH_SEED_POPUP_MAX) return false;
+  if (st.last && Date.now() - Number(st.last) < WATCH_SEED_POPUP_GAP_DAYS * 86400e3) return false;
+  await ensureLargecap();        // 清單還沒載到就先等它，不然這次機會白白錯過
+  if (!watchSeedShouldPrompt()) return false;
+  if (_screenIsBusy()) { _watchSeedQueued = true; return false; }
+  renderWatchSeedPopup();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("watchSeedModal")).show();
+  noteWatchSeedPopupShown();
+  return true;
+}
+
+// 安裝精靈剛走完的那一刻最該跳（他才剛開好通知，卻一檔股票都沒有），但那時畫面上
+// 可能還有別的閘或面板（精靈自己、方案面板）。全螢幕的閘不是 Bootstrap modal，
+// hidden.bs.modal 接不到，所以用同一個排隊機制：先記下來，畫面空了再跳。
+let _watchSeedQueued = false;
+
+// 1200ms 不是隨便取的：精靈結束時 consumePlanIntent 排在 600ms（從官網定價頁走過來的人
+// 會開方案面板）。比它早跳，兩個 modal 會疊起來——同 z-index 時由 DOM 順序決定誰在上面，
+// 方案面板會開在起步清單後面。晚一點跳，_screenIsBusy 就量得到它，改由關窗那一刻接手。
+function queueWatchSeedPopup() {
+  _watchSeedQueued = true;
+  setTimeout(_flushWatchSeedWhenFree, 1200);
+}
+
+function _flushWatchSeedWhenFree() {
+  if (!_watchSeedQueued || _screenIsBusy()) return;
+  _watchSeedQueued = false;
+  maybeShowWatchSeedPopup();
+}
+
+document.addEventListener("hidden.bs.modal", () => setTimeout(_flushWatchSeedWhenFree, 280));
+
 // ── 每日提醒開啟推播 ──
 // 推播是規則觸發、盤後報告唯一的主動送達管道；沒開的人每天開 App 提醒一次
 // （台北日曆日），刻意不做靜音——只記「上次提醒的日期」這一把 key。
@@ -7411,7 +7810,7 @@ function renderHome() {
            <div class="hec-title">還沒有自選股</div>
            <button type="button" class="btn-cta-lg" onclick="focusAddStock()">＋ 新增自選股</button>
            <div class="hec-sub">加入之後，這裡會顯示每一檔今天有沒有事。</div>
-         </div>`
+         </div>${watchSeedStripHtml("home")}`
       : `<div class="home-tile-empty">${HOME_FILTER_EMPTY[homeFilter] || HOME_FILTER_EMPTY.mine}</div>`;
     listEl.innerHTML = (shown.length
       ? shown.map(r => homeTileHtml(r)).join("")
@@ -10312,7 +10711,7 @@ function renderWatchlist(rows) {
          <div class="hec-title">還沒有自選股</div>
          <button type="button" class="btn-cta-lg" onclick="focusAddStock()">＋ 新增自選股</button>
          <div class="hec-sub">在上面的搜尋列輸入代號或名稱，例如 2330／台積電。</div>
-       </div>`;
+       </div>${watchSeedStripHtml("watch")}`;
   grid.style.display = visible.length ? "block" : "none";
   renderOverLimitBanner("watchlist");
 
@@ -12322,18 +12721,9 @@ async function addStock() {
       user_id:    state.userId,
       stock_id:   sid,
       stock_name: name,
-      // 2026-09-28 Howard：基礎訊號預設全開（DB 預設同步改，migrate_signal_defaults_keep.sql）
-      alert_break_support:    true,
-      alert_near_support:     true,
-      alert_break_resistance: true,
-      alert_near_resistance:  true,
-      alert_volume_spike:     true,
-      alert_limit_up:         true,
-      alert_limit_down:       true,
-      alert_inst_buy:         true,
-      alert_inst_sell:        true,
-      alert_margin_up:        true,
-      alert_margin_down:      true,
+      // 基礎訊號預設全開（2026-09-28 Howard，DB 預設同步改，migrate_signal_defaults_keep.sql）。
+      // 旗標只有一份：WATCH_SIGNAL_DEFAULTS，起步清單那條路讀的是同一個物件
+      ...WATCH_SIGNAL_DEFAULTS,
     }, state.accessToken);
     trackActivity("watch_add", { stock: sid });
     inp.value = "";

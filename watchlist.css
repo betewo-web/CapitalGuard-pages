@@ -2750,6 +2750,59 @@ body.modal-blocking .modal-backdrop.show {
 	border-radius: 9px;
 }
 
+/* ── 新手起步清單（彈窗、首頁與設定頁的空清單共用）──
+   清單是市值排序的事實，不是我們的意見：所以一格就是「名稱＋代號＋產業」，
+   沒有顏色、沒有強調、沒有分數（color-vocabulary-rules：顏色只做強調，
+   意義交給文字）。產業籤只是分類，用最淡的字色。
+   兩個空清單的容器是 .text-center + .text-muted，所以這裡要把對齊與字色寫回來——
+   灰字置中的清單讀起來像「無資料」，而這一排是可以按的東西。 */
+.wseed-strip {
+	margin-top: 1.1rem;
+	text-align: left;
+	padding-top: 0.9rem;
+	border-top: 1px solid var(--border);
+}
+.wseed-lead {
+	font-size: 0.82rem;
+	line-height: 1.6;
+	color: var(--text-1) !important;
+	margin-bottom: 0.6rem;
+}
+.wseed-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.wseed-item {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.42rem 0.6rem;
+	border-radius: 10px;
+	background: var(--surface-2);
+	border: 1px solid var(--border);
+	text-align: left;
+}
+.wseed-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	flex-wrap: wrap;
+}
+.wseed-name { font-size: 0.9rem; font-weight: 700; color: var(--text-0) !important; }
+.wseed-sid { font-size: 0.78rem; color: var(--text-1) !important; font-variant-numeric: tabular-nums; }
+.wseed-ind { font-size: 0.72rem; color: var(--text-muted) !important; }
+.wseed-add { flex-shrink: 0; white-space: nowrap; }
+/* 加過的那一列留在原地，只是不能再按（重新挑會看起來像按鈕把它吃掉了） */
+.wseed-done { flex-shrink: 0; font-size: 0.78rem; color: var(--text-muted) !important; }
+.wseed-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.7rem;
+	margin-top: 0.7rem;
+}
+#watch-seed-popup-body .wseed-lead { font-size: 0.86rem; }
+#watchSeedModal .modal-footer { gap: 0.4rem; flex-wrap: nowrap; }
+#watchSeedModal .modal-footer .btn { white-space: nowrap; }
+
 /* 編輯器 */
 .rule-field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.7rem; flex: 1 1 auto; }
 .rule-field > label { font-size: 0.88rem; color: var(--text-muted); }
