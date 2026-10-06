@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="281">
+  <meta name="app-version" content="282">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=281" rel="stylesheet">
+  <link href="watchlist.css?v=282" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2812,10 +2812,17 @@ function limitPromptHtml(kind, err) {
   const unit = kind === "watchlist" ? "檔" : "條";
   const lim = kind === "watchlist" ? "watch_limit" : "rule_limit";
   const next = nextPlanFor(kind);
-  trackActivity("limit_hint", { kind, next: next ? next.code : "" });
+  // 自選股的額度是「自選＋好友分享給我」共用的，所以單講「最多 N 檔自選股」會讓
+  // 只放了 1 檔的人看不懂為什麼已達上限（Howard 2026-10-06）：有分享佔格子時把
+  // 兩邊的數字都寫出來，並多給一條出路（管理好友分享）。沒有分享就維持原本的一句話。
+  const share = kind === "watchlist" ? watchSlotsBreakdown() : null;
+  trackActivity("limit_hint", { kind, next: next ? next.code : "", shared: share ? share.shared : 0 });
   let text;
   if (planState.ready) {
-    text = `${planState.plan.name}最多 ${planLimitOf(kind)} ${unit}${what}，已達上限。`;
+    text = share
+      ? `${planState.plan.name}的 ${planLimitOf(kind)} 檔額度由自選股與好友分享給你的股票共用：`
+        + `目前自選股 ${share.own} 檔＋好友分享 ${share.shared} 檔＝${share.used} 檔，已達上限。`
+      : `${planState.plan.name}最多 ${planLimitOf(kind)} ${unit}${what}，已達上限。`;
     if (next) text += ` ${next.name} NT$${next.price_twd}／月可放 ${next[lim]} ${unit}。`;
   } else {
     // 方案狀態沒載到但伺服器擋了：直接用伺服器的訊息
@@ -2826,7 +2833,35 @@ function limitPromptHtml(kind, err) {
   const btn = next
     ? `<button type="button" class="btn btn-xs btn-success btn-accent-sm ms-1" onclick="openPlanModal('${jsAttr(kind)}', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} →</button>`
     : `<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${jsAttr(kind)}')">查看方案 →</button>`;
-  return `<span class="text-warning plan-hint">${ICON_WARN}${escapeHtml(text)}</span> ${btn}${trialHintHtml(kind)}`;
+  const shareBtn = share
+    ? ` <button type="button" class="btn btn-xs btn-outline-light ms-1" onclick="openSharedInFromLimit()">管理好友分享 →</button>`
+    : "";
+  return `<span class="text-warning plan-hint">${ICON_WARN}${escapeHtml(text)}</span> ${btn}${shareBtn}${trialHintHtml(kind)}`;
+}
+
+// 自選股額度的拆解：自選股幾檔、好友分享給我幾檔。沒有分享（或分享功能沒開、方案不限）
+// 回 null，讓所有文案退回「只有自選股」的講法——沒有分享的人不該看到「好友分享 0 檔」。
+// own 預設用畫面上的 watchlistRows 而不是伺服器的 usage.watchlist：新增自選股的預檢算的是
+// watchlistRows.length + frSlotsExtra()，兩邊用同一個數字才不會出現「說滿了但數字是 2／3」。
+// 方案面板傳 usage.watchlist 進來，那一頁的用量條用的是同一份數字，自己不能互相矛盾。
+function watchSlotsBreakdown(own) {
+  const shared = frSlotsExtra();
+  const limit = planLimitOf("watchlist");
+  if (!shared || limit === null) return null;
+  own = own === undefined ? watchlistRows.length : own;
+  return { own, shared, used: own + shared, limit };
+}
+
+// 上限提示裡的「管理好友分享」：分享分頁在底部導覽，開著的 modal（字卡、起步清單…）
+// 會整個蓋住它，所以跟方案頁一樣先收掉再跳（_closeOpenModals 上面的註解是同一個理由）。
+function openSharedInFromLimit() {
+  const jump = () => {
+    switchTab("friends");
+    frSwitchSeg("shares");
+    frSwitchShare("in");
+  };
+  if (_closeOpenModals("")) setTimeout(jump, 220);
+  else jump();
 }
 
 // 每個升級提示後面都接這一句（還沒體驗過的帳號才有）：上限提示、功能提示、
@@ -2927,10 +2962,11 @@ let _planFocusCode = null;   // 這次開面板要選中的方案卡（上限提
 // 而是把開著的 modal 全部收掉再開方案頁——按下升級就只剩方案頁一個畫面。
 // 回傳有沒有真的收掉東西：有的話要等淡出跑完才能開下一個，否則 Bootstrap 會把
 // body 的 .modal-open 與 backdrop 留在畫面上。
-function _closeModalsForPlan() {
+// keepId 是「這一個不要收」（開方案頁時留著它自己）；跳到分頁的話全部收掉（keepId 空字串）。
+function _closeOpenModals(keepId) {
   let closed = false;
   document.querySelectorAll(".modal.show").forEach(el => {
-    if (el.id === "planModal") return;
+    if (keepId && el.id === keepId) return;
     const inst = bootstrap.Modal.getInstance(el);
     if (inst) { inst.hide(); closed = true; }
   });
@@ -2940,7 +2976,7 @@ function _closeModalsForPlan() {
 function openPlanModal(focus, planCode) {
   _planFocusCode = planCode || null;
   trackActivity("plan_open", { focus: focus || "", plan: _planFocusCode || "" });
-  if (_closeModalsForPlan()) setTimeout(() => _showPlanModal(focus), 220);
+  if (_closeOpenModals("planModal")) setTimeout(() => _showPlanModal(focus), 220);
   else _showPlanModal(focus);
 }
 
@@ -3070,7 +3106,8 @@ function planFeatureRows(p) {
   ].join("");
 }
 
-function meterHtml(label, used, limit) {
+// note 是數字底下補的一行拆解（自選股額度由自選與好友分享共用，「3 / 3」看不出誰佔了幾格）
+function meterHtml(label, used, limit, note) {
   const unlimited = limit === null || limit === undefined;
   const pct = unlimited ? 0 : Math.min(100, Math.round(used / Math.max(1, limit) * 100));
   const full = !unlimited && used >= limit;
@@ -3078,6 +3115,7 @@ function meterHtml(label, used, limit) {
     <div class="plan-meter${full ? " is-full" : ""}">
       <div class="plan-meter-head"><span>${label}</span><b>${used}${unlimited ? "" : ` / ${limit}`}</b></div>
       <div class="plan-meter-bar"><i style="width:${pct}%"></i></div>
+      ${note ? `<div class="plan-meter-note">${escapeHtml(note)}</div>` : ""}
     </div>`;
 }
 
@@ -3134,6 +3172,8 @@ function renderPlanModal(focus) {
   }
 
   const p = planState.plan, u = planState.usage || {};
+  // 自選股的額度拆解：用量條與提示句都讀這一份，這一頁自己的數字才不會互相矛盾
+  const slots = watchSlotsBreakdown(u.watchlist || 0);
   // 要選中的方案：上限提示或官網深連結指定的那個；已經是目前方案就不必再推
   const target = _planFocusCode && _planFocusCode !== p.code
     ? planState.plans.find(x => x.code === _planFocusCode) || null : null;
@@ -3141,7 +3181,10 @@ function renderPlanModal(focus) {
   let focusHint = {
     ai:          `${ICON_AI}AI 資料白話仍在開發，目前不包含在任何方案裡。`,
     ai_limit:    `${ICON_AI}今日 AI 使用次數已達上限，明天會重置。`,
-    watchlist:   `${ICON_STAR}自選股已達目前方案上限，升級即可加入更多。`,
+    // 額度是自選＋好友分享共用的，所以這裡也要寫拆解（與 limitPromptHtml 同一個理由）
+    watchlist:   slots
+      ? `${ICON_STAR}自選股已達目前方案上限：自選股 ${slots.own} 檔＋好友分享 ${slots.shared} 檔＝${slots.used}／${slots.limit} 檔（兩者共用同一份額度），升級即可加入更多。`
+      : `${ICON_STAR}自選股已達目前方案上限，升級即可加入更多。`,
     alert_rules: `${ICON_RULES}進階訊號已達目前方案上限，升級即可新增更多。`,
     stats_enabled: `${ICON_CHART}統計整理分頁（全市場評分的排序與篩選）需要付費方案。`,
     live_radar:    `${ICON_RADAR}盤中雷達持續更新需要付費方案；目前是開啟 App 或收到通知時更新一次。`,
@@ -3168,7 +3211,8 @@ function renderPlanModal(focus) {
       </div>
       <div class="plan-meters">
         ${meterHtml(frSlotsExtra() ? `${ICON_STAR}自選股＋分享` : `${ICON_STAR}自選股`,
-                    (u.watchlist || 0) + frSlotsExtra(), p.watch_limit)}
+                    (u.watchlist || 0) + frSlotsExtra(), p.watch_limit,
+                    slots ? `自選股 ${slots.own} 檔＋好友分享 ${slots.shared} 檔` : "")}
         ${meterHtml(`${ICON_RULES}進階訊號`, u.rules || 0, p.rule_limit)}
         ${p.ai_enabled ? meterHtml(`${ICON_AI}今日 AI 次數`, u.ai_today || 0, p.ai_daily_limit) : ""}
       </div>
@@ -13959,7 +14003,10 @@ function frRenderUsage() {
   const u = frShare && frShare.usage;
   if (!el) return;
   if (!u) { el.textContent = ""; return; }
-  // 「9／10」看不出哪個是上限、哪個是已用（Howard 2026-10-05）：兩個數字都標上名字
+  // 「9／10」看不出哪個是上限、哪個是已用（Howard 2026-10-05）：兩個數字都標上名字。
+  // 這一顆刻意不塞「自選 7＋分享 2」的拆解：它 margin-left:auto 貼在「分享中心」右邊、
+  // 又是 nowrap，再加 13 個字在 360px 的手機上會撐出去。拆解寫在會擋住人的那幾處
+  // （加自選股的上限提示、方案面板的用量條、「新增分享」視窗那一格），那裡有整行可用。
   el.textContent = `自選+分享 總量 : ${u.limit} 已用 : ${u.used}`;
   el.classList.toggle("is-full", u.used >= u.limit);
 }
@@ -14950,8 +14997,9 @@ function frRenderShareLimit() {
   frShow("fr-share-limit", full);
   if (!full) return;
   document.getElementById("fr-share-limit-text").textContent =
-    `「自選+分享」已達上限（${u.used}／${u.limit}）。分享自己的自選股不佔用量，可以照常送出；`
-    + "要再加自選股或接受好友的分享，請先移除一檔自選股，或升級方案。";
+    `「自選+分享」已達上限：自選股 ${u.watch || 0} 檔＋好友分享給你 ${u.shared_in || 0} 檔`
+    + `＝${u.used}／${u.limit} 檔（兩者共用同一份額度）。分享自己的自選股不佔用量，可以照常送出；`
+    + "要再加自選股或接受好友的分享，請先移除一檔自選股或一則分享，或升級方案。";
 }
 
 // 關掉「新增分享」視窗。then 等它真的關完才跑：接著要開另一個視窗（方案面板）時，

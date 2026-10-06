@@ -3865,6 +3865,8 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	background: linear-gradient(90deg, #8b7cff, #f5c542);
 	transition: width 0.25s ease;
 }
+/* 自選股的額度由自選與好友分享共用，數字底下補一行拆解（.text-muted 全站被覆寫成近黑，用變數） */
+.plan-meter-note { margin-top: 0.25rem; font-size: 0.68rem; color: var(--text-muted); line-height: 1.4; }
 /* 用滿了才變橘——橘是全站「要處理」的顏色 */
 .plan-meter.is-full .plan-meter-bar i { background: var(--sig-orange); }
 .plan-meter.is-full .plan-meter-head b { color: var(--sig-orange); }
