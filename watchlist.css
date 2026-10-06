@@ -620,51 +620,26 @@ body.has-bottom-nav .page-shell {
 	transition: border-color 0.24s ease, background 0.24s ease;
 }
 
+/* 2026-10-06（Howard）：一列上有三顆動作鈕（基礎／進階／✕），窄螢幕放不下時
+   整組鈕換到第二行——名稱不會被壓到只剩一個字。.wl-ident 給了 min-width，
+   否則它 flex-shrink 到 0 都還塞得下，永遠不會換行。 */
 .wl-row-head {
 	display: flex;
 	align-items: baseline;
 	justify-content: space-between;
-	gap: 0.7rem;
+	flex-wrap: wrap;
+	gap: 0.55rem 0.7rem;
 	min-width: 0;
 }
 
-/* 2026-09-29（Howard）：設定頁的一列可以點，進去是這一檔的基礎訊號。
-   名稱這一塊從 <div> 換成真的 <button>（鍵盤與讀屏的入口），所以要先把瀏覽器
-   預設的按鈕外觀清乾淨，剩下的版面規則與換之前一字不差。 */
+/* 名稱＋代號。2026-10-06 從 <button> 換回 <div>：基礎訊號改成列上明寫的
+   「基礎」鈕，名稱不再是入口（整列可點那一版沒有任何標示，見 renderWatchlist）。 */
 .wl-ident {
-	appearance: none;
-	-webkit-appearance: none;
-	background: none;
-	border: 0;
-	padding: 0;
-	margin: 0;
-	font: inherit;
-	color: inherit;
-	text-align: left;
-	min-width: 0;
+	min-width: 7rem;
 	flex: 1 1 auto;
 	display: flex;
 	align-items: baseline;
 	gap: 0.4rem;
-}
-
-/* 整列可點：cursor 在桌機是唯一的提示，手機靠右邊那個 › */
-.wl-row-tappable { cursor: pointer; }
-
-.wl-ident:focus-visible {
-	outline: 2px solid rgba(120, 180, 255, 0.72);
-	outline-offset: 3px;
-	border-radius: 8px;
-}
-
-/* › 貼到右邊，停在「移除」左側：這是「點進去還有一層」的招牌。
-   放在 .wl-ident 裡面，所以超出方案那一列的半透明也會一起吃到。 */
-.wl-row-go {
-	margin-left: auto;
-	flex: 0 0 auto;
-	color: var(--text-muted);
-	font-size: 1.15rem;
-	line-height: 1;
 }
 
 /* 全名優先：窄螢幕上寧可折成兩行，也不要把「台灣積體電路製造股份有限公司」
@@ -761,6 +736,15 @@ body.has-bottom-nav .page-shell {
 }
 
 .wl-row-actions .wl-icon-btn { flex: 0 0 auto; padding: 0 0.9rem; }
+
+/* 只有圖示的動作鈕（設定頁的「移除」，Howard 2026-10-06：留 ✕ 就好）。
+   文字拿掉之後左右留白也要跟著收，不然會是一顆很寬的空鈕；
+   寬度釘住 40px＝與高度同值，維持可點面積（手指 40×40）。 */
+.wl-icon-only {
+	gap: 0;
+	width: 40px;
+}
+.wl-row-actions .wl-icon-only { padding: 0; }
 
 /* 動作鈕：24px 的正方形線框鈕，圖示是 currentColor 的 SVG，
    hover／停用態變色時圖示會跟著變（emoji 做不到這件事）。
@@ -2781,6 +2765,31 @@ body.modal-blocking .modal-backdrop.show {
 	width: 100%;
 }
 .rule-input:focus { outline: 2px solid var(--accent-2); outline-offset: -1px; }
+
+/* 已達方案上限時的瀏覽模式（Howard 2026-10-06）：編輯器照常打得開，
+   這一塊貼在最上面說明「可以看、存不了」。中性配色——這是狀態不是錯誤，
+   跟 .wl-tag-locked／.plan-lock-tag 同一套語彙（COLORS：鎖不用橘也不用紅）。 */
+.rule-editor-lock {
+	border: 1px solid rgba(146, 146, 163, 0.32);
+	background: rgba(255, 255, 255, 0.04);
+	border-radius: 11px;
+	padding: 0.7rem 0.8rem;
+	margin-bottom: 0.95rem;
+	font-size: 0.86rem;
+	color: var(--text-1);
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+}
+.rule-lock-title {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 0.95rem;
+	font-weight: 700;
+	color: var(--text-0);
+}
+.rule-lock-sub { color: var(--text-muted); }
 
 /* 三步驟：範圍 → 條件 → 名稱。編號圓點讓人一眼看出有幾步、走到哪 */
 .rule-step { margin-bottom: 0.95rem; }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="277">
+  <meta name="app-version" content="278">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=277" rel="stylesheet">
+  <link href="watchlist.css?v=278" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -808,6 +808,9 @@
              「通知等級」欄位已拿掉（2026-09-12）：一律依條件自動判定，
              與後端 CONDITION_REGISTRY 的等級一致（下跌方向＝🟠，其餘＝🔵）。 -->
         <div id="rules-pane-editor" style="display:none">
+          <!-- 已達方案上限時的提示（syncRuleEditorLock 開關它）：編輯器照常打得開、
+               可以瀏覽每一個條件，只有「儲存並啟用」停用。 -->
+          <div class="rule-editor-lock" id="rule-editor-lock" style="display:none"></div>
           <div class="rule-step">
             <div class="rule-step-head"><span class="rule-step-no">1</span>要看哪些股票？</div>
             <select id="rule-scope" class="rule-input" aria-label="套用範圍" onchange="renderRulePreview()"></select>
@@ -839,7 +842,7 @@
 
       <div class="modal-footer py-2" id="rules-footer" style="display:none">
         <button type="button" class="btn btn-sm btn-outline-light" onclick="showRulesPane('list')">取消</button>
-        <button type="button" class="btn btn-sm btn-primary" onclick="saveRule()">儲存並啟用</button>
+        <button type="button" class="btn btn-sm btn-primary" id="rules-save" onclick="saveRule()">儲存並啟用</button>
       </div>
       <div class="modal-footer py-2" id="rules-picker-footer" style="display:none">
         <button type="button" class="btn btn-sm btn-outline-light" onclick="showRulesPane('editor')">返回編輯</button>
@@ -9614,20 +9617,22 @@ function setRulesMsg(text, isErr) {
 }
 
 // ── 編輯器 ──
+// 已達方案上限時「新增訊號」仍然打得開，只是存不了（Howard 2026-10-06）。
+// 原本是連編輯器都不開、只在清單下面留一行提示：想知道「升級之後能設什麼」的人
+// 沒有任何地方可以看。現在整個編輯器與條件選單照常可瀏覽，鎖的只有儲存那一步
+// （DB 的 trigger 仍是真正的防線，見 BILLING.md）。
+let _ruleEditorLocked = false;
+
 function openRuleEditor(id) {
-  // 新增前先看方案上限（編輯既有規則不受限）；伺服器端 trigger 是真正的防線
-  if (!id && planState.ready && alertRules.length >= planState.plan.rule_limit) {
-    const el = document.getElementById("rules-msg");
-    el.innerHTML = limitPromptHtml("alert_rules");
-    el.className = "small mt-2";
-    return;
-  }
+  // 新增才看上限，編輯既有規則不受限
+  _ruleEditorLocked = !id && planState.ready && alertRules.length >= planState.plan.rule_limit;
   editingRuleId = id;
   const r = id ? alertRules.find(x => String(x.id) === String(id)) : null;
-  _rulesEditorTitle = r ? "編輯訊號" : "新增訊號";
+  _rulesEditorTitle = r ? "編輯訊號" : _ruleEditorLocked ? "瀏覽訊號條件" : "新增訊號";
   document.getElementById("rules-modal-title").textContent = _rulesEditorTitle;
   document.getElementById("rule-name").value = (r && r.name) || "";
   document.getElementById("rule-editor-msg").textContent = "";
+  syncRuleEditorLock();
 
   const scopeEl = document.getElementById("rule-scope");
   scopeEl.innerHTML = `<option value="">全部自選股</option>` + watchlistRows.map(w => {
@@ -9643,6 +9648,26 @@ function openRuleEditor(id) {
   renderRuleConditions();
 
   showRulesPane("editor");
+}
+
+// 上限鎖：提示放在編輯器最上面（一進來就看得到，不必捲到底），
+// 儲存鈕停用並改字，說明為什麼按不動。沒鎖的時候要把這三件事全部還原——
+// 同一個 pane 會被重複使用，忘了還原就會變成「升級了還是存不了」。
+function syncRuleEditorLock() {
+  const lockEl = document.getElementById("rule-editor-lock");
+  const saveEl = document.getElementById("rules-save");
+  if (lockEl) {
+    lockEl.style.display = _ruleEditorLocked ? "" : "none";
+    lockEl.innerHTML = _ruleEditorLocked
+      ? `<div class="rule-lock-title">${ICON_LOCK}這條存不起來，但可以先看</div>
+         <div>${limitPromptHtml("alert_rules")}</div>
+         <div class="rule-lock-sub">下面的條件與說明都能照常瀏覽；要空出額度，也可以回訊號清單刪掉一條。</div>`
+      : "";
+  }
+  if (saveEl) {
+    saveEl.disabled = _ruleEditorLocked;
+    saveEl.textContent = _ruleEditorLocked ? "已達上限，無法儲存" : "儲存並啟用";
+  }
 }
 
 function addRuleCondition() {
@@ -9879,6 +9904,11 @@ function renderRuleSummary() {
 
 async function saveRule() {
   const msgEl = document.getElementById("rule-editor-msg");
+  // 瀏覽模式（已達上限）：鈕本來就是 disabled，這裡是鍵盤／程式呼叫的第二道
+  if (_ruleEditorLocked) {
+    showUpgradeAtEditorBottom(limitPromptHtml("alert_rules"));
+    return;
+  }
   const name = document.getElementById("rule-name").value.trim() || autoRuleName(editorConditions);
   const stockId = document.getElementById("rule-scope").value || null;
   if (!editorConditions.length) { msgEl.textContent = "至少要有一個條件"; return; }
@@ -10181,36 +10211,28 @@ function renderWatchlist(rows) {
     }
 
     const item = document.createElement("article");
-    item.className = active ? "wl-row wl-row-tappable" : "wl-row wl-row-tappable is-inactive";
+    item.className = active ? "wl-row" : "wl-row is-inactive";
     item.dataset.id = row.id;
     item.dataset.sid = sid;
-    // 2026-09-22：一列就是「名稱＋代號 …… 移除」，超出方案時多一行標記。
-    // 收盤價、事件、持股與 K 線在「🌙 盤後」，通知改從標題列那顆「🔔 通知」一次設定。
-    // 2026-09-29（Howard）：整列可點，點進去就是這一檔的基礎訊號——本來只能從標題列
-    // 的「基礎訊號」進「全部股票」，再按「設定個股」挑，要調某一檔得繞三步。
-    // 名稱那一塊是真的 <button>，鍵盤與讀屏靠它；點列上的空白處由下面的 listener 接。
+    // 2026-09-22：一列就是「名稱＋代號 …… 動作鈕」，超出方案時多一行標記。
+    // 收盤價、事件、持股與 K 線在「🌙 盤後」。
+    // 2026-10-06（Howard）：基礎訊號從「整列可點」改成明寫一顆「基礎」鈕。
+    // 整列可點（2026-09-29–2026-10-06）在這一列上沒有任何標示能解釋「點名稱會發生什麼」，
+    // 旁邊又有兩顆看得見的鈕，等於只有知道的人按得到；名稱現在就只是名稱。
     item.innerHTML = `
       <div class="wl-row-head">
-        <button type="button" class="wl-ident"
-                aria-label="設定 ${escapeHtml(displayName)} ${escapeHtml(sid)} 的基礎訊號">
+        <div class="wl-ident">
           <span class="wl-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
           <span class="wl-sid">${escapeHtml(sid)}</span>
-          <span class="wl-row-go" aria-hidden="true">›</span>
-        </button>
+        </div>
         <div class="wl-row-actions">
+          <button class="wl-icon-btn" title="${escapeHtml(sid)} 的基礎訊號" aria-label="設定 ${escapeHtml(displayName)} ${escapeHtml(sid)} 的基礎訊號" onclick="openAlertSettingsForStock('${jsAttr(row.id)}')">${ICON_BELL}<span class="wl-ic-label">基礎</span></button>
           <button class="wl-icon-btn" title="${escapeHtml(sid)} 的進階訊號" aria-label="設定 ${escapeHtml(displayName)} ${escapeHtml(sid)} 的進階訊號" onclick="openRulesForStock('${jsAttr(sid)}')">${ICON_RULES}<span class="wl-ic-label">進階</span>${ruleCountBadge(sid)}</button>
-          <button class="wl-icon-btn wl-icon-danger" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}<span class="wl-ic-label">移除</span></button>
+          <button class="wl-icon-btn wl-icon-danger wl-icon-only" title="移除 ${escapeHtml(sid)}" aria-label="移除 ${escapeHtml(sid)}" onclick="openRemoveStockConfirm('${jsAttr(row.id)}')">${ICON_CLOSE}</button>
         </div>
       </div>
       ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
     `;
-    // 整列一個 listener 就夠：名稱那顆 button 的 click（滑鼠或鍵盤 Enter／空白）
-    // 會冒泡上來，所以它不必自己綁。.wl-row-actions 裡的「移除」有自己的動作，排除掉。
-    item.addEventListener("click", (e) => {
-      if (e.target.closest(".wl-row-actions")) return;
-      alertSelectedIds = null;   // 全新的進入點，按返回時勾選頁要回到預設全選
-      openAlertSettings(row.id);
-    });
     grid.appendChild(item);
   });
 }
@@ -10419,6 +10441,14 @@ function alertTargetRows() {
   if (!alertSelectedIds) return watchlistRows.slice();
   const want = new Set(alertSelectedIds);
   return watchlistRows.filter(r => want.has(String(r.id)));
+}
+
+// 設定頁每一列那顆「基礎」鈕的落點（Howard 2026-10-06）。
+// 它是一個全新的進入點，所以勾選頁的選取要清掉——按返回時要回到預設全選，
+// 而不是上一次某個範圍留下來的勾選狀態。
+function openAlertSettingsForStock(rowId) {
+  alertSelectedIds = null;
+  openAlertSettings(rowId);
 }
 
 function openAlertSettings(scope) {
