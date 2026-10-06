@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="283">
+  <meta name="app-version" content="284">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=283" rel="stylesheet">
+  <link href="watchlist.css?v=284" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -288,12 +288,13 @@
       <!-- 方塊自己就是卡片，不再包一層 panel-card：少一層框 -->
       <div class="home-sec mb-3">
         <!-- 標題與右邊的入口要各自是一個 flex 項目：圖示與文字不包起來的話，
-             文字會變成另一個匿名項目，被 justify-content: space-between 推到右邊 -->
+             文字會變成另一個匿名項目，被 justify-content: space-between 推到右邊。
+             2026-10-06 Howard：「新增自選股」從這一列搬到三格下面（見 #home-add-watch），
+             所以這一列現在只有標題；space-between 留著，後面要再掛東西時行為不變。 -->
         <div class="home-sec-title">
           <span class="hs-head">
             <span class="hs-label"><i data-icon="radar"></i>股票雷達</span>
           </span>
-          <button type="button" class="hs-btn" onclick="switchTab('watch')">新增自選股</button>
         </div>
         <!-- 要看哪一種（2026-10-04 Howard）：自選／持股／好友分享 三選一，取代原本的「只列持股」撥片。
              自己一排、三格等寬：塞在標題列裡的話，字級調大時三格加上右邊的入口鈕會擠不下。
@@ -306,6 +307,16 @@
           <button type="button" role="radio" data-hf="mine" aria-checked="true" onclick="setHomeFilter('mine')"><i data-icon="star"></i>自選<span class="hs-seg-n"></span></button>
           <button type="button" role="radio" data-hf="held" aria-checked="false" onclick="setHomeFilter('held')"><i data-icon="wallet"></i>持股<span class="hs-seg-n"></span></button>
           <button type="button" role="radio" data-hf="shared" aria-checked="false" onclick="setHomeFilter('shared')"><i data-icon="share"></i>好友分享<span class="hs-seg-n"></span></button>
+        </div>
+
+        <!-- 「新增自選股」（2026-10-06 Howard）：從標題列右上搬到三格下面、置中、只留圖示。
+             **只在「自選」那一格出現**（syncHomeFilter 開關它）：在「持股」與「好友分享」那兩格
+             按它會跳到設定頁加自選股，跟當下在看的東西對不上。
+             只有圖示就一定要有 aria-label／title——讀螢幕的人與長按看提示的人都只剩這個。
+             空帳號時整顆收起來（.home-sec.is-empty）：那時清單中間已經有一顆置中的大按鈕。 -->
+        <div class="hs-add" id="home-add-watch">
+          <button type="button" class="hs-add-btn" onclick="switchTab('watch')"
+                  aria-label="新增自選股" title="新增自選股"><i data-icon="plus"></i></button>
         </div>
 
         <!-- 進階訊號推薦：規則數未達 RULE_NUDGE_TARGET 條時顯示一行，內容由 renderRuleNudge() 畫；
@@ -1779,7 +1790,8 @@ const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2
   const ICONS_BY_NAME = { home: ICON_HOME, chart: ICON_CHART, bell: ICON_BELL, star: ICON_STAR,
                           news: ICON_EVENTS, calendar: ICON_CAL, moon: ICON_MOON, gear: ICON_GEAR,
                           filter: ICON_FILTER, friends: ICON_FRIENDS,
-                          radar: ICON_RADAR, wallet: ICON_WALLET, share: ICON_SHARE };
+                          radar: ICON_RADAR, wallet: ICON_WALLET, share: ICON_SHARE,
+                          plus: ICON_PLUS };
   document.querySelectorAll("[data-icon]").forEach(el => {
     const ic = ICONS_BY_NAME[el.dataset.icon];
     if (ic) el.innerHTML = ic;
@@ -1835,7 +1847,7 @@ const HOLDINGS_ONLY_KEY = "cg-home-holdings-only";
 const HOME_FILTERS = ["mine", "held", "shared"];
 // 選到的那一種一檔都沒有時要講清楚是為什麼——空白是篩選造成的，不是資料沒來
 const HOME_FILTER_EMPTY = {
-  mine:   "還沒有自選股。按右上的「新增自選股」加入；好友分享給你的股票在「好友分享」那一格。",
+  mine:   "還沒有自選股。按上面那一排下面的「＋」加入；好友分享給你的股票在「好友分享」那一格。",
   held:   "沒有持股部位。持股在「設定」分頁填股數，或連券商同步。",
   shared: "還沒有好友分享給你的股票。好友分享後，到「分享」分頁的「好友分享給我」接受，就會出現在這裡。",
 };
@@ -7856,8 +7868,8 @@ function renderHome() {
   // 只放在「自選」那一格——切到持股或分享時的空白是篩選造成的，不是沒資料
   const example = homeFilter === "mine" && showcaseWanted(rows);
   // 一檔都沒有（自選與分享都是空的）＝新帳號進來的第一個畫面。只留一行灰字的話，他要自己找到
-  // 標題列右上那顆小按鈕；改成置中的大按鈕（Howard 2026-09-24），同時把右上那顆
-  // 與「自選／持股／分享」那一排收起來（.home-sec.is-empty），免得同一句話出現兩次、
+  // 那顆小按鈕；改成置中的大按鈕（Howard 2026-09-24），同時把那顆「＋」（2026-10-06 起在
+  // 三格下面）與「自選／持股／好友分享」那一排收起來（.home-sec.is-empty），免得同一句話出現兩次、
   // 而且小的那顆反而更顯眼。篩選造成的空白不算——那時要講的是篩選，不是新增。
   const noWatchlist = rows.length === 0;
   const secEl = listEl && listEl.closest(".home-sec");
@@ -8218,6 +8230,10 @@ function syncHomeFilter(counts) {
     const n = b.querySelector(".hs-seg-n");
     if (n && counts) n.textContent = counts[b.dataset.hf] > 0 ? String(counts[b.dataset.hf]) : "";
   });
+  // 三格下面那顆「＋」只屬於「自選」（2026-10-06 Howard）：在持股與好友分享那兩格按它
+  // 會跳到設定頁加自選股，跟當下在看的東西對不上
+  const add = document.getElementById("home-add-watch");
+  if (add) add.classList.toggle("is-off", homeFilter !== "mine");
 }
 
 // ── 統計結果（使用者自己設的排序與條件，存在本機） ──

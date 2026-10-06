@@ -2052,7 +2052,10 @@ body.modal-blocking .modal-backdrop.show {
 	border: 1px solid var(--border);
 	border-radius: 14px;
 	background: rgba(146, 146, 163, 0.1);
+	/* 下面那條 @container 要量的就是這一條軌道自己有多寬 */
+	container-type: inline-size;
 }
+
 
 .hs-seg button {
 	position: relative;
@@ -2062,13 +2065,15 @@ body.modal-blocking .modal-backdrop.show {
 	align-items: center;
 	justify-content: center;
 	gap: 4px;
-	padding: 0.5rem 0.2rem;
+	/* 高度與字級 2026-10-06 Howard 再往上加一階（0.5rem/0.92rem → 0.78rem/1.02rem）：
+	   字級與上面那條 .home-tab 齊平，層級仍然靠底色與顏色分，不是靠字小。 */
+	padding: 0.78rem 0.2rem;
 	border: none;
 	border-radius: 10px;
 	background: transparent;
 	color: var(--text-muted);
 	font-family: inherit;
-	font-size: 0.92rem;
+	font-size: 1.02rem;
 	font-weight: 600;
 	line-height: 1.25;
 	text-align: center;
@@ -2081,7 +2086,18 @@ body.modal-blocking .modal-backdrop.show {
    難看一點但三格永遠都在。 */
 
 .hs-seg button [data-icon] { display: inline-flex; }
-.hs-seg button .ic { width: 15px; height: 15px; }
+.hs-seg button .ic { width: 16px; height: 16px; }
+
+/* 擠不下的時候先丟圖示，不要先折字（2026-10-06）。
+   「好友分享」四個字 ＋ 圖示 ＋ 檔數，在 320px 的機子上放不進 1/3 格——折行不會壞掉，
+   但那一格變兩行、整排高低不齊，很難看。三個字各自是意思、圖示只是裝飾，所以先丟圖示。
+   門檻用 em 不用 px：em 跟著使用者的字級走，「字調到特大」與「螢幕很窄」是同一件事
+   （特大 18px 時 22em = 396px，360px 的機子也會進來）。
+   **這一段必須排在上面那條 inline-flex 之後**：兩條特異性一樣，同分時由順序決定。
+   瀏覽器不支援 @container（iOS 16 以前）就退回折行，不會壞。 */
+@container (max-width: 22em) {
+	.hs-seg button [data-icon] { display: none; }
+}
 
 /* 段與段之間的細線（與首頁三分頁 .home-tab 同一招）：相鄰兩段都沒被選中時才畫，
    選中的那一段自己有底色，旁邊再加一條線只會讓那一塊看起來被框住兩次。 */
@@ -2106,8 +2122,41 @@ body.modal-blocking .modal-backdrop.show {
 }
 
 /* 每一格後面的檔數：比字小一級、淡一點；0 檔時是空的，整顆收起來不佔間距 */
-.hs-seg-n { font-size: 0.82rem; font-weight: 500; opacity: 0.75; }
+.hs-seg-n { font-size: 0.88rem; font-weight: 500; opacity: 0.75; }
 .hs-seg-n:empty { display: none; }
+
+/* 「新增自選股」：三格下面、置中、只有圖示（2026-10-06 Howard）。原本在標題列右上、
+   寫著四個字——搬下來之後它緊貼著自己管的那一格，而且不再跟標題搶同一行的寬度。
+   樣式沿用 .home-manage-btn 的講法：可點的東西是紫的（色彩語彙規則，橘留給要注意的事）。
+   只有圖示，所以 markup 那邊一定要有 aria-label／title。 */
+.hs-add {
+	display: flex;
+	justify-content: center;
+	margin: -0.25rem 0 0.8rem;
+}
+
+/* 不在「自選」那一格時收起來（syncHomeFilter 掛這個 class）。用 class 不用 inline style：
+   空帳號那條規則（.home-sec.is-empty .hs-add）才蓋得過去，不然要加 !important */
+.hs-add.is-off { display: none; }
+
+.hs-add-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.9rem;
+	height: 2.9rem;
+	padding: 0;
+	border: 1px solid var(--accent);
+	border-radius: 999px;
+	background: rgba(139, 124, 255, 0.18);
+	color: var(--text-0);
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+
+.hs-add-btn:active { background: rgba(139, 124, 255, 0.32); }
+.hs-add-btn [data-icon] { display: inline-flex; }
+.hs-add-btn .ic { width: 1.4rem; height: 1.4rem; }
 
 /* 標題右邊的入口鈕（例：股票雷達 → 新增自選股）。跟 .hs-link 一樣是紫的「可點」，
    但這是要按的東西，所以給它框與可按的面積（色彩語彙規則：橘留給需要注意的事）。 */
@@ -2287,9 +2336,10 @@ body.modal-blocking .modal-backdrop.show {
 	box-shadow: 0 10px 26px rgba(139, 124, 255, 0.28);
 }
 .btn-cta-lg:active { background: #7a6bf0; }
-/* 空清單時標題列右上那顆與「自選／持股／分享」那一排一起收起來：同一句話在同一塊裡
-   出現兩次，小的那顆反而比置中的大按鈕更搶眼 */
-.home-sec.is-empty .home-sec-title .hs-btn,
+/* 空清單時那顆「＋」與「自選／持股／好友分享」那一排一起收起來：同一句話在同一塊裡
+   出現兩次，小的那顆反而比置中的大按鈕更搶眼。
+   （2026-10-06：「＋」從標題列右上搬到三格下面，選擇器跟著換成 .hs-add） */
+.home-sec.is-empty .hs-add,
 .home-sec.is-empty .hs-seg { display: none; }
 
 .home-dir {
