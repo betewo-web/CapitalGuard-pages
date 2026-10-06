@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="274">
+  <meta name="app-version" content="275">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=274" rel="stylesheet">
+  <link href="watchlist.css?v=275" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2892,14 +2892,32 @@ let planPayments = null;   // payments 列（開面板時懶載入）
 
 let _planFocusCode = null;   // 這次開面板要選中的方案卡（上限提示／官網深連結帶進來）
 
+// 方案頁是「跳轉」不是「疊上去」（Howard 2026-10-06）──
+// #planModal 在 DOM 裡排在字卡（#radarTimelineModal）、事件、持股、通知設定…之前，
+// 而 Bootstrap 兩個 modal 的 z-index 都是 1055，所以後面那個永遠蓋在方案頁上面：
+// 使用者在字卡裡按「升級方案」，方案頁開在背景被擋住，看起來像沒反應。
+// 不靠調 z-index 疊兩層（那會變成兩個都在、背景捲動與 backdrop 都要自己收），
+// 而是把開著的 modal 全部收掉再開方案頁——按下升級就只剩方案頁一個畫面。
+// 回傳有沒有真的收掉東西：有的話要等淡出跑完才能開下一個，否則 Bootstrap 會把
+// body 的 .modal-open 與 backdrop 留在畫面上。
+function _closeModalsForPlan() {
+  let closed = false;
+  document.querySelectorAll(".modal.show").forEach(el => {
+    if (el.id === "planModal") return;
+    const inst = bootstrap.Modal.getInstance(el);
+    if (inst) { inst.hide(); closed = true; }
+  });
+  return closed;
+}
+
 function openPlanModal(focus, planCode) {
   _planFocusCode = planCode || null;
   trackActivity("plan_open", { focus: focus || "", plan: _planFocusCode || "" });
-  // 從規則面板點「查看方案」過來：先把規則面板收掉，Bootstrap 疊兩層 modal 會亂
-  const rulesEl = document.getElementById("rulesModal");
-  const rulesInst = rulesEl && bootstrap.Modal.getInstance(rulesEl);
-  if (rulesInst && rulesEl.classList.contains("show")) rulesInst.hide();
+  if (_closeModalsForPlan()) setTimeout(() => _showPlanModal(focus), 220);
+  else _showPlanModal(focus);
+}
 
+function _showPlanModal(focus) {
   // 版本放標題列：底部那行註記只在方案資料載入成功時才畫，用戶找不到版本就是這樣
   const verEl = document.getElementById("plan-modal-ver");
   if (verEl) verEl.textContent = `App v${appVersion()}`;
@@ -2950,6 +2968,17 @@ function planNameOf(code) {
 // 只寫階級看不出它是哪一台雷達，同一個面板裡一半寫全名、一半寫階級更難懂（Howard 2026-09-28）
 function freePlanName() {
   return planNameOf("free") || "免費版";
+}
+
+// 「不自動更新（免費版）」括號裡那三個字（Howard 2026-10-06）：免費版盤中不輪詢報價，
+// 畫面上只寫「不自動更新」會被當成系統壞了——要寫出這是方案造成的。
+// 這裡刻意不寫整個全名（「不自動更新（標準雷達（免費版））」括號套括號沒人看得懂），
+// 取的是方案名稱括號裡的階級；而且取「目前方案」而不是寫死免費版，
+// 因為決定輪不輪詢的是 plans.live_radar，將來哪個方案關掉它都會寫對。
+function planTierLabel() {
+  const name = (planState.plan && planState.plan.name) || freePlanName();
+  const m = /（([^（）]+)）\s*$/.exec(name);
+  return m ? m[1] : (name || "免費版");
 }
 
 // ── 邀請朋友（B3）：台灣的傳播在 LINE 群組，App 裡以前沒有任何可以分享出去的入口 ──
@@ -7215,7 +7244,12 @@ function renderHome() {
     // 漲／跌籤是用昨天的漲跌幅算的、訊號 0 與逼近關卡 0 不是今天的結論。
     // 一律讓位給「資訊尚未同步」（見 _monitorPendingSids）。
     const pending = _monitorPending(sid);
-    return { sid, name, active, counts, todayCount, total, standout, nearCount, pending,
+    // 超出方案上限的那幾檔：不在 active_watchlist 裡，monitor 不追蹤、不通知。
+    // 設定頁那一列掛「🔒 超出方案」，盤中與盤後以前什麼都沒有（Howard 2026-10-06）——
+    // 兩格數字永遠是 0，看起來像「今天沒事」，其實是根本沒在看。
+    // 好友分享給我的不受自選股上限管（不在那個 view 裡），所以只判自己的列。
+    const locked = !row._share && !isWatchRowActive(row);
+    return { sid, name, active, counts, todayCount, total, standout, nearCount, pending, locked,
              shared: row._share || null,
              dir: pending ? null : homeDirectionOf(sid),
              limitKind: (active && (active.signal === "limit_up" || active.signal === "limit_down"))
@@ -7316,7 +7350,11 @@ function homeTileHtml(r) {
   // 剛加入、還沒拿到當日那列：兩格數字都還不是今天的結論，整個換成一句話。
   // 用同一個 .home-tile-stat 盒子（裡面的 <i> 本來就是灰色 nowrap），不必動 CSS；
   // 一格取代兩格，這一列反而更窄，窄螢幕不會被擠爆。
-  const lead = r.pending
+  // 超出方案：兩格數字會永遠是 0（monitor 不追蹤這幾檔），寫成 0 等於講錯話，
+  // 整格換成鎖——與設定頁那一列的「🔒 超出方案」同一句話
+  const lead = r.locked
+    ? `<span class="home-tile-stat home-tile-locked"><i>🔒 超出方案</i></span>`
+    : r.pending
     ? `<span class="home-tile-stat"><i>資訊尚未同步</i></span>`
     : stat(r.todayCount, "⚡ 訊號", "sev-orange") + stat(r.nearCount, "🎯 逼近關卡", "sev-blue");
   // 事件籤 2026-09-22 從方塊上拿掉（Howard）：方塊只講訊號，事件在下面那張「今日股票資訊彙整」卡
@@ -7325,7 +7363,8 @@ function homeTileHtml(r) {
   // 沒有事件就連第二行都不畫，一列就是一行
   // 分享來的那一格把 share_id 帶進字卡（自己的自選股帶空字串）：同一檔可能自己也有，
   // 字卡要知道是從哪一個來源點進來的
-  return `<div class="home-tile${r.todayCount ? " is-hot" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
+  return `<div class="home-tile${r.todayCount ? " is-hot" : ""}${r.locked ? " is-locked" : ""}" title="${
+      r.locked ? "超出目前方案的自選股上限，不再產生通知；升級後恢復" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
       <div class="home-tile-head">
         <span class="home-tile-name">${escapeHtml(r.name)}</span>${r.shared
           ? `<span class="home-tile-shared" title="好友分享給我">${ICON_SHARE}${escapeHtml(r.shared.from_name || "好友")}</span>` : ""}${dir}${live}
@@ -7353,7 +7392,7 @@ function homeStatusText() {
   // 那不是「報價已停止更新」（那句講的是取價主機掛了）。同一句話用在兩件事上，
   // 使用者會以為系統壞了，然後去按一個其實沒有問題的東西。
   if (isOpen && !liveQuotesAllowed()) {
-    return `⏸ 盤中不自動更新${freshnessAt ? ` · 報價 ${fmtClock(freshnessAt)}` : ""} · 自選 ${n} 檔`;
+    return `⏸ 盤中不自動更新（${planTierLabel()}）${freshnessAt ? ` · 報價 ${fmtClock(freshnessAt)}` : ""} · 自選 ${n} 檔`;
   }
   const quoteStale = isOpen && quoteAge !== null && quoteAge >= QUOTE_STALE_MS;
   if (quoteStale) return `🟠 報價已停止更新 · 最後 ${fmtClock(freshnessAt)}（${fmtAgeRough(quoteAge)}）· 自選 ${n} 檔`;
@@ -8624,7 +8663,7 @@ function renderRadarTimeline(sid) {
   // 免費版（plans.live_radar=false）：說明這頁的價與時間軸停在什麼時候，並給一步升級的出口。
   // 不寫「資料異常」之類的字——它沒有異常，是方案就這樣。
   const liveOffHtml = (!past && _isMarketOpenNow() && !liveQuotesAllowed())
-    ? ` · <span class="rtl-live-off">⏸ 不自動更新</span> <span class="hs-link" onclick="openPlanModal('live_radar')">持續更新 →</span>`
+    ? ` · <span class="rtl-live-off">⏸ 不自動更新（${escapeHtml(planTierLabel())}）</span> <span class="hs-link" onclick="openPlanModal('live_radar')">持續更新（升級方案） →</span>`
     : "";
   // 剛加入、監控還沒納入：副標要寫出來，否則「有 0 則訊號」看起來像今天真的沒事
   const pending = !past && _monitorPending(sid);
@@ -10186,6 +10225,9 @@ function renderPost() {
       q: getCloseQuote(sid),
       events: todayEventsOf(sid),
       hold: holdings.get(sid) || null,
+      // 超出方案上限：monitor 不追蹤、不通知（設定頁同一把鎖，Howard 2026-10-06）。
+      // 收盤價與持股仍然顯示——那是自己的資料，沒有被鎖住的是「通知」
+      locked: !isWatchRowActive(row),
     };
   });
   rows.sort((a, b) => (b.hold ? 1 : 0) - (a.hold ? 1 : 0)
@@ -10228,10 +10270,16 @@ function renderPost() {
            ${ICON_EVENTS}<span>資訊彙整</span>
          </button>`
       : "";
-    return `<article class="post-row">
+    // 盤後頁刻意不用膠囊徽章（test_pwa_tabs 釘住：這一頁的籤會被當成按鈕），
+    // 鎖寫成純文字，字一樣是「🔒 超出方案」——與設定頁那一列同一句話
+    const lockTag = r.locked
+      ? `<span class="post-lock" title="超出目前方案的自選股上限，不再產生通知；升級後恢復">🔒 超出方案</span>`
+      : "";
+    return `<article class="post-row${r.locked ? " is-locked" : ""}">
       <div class="post-row-head">
         <span class="wl-name">${escapeHtml(r.name)}</span>
         <span class="wl-sid">${escapeHtml(r.sid)}</span>
+        ${lockTag}
         ${quote}
       </div>
       ${facts.length ? `<div class="post-facts">${facts.join("")}</div>` : ""}

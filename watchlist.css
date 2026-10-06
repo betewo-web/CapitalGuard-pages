@@ -3997,6 +3997,17 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 }
 .rule-card.is-inactive .rule-card-name,
 .rule-card.is-inactive .rule-conds { opacity: 0.55; }
+
+/* 超出方案的鎖在三頁要長得一樣（Howard 2026-10-06）：設定頁本來就有，盤中與盤後以前
+   什麼都沒有，那幾列的「0 則訊號」看起來像今天沒事。盤中那一格用鎖取代兩格數字，
+   盤後沿用設定頁的徽章；兩邊都把整列降一階，但收盤價、持股、K 線維持可讀——
+   被鎖住的是通知，不是自己的資料。 */
+.home-tile.is-locked .home-tile-name,
+.home-tile.is-locked .home-dir { opacity: 0.55; }
+.home-tile-stat.home-tile-locked i { color: var(--text-muted); }
+.post-row.is-locked .wl-name,
+.post-row.is-locked .wl-sid { opacity: 0.55; }
+.post-lock { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
 /* 自選已滿是方案上限的狀態，不是個股需要注意——跟 .wl-tag-locked 同一類，一起讓出橘色。 */
 .count-badge.is-full { background: linear-gradient(145deg, #8a8a9b, #b8b8c6); color: #1b1b26; }
 
