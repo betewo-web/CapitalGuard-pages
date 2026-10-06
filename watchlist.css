@@ -3436,23 +3436,25 @@ body.modal-blocking .modal-backdrop.show {
 .rtl-divider { font-size: 13.12px; color: var(--text-muted); margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
 .rtl-none { padding: 14px 6px; font-size: 15.2px; color: var(--text-1); }
 .rtl-none span { font-size: 13.44px; color: var(--text-muted); }
-/* 每一則的「分享」鈕（2026-10-06）。第一版是淡的線框鈕，Howard 看了手機說要放大、
-   要顯著的顏色——改成實色膠囊，用全站主要動作那組藍（同 .btn-primary，分享視窗裡
-   「傳給 LINE 好友」也是這一組），白字對 #4874ff 是 4.6:1。它不是訊號的顏色：
-   等級仍然只由左側邊條（橘／藍）表達，這顆講的是「可以按」。
-   浮右而不是占一欄：放大之後若還占著 flex 的第四欄，390px 上說明文字只剩 150px。
+/* 每一則的「分享」鈕（2026-10-06，三輪）。淡線框 → 藍色實色膠囊 → 現在這版：
+   38px 的圓鈕、只有圖示不寫字、品牌紫漸層（同 .btn-success 那一組，深色字 #120c2e
+   對 #a78bfa 約 7:1）。選紫不選橘：橘在這個 App 是訊號等級的顏色，等級只由每一列
+   左側的邊條表達，這顆講的是「可以按」，不該混進訊號的色彩語彙。
+   名字由 aria-label／title 給（圖示鈕沒有文字，但讀螢幕軟體與桌機 tooltip 都有）。
+   浮右而不是占一欄：占著 flex 的第四欄時，390px 上說明文字只剩 150px、一句話斷四行。
    整列本身是連結，所以鈕的點擊在 JS 裡就先 stopPropagation（見 radarStoryListHtml）。 */
 .rtl-share {
 	float: right; margin: 1px 0 6px 10px;
-	display: inline-flex; align-items: center; gap: 5px;
-	font-size: 13.5px; font-weight: 700; color: #fff; padding: 7px 14px;
-	border: none; border-radius: 999px; cursor: pointer;
-	background: linear-gradient(145deg, #4874ff, #56a8ff);
-	box-shadow: 0 2px 8px rgba(72, 116, 255, 0.32);
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 38px; height: 38px; padding: 0;
+	color: #120c2e;                 /* 這組紫底上用深色字，與 .btn-success 同一套 */
+	border: none; border-radius: 50%; cursor: pointer;
+	background: linear-gradient(145deg, #7c5cff, #a78bfa);
+	box-shadow: 0 2px 8px rgba(124, 92, 255, 0.35);
 }
 .rtl-share:hover { filter: brightness(1.08); }
 .rtl-share:active { filter: brightness(0.92); }
-.rtl-share svg { width: 15px; height: 15px; }
+.rtl-share svg { width: 17px; height: 17px; stroke-width: 1.8; }
 
 /* ── 分享圖片（signalShareSvg）裡的字樣與底色 ──────────────────────────────
    這些規則只有產生圖片時用到：signalShareCss() 會把 :root 與所有 .rtl- 規則抽進

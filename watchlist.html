@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="270">
+  <meta name="app-version" content="271">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=270" rel="stylesheet">
+  <link href="watchlist.css?v=271" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -8961,8 +8961,10 @@ function radarStoryListHtml(story, opts = {}) {
     // 擺在 .rtl-text 裡面靠 float 浮右（不是 flex 的第四欄）：鈕放大之後若還占著一欄，
     // 390px 的手機上說明文字只剩 150px，一句話會斷成四五行；浮動讓文字繞過它、
     // 底下那幾行照樣用滿整個寬度。
+    // 只有圖示、不寫字（Howard 2026-10-06 第三輪）：名字由 aria-label／title 給，
+    // 桌機游標停住看得到「分享這則訊號」，讀螢幕軟體也讀得到。
     const share = `<button type="button" class="rtl-share" aria-label="分享這則訊號" title="分享這則訊號"`
-      + ` onclick="event.stopPropagation(); shareRadarEntry('${jsAttr(rtlEntryId(e))}')">${ICON_SHARE}<span>分享</span></button>`;
+      + ` onclick="event.stopPropagation(); shareRadarEntry('${jsAttr(rtlEntryId(e))}')">${ICON_SHARE}</button>`;
     return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-eid="${escapeHtml(rtlEntryId(e))}" data-sev="${e.sev}"${link}>
       <div class="rtl-time">${fmtTime(e.at)}</div>
       ${signalIconSvg(rtlEntryIconRow(e), 38)}
