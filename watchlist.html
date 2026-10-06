@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="286">
+  <meta name="app-version" content="287">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=286" rel="stylesheet">
+  <link href="watchlist.css?v=287" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1848,7 +1848,9 @@ const HOME_FILTERS = ["mine", "held", "shared"];
 // 選到的那一種一檔都沒有時要講清楚是為什麼——空白是篩選造成的，不是資料沒來
 const HOME_FILTER_EMPTY = {
   mine:   "還沒有自選股。按上面那一排下面的「＋」加入；好友分享給你的股票在「好友分享」那一格。",
-  held:   "沒有持股部位。持股在「設定」分頁填股數，或連券商同步。",
+  // 券商 API 還沒對使用者開放（同 .held 那一段的註解），所以不提「連券商同步」——
+  // 講一條使用者按不到的路，只會讓人去找一個不存在的開關
+  held:   "沒有持股部位。持股在「設定」分頁填股數。",
   shared: "還沒有好友分享給你的股票。好友分享後，到「分享」分頁的「好友分享給我」接受，就會出現在這裡。",
 };
 // 今日股票資訊彙整預設收合，只留第一條（Howard 2026-09-24）。刻意不寫進 localStorage：
@@ -7998,7 +8000,10 @@ function homeStatusText() {
   const pendingN = _monitorPendingSids().length;
   const pendingNote = pendingN ? ` · ${pendingN} 檔資訊尚未同步` : "";
   if (isOpen) return `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : latestAt ? ` · 資料 ${fmtTime(latestAt)}` : ""}${pendingNote} · ${n}`;
-  return `⚪ 已收盤${latestQuoteAt ? ` · 報價 ${fmtTime(latestQuoteAt, true)}` : latestAt ? ` · 資料 ${fmtTime(latestAt, true)}` : ""} · ${n}`;
+  // 收盤後不寫報價時刻（Howard 2026-10-06）：收盤後那個時間永遠是 13:30 前後，
+  // 看了不會改變任何決定。盤中仍然寫——那時候「價是幾點的」才有意義，
+  // 而真的停更會走上面 quoteStale 那一條，不靠這裡
+  return `⚪ 已收盤 · ${n}`;
 }
 
 // 接下來 7 天：stock_events 裡事件日在明天起 7 天內的日程（除權息、法說會、財報…）。
