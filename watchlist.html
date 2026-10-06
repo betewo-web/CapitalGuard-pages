@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="275">
+  <meta name="app-version" content="276">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=275" rel="stylesheet">
+  <link href="watchlist.css?v=276" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -8660,9 +8660,19 @@ function renderRadarTimeline(sid) {
   // 副標：哪一天（今天就寫「今天」）、幾則；看的是過去某天時給一個回到今天的出口
   const dayText = date === taipeiDateKey(new Date()) ? "今天" : `${_mdOf(date)}（${_weekdayZh(date)}）`;
   const backHtml = past ? ` <span class="hs-link" onclick="rtlPickDate('${jsAttr(sessionDate)}')">回今天</span>` : "";
+  // 超出方案上限（Howard 2026-10-06）：這一檔不在 active_watchlist 裡，monitor 從來沒有
+  // 判斷過它的任何條件——「有 0 則訊號」是沒有人在算，不是今天沒事（同稽核 I13）。
+  // 被鎖的那一列仍然可以點進來（過去在方案內的那幾天的紀錄還在），所以說明寫在這裡，
+  // 而不是把整列變成點不動。分享來的不受自選上限管。
+  const lockedRow = !shared && !!wl && !isWatchRowActive(wl);
+  const lockedHtml = lockedRow
+    ? ` · <span class="rtl-live-off">🔒 超出方案上限，沒有在監控中</span> <span class="hs-link" onclick="openPlanModal('watchlist')">升級方案 →</span>`
+    : "";
   // 免費版（plans.live_radar=false）：說明這頁的價與時間軸停在什麼時候，並給一步升級的出口。
   // 不寫「資料異常」之類的字——它沒有異常，是方案就這樣。
-  const liveOffHtml = (!past && _isMarketOpenNow() && !liveQuotesAllowed())
+  // 這一檔被鎖住時不寫這句：一行裡兩個「升級」連結，而且「沒有在監控中」已經把
+  // 「價不會動」整個包含進去了——講兩次反而讓人以為是兩回事。
+  const liveOffHtml = (!past && !lockedRow && _isMarketOpenNow() && !liveQuotesAllowed())
     ? ` · <span class="rtl-live-off">⏸ 不自動更新（${escapeHtml(planTierLabel())}）</span> <span class="hs-link" onclick="openPlanModal('live_radar')">持續更新（升級方案） →</span>`
     : "";
   // 剛加入、監控還沒納入：副標要寫出來，否則「有 0 則訊號」看起來像今天真的沒事
@@ -8671,7 +8681,7 @@ function renderRadarTimeline(sid) {
   // 好友分享給我的：副標寫到期日（設計第 6 點），讓人知道這檔什麼時候會從雷達消失
   const sharedHtml = shared ? ` · <span class="rtl-shared-exp">分享${shared.expires_at ? `到 ${escapeHtml(frDate(shared.expires_at))}` : "無期限"}</span>` : "";
   document.getElementById("rtl-sub").innerHTML =
-    `${escapeHtml(dayText)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}${pendingHtml}${sharedHtml}${backHtml}${liveOffHtml}`;
+    `${escapeHtml(dayText)}<span class="rtl-sub-gap">有 ${intraday.length} 則訊號</span>${activeHtml}${pendingHtml}${lockedHtml}${sharedHtml}${backHtml}${liveOffHtml}`;
   const daysEl = document.getElementById("rtl-days");
   if (daysEl) daysEl.innerHTML = rtlDaysHtml(sid);
   const dayCountEl = document.getElementById("rtl-history-n");
@@ -8684,14 +8694,14 @@ function renderRadarTimeline(sid) {
   // 開盤那一段，手一放就被拉回去了）。換股票／換日期時 _rtlScrollKey 不同＝回到最右邊。
   const prevScroll = _rtlReadScroll(`${sid}|${date}`);
   document.getElementById("rtl-chart-wrap").innerHTML =
-    radarTimelineChartHtml(sid, intraday, ref, { past, covered, pending });
+    radarTimelineChartHtml(sid, intraday, ref, { past, covered, pending, locked: lockedRow });
   _rtlApplyScroll(prevScroll);
   const headEl = document.getElementById("rtl-story-head");
   if (headEl) headEl.textContent = past ? `${_mdOf(date)} 盤中發生了什麼` : "盤中發生了什麼";
   // 分享鈕要能把這張圖重畫成一張圖片：它要的東西跟時間軸一模一樣（哪一檔、哪一天、
   // 那天的參考價位）。在這裡原封不動存一份，而不是等按下去再重算一次——重算就是
   // 第二份真相，而分享出去的圖片沒人會回來核對（unknown-treated-as-known 那一類）。
-  _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending };
+  _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending, locked: lockedRow };
   document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, { past, covered });
   _paintRtlTarget();   // 重畫換掉了節點：正在閃的那一則要接著閃完
 }
@@ -8885,7 +8895,8 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     }).join("");
     // 「還沒納入監控」不等於「今天沒有訊號」：剛加入的那幾分鐘沒有任何條件被判斷過，
     // 把缺資料說成「所有條件都沒成立」是同一類錯（稽核 I13；2026-10-02 光聖 6442）
-    const emptyLabel = !opts.past ? (opts.pending ? "資訊尚未同步" : "今天還沒有訊號")
+    const emptyLabel = !opts.past ? (opts.locked ? "沒有在監控中（超出方案）"
+                                    : opts.pending ? "資訊尚未同步" : "今天還沒有訊號")
                      : (opts.covered ? "這天沒有訊號" : "沒有這天的紀錄");
     emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">${emptyLabel}</text>`;
   }
@@ -9116,7 +9127,7 @@ function _sigShareWrap(text, maxW, fs, maxLines) {
 function signalShareSvg(ctx, e) {
   const { pad, gap, foot, minW, descLines } = SIGNAL_SHARE;
   const chart = radarTimelineChartHtml(ctx.sid, ctx.intraday, ctx.ref, {
-    past: ctx.past, covered: ctx.covered, pending: ctx.pending, export: true,
+    past: ctx.past, covered: ctx.covered, pending: ctx.pending, locked: ctx.locked, export: true,
     highlight: ctx.intraday.findIndex(x => rtlEntryId(x) === rtlEntryId(e)),
   });
   const textX = pad + 58;                                 // 圖示 34 ＋ 左右間距
