@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="276">
+  <meta name="app-version" content="277">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=276" rel="stylesheet">
+  <link href="watchlist.css?v=277" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7247,8 +7247,8 @@ function renderHome() {
     // 超出方案上限的那幾檔：不在 active_watchlist 裡，monitor 不追蹤、不通知。
     // 設定頁那一列掛「🔒 超出方案」，盤中與盤後以前什麼都沒有（Howard 2026-10-06）——
     // 兩格數字永遠是 0，看起來像「今天沒事」，其實是根本沒在看。
-    // 好友分享給我的不受自選股上限管（不在那個 view 裡），所以只判自己的列。
-    const locked = !row._share && !isWatchRowActive(row);
+    // 2026-10-06 起分享也算在上限內：自己的列看 active_watchlist，分享的看 monitored_shares。
+    const locked = row._share ? !!row._share.locked : !isWatchRowActive(row);
     return { sid, name, active, counts, todayCount, total, standout, nearCount, pending, locked,
              shared: row._share || null,
              dir: pending ? null : homeDirectionOf(sid),
@@ -8663,8 +8663,8 @@ function renderRadarTimeline(sid) {
   // 超出方案上限（Howard 2026-10-06）：這一檔不在 active_watchlist 裡，monitor 從來沒有
   // 判斷過它的任何條件——「有 0 則訊號」是沒有人在算，不是今天沒事（同稽核 I13）。
   // 被鎖的那一列仍然可以點進來（過去在方案內的那幾天的紀錄還在），所以說明寫在這裡，
-  // 而不是把整列變成點不動。分享來的不受自選上限管。
-  const lockedRow = !shared && !!wl && !isWatchRowActive(wl);
+  // 而不是把整列變成點不動。分享來的也算在上限內（2026-10-06），看的是 monitored_shares。
+  const lockedRow = shared ? !shareIsMonitored(shared.share_id) : (!!wl && !isWatchRowActive(wl));
   const lockedHtml = lockedRow
     ? ` · <span class="rtl-live-off">🔒 超出方案上限，沒有在監控中</span> <span class="hs-link" onclick="openPlanModal('watchlist')">升級方案 →</span>`
     : "";
@@ -13241,7 +13241,22 @@ function sharedInRows() {
   return (frShare.incoming || [])
     .filter(x => x.status === "accepted")
     .map(x => ({ stock_id: x.stock_id, stock_name: x.stock_name,
-                 _share: { share_id: x.share_id, from_name: x.from_name, expires_at: x.expires_at, label: x.label } }));
+                 _share: { share_id: x.share_id, from_name: x.from_name, expires_at: x.expires_at, label: x.label,
+                           locked: !shareIsMonitored(x.share_id) } }));
+}
+
+// 好友分享的股票也算在自選股上限內（Howard 2026-10-06），超出的一樣鎖住：
+// 額度怎麼切是後端的事（monitor_shared_stocks：自己的自選股先佔，剩下的依接受先後），
+// share_state() 把結果當成 share_id 陣列回來。這裡只負責查表，不在瀏覽器重算排名——
+// 重算就是第二份真相，遲早跟 monitor 不一致（同 loadActiveIds 的理由）。
+// 拿不到那個鍵（舊版 DB、RPC 失敗）＝null＝一則都不鎖。
+function monitoredShareIds() {
+  const list = frShare && frShare.monitored_shares;
+  return Array.isArray(list) ? new Set(list.map(String)) : null;
+}
+function shareIsMonitored(shareId) {
+  const ids = monitoredShareIds();
+  return !ids || ids.has(String(shareId));
 }
 function sharedInSids() { return sharedInRows().map(r => String(r.stock_id || "").trim()); }
 function sharedInById(shareId) {
@@ -13621,6 +13636,10 @@ function frRenderSharesIn() {
     // 進階訊號依我的方案生效：超出額度或需要混和訊號權限的部分不會發
     const rulesNote = (s.rules_total > 0 && s.rules_active != null && s.rules_active < s.rules_total)
       ? `<div class="fr-hint fr-warn">進階訊號 ${s.rules_active}／${s.rules_total} 條生效，其餘升級方案後生效</div>` : "";
+    // 整則都沒進監控（分享也算在自選股上限內，2026-10-06）：接受的時候額度還夠，
+    // 後來降級或自選股變多才被擠出來。不講的話這一檔在首頁就只是「有 0 則訊號」。
+    const slotNote = shareIsMonitored(s.share_id) ? ""
+      : `<div class="fr-hint fr-warn">🔒 超出自選股上限，這一檔沒有在監控中、不會通知。升級方案或減少自選股後恢復</div>`;
     // 對方更新了：不能拒絕這次更新（要嘛接受、要嘛整個移除），但一定要讓他知道
     const ack = s.needs_ack
       ? `<div class="fr-hold"><div>${escapeHtml(s.from_name || "好友")} 更新了這則分享的設定（第 ${s.version} 版），已經套用。</div>
@@ -13635,7 +13654,7 @@ function frRenderSharesIn() {
     <li class="fr-in-card${frFlashClass("share", s.share_id)}" data-flash-id="${sid(s)}">
       ${head(s)}
       ${ack}
-      ${detail(s, rulesNote + remove)}
+      ${detail(s, slotNote + rulesNote + remove)}
     </li>`;
   }, "還沒有好友分享給你的股票。");
 }
