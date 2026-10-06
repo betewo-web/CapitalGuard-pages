@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="280">
+  <meta name="app-version" content="281">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=280" rel="stylesheet">
+  <link href="watchlist.css?v=281" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -6296,13 +6296,23 @@ async function addWatchSeed(ctx, btn, only) {
 // ── 畫面 ──
 // 一句話的理由 → 清單 → 出口。文案只講「市值前段的大型股」這個事實，
 // 並明寫不是推薦名單（COMPLIANCE.md 第 4 條用的是同一句話）。
-function watchSeedLeadHtml(picks) {
+// compact＝首頁與設定頁那一排。那裡上面已經有空狀態的大按鈕、下面還有範例卡，
+// 三行說明會把範例卡擠出畫面（2026-10-06 Howard 就是這樣發現範例卡不見的）。
+// 完整的理由留在彈窗——那裡只有這一件事，讀得完。
+//
+// 「市值前段的大型股」而不是「市值最大的 N 檔」：產業上限會讓第 N 檔不一定是市值第 N 名，
+// 他已經有的那幾檔也會被跳過。寫成排名就是寫了一句會變成假的話。
+function watchSeedLeadHtml(picks, compact) {
   const limit = planLimitOf("watchlist");
   const planLine = planState.ready
     ? `${escapeHtml(planState.plan.name)}可追蹤 ${limit} 檔，這裡先給一半。`
     : "";
-  // 「市值前段的大型股」而不是「市值最大的 N 檔」：產業上限會讓第 N 檔不一定是市值第 N 名，
-  // 他已經有的那幾檔也會被跳過。寫成排名就是寫了一句會變成假的話。
+  if (compact) {
+    return `<div class="wseed-lead">
+        這 ${picks.length} 檔是台股市值前段的大型股（依公開資料的市值排序），不是推薦名單——
+        先加幾檔，訊號才有東西可以追。
+      </div>`;
+  }
   return `<div class="wseed-lead">
       先加幾檔開始追蹤：下面這 ${picks.length} 檔是台股市值前段的大型股（依公開資料的市值排序，
       同一產業不重複太多檔）。這不是推薦名單，只是讓 App 跑起來的起點——
@@ -6337,7 +6347,7 @@ function watchSeedStripHtml(ctx) {
   const picks = watchSeedPicks(watchSeedCount());
   _watchSeedShown = picks;
   return `<div class="wseed-strip">
-      ${watchSeedLeadHtml(picks)}
+      ${watchSeedLeadHtml(picks, true)}
       ${watchSeedListHtml(picks, ctx, false)}
       <div class="wseed-actions">
         <button type="button" class="btn btn-sm btn-success btn-accent-sm"
@@ -7805,17 +7815,21 @@ function renderHome() {
   const secEl = listEl && listEl.closest(".home-sec");
   if (secEl) secEl.classList.toggle("is-empty", noWatchlist);
   if (listEl) {
+    // 範例卡排在起步清單**之前**（2026-10-06 Howard：「本來會有聯發科範例，現在我沒看到」——
+    // 起步清單夾在中間，把它推到 390px 手機的畫面外了）。順序是有意義的：
+    // 範例卡回答「這個 App 會給我什麼」，起步清單才是「那我加哪幾檔」。
+    const exampleHtml = example ? showcaseTileHtml() : "";
     const emptyHtml = noWatchlist
       ? `<div class="home-empty-cta">
            <div class="hec-title">還沒有自選股</div>
            <button type="button" class="btn-cta-lg" onclick="focusAddStock()">＋ 新增自選股</button>
            <div class="hec-sub">加入之後，這裡會顯示每一檔今天有沒有事。</div>
-         </div>${watchSeedStripHtml("home")}`
+         </div>${exampleHtml}${watchSeedStripHtml("home")}`
+      // 篩選造成的空白：example 一定是空的（它要求 homeFilter === "mine"）
       : `<div class="home-tile-empty">${HOME_FILTER_EMPTY[homeFilter] || HOME_FILTER_EMPTY.mine}</div>`;
-    listEl.innerHTML = (shown.length
-      ? shown.map(r => homeTileHtml(r)).join("")
-      : emptyHtml)
-      + (example ? showcaseTileHtml() : "");
+    listEl.innerHTML = shown.length
+      ? shown.map(r => homeTileHtml(r)).join("") + exampleHtml
+      : emptyHtml;
   }
   homeRenderUpcoming();
   // 「今日股票資訊彙整」那一區 2026-09-27 搬到盤後分頁（見 renderTodayNews()）。這一句留在首頁：
