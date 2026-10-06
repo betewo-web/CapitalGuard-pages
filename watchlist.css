@@ -515,6 +515,25 @@ body.has-bottom-nav .page-shell {
 
 .wl-addbar:focus-within .wl-addbar-icon { color: var(--accent-2); }
 
+/* 從「＋ 新增自選股」跳過來時閃 3 秒（0.6 秒 × 5，與 .fr-list li.is-flash 同一種節奏）。
+   換頁本身沒有畫面語言：整頁換掉之後「可以打字了、打在哪裡」只有手機彈鍵盤時才看得出來。
+   閃整條 .wl-addbar 而不是 <input>：框與聚焦環都畫在外面這一條上，input 自己沒有邊框。
+   不喜歡動畫的人（系統設定）改成靜態外框，資訊一樣、不閃。 */
+@keyframes addbar-flash {
+	0%, 100% { border-color: rgba(121, 157, 255, 0.24); box-shadow: 0 0 0 0 rgba(139, 124, 255, 0); }
+	50%      { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(139, 124, 255, 0.45); }
+}
+
+.wl-addbar.is-flash { animation: addbar-flash 0.6s ease-in-out 5; }
+
+@media (prefers-reduced-motion: reduce) {
+	.wl-addbar.is-flash {
+		animation: none;
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.4);
+	}
+}
+
 .wl-addbar-input {
 	flex: 1 1 auto;
 	min-width: 0;

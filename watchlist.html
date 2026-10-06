@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="284">
+  <meta name="app-version" content="285">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=284" rel="stylesheet">
+  <link href="watchlist.css?v=285" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -315,7 +315,7 @@
              只有圖示就一定要有 aria-label／title——讀螢幕的人與長按看提示的人都只剩這個。
              空帳號時整顆收起來（.home-sec.is-empty）：那時清單中間已經有一顆置中的大按鈕。 -->
         <div class="hs-add" id="home-add-watch">
-          <button type="button" class="hs-add-btn" onclick="switchTab('watch')"
+          <button type="button" class="hs-add-btn" onclick="focusAddStock()"
                   aria-label="新增自選股" title="新增自選股"><i data-icon="plus"></i></button>
         </div>
 
@@ -10988,6 +10988,26 @@ function goAddStockFromGuard() {
 }
 
 // 「新增自選股」的唯一落點：切到設定分頁、捲到搜尋列並聚焦，游標就在該打字的地方
+// 「新增自選股」的三個入口（首頁三格下面那顆「＋」、首頁與設定頁的空清單大按鈕）全部走這裡：
+// 切到設定分頁 → 捲到搜尋列 → 聚焦 → 閃 3 秒（Howard 2026-10-06）。
+// 為什麼要閃：換頁本身沒有畫面語言。整頁換掉之後，「現在可以打字了、打在哪裡」只有手機
+// 彈出鍵盤時才看得出來——平板與桌機不彈，iOS 在 setTimeout 之後的 focus 也常被擋掉。
+const ADD_FLASH_MS = 3000;   // 與 watchlist.css 的 addbar-flash 同值（0.6 秒 × 5）
+let _addFlashTimer = null;
+
+// 閃的是整條 .wl-addbar 不是 <input>：框與聚焦環都畫在外面那一條上，input 自己沒有邊框。
+function flashAddStock() {
+  const bar = document.querySelector(".wl-addbar");
+  if (!bar) return;
+  clearTimeout(_addFlashTimer);
+  // 連按兩次要重新閃：class 還在的話 CSS 動畫不會重頭跑。拿掉之後要讀一次版面
+  // （offsetWidth）強迫瀏覽器結算，不然「拿掉再加上」會被合併成什麼都沒改。
+  bar.classList.remove("is-flash");
+  void bar.offsetWidth;
+  bar.classList.add("is-flash");
+  _addFlashTimer = setTimeout(() => bar.classList.remove("is-flash"), ADD_FLASH_MS);
+}
+
 function focusAddStock() {
   switchTab("watch");
   setTimeout(() => {
@@ -10995,6 +11015,7 @@ function focusAddStock() {
     if (!inp) return;
     inp.scrollIntoView({ block: "center", behavior: "smooth" });
     try { inp.focus({ preventScroll: true }); } catch { inp.focus(); }
+    flashAddStock();
   }, 80);
 }
 
