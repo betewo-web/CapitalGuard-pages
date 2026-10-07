@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="291">
+  <meta name="app-version" content="292">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=291" rel="stylesheet">
+  <link href="watchlist.css?v=292" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -277,7 +277,7 @@
 
       <!-- 首頁＝自選股清單，一檔一列（2026-09-22 Howard 連續六版改到這裡）：
            · 一列上放得下的只有：股名＋漲／平／跌＋漲停／跌停，以及右側兩格數字
-             （⚡ 訊號＝這檔今天幾則、🎯 逼近關卡＝貼著幾條）。今天有事件就多一行「N 件資料」。
+             （⚡ 訊號＝這檔今天幾則；「🎯 逼近關卡」2026-10-07 拿掉）。今天有事件就多一行「N 件資料」。
            · 標題「今日總覽」、總覽卡、清單說明、方塊裡的評分都拿掉了——首頁只講「今天誰有事」，
              其餘一律點進個股字卡（盤中雷達／歷史訊號／看 K 線）。評分變化在 📊 統計 分頁。
            · 仍然成立的原則：首頁不放股價與百分比（只有漲／平／跌、盤中即時、漲跌為零才是平）、
@@ -388,7 +388,7 @@
       <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
     </section>
 
-    <!-- ⚡ 盤中雷達分頁 2026-09-22 拿掉（Howard）：首頁本來就是每檔一列、帶「訊號／逼近關卡」兩格數字，
+    <!-- ⚡ 盤中雷達分頁 2026-09-22 拿掉（Howard）：首頁本來就是每檔一列、帶「訊號」那格數字，
          點進去的個股字卡第一頁就叫「盤中雷達」（同一天的時間軸，講得比那頁的縮寫籤細）。
          兩個地方講同一件事，留一個。renderLive 與縮寫籤 radarChipHtml 一併移除。 -->
 
@@ -7992,21 +7992,20 @@ function renderHome() {
     const todayCount = counts[counts.length - 1];
     const total = counts.reduce((a, b) => a + b, 0);
     const standout = (stockEvents[sid] || []).filter(isTodayEvent).length;   // 今天的事件數（不分階）
-    // 逼近關卡：與雷達分頁同一個算法（距關卡 RADAR_NEAR_PCT 以內）。方塊上那一格數的是
-    // 這檔自己貼著幾條關卡——支撐、壓力各算一條，所以是 0、1 或 2
-    const lv = nearestLevels(sid, getQuote(sid)?.price ?? null);
-    const nearCount = (lv.supPct != null && lv.supPct <= RADAR_NEAR_PCT ? 1 : 0)
-                    + (lv.resPct != null && lv.resPct <= RADAR_NEAR_PCT ? 1 : 0);
+    // 「🎯 逼近關卡」那一格 2026-10-07 拿掉（Howard：作用不大）：貼著關卡本身不是一件
+    // 「今天發生的事」，真的跌破或逼近時左邊的訊號籤就會寫出來；而且它在這一列佔掉
+    // 85px，好友分享那一格多一顆分享者籤就擠不下，股名被省略成「台…」。
+    // 關卡要看去個股字卡——圖上就畫著最近的支撐與壓力。nearestLevels 還在，字卡在用。
     // 剛加入、監控還沒寫出當日那列：這一列能顯示的全是上一個交易日的東西——
-    // 漲／跌籤是用昨天的漲跌幅算的、訊號 0 與逼近關卡 0 不是今天的結論。
+    // 漲／跌籤是用昨天的漲跌幅算的、訊號 0 不是今天的結論。
     // 一律讓位給「資訊尚未同步」（見 _monitorPendingSids）。
     const pending = _monitorPending(sid);
     // 超出方案上限的那幾檔：不在 active_watchlist 裡，monitor 不追蹤、不通知。
     // 設定頁那一列掛「🔒 超出方案」，盤中與盤後以前什麼都沒有（Howard 2026-10-06）——
-    // 兩格數字永遠是 0，看起來像「今天沒事」，其實是根本沒在看。
+    // 那格數字永遠是 0，看起來像「今天沒事」，其實是根本沒在看。
     // 2026-10-06 起分享也算在上限內：自己的列看 active_watchlist，分享的看 monitored_shares。
     const locked = row._share ? !!row._share.locked : !isWatchRowActive(row);
-    return { sid, name, active, counts, todayCount, total, standout, nearCount, pending, locked,
+    return { sid, name, active, counts, todayCount, total, standout, pending, locked,
              shared: row._share || null,
              dir: pending ? null : homeDirectionOf(sid),
              limitKind: (active && (active.signal === "limit_up" || active.signal === "limit_down"))
@@ -8089,7 +8088,7 @@ function homeDirectionOf(sid) {
 }
 
 // 首頁方塊（2026-09-22 五版，Howard）：一檔一列、佔滿整行。
-// 上排＝名稱＋漲／平／跌＋漲停／進行中，右側兩格數字（訊號／逼近關卡）；下排＝評分變化與今日資料籤。
+// 上排＝名稱＋漲／平／跌＋漲停／進行中，右側一格數字（訊號）；下排＝評分變化與今日資料籤。
 // 日期與「今日」都拿掉了（哪一天由標題下面那行狀態講），字體略小。
 // 點方塊開的就是當日盤中雷達（`radarTimelineModal`，不是切到雷達分頁）；點資料籤開事件面板。
 function homeTileHtml(r) {
@@ -8104,20 +8103,20 @@ function homeTileHtml(r) {
   const live = liveLabel
     ? `<span class="home-tile-live${r.limitKind ? " is-limit" : ""}">${escapeHtml(liveLabel)}</span>`
     : "";
-  // 兩格數字（2026-09-22 從頁面頂端搬進來）：這一檔今天幾則訊號、貼著幾條關卡。
+  // 右邊那格數字（2026-09-22 從頁面頂端搬進來）：這一檔今天幾則訊號。
+  // 「🎯 逼近關卡」2026-10-07 拿掉（Howard），見 renderHome 裡的理由。
   // 0 用灰色，眼睛才會停在有數字的那幾列
   const stat = (n, label, cls) =>
     `<span class="home-tile-stat"><b class="${n ? cls : "hs-zero"}">${n}</b><i>${label}</i></span>`;
-  // 剛加入、還沒拿到當日那列：兩格數字都還不是今天的結論，整個換成一句話。
-  // 用同一個 .home-tile-stat 盒子（裡面的 <i> 本來就是灰色 nowrap），不必動 CSS；
-  // 一格取代兩格，這一列反而更窄，窄螢幕不會被擠爆。
-  // 超出方案：兩格數字會永遠是 0（monitor 不追蹤這幾檔），寫成 0 等於講錯話，
+  // 剛加入、還沒拿到當日那列：那格數字還不是今天的結論，整個換成一句話。
+  // 用同一個 .home-tile-stat 盒子（裡面的 <i> 本來就是灰色 nowrap），不必動 CSS。
+  // 超出方案：數字會永遠是 0（monitor 不追蹤這幾檔），寫成 0 等於講錯話，
   // 整格換成鎖——與設定頁那一列的「🔒 超出方案」同一句話
   const lead = r.locked
     ? `<span class="home-tile-stat home-tile-locked"><i>🔒 超出方案</i></span>`
     : r.pending
     ? `<span class="home-tile-stat"><i>資訊尚未同步</i></span>`
-    : stat(r.todayCount, "⚡ 訊號", "sev-orange") + stat(r.nearCount, "🎯 逼近關卡", "sev-blue");
+    : stat(r.todayCount, "⚡ 訊號", "sev-orange");
   // 事件籤 2026-09-22 從方塊上拿掉（Howard）：方塊只講訊號，事件在下面那張「今日股票資訊彙整」卡
   // 與「🌙 盤後」頁。r.standout 仍用於排序（今天有事的排前面）。
   // 評分 2026-09-22 從方塊上拿掉（Howard）：首頁只講「今天誰有事」，評分變化在 📊 統計 分頁。
@@ -8162,7 +8161,7 @@ function homeStatusText() {
   }
   const quoteStale = isOpen && quoteAge !== null && quoteAge >= QUOTE_STALE_MS;
   if (quoteStale) return `🟠 報價已停止更新 · 最後 ${fmtClock(freshnessAt)}（${fmtAgeRough(quoteAge)}）· ${n}`;
-  // 剛加入的那幾檔還在等監控納入：它們那一列的「訊號 0 / 逼近關卡 0」不是今天的結論
+  // 剛加入的那幾檔還在等監控納入：它們那一列的「訊號 0」不是今天的結論
   const pendingN = _monitorPendingSids().length;
   const pendingNote = pendingN ? ` · ${pendingN} 檔資訊尚未同步` : "";
   if (isOpen) return `🟢 盤中（09:00–13:35）${latestQuoteAt ? ` · 報價 ${fmtClock(latestQuoteAt)}` : latestAt ? ` · 資料 ${fmtTime(latestAt)}` : ""}${pendingNote} · ${n}`;
@@ -8228,7 +8227,9 @@ function holdingBySid() {
 //      涵蓋每一檔自選股（需 migrate_intraday_levels.sql；沒跑時這裡是 null）
 //   2. 每日報告 stock_data[sid].levels —— 6MB 才到，而且只涵蓋進榜的股票；K 線圖畫的是這組
 // 以前只有 2：訊號都已經顯示「跌破支撐」了，關卡那行還在等報告檔、沒進榜的更是永遠沒有。
-const RADAR_NEAR_PCT = 1.0;   // 距關卡 1% 內算「逼近」，與後端 MONITOR_NEAR_PCT 預設一致
+// RADAR_NEAR_PCT（距關卡 1% 內算「逼近」）2026-10-07 一併移除：唯一的用途是首頁方塊
+// 那格「🎯 逼近關卡」，那一格拿掉之後前端沒有人要判斷「逼不逼近」了——真的逼近時
+// 是後端 monitor 發訊號（門檻在它自己的 MONITOR_NEAR_PCT），前端只負責把訊號寫出來。
 
 // 價位忠實呈現：資料有幾位小數就顯示幾位（最多兩位，台股最細檔位 0.01），不補零也不
 // 四捨五入成整數。2026-09-14 使用者要求：以前列表列一律整數，105.5 顯示成 106，與券商
