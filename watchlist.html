@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="290">
+  <meta name="app-version" content="291">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=290" rel="stylesheet">
+  <link href="watchlist.css?v=291" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7771,12 +7771,22 @@ function buildWhyHtml(row) {
     [/融資暴增|融資顯著增加/, "💳 融資顯著增加", wl.alert_margin_up],
     [/融資暴減|融資顯著減少/, "💳 融資顯著減少", wl.alert_margin_down],
   ];
-  const lines = [`你已將 <b>${escapeHtml(name)} ${escapeHtml(sid)}</b> 加入自選股`];
-  for (const [re, label] of condMap) {
-    if (re.test(t)) { lines.push(`已開啟「${label}」通知條件`); break; }
+  // 好友分享的那一則講的是分享者的設定（內文最後一行會註明「來自 ○○ 的分享」）。同一檔
+  // 自己的自選股與好友的分享可以並存，兩邊的開關與目標價各自生效，所以不能拿自己那一份
+  // 去解釋這一則——目標價最明顯：分享者設 55、自己設 60，照自己的寫會變成「設定的上漲價格：60」。
+  const fromShare = /\n來自 .+ 的分享$/.test(String(row.body || ""));
+  const lines = [fromShare
+    ? `這一則來自好友分享的 <b>${escapeHtml(name)} ${escapeHtml(sid)}</b> 訊號設定（內文最後一行是分享的人）`
+    : `你已將 <b>${escapeHtml(name)} ${escapeHtml(sid)}</b> 加入自選股`];
+  if (fromShare) {
+    lines.push("你自己對這一檔的設定另外算，不影響這一則");
+  } else {
+    for (const [re, label] of condMap) {
+      if (re.test(t)) { lines.push(`已開啟「${label}」通知條件`); break; }
+    }
+    if (/上漲價位|設定價格（上漲）/.test(t) && wl.target_price_high != null) lines.push(`設定的上漲價格：${wl.target_price_high}`);
+    if (/下跌價位|設定價格（下跌）/.test(t) && wl.target_price_low != null)  lines.push(`設定的下跌價格：${wl.target_price_low}`);
   }
-  if (/上漲價位|設定價格（上漲）/.test(t) && wl.target_price_high != null) lines.push(`設定的上漲價格：${wl.target_price_high}`);
-  if (/下跌價位|設定價格（下跌）/.test(t) && wl.target_price_low != null)  lines.push(`設定的下跌價格：${wl.target_price_low}`);
   if (String(row.source || "").startsWith("daily_report")) lines.push("已訂閱每日分析報告推播");
   return `<div class="why-box"><div class="why-title">為什麼通知你？</div>${lines.map(l => `・${l}`).join("<br>")}</div>`;
 }
