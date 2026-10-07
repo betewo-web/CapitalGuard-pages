@@ -2377,6 +2377,14 @@ body.modal-blocking .modal-backdrop.show {
 	color: var(--sig-orange);
 	border: 1px solid rgba(255, 159, 67, 0.55);
 	white-space: nowrap;
+	/* 擠不下時先收這一顆，不要先擠股名（同 .home-tile-shared，2026-10-07 加了
+	   右邊那顆「⋯」之後更容易擠到）：320px ＋ 最大字級 ＋ 有訊號籤那一列實測
+	   股名只剩 35px（「台…」），改成這一顆可縮之後股名回到 71px。
+	   股名是這一列的主詞，籤是修飾語——要省略也是從籤開始。 */
+	min-width: 0;
+	flex-shrink: 8;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 /* 籤上寫的是現在哪一種訊號（逼近壓力、跌破支撐…）；還在漲停／跌停板上的那顆用實底，
@@ -4892,3 +4900,71 @@ select.fr-input { width: 100%; }
 .fr-share-footer .fr-form-msg { flex: 1 1 100%; margin: 0; }
 .fr-share-footer .fr-form-msg:empty { display: none; }
 .fr-share-footer .btn { flex: 1 1 0; margin: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+
+/* ── 我分享出去的：每一列右邊一顆「移除」（Howard 2026-10-07）──────────
+   展開鈕仍然佔滿剩下的寬度（flex: 1 1 0 ＋ min-width: 0），所以長標題照舊在
+   自己的欄裡折行，不會把這顆擠出卡片。40×40 是手指的可點面積。 */
+.fr-share-row { display: flex; align-items: center; gap: 6px; }
+.fr-share-row .fr-share-head { flex: 1 1 0; min-width: 0; }
+.fr-icon-btn {
+	flex: 0 0 auto; width: 40px; height: 40px;
+	display: inline-flex; align-items: center; justify-content: center;
+	border: 1px solid var(--border); border-radius: 11px;
+	background: rgba(146, 146, 163, 0.1); color: var(--text-1);
+	cursor: pointer; padding: 0;
+	transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+.fr-icon-btn:hover {
+	border-color: rgba(255, 95, 133, 0.55); background: rgba(255, 95, 133, 0.13); color: #ff8ba5;
+}
+#fr-pane-shares .fr-icon-btn { width: 44px; height: 44px; }
+#fr-pane-shares .fr-icon-btn .ic { width: 17px; height: 17px; }
+
+/* ── 收到的分享：跟我現在的設定差在哪（Howard 2026-10-07）──────────────
+   不是警告框（.fr-hold 的橘邊留給「要你做決定」），是一塊比較表：
+   灰底、每個項目一段，差異逐條列出。 */
+.fr-cmp {
+	margin-top: 10px; padding: 10px 12px; border-radius: 10px;
+	background: rgba(146, 146, 163, 0.1); font-size: 13px; color: var(--text-1);
+}
+.fr-cmp-head { font-weight: 700; color: var(--text-0); }
+.fr-cmp-item { margin-top: 8px; }
+.fr-cmp-item:first-of-type { margin-top: 6px; }
+.fr-cmp-what { color: var(--text-0); }
+.fr-cmp-list { margin: 2px 0 0; padding-left: 1.1em; }
+.fr-cmp-list li { margin: 2px 0; color: var(--sig-orange); }
+#fr-pane-shares .fr-cmp { font-size: 1.05rem; line-height: 1.6; padding: 13px 14px; }
+
+/* ── 首頁「自選」每一列右邊那顆圖示鈕（設定／分享，Howard 2026-10-07）──
+   flex: 0 0 auto＋固定寬：這一列擠不下時要收的是股名（它有 min-width: 0 與
+   ellipsis），不是這顆鈕——收掉它就等於這個入口消失了。 */
+.home-tile-more {
+	flex: 0 0 auto; width: 30px; height: 30px; margin-left: 6px;
+	display: inline-flex; align-items: center; justify-content: center;
+	border: 1px solid var(--border); border-radius: 9px;
+	background: rgba(146, 146, 163, 0.1); color: var(--text-1);
+	padding: 0; cursor: pointer;
+}
+.home-tile-more:hover { border-color: var(--accent); color: var(--text-0); }
+
+/* 「設定／分享」視窗的兩顆大按鈕：一行標題＋一行說明，整塊可點 */
+.sa-btn {
+	width: 100%; display: flex; align-items: center; gap: 12px; text-align: left;
+	margin-bottom: 10px; padding: 13px 14px; border-radius: 12px;
+	border: 1px solid var(--border); background: var(--surface); color: var(--text-0);
+	cursor: pointer;
+}
+.sa-btn:last-child { margin-bottom: 0; }
+.sa-btn:hover { border-color: var(--accent); }
+.sa-ic { flex: 0 0 auto; display: inline-flex; color: var(--accent); }
+.sa-ic .ic { width: 20px; height: 20px; }
+.sa-text { min-width: 0; }
+.sa-text b { display: block; font-size: 1.1rem; }
+.sa-text i { display: block; font-style: normal; font-size: 0.95rem; color: var(--text-muted); line-height: 1.5; }
+
+/* 從首頁跳過來的那一檔閃 3 秒（goStockSettings）。動畫與分享分頁共用 fr-flash：
+   同一件事（「你要找的是這一列」）在兩頁應該長得一樣。 */
+.wl-row.is-flash { animation: fr-flash 0.6s ease-in-out 5; border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) {
+	.wl-row.is-flash { animation: none; box-shadow: 0 0 0 2px var(--accent); }
+}

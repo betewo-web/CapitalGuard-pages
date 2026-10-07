@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="292">
+  <meta name="app-version" content="293">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=292" rel="stylesheet">
+  <link href="watchlist.css?v=293" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1192,6 +1192,30 @@
   </div>
 </div>
 
+<!-- ── 一檔股票的「設定／分享」（首頁「自選」每一列右邊那顆圖示鈕開）2026-10-07 Howard ──
+     兩個出口都是「跳過去」而不是在這裡做：設定要看得到整列的三顆鈕（基礎／進階／移除），
+     分享要看得到對象清單。所以這個視窗只負責問「要做哪一件」。 -->
+<div class="modal fade sheet-modal" id="stockActionModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="sa-title">—</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body p-3">
+        <button type="button" class="sa-btn" id="sa-btn-settings">
+          <span class="sa-ic" id="sa-ic-settings"></span>
+          <span class="sa-text"><b>設定</b><i>跳到設定頁的這一檔：基礎訊號、進階訊號、移除</i></span>
+        </button>
+        <button type="button" class="sa-btn" id="sa-btn-share">
+          <span class="sa-ic" id="sa-ic-share"></span>
+          <span class="sa-text"><b>分享</b><i>把這一檔目前的訊號設定分享給好友或群組</i></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── 邀請好友安裝（分享 → 最上面那顆寬按鈕開）2026-10-05 Howard ──
      兩條路各一塊：上面是官網網址（複製或叫系統的分享面板），下面是官方帳號的行動條碼
      （當面給對方掃最快，不必打字、不必傳訊息）。條碼與「顯示條碼」那一頁的畫法共用
@@ -1775,6 +1799,11 @@ const ICON_PLUS    = _svg('<path d="M8 3.4v9.2M3.4 8h9.2"/>', 14);
 const ICON_SHARE   = _svg('<circle cx="4.2" cy="8" r="1.9"/><circle cx="11.8" cy="3.9" r="1.9"/><circle cx="11.8" cy="12.1" r="1.9"/><path d="M5.9 7.1 10.1 4.8M5.9 8.9l4.2 2.3"/>', 14);
 const ICON_INBOX   = _svg('<path d="M2.4 9.2 4 3.6h8l1.6 5.6"/><path d="M2.4 9.2v3.2h11.2V9.2h-3.3a2.3 2.3 0 0 1-4.6 0z"/>', 14);
 const ICON_CHEVRON = _svg('<path d="M4 6.2 8 10.2 12 6.2"/>', 14);
+// 首頁「自選」每一列右邊那顆：點開「設定／分享」兩個選項。實心小點才看得出是三顆點
+// （線條圓圈在 14px 會糊成一條虛線）。
+const ICON_DOTS    = _svg('<circle cx="8" cy="3.2" r="1.15" fill="currentColor" stroke="none"/>'
+  + '<circle cx="8" cy="8" r="1.15" fill="currentColor" stroke="none"/>'
+  + '<circle cx="8" cy="12.8" r="1.15" fill="currentColor" stroke="none"/>', 14);
 const ICON_SCAN    = _svg('<path d="M2.6 5.6V3.8a1.2 1.2 0 0 1 1.2-1.2h1.8M10.4 2.6h1.8a1.2 1.2 0 0 1 1.2 1.2v1.8M13.4 10.4v1.8a1.2 1.2 0 0 1-1.2 1.2h-1.8M5.6 13.4H3.8a1.2 1.2 0 0 1-1.2-1.2v-1.8"/><path d="M4.6 8h6.8"/>');
 const ICON_CAMERA  = _svg('<path d="M2.4 5.6h2.3l1-1.6h4.6l1 1.6h2.3v7H2.4z"/><circle cx="8" cy="8.9" r="2.3"/>', 14);
 const ICON_IMAGE   = _svg('<rect x="2.4" y="3" width="11.2" height="10" rx="1.6"/><circle cx="5.8" cy="6.4" r="1.1"/><path d="M2.8 11.6 6.4 8.6l2.4 2 2-1.6 2.6 2.4"/>', 14);
@@ -8123,14 +8152,83 @@ function homeTileHtml(r) {
   // 沒有事件就連第二行都不畫，一列就是一行
   // 分享來的那一格把 share_id 帶進字卡（自己的自選股帶空字串）：同一檔可能自己也有，
   // 字卡要知道是從哪一個來源點進來的
+  // 最右邊那顆只有圖示的鈕（Howard 2026-10-07）：點開「設定／分享」。
+  // 只有自己的自選股那幾列有——好友分享來的不在我的自選股裡（沒有設定頁那一列），
+  // 也不能由我再分享出去（share_create 只收自己的自選股，會回 not_in_watchlist）。
+  // stopPropagation：整個方塊的 onclick 是開盤中雷達，按這顆不該順便開那張卡。
+  const menu = r.shared ? "" : `<button type="button" class="home-tile-more"
+        title="${escapeHtml(r.name)}：設定或分享" aria-label="${escapeHtml(r.name)} 的設定與分享"
+        onclick="event.stopPropagation();openStockActionMenu('${jsAttr(r.sid)}')">${ICON_DOTS}</button>`;
   return `<div class="home-tile${r.todayCount ? " is-hot" : ""}${r.locked ? " is-locked" : ""}" title="${
       r.locked ? "超出目前方案的自選股上限，不再產生通知；升級後恢復" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
       <div class="home-tile-head">
         <span class="home-tile-name">${escapeHtml(r.name)}</span>${r.shared
           ? `<span class="home-tile-shared" title="好友分享給我">${ICON_SHARE}${escapeHtml(r.shared.from_name || "好友")}</span>` : ""}${dir}${live}
-        <span class="home-tile-lead">${lead}</span>
+        <span class="home-tile-lead">${lead}</span>${menu}
       </div>
     </div>`;
+}
+
+// ── 首頁一列的「設定／分享」（Howard 2026-10-07）──────────────────────────
+// 刻意做成兩步（先選要做什麼、再跳過去）：這一列原本整塊都是「開盤中雷達」，
+// 多兩顆按鈕在列上會把股名擠掉（v292 的水平捲軸就是這樣來的）。
+let _stockActionSid = "";
+
+function openStockActionMenu(sid) {
+  _stockActionSid = String(sid || "").trim();
+  const nm = getPreferredStockName(_stockActionSid, "") || _stockActionSid;
+  const titleEl = document.getElementById("sa-title");
+  if (titleEl) titleEl.textContent = `${nm} ${_stockActionSid}`;
+  // 分享功能沒放行（後端擋著、或這個帳號看不到那一格）就不給那一顆：
+  // 按了只會跳到一個藏起來的分頁
+  const shareBtn = document.getElementById("sa-btn-share");
+  if (shareBtn) shareBtn.style.display = frEnabled ? "" : "none";
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("stockActionModal")).show();
+}
+
+// 先關這個視窗再做下一件事：兩個 modal 同時在轉場，先關的那個收尾時會把後開的那個
+// 的背景捲動鎖一起解掉（v275 學到的）。
+function closeStockActionMenu(then) {
+  const el = document.getElementById("stockActionModal");
+  const m = el && window.bootstrap ? bootstrap.Modal.getInstance(el) : null;
+  if (!m || !el.classList.contains("show")) { if (then) then(); return; }
+  if (then) el.addEventListener("hidden.bs.modal", () => then(), { once: true });
+  m.hide();
+}
+
+// 「設定」：跳到設定分頁、捲到那一列、閃 3 秒。
+// 閃爍做成狀態（wlFlash）而不是直接加 class：這一頁每次重畫都會重建每一列
+// （報價、事件回來都會重畫），加在節點上的 class 一重畫就不見了（v103／v115 的教訓）。
+const WL_FLASH_MS = 3000;   // 與 watchlist.css 的 fr-flash 同值（0.6 秒 × 5）
+let wlFlash = { sid: "", until: 0 };
+let _wlFlashTimer = null;
+
+const wlFlashClass = sid => (wlFlash.sid === sid && Date.now() < wlFlash.until) ? " is-flash" : "";
+
+function goStockSettings(sid) {
+  const want = String(sid || "").trim();
+  if (!want) return;
+  wlFlash = { sid: want, until: Date.now() + WL_FLASH_MS };   // 先設狀態，接下來那一次 render 就帶著
+  clearTimeout(_wlFlashTimer);
+  _wlFlashTimer = setTimeout(() => {
+    wlFlash = { sid: "", until: 0 };
+    if (currentTab === "watch") renderWatchlist(watchlistRows);
+  }, WL_FLASH_MS + 100);
+  switchTab("watch");
+  setTimeout(() => {
+    const el = document.querySelector(`#wl-grid .wl-row[data-sid="${want}"]`);
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, 80);
+}
+
+// 「分享」：跳到分享 → 分享股票 → 我分享出去的，並開「新增分享」、股票欄位填好這一檔
+function goStockShare(sid) {
+  const want = String(sid || "").trim();
+  if (!frEnabled || !want) return;
+  switchTab("friends");
+  frSwitchSeg("shares");
+  frSwitchShare("out");      // 要在 frSwitchSeg 之後：有待決定的邀請時它會自己切到「好友分享給我」
+  frOpenShareForm(want);
 }
 
 // 清單上方那一行：盤中／已收盤、報價時刻、自選檔數。
@@ -11019,7 +11117,8 @@ function renderWatchlist(rows) {
     }
 
     const item = document.createElement("article");
-    item.className = active ? "wl-row" : "wl-row is-inactive";
+    // is-flash：從首頁那一列的「設定」跳過來的那一檔閃 3 秒（goStockSettings）
+    item.className = (active ? "wl-row" : "wl-row is-inactive") + wlFlashClass(sid);
     item.dataset.id = row.id;
     item.dataset.sid = sid;
     // 2026-09-22：一列就是「名稱＋代號 …… 動作鈕」，超出方案時多一行標記。
@@ -14018,6 +14117,7 @@ let frIdMode  = null;    // "handle"（有代號表）｜"uuid"（舊 schema）
 let frOpenShare = null;  // 「我分享出去的」目前展開的那一則
 let frOpenIn    = null;  // 「好友分享給我」目前展開的那一則
 let frGroupEdit = null;  // 群組表單：null＝新增；group_id＝調整那個群組的成員
+let _frRulesTried = false;   // 「新增分享」為了預覽抓過一次完整的進階訊號清單了（只抓一次）
 
 // PostgREST 找不到函式時回 404 + PGRST202。「函式不存在」和「函式存在但出錯」
 // 是兩件事，混在一起 migration 還沒跑的那段期間就只會看到整頁壞掉。
@@ -14258,6 +14358,90 @@ function frRulesSummary(rules) {
   return escapeHtml(`進階訊號 ${list.length} 條：${names}${list.length > 3 ? "…" : ""}`);
 }
 
+// ── 收到的分享：訊號跟我現在的設定差在哪（Howard 2026-10-07）──────────────
+// 為什麼要有：原本畫面只在「設定一模一樣」時講一句「你已經有這一檔」，**不一樣的地方
+// 完全看不到**。2026-10-07 實測：分享只帶 1 條進階訊號，收件人自己那一檔有 10 條，
+// 她看到的卻是「設定完全相同」（那句講的是她先前接受過的另一則分享），接受之後才發現少了 9 條。
+//
+// 資料是 DB 算的（share_compare，share_state() 的 incoming 多一個 compare 鍵）：
+// 「完全相同」的判定要與 share_conflict 是同一個答案，不能在瀏覽器再算一份。
+// 拿不到這個鍵（舊版 DB、migration 還沒跑）＝null＝整段不顯示。
+function frCmpItems(s) {
+  return Array.isArray(s && s.compare) ? s.compare : null;
+}
+
+function frCmpWhat(c) {
+  return c.kind === "share"
+    ? `好友分享「${c.label}」${c.from_name ? `（來自 ${c.from_name}）` : ""}`
+    : `你的自選股「${c.label}」`;
+}
+
+// 卡片上那一行用的短寫法：股票名稱在同一張卡的標題上已經有了，再寫一次只是把行擠長
+function frCmpWho(c) {
+  return c.kind === "share" ? `好友分享${c.from_name ? `（來自 ${c.from_name}）` : ""}` : "你的自選股";
+}
+
+// 差在哪的逐條說明；空陣列＝完全相同
+function frCmpDiffLines(c) {
+  const lines = [];
+  const names = ks => (ks || []).map(k => FR_FLAG_LABELS[k] || k).join("、");
+  if ((c.flags_share_only || []).length) lines.push(`這則多開了：${names(c.flags_share_only)}`);
+  if ((c.flags_mine_only  || []).length) lines.push(`這則沒有你開著的：${names(c.flags_mine_only)}`);
+  const price = (label, mine, shr) => {
+    const a = (mine === null || mine === undefined) ? null : Number(mine);
+    const b = (shr  === null || shr  === undefined) ? null : Number(shr);
+    if (a === b) return;
+    lines.push(`${label}：你 ${a === null ? "沒設" : a}／這則 ${b === null ? "沒設" : b}`);
+  };
+  price("目標高", c.high_mine, c.high_share);
+  price("目標低", c.low_mine, c.low_share);
+  const rm = Number(c.rules_mine) || 0, rs = Number(c.rules_share) || 0, rb = Number(c.rules_both) || 0;
+  if (rm !== rs || rb < rm) {
+    const show = (list, head) => {
+      const a = Array.isArray(list) ? list : [];
+      return a.length ? `；${head}${a.slice(0, 3).join("、")}${a.length > 3 ? "…" : ""}` : "";
+    };
+    lines.push(`進階訊號：你 ${rm} 條、這則 ${rs} 條（相同 ${rb} 條）`
+      + show(c.rules_mine_only, "這則沒有：") + show(c.rules_share_only, "這則多了："));
+  }
+  return lines;
+}
+
+// 卡片上一行：這一檔我手上已經有東西時才出現。差異的第一項就寫出來——
+// 「有差異」三個字沒有資訊量，使用者還是得展開才知道要不要在意。
+function frCmpLine(s) {
+  const items = frCmpItems(s);
+  if (!items || !items.length) return "";
+  const diffs = items.map(c => ({ c, lines: frCmpDiffLines(c) })).filter(x => x.lines.length);
+  if (!diffs.length) {
+    return `<div class="fr-hint">與你已有的${items.length > 1 ? `${items.length} 個項目` : frCmpWho(items[0])}設定完全相同</div>`;
+  }
+  // 只寫第一項差異的前半段（分號後面的清單留給下面的比較表）：這一行在收合的卡片上，
+  // 整串寫出來會折成三行，而「有差異」三個字又等於什麼都沒說
+  const first = diffs[0];
+  const more = diffs.length > 1 ? `（另有 ${diffs.length - 1} 個項目也不同）` : "";
+  const rest = first.lines.length > 1 ? `（還有 ${first.lines.length - 1} 項不同）` : "";
+  const head = String(first.lines[0]).split("；")[0];
+  return `<div class="fr-hint fr-warn">與${escapeHtml(frCmpWho(first.c))}不同：${escapeHtml(head + rest + more)}</div>`;
+}
+
+function frCmpHtml(s) {
+  const items = frCmpItems(s);
+  if (!items || !items.length) return "";
+  return `<div class="fr-cmp">
+      <div class="fr-cmp-head">跟你現在的設定比</div>
+      ${items.map(c => {
+        const lines = frCmpDiffLines(c);
+        return `<div class="fr-cmp-item">
+          <div class="fr-cmp-what">${escapeHtml(frCmpWhat(c))}</div>
+          ${lines.length
+            ? `<ul class="fr-cmp-list">${lines.map(t => `<li>${escapeHtml(t)}</li>`).join("")}</ul>`
+            : `<div class="fr-hint">完全相同（11 個基礎訊號、2 個目標價、進階訊號的條件都一樣）</div>`}
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
 const frShow = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? "" : "none"; };
 
 // ── 渲染 ──
@@ -14361,22 +14545,33 @@ function frRenderGroupPick() {
 
 // 「我分享出去」。同一檔可以有多個分享並存（不能減對象，要減就另建一個），
 // 所以每一則都帶建立日期，第二個起名稱後面有 #2、#3。
+//
+// 每一列右邊一顆「移除」（2026-10-07 Howard：「全部都沒有移除按鈕」）。
+// 為什麼放在列上、不像「好友分享給我」那樣收在下一層：已終止／已到期的那幾則展開之後
+// 一顆按鈕都沒有（下一層只在 s.live 時才畫動作），清單只會越來越長、而且沒有出口。
+// 還在進行中的那一則按下去會先終止（對象收到通知），確認框把這件事寫出來。
 function frRenderSharesOut() {
   const rows = (frShare && frShare.outgoing) || [];
   frList("fr-shares-out", rows, s => {
     const rec = s.recipients || [];
     const accepted = rec.filter(r => r.status === "accepted").length;
+    const attached = rec.filter(r => ["pending", "held", "accepted"].includes(r.status)).length;
     const open = frOpenShare === s.share_id;
     const ended = s.ended === "terminated" ? "已終止" : s.ended === "expired" ? "已到期" : "";
     return `
     <li class="fr-share ${s.live ? "" : "is-ended"}">
-      <button class="fr-share-head" data-fr="share-open" data-id="${escapeHtml(s.share_id)}" aria-expanded="${open}">
-        <span class="fr-grow">
-          <b>${escapeHtml(s.label)}</b>${ended ? `<span class="fr-chip">${ended}</span>` : ""}
-          <div class="fr-hint">建立 ${frDate(s.created_at)} · ${frExpiry(s.expires_at)} · ${rec.length} 人（${accepted} 已接受）${s.version > 1 ? ` · 第 ${s.version} 版` : ""}</div>
-        </span>
-        <span class="fr-caret">${open ? "收合" : "展開"}${ICON_CHEVRON}</span>
-      </button>
+      <div class="fr-share-row">
+        <button class="fr-share-head" data-fr="share-open" data-id="${escapeHtml(s.share_id)}" aria-expanded="${open}">
+          <span class="fr-grow">
+            <b>${escapeHtml(s.label)}</b>${ended ? `<span class="fr-chip">${ended}</span>` : ""}
+            <div class="fr-hint">建立 ${frDate(s.created_at)} · ${frExpiry(s.expires_at)} · ${rec.length} 人（${accepted} 已接受）${s.version > 1 ? ` · 第 ${s.version} 版` : ""}</div>
+          </span>
+          <span class="fr-caret">${open ? "收合" : "展開"}${ICON_CHEVRON}</span>
+        </button>
+        <button class="fr-icon-btn fr-quiet" data-fr="share-delete" data-id="${escapeHtml(s.share_id)}"
+                data-name="${escapeHtml(s.label)}" data-live="${s.live ? "1" : ""}" data-rec="${attached}"
+                title="移除「${escapeHtml(s.label)}」" aria-label="移除 ${escapeHtml(s.label)}">${ICON_TRASH}</button>
+      </div>
       ${open ? frShareDetailHtml(s) : ""}
     </li>`;
   }, "還沒有分享。按「新增」從自選股選一檔分享給好友。");
@@ -14453,6 +14648,7 @@ function frRenderSharesIn() {
         <span class="fr-grow">
           <b>${escapeHtml(frShareName(s))}</b>
           <div class="fr-hint">來自 ${escapeHtml(s.from_name || "好友")} · ${frExpiry(s.expires_at)}</div>
+          ${frCmpLine(s)}
         </span>
         <span class="fr-caret">${open ? "收合" : "展開"}${ICON_CHEVRON}</span>
       </button>`;
@@ -14500,11 +14696,14 @@ function frRenderSharesIn() {
         <button class="btn btn-sm btn-primary" data-fr="in-accept" data-id="${sid(s)}">${ICON_CHECK}接受</button>
         <button class="btn btn-sm btn-outline-light" data-fr="in-decline" data-id="${sid(s)}">${ICON_CLOSE}拒絕</button>`;
     }
+    // 比較表在邀請上**不收進下一層**：要決定接不接受就得先知道差在哪（2026-10-07）。
+    // 收在展開裡的話，看起來「已經有這一檔」就直接按下去了——那正是出事的那一次。
     return `
     <li class="fr-in-card${frFlashClass("share", s.share_id)}" data-flash-id="${sid(s)}">
       ${head(s)}
       ${detail(s)}
       ${box}
+      ${frCmpHtml(s)}
       <div class="fr-in-actions">${actions}</div>
     </li>`;
   });
@@ -14531,7 +14730,7 @@ function frRenderSharesIn() {
     <li class="fr-in-card${frFlashClass("share", s.share_id)}" data-flash-id="${sid(s)}">
       ${head(s)}
       ${ack}
-      ${detail(s, slotNote + rulesNote + remove)}
+      ${detail(s, frCmpHtml(s) + slotNote + rulesNote + remove)}
     </li>`;
   }, "還沒有好友分享給你的股票。");
 }
@@ -15239,7 +15438,9 @@ async function frSaveGroup() {
 }
 
 // ── 分享股：新增 ──
-function frOpenShareForm() {
+// preSid：從首頁那一列的「分享」進來時要預選的那一檔（2026-10-07）。
+// 不在自選股裡就照舊用第一檔——分享只收自己的自選股。
+function frOpenShareForm(preSid) {
   const sel = document.getElementById("fr-share-stock");
   const rows = watchlistRows || [];
   sel.innerHTML = rows.length
@@ -15248,6 +15449,15 @@ function frOpenShareForm() {
         return `<option value="${escapeHtml(sid)}">${escapeHtml(sid)} ${escapeHtml(getPreferredStockName(sid, r.stock_name) || "")}</option>`;
       }).join("")
     : `<option value="">（自選股是空的）</option>`;
+  const want = String(preSid || "").trim();
+  if (want && rows.some(r => String(r.stock_id).trim() === want)) sel.value = want;
+
+  // 進階訊號的完整列（名稱、enabled）只有開過規則面板才有。沒有就抓一次，
+  // 否則預覽會把「其實會送出的那幾條」寫成「沒有進階訊號」。
+  if (!(Array.isArray(alertRules) && alertRules.length) && !_frRulesTried) {
+    _frRulesTried = true;
+    refreshRules().then(frUpdateSharePreview).catch(() => {});
+  }
 
   frRenderSharePick();
 
@@ -15346,15 +15556,107 @@ function frFilterPick(q) {
   });
 }
 
+// 我現在會送出的進階訊號：指定這一檔的，加上套用到全部自選股的。
+// **要跟 share_rules_snapshot() 一樣只算方案額度內生效的那些**（它讀 active_alert_rules）：
+// 2026-10-07 的事故說的就是這件事——送出的條數與使用者以為的不一樣，而收件人那一側
+// 只看到「設定完全相同」。超額的那幾條不會進快照，所以預覽也不能算進去。
+function frMyRulesFor(sid) {
+  const rows = (Array.isArray(alertRules) && alertRules.length)
+    ? alertRules
+    : (Array.isArray(ruleNudge.rules) ? ruleNudge.rules : []);
+  return rows.filter(r => r.enabled !== false && isRuleActive(r)
+                       && (!r.stock_id || String(r.stock_id).trim() === sid));
+}
+
+// 超出方案額度、所以不會送出的那幾條（開著但不在 active_alert_rules 裡）
+function frMyRulesHeldFor(sid) {
+  const rows = (Array.isArray(alertRules) && alertRules.length)
+    ? alertRules
+    : (Array.isArray(ruleNudge.rules) ? ruleNudge.rules : []);
+  return rows.filter(r => r.enabled !== false && !isRuleActive(r)
+                       && (!r.stock_id || String(r.stock_id).trim() === sid));
+}
+
 function frUpdateSharePreview() {
   const sid = document.getElementById("fr-share-stock").value;
   const row = (watchlistRows || []).find(r => String(r.stock_id).trim() === sid);
   const el = document.getElementById("fr-share-preview");
   if (!row) { el.textContent = ""; return; }
-  // 進階訊號：指定這檔的，加上套用到全部自選股的
-  const rules = (typeof alertRules !== "undefined" && Array.isArray(alertRules) ? alertRules : [])
-    .filter(r => r.enabled !== false && (!r.stock_id || String(r.stock_id).trim() === sid));
-  el.innerHTML = `將送出：${frFlagSummary(row)}　${frRulesSummary(rules)}`;
+  const rules = frMyRulesFor(sid);
+  const held = frMyRulesHeldFor(sid).length;
+  el.innerHTML = `將送出：${frFlagSummary(row)}　${frRulesSummary(rules)}`
+    + (held ? `<div class="fr-warn">另外 ${held} 條進階訊號超出你的方案額度，現在不生效、也不會送出。</div>` : "");
+}
+
+// ── 送出前的重複檢查（Howard 2026-10-07）────────────────────────────────
+// 兩種「重複發送」，都只是問一次、不擋：
+//   1. 這一檔已經分享給這幾位，而且那一則還在進行中 → 對方會收到第二則邀請。
+//      並存是設計上允許的（設定可能不同），但「設定也完全相同」時對方只會看到
+//      「你已經有這一檔」然後卡住，所以這一句要講出來。
+//   2. 同一位被直接選到、又在選到的群組裡（或在兩個群組裡）→ 伺服器會去重，
+//      他只會收到一則。畫面上看不出來，所以也要講。
+// 回傳 { already: [...], twice: [...] }，都是給人看的句子。
+function frShareDupInfo(sid, friends, groups, exceptId) {
+  const nameOf = new Map(((frState && frState.friends) || []).map(f => [f.user_id, f.name || "（無名稱）"]));
+  const via = new Map();                       // user_id → 從哪幾個來源選到的
+  const add = (uid, src) => { if (!via.has(uid)) via.set(uid, []); via.get(uid).push(src); };
+  (friends || []).forEach(uid => add(uid, "直接選取"));
+  (groups || []).forEach(gid => {
+    const g = ((frState && frState.groups) || []).find(x => x.group_id === gid);
+    if (!g) return;
+    (g.members || []).filter(m => !m.is_me).forEach(m => {
+      if (!nameOf.has(m.user_id)) nameOf.set(m.user_id, m.name || "（無名稱）");
+      add(m.user_id, `群組「${g.name}」`);
+    });
+  });
+
+  const twice = [...via.entries()].filter(([, src]) => src.length > 1)
+    .map(([uid, src]) => `${nameOf.get(uid) || "好友"}（${src.join("、")}）`);
+
+  const already = [];
+  for (const s of (frShare && frShare.outgoing) || []) {
+    if (!s.live || s.share_id === exceptId || String(s.stock_id || "").trim() !== sid) continue;
+    const same = frSameAsMySettings(s.base, s.rules, sid);
+    for (const r of s.recipients || []) {
+      if (!["pending", "held", "accepted"].includes(r.status)) continue;
+      if (!via.has(r.user_id)) continue;
+      already.push(`${r.name || "好友"}：${s.label}（${FR_RECIPIENT_STATUS[r.status] || r.status}${
+        same ? "，設定與這次要送出的完全相同" : ""}）`);
+    }
+  }
+  return { already, twice };
+}
+
+// 一則分享的設定，與我現在這一檔的設定是不是一模一樣。
+// 比法與 DB 的 share_conflict 同一套（13 個鍵＋進階訊號比條件）；這裡只用來在確認框裡
+// 多講一句話，判定「擋不擋」仍然在伺服器。
+function frSameAsMySettings(base, rules, sid) {
+  const row = (watchlistRows || []).find(r => String(r.stock_id).trim() === sid);
+  if (!row || !base) return false;
+  for (const k of Object.keys(FR_FLAG_LABELS)) if (!!base[k] !== !!row[k]) return false;
+  const num = v => (v === null || v === undefined || v === "") ? null : Number(v);
+  if (num(base.target_price_high) !== num(row.target_price_high)) return false;
+  if (num(base.target_price_low)  !== num(row.target_price_low))  return false;
+  const key = r => JSON.stringify((r && r.conditions) || []);
+  const mine = frMyRulesFor(sid).map(key).sort();
+  const theirs = (Array.isArray(rules) ? rules : []).map(key).sort();
+  return mine.length === theirs.length && mine.every((x, i) => x === theirs[i]);
+}
+
+// 回 true＝可以送（沒有重複，或使用者按了確定）
+function frConfirmShareTargets(sid, friends, groups, exceptId) {
+  const dup = frShareDupInfo(sid, friends, groups, exceptId);
+  if (!dup.already.length && !dup.twice.length) return true;
+  const parts = [];
+  if (dup.already.length) {
+    parts.push("這一檔已經分享給以下好友，而且那一則還在進行中：\n　· " + dup.already.join("\n　· ")
+      + "\n\n再送一次＝對方多收到一則邀請。兩則可以並存（設定不同時各自生效）；"
+      + "設定完全相同的話，對方那一側只會看到「你已經有這一檔」。");
+  }
+  if (dup.twice.length) {
+    parts.push("以下對象被選到兩次以上，只會收到一則：\n　· " + dup.twice.join("\n　· "));
+  }
+  return window.confirm(parts.join("\n\n") + "\n\n確定要送出嗎？");
 }
 
 async function frSendShare() {
@@ -15369,6 +15671,8 @@ async function frSendShare() {
   if (!sid) { msg.textContent = "先選一檔股票"; msg.classList.add("bad"); return; }
   if (!friends.length && !groups.length) { msg.textContent = "請至少選一位好友或一個群組"; msg.classList.add("bad"); return; }
   if (!forever && !date) { msg.textContent = "請選終止日期，或勾「永不終止」"; msg.classList.add("bad"); return; }
+  // 重複發送（同一檔給同一個人、同一個人被選到兩次）先問一次
+  if (!frConfirmShareTargets(sid, friends, groups, null)) return;
 
   // 到期日算到那一天的最後一刻（台北時間）
   const expires = forever ? null : new Date(`${date}T23:59:59+08:00`).toISOString();
@@ -15417,6 +15721,15 @@ document.addEventListener("click", async e => {
     "share-terminate": `立即終止「${name}」的分享？對方會收到通知，之後不會再收到這檔的分享訊號。`,
     "in-remove":       `移除「${name}」？之後不會再收到這檔的分享訊號。`,
   };
+  // 移除我分享出去的那一則。進行中的會先終止（對象收到通知），所以兩種情況講的不是同一件事
+  if (act === "share-delete") {
+    const n = Number(btn.dataset.rec) || 0;
+    confirms[act] = btn.dataset.live
+      ? `移除「${name}」？\n\n這則分享還在進行中，移除會先終止它：`
+        + (n ? `${n} 位對象會收到通知，` : "")
+        + "之後不會再收到這檔的分享訊號。"
+      : `把已結束的「${name}」從清單移除？`;
+  }
   // 取代原有的：要刪的是他自己的東西，確認框把會失去什麼講清楚
   if (act === "in-replace") {
     const old = btn.dataset.old || "", from = btn.dataset.from || "好友";
@@ -15442,13 +15755,18 @@ document.addEventListener("click", async e => {
       case "group-del":     res = await frRpc("lab_group_delete", { p_group_id: id });   break;
       case "group-leave":   res = await frRpc("lab_group_leave",  { p_group_id: id });   break;
       case "share-terminate": res = await frRpc("share_terminate", { p_share_id: id });  break;
+      case "share-delete":    res = await frRpc("share_delete",    { p_share_id: id });  break;
       case "share-update": {
         const box = btn.closest(".fr-share-body");
-        res = await frRpc("share_update", {
-          p_share_id: id,
-          p_friends: Array.from(box.querySelectorAll(".fr-up-friend:checked")).map(c => c.value),
-          p_groups:  Array.from(box.querySelectorAll(".fr-up-group:checked")).map(c => c.value),
-        });
+        const upFriends = Array.from(box.querySelectorAll(".fr-up-friend:checked")).map(c => c.value);
+        const upGroups  = Array.from(box.querySelectorAll(".fr-up-group:checked")).map(c => c.value);
+        // 新加的對象裡有人已經有這一檔的另一則分享：也要先問（同「新增分享」的檢查）
+        const sOut = ((frShare && frShare.outgoing) || []).find(x => x.share_id === id);
+        if (sOut && !frConfirmShareTargets(String(sOut.stock_id || "").trim(), upFriends, upGroups, id)) {
+          btn.disabled = false;
+          return;
+        }
+        res = await frRpc("share_update", { p_share_id: id, p_friends: upFriends, p_groups: upGroups });
         break;
       }
       case "in-accept":  res = await frRpc("share_respond", { p_share_id: id, p_accept: true });  break;
@@ -15473,6 +15791,10 @@ document.addEventListener("click", async e => {
       case "group-del":       frToast("已刪除群組"); break;
       case "group-leave":     frToast("已退出群組"); break;
       case "share-terminate": frToast(`已終止，已通知 ${res.notified} 人`); break;
+      case "share-delete":
+        frToast(res.terminated ? `已終止並移除，已通知 ${res.notified} 人` : "已從清單移除");
+        if (frOpenShare === id) frOpenShare = null;
+        break;
       case "share-update":    frToast(`已更新發送（新增 ${res.added} 人、通知 ${res.notified} 人）`); break;
       case "in-decline":      frToast("已拒絕"); break;
       case "in-ack":          frToast("已確認"); break;
@@ -15568,7 +15890,21 @@ document.addEventListener("click", async e => {
   on("fr-btn-invite", "click", frOpenInvite);
   on("fr-btn-invite-send", "click", guard(frInviteSend));
   on("fr-btn-invite-copy", "click", guard(frInviteCopy));
-  on("fr-btn-new-share", "click", frOpenShareForm);
+  // 包一層：直接掛 frOpenShareForm 的話，事件物件會被當成「要預選的股票代號」
+  on("fr-btn-new-share", "click", () => frOpenShareForm());
+
+  // 首頁一列的「設定／分享」視窗（stockActionModal）
+  const sa = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+  sa("sa-ic-settings", ICON_GEAR);
+  sa("sa-ic-share", ICON_SHARE);
+  on("sa-btn-settings", "click", () => {
+    const sid = _stockActionSid;
+    closeStockActionMenu(() => goStockSettings(sid));
+  });
+  on("sa-btn-share", "click", () => {
+    const sid = _stockActionSid;
+    closeStockActionMenu(() => goStockShare(sid));
+  });
   // 「取消」與右上的叉是 data-bs-dismiss，不必另外接。上限提示的兩顆：先關視窗再走
   on("fr-btn-limit-watch", "click", () => frCloseShareForm(() => switchTab("watch")));
   on("fr-btn-limit-plan", "click", () => frCloseShareForm(() => openPlanModal()));
