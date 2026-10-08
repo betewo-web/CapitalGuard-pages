@@ -1785,9 +1785,43 @@ body.modal-blocking .modal-backdrop.show {
 /* 未讀改以底色＋粗體標題表示；左邊條已讓給等級 */
 .inbox-item.unread {
 	background: var(--surface-2);
+	border-color: rgba(146, 146, 163, 0.34);
 }
 
 .inbox-item.unread .ib-title { font-weight: 700; }
+
+/* 未讀的那一顆點：放在標題列最前面（列最左邊是訊號圖示，那個位置已經有主人）。
+   刻意用前景色而不是橘或藍——橘藍在這一頁已經是「訊號等級」的意思（左邊條），
+   未讀是另一個維度，借用那組顏色會讓人以為這則比較重要。 */
+.ib-unread-dot {
+	flex: 0 0 auto;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--text-0);
+}
+
+/* 已讀整列弱化（2026-10-08）：原本未讀／已讀只差 surface↔surface-2 的 5 個色階，
+   深色底上等於沒有差別。對比做在亮度上——標題轉灰、圖示降透明度、底色拉掉、
+   等級邊條減半，未讀維持原樣不動。
+   .read 由 renderInbox 只在已讀功能可用時才掛：migrate_pwa_v2.sql 沒跑過的帳號
+   兩個 class 都不掛，整頁回到改版前的中性外觀，不會變成「全部看起來都已讀」。 */
+.inbox-item.read {
+	background: transparent;
+	border-left-color: rgba(146, 146, 163, 0.45);
+}
+
+.inbox-item.read[data-sev="orange"] { border-left-color: rgba(255, 159, 67, 0.45); }
+.inbox-item.read[data-sev="blue"]   { border-left-color: rgba(86, 168, 255, 0.45); }
+
+.inbox-item.read .ib-title { color: var(--text-1); }
+.inbox-item.read > .sig-ico { opacity: 0.55; }
+/* 內文不跟著轉 --text-muted：已讀不等於不用讀，列表的內文字色有自己的下限
+   （test_the_stats_and_inbox_pages_are_readable）。弱化交給標題、圖示與底色。 */
+
+/* 滑過去時把弱化收回來一半：要點的那一刻讀得清楚，手指離開又退回背景 */
+.inbox-item.read:hover > .sig-ico { opacity: 0.85; }
+.inbox-item.read:hover .ib-title { color: var(--text-0); }
 
 /* 從手機通知點進來、被捲到畫面中央的那一則：亮一下再淡掉，讓人知道是哪則 */
 .inbox-item.is-target {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="293">
+  <meta name="app-version" content="294">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=293" rel="stylesheet">
+  <link href="watchlist.css?v=294" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7553,6 +7553,15 @@ function updateInboxBadge() {
     el.textContent = n > 99 ? "99+" : String(n);
   }
   _setAppBadge(n);   // 桌面／主畫面的 PWA 圖示未讀數
+  _syncInboxUnreadChip(n);
+}
+
+// 「未讀」篩選籤帶數字（2026-10-08）：底部導覽的徽章在通知分頁上是看不到自己的
+// （圖示被 active 狀態蓋著、而且人已經在這一頁了），所以站在列表裡沒有任何地方
+// 講得出「還有幾則沒看」。已讀功能不可用時不印數字——那時候 n 恆為 0，印 0 是說謊。
+function _syncInboxUnreadChip(n) {
+  const chip = document.querySelector('#inbox-filters .filter-chip[data-f="unread"]');
+  if (chip) chip.textContent = inboxSupportsRead && n > 0 ? `未讀 ${n > 99 ? "99+" : n}` : "未讀";
 }
 
 // App 圖示未讀數（Badging API）。只有安裝成 PWA 才有效，其餘情況靜默跳過。
@@ -7632,15 +7641,19 @@ function renderInbox() {
     }
     const sev = inferSeverity(r);
     const unread = inboxSupportsRead && !r.read_at;
+    // 已讀也掛一個 class（不是「沒有 unread 就是已讀」）：read_at 這一欄不存在時
+    // 兩個都不掛，整頁維持中性外觀，不會把全部通知畫成已讀的樣子
+    const read = inboxSupportsRead && !!r.read_at;
     const sid = String(r.stock_id || "").trim();
     const title = escapeHtml(_titleWithoutSid(r.title, sid));
+    const dot = unread ? `<span class="ib-unread-dot" title="未讀" aria-label="未讀"></span>` : "";
     html += `
-      <div class="inbox-item${unread ? " unread" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
+      <div class="inbox-item${unread ? " unread" : read ? " read" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
            onclick="openInboxItem('${jsAttr(String(r.id))}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxItem('${jsAttr(String(r.id))}');}">
         ${signalIconSvg(r, 34)}
         <div class="ib-main">
-          <div class="ib-title">${title}</div>
+          <div class="ib-title">${dot}${title}</div>
           <div class="ib-body">${escapeHtml(r.body || "")}</div>
         </div>
         <div class="ib-side">
