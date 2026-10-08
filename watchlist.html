@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="294">
+  <meta name="app-version" content="295">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=294" rel="stylesheet">
+  <link href="watchlist.css?v=295" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2715,6 +2715,13 @@ function renderOverLimitBanner(kind) {
     </span>`;
 }
 
+// 「超出方案的那幾筆怎麼恢復」那句尾巴。2026-10-08 起進階訊號三階同額度，
+// 規則撞上限時再說「升級後恢復」就是假話（自選股還是分階的，所以照樣問 plans）。
+function overLimitRecoveryText(kind) {
+  if (nextPlanFor(kind)) return "升級後恢復";
+  return kind === "watchlist" ? "移除其他自選股之後會自己恢復" : "刪掉其他幾條之後會自己恢復";
+}
+
 let _keepKind = "watchlist";
 function openKeepPicker(kind) {
   _keepKind = kind;
@@ -2738,7 +2745,7 @@ function renderKeepPicker() {
   const unit = kind === "watchlist" ? "檔" : "條";
   document.getElementById("keep-title").textContent = `選擇要保留的${what}`;
   document.getElementById("keep-lead").innerHTML =
-    `${escapeHtml(planState.plan.name)}可保留 ${limit} ${unit}。勾選的繼續產生通知，其餘保留資料、暫停通知；升級後全部恢復。目前是依加入時間保留最早的 ${limit} ${unit}。`;
+    `${escapeHtml(planState.plan.name)}可保留 ${limit} ${unit}。勾選的繼續產生通知，其餘保留資料、暫停通知；${overLimitRecoveryText(kind)}。目前是依加入時間保留最早的 ${limit} ${unit}。`;
   document.getElementById("keep-list").innerHTML = rows.map(r => {
     const id = String(r.id);
     const label = kind === "watchlist"
@@ -2846,11 +2853,15 @@ function nextPlanFor(kind) {
 // 「超過 N 檔」的 N 取比它便宜一階的自選股上限（專業版對免費版、旗艦版對專業版），
 // 不然旗艦版也會寫成「超過 3 檔的人」，聽起來跟專業版沒差。
 // 官網 index／pricing／faq 三頁寫的是同一句（test_marketing_site 以種子數字比對），改字要一起改
+//
+// 「條件可混和」只在比它便宜那一階真的沒有的時候才接上去（2026-10-08）：混和訊號
+// 三階都有了，寫進兩個付費方案的情境句只會讓人以為那是付費功能。資料驅動而不是
+// 直接刪掉——哪天某一階又關掉混和，這句會自己長回來。
 function planPitch(p) {
   const cheaper = (planState.plans || [])
     .filter(x => x.price_twd < p.price_twd)
     .sort((a, b) => b.price_twd - a.price_twd)[0] || { watch_limit: 3 };
-  const mixed = p.mixed_signals ? "、條件可混和" : "";
+  const mixed = p.mixed_signals && cheaper.mixed_signals === false ? "、條件可混和" : "";
   return `${p.name}適合持股加觀察名單超過 ${cheaper.watch_limit} 檔的人：NT$${p.price_twd}／月、${p.watch_limit} 檔自選股、${p.rule_limit} 條進階訊號${mixed}。`;
 }
 
@@ -2916,7 +2927,8 @@ function openSharedInFromLimit() {
 // 每個升級提示後面都接這一句（還沒體驗過的帳號才有）：上限提示、功能提示、
 // 統計頁與 K 線的鎖頁。trial_status() 說 available 才畫；用過、體驗中、已付費都不畫。
 // 只在「體驗的那個方案真的有這一項」時才畫（Howard 2026-09-28）：體驗是 pro，
-// 混和訊號只有 premium 有，混和訊號的升級提示旁邊掛「免費體驗 10 天」會誤導。
+// 當時混和訊號只有 premium 有，混和訊號的升級提示旁邊掛「免費體驗 10 天」會誤導。
+// （2026-10-08 起混和訊號三階都有，那個提示不會再出現；判斷照樣讀 plans。）
 // kind：watchlist／alert_rules（數量）或 PLAN_FEATURES 的旗標名（功能）。
 function trialCovers(kind) {
   if (!trialOfferAvailable()) return false;
@@ -3076,6 +3088,16 @@ function planNameOf(code) {
   return p ? p.name : (PLAN_NAME_FALLBACK[code] || code || "");
 }
 
+// 「這一項要哪個方案才有」：最便宜而且真的有這一項的那個公開方案的名字。
+// 寫死方案名的替代品（2026-10-08）——混和訊號三階都有之後，「是旗艦版功能」那種句子
+// 一旦規格再變就會變成假話；讀 plans 算出來的名字不會。沒有任何方案有的話回「付費方案」。
+function cheapestPlanNameWith(feature) {
+  const p = (planState.plans || [])
+    .filter(x => x[feature] === true)
+    .sort((a, b) => a.price_twd - b.price_twd)[0];
+  return p ? p.name : "付費方案";
+}
+
 // 畫面上不寫「免費版」三個字，一律寫 plans 裡的全名（標準雷達（免費版））：
 // 只寫階級看不出它是哪一台雷達，同一個面板裡一半寫全名、一半寫階級更難懂（Howard 2026-09-28）
 function freePlanName() {
@@ -3132,8 +3154,9 @@ function consumePlanIntent() {
 }
 
 // 功能列。數字全部來自 plans 表；「共有」的功能每一欄都打勾，
-// 差異是七項：自選股數、進階訊號數、混和訊號、統計分頁、盤中雷達持續更新、K 線圖、每日通知則數
-// ——與 BILLING.md 的規格表一致。
+// 差異是五項：自選股數、統計分頁、盤中雷達持續更新、K 線圖、每日通知則數——與 BILLING.md 的規格表一致。
+// 進階訊號條數與混和訊號 2026-10-08 起三欄一樣（6 條、都打勾），和持股損益一樣是共有功能；
+// 列著而不是拿掉，不然免費版的人會以為自己沒有。
 // AI 兩列 2026-09-27 拿掉：三階都不含（plans.ai_enabled 全 false），
 // 三欄都是「—」的列只是佔位；它去哪了由 PLAN_COMING_SOON_NOTE 說。
 function planFeatureRows(p) {
@@ -3234,10 +3257,16 @@ function renderPlanModal(focus) {
     watchlist:   slots
       ? `${ICON_STAR}自選股已達目前方案上限：自選股 ${slots.own} 檔＋好友分享 ${slots.shared} 檔＝${slots.used}／${slots.limit} 檔（兩者共用同一份額度），升級即可加入更多。`
       : `${ICON_STAR}自選股已達目前方案上限，升級即可加入更多。`,
-    alert_rules: `${ICON_RULES}進階訊號已達目前方案上限，升級即可新增更多。`,
+    // 三階同額度時不說「升級即可新增更多」（2026-10-08）：沒有方案給得更多，
+    // 出路是把用不到的那幾條刪掉或改寫。
+    alert_rules: nextPlanFor("alert_rules")
+      ? `${ICON_RULES}進階訊號已達目前方案上限，升級即可新增更多。`
+      : `${ICON_RULES}進階訊號已達上限（每個方案都是 ${p.rule_limit} 條）。刪掉或改寫用不到的那幾條就能再加新的。`,
     stats_enabled: `${ICON_CHART}統計整理分頁（全市場評分的排序與篩選）需要付費方案。`,
     live_radar:    `${ICON_RADAR}盤中雷達持續更新需要付費方案；目前是開啟 App 或收到通知時更新一次。`,
-    mixed_signals: `${ICON_MIX}一條進階訊號放多個條件（混和訊號）是${escapeHtml(planNameOf("premium"))}功能。`,
+    // 不寫死哪一階（2026-10-08 起三階都有混和訊號，這一句因此走不到）：真的哪天某一階
+    // 關掉，名字要指向「最便宜而且有這一項」的那個方案，而不是永遠寫著旗艦版。
+    mixed_signals: `${ICON_MIX}一條進階訊號放多個條件（混和訊號）需要${escapeHtml(cheapestPlanNameWith("mixed_signals"))}。`,
     kline_enabled: `${ICON_CANDLE}K 線圖需要付費方案。`,
     trial:         `${ICON_GIFT}免費體驗不需要付款資料，到期自動回到${escapeHtml(freePlanName())}。`,
     // 從通知匣的體驗倒數提醒過來：到期前後都說得通，不必判斷現在過期了沒
@@ -5855,10 +5884,10 @@ const RULE_NUDGE_SNOOZE_DAYS = 7;
 // 2026-09-29 補到 10 組＝旗艦版的額度上限：原本只有 6 組，旗艦版六種型別都加過之後
 // 還剩 4 格額度，面板卻沒有建議可給。
 // 2026-10-06（Howard）起這個順序同時是「預設進階訊號」的發放順序（seedDefaultRules）：
-// 免費版（額度 1）拿第 1 條、專業版（6）拿第 1–6 條、旗艦版（10）全拿。
-// 同日依 Howard 指示把第 4↔7、第 6↔9 對調，讓前 6 條（專業版拿到的那組）涵蓋
-// 盤中／技術／籌碼三層，而不是把兩條「前高、均線」擠在一起、把基本面排到第 6。
-// 改順序＝改每一階拿到什麼，不要順手調整。
+// 2026-10-08 起三階額度都是 6，所以三階都拿第 1–6 條，第 7–10 條只能自己手動加。
+// 2026-10-06 依 Howard 指示把第 4↔7、第 6↔9 對調，讓前 6 條（當時是專業版拿到的那組，
+// 現在是所有人拿到的那組）涵蓋盤中／技術／籌碼三層，而不是把兩條「前高、均線」
+// 擠在一起、把基本面排到第 6。改順序＝改每個人拿到哪 6 條，不要順手調整。
 const RULE_TEMPLATES = [
   { name: "跌幅超過 2%",            conditions: [{ type: "change_pct_below", value: 2 }] },
   { name: "量能達 20 日均量 2 倍",  conditions: [{ type: "volume_vs_ma", window: 20, ratio: 2, op: "above" }] },
@@ -5886,9 +5915,9 @@ async function loadRuleNudgeState() {
   }
 }
 
-// 目標條數不能超過方案上限。2026-09-27 起免費版只剩 1 條，所以免費版設好 1 條就
-// 不再推薦；付費方案仍是 RULE_NUDGE_TARGET 條。上限從 plans 來，不會出現
-// 「達上限了還在推薦」
+// 目標條數不能超過方案上限（上限從 plans 來，不會出現「達上限了還在推薦」）。
+// 免費版設好 1 條就不再推薦——2026-10-08 起它的額度也是 6 條，但「催你設到幾條」
+// 是另一回事，而且預設進階訊號已經先幫每個人開好 6 條了。
 function ruleNudgeTarget() {
   const limit = planLimitOf("alert_rules");
   const byPlan = planState.ready && planState.plan ? RULE_NUDGE_TARGET_BY_PLAN[planState.plan.code] : undefined;
@@ -5990,7 +6019,8 @@ async function autoPickRules(ctx, btn) {
 }
 
 // ── 預設進階訊號：登入時依方案額度自動開好（Howard 2026-10-06）──────────
-// 發放順序就是 RULE_TEMPLATES 的順序；額度就是 plans.rule_limit（免費 1／專業 6／旗艦 10）。
+// 發放順序就是 RULE_TEMPLATES 的順序；額度就是 plans.rule_limit
+// （2026-10-08 起三階都是 6，所以三階都拿前 6 條，第 7–10 條要自己手動加）。
 //
 // 水位制，不是「數一數現在幾條」：user_rule_seed.seeded_limit 記「已經自動發到第幾條」。
 //   * 發過的那幾條永遠不再自動發——使用者把它刪掉、停用、改掉條件之後，
@@ -10449,7 +10479,7 @@ async function refreshRules() {
         <div class="rule-card-head">
           <span class="rule-card-name">${escapeHtml(r.name || "(未命名)")}</span>
           ${r.enabled ? "" : '<span class="rule-off-tag">已停用</span>'}
-          ${active ? "" : '<span class="rule-off-tag plan-lock-tag" title="超出目前方案的規則數上限，升級後恢復">🔒 超出方案</span>'}
+          ${active ? "" : `<span class="rule-off-tag plan-lock-tag" title="超出目前方案的規則數上限，${escapeHtml(overLimitRecoveryText("alert_rules"))}">🔒 超出方案</span>`}
           <span class="toggle-wrap form-check form-switch mb-0">
             <input class="form-check-input" type="checkbox" ${r.enabled ? "checked" : ""}
                    aria-label="啟用或停用這條規則"
@@ -14724,7 +14754,8 @@ function frRenderSharesIn() {
   frList("fr-shares-in", accepted, s => {
     // 進階訊號依我的方案生效：超出額度或需要混和訊號權限的部分不會發
     const rulesNote = (s.rules_total > 0 && s.rules_active != null && s.rules_active < s.rules_total)
-      ? `<div class="fr-hint fr-warn">進階訊號 ${s.rules_active}／${s.rules_total} 條生效，其餘升級方案後生效</div>` : "";
+      ? `<div class="fr-hint fr-warn">進階訊號 ${s.rules_active}／${s.rules_total} 條生效，${nextPlanFor("alert_rules")
+          ? "其餘升級方案後生效" : "其餘要先騰出額度（刪掉自己用不到的那幾條）才會生效"}</div>` : "";
     // 整則都沒進監控（分享也算在自選股上限內，2026-10-06）：接受的時候額度還夠，
     // 後來降級或自選股變多才被擠出來。不講的話這一檔在首頁就只是「有 0 則訊號」。
     const slotNote = shareIsMonitored(s.share_id) ? ""
