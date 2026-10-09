@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="307">
+  <meta name="app-version" content="308">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -119,6 +119,9 @@
     .badge.admin { border-color: rgba(12,163,12,.5); color: #6fdc6f; }
     /* 示範帳號是官網截圖用的，不計入任何經營數字（migrate_demo_account.sql） */
     .badge.demo { border-color: rgba(154,165,189,.5); color: var(--text-2); }
+    .badge.trial { border-color: rgba(57,135,229,.55); color: #8fbcf2; }
+    .badge.premium { border-color: rgba(245,197,66,.5); color: var(--accent-2); }
+    .card-tools { display: flex; gap: .3rem; }
 
     /* ── 第零層：待辦 ── */
     .todo-wrap { display: grid; gap: .5rem; margin-bottom: .4rem; }
@@ -222,6 +225,7 @@
   <div class="grid">
     <div class="card span-4" id="c-plans"></div>
     <div class="card span-8" id="c-payments"></div>
+    <div class="card span-12" id="c-trials"></div>
   </div>
 
   <h2 class="sec">自選股 <small>熱門標的與使用方式</small></h2>
@@ -246,9 +250,17 @@
   <div class="grid">
     <div class="card span-8" id="c-alerts-day"></div>
     <div class="card span-4" id="c-alert-kinds"></div>
+    <div class="card span-12" id="c-alerts-user"></div>
     <div class="card span-4" id="c-alert-hours"></div>
     <div class="card span-4" id="c-alert-stocks"></div>
     <div class="card span-4" id="c-push-platform"></div>
+  </div>
+
+  <h2 class="sec">好友分享與回饋 <small>分享股、收件人與回饋貼圖（FRIENDS.md／REACTIONS.md）</small></h2>
+  <div class="tiles" id="social-tiles" style="margin-bottom:.8rem"></div>
+  <div class="grid">
+    <div class="card span-6" id="c-rx-kinds"></div>
+    <div class="card span-6" id="c-sharers"></div>
   </div>
 
   <h2 class="sec">事件與系統 <small>盤後事件產出、資料表與管線狀態</small></h2>
@@ -438,7 +450,12 @@ const RULE_TYPE_INFO = {
 const SOURCE_LABELS = {
   monitor: "盤中訊號", rule: "進階訊號", post_market: "盤後提醒", postmarket: "盤後提醒（舊）",
   daily_report: "每日報告", daily_report_web_push: "每日報告", daily_report_line: "每日報告（LINE，已停用）",
+  share: "好友分享訊號", reaction: "回饋貼圖", demo: "示範帳號",
 };
+// 回饋貼圖六種（與 migrate_reactions.sql 的 reaction_label()／App 的 RX_KINDS 同一份字，測試釘住）
+const RX_LABELS = { awesome: "厲害", sharp_eye: "有眼光", bittersweet: "淡淡哀傷", thanks: "感謝提醒", it_happened: "竟然這樣", watch_together: "一起觀察" };
+// 免費體驗狀態（admin_stats().plans.trials.list[].state 與 users.list[].trial）
+const TRIAL_LABELS = { active: "體驗中", used: "體驗已結束", converted: "體驗後升級" };
 const KIND_LABELS = {
   near_sup: "逼近支撐", break_sup: "跌破關鍵價位", reclaim_sup: "收復支撐", near_res: "逼近壓力", break_res: "突破關鍵價位",
   volume_spike: "成交量異常", vol_spike: "成交量異常", limit_up: "漲停", limit_down: "跌停", target_high: "達到設定價格（上）", target_low: "達到設定價格（下）",
@@ -471,6 +488,7 @@ const FUNNEL_HINT = {
   active:   "近 7 日仍在讀通知或開 App",
 };
 const TODO_ICON = { no_push: "🔕", never_opened: "💤", dormant: "🌙", sub_expiring: "⏳",
+                    trial_ending: "🎁", trial_lapsed: "🪫",
                     push_failing: "⚠️", no_watchlist: "📭", pipeline_stale: "🛠️" };
 const label = (map, k) => map[k] || k || "—";
 
@@ -519,6 +537,24 @@ function lineSeries(name, data, color, extra = {}) {
            symbol: "circle", symbolSize: 8, showSymbol: data.length <= 45, ...extra };
 }
 
+// 匯出目前這張卡的表格（就是「表格」檢視那一份數字）。從 DOM 讀，不另外維護一份資料；
+// 加 BOM 讓 Excel 直接認出 UTF-8 的中文。
+function exportCsv(id) {
+  const el = document.getElementById(id);
+  const table = el && el.querySelector("table.tbl");
+  if (!table) return;
+  const cell = v => { const t = String(v ?? "").replace(/\s+/g, " ").trim(); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const lines = Array.from(table.querySelectorAll("tr")).map(tr => Array.from(tr.querySelectorAll("th,td")).map(td => cell(td.textContent)).join(","));
+  const title = (el.querySelector(".card-title") || {}).firstChild;
+  const name = ((title && title.textContent) || id).trim().replace(/[\\/:*?"<>|]+/g, "_");
+  const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = `${name}_${(stats && stats.today) || ""}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const csvBtn = id => `<button type="button" class="btn" style="padding:.2rem .55rem;font-size:.75rem" onclick="exportCsv('${id}')" title="下載這張表的 CSV">CSV</button>`;
+
 function mountChart(id, option, cls) {
   const host = document.querySelector(`#${id} .chart`);
   if (!host) return;
@@ -539,13 +575,13 @@ function card(id, title, sub, { head, rows, legend, empty, tall, short } = {}) {
   el.innerHTML = `
     <div class="card-head">
       <div class="card-title">${escapeHtml(title)}${sub ? `<small>${escapeHtml(sub)}</small>` : ""}</div>
-      <div class="card-tools">${hasData ? `<button type="button" class="btn" style="padding:.2rem .55rem;font-size:.75rem" onclick="toggleCard('${id}')">${mode === "chart" ? "表格" : "圖表"}</button>` : ""}</div>
+      <div class="card-tools">${hasData ? `<button type="button" class="btn" style="padding:.2rem .55rem;font-size:.75rem" onclick="toggleCard('${id}')">${mode === "chart" ? "表格" : "圖表"}</button>${csvBtn(id)}` : ""}</div>
     </div>
     ${legend && legend.length ? `<div class="legend">${legend.map(l => `<span><i class="${l.line ? "line" : ""}" style="background:${l.color}"></i>${escapeHtml(l.name)}</span>`).join("")}</div>` : ""}
     ${hasData ? `<div class="chart${tall ? " tall" : short ? " short" : ""}"></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr>${head.map((h, i) => `<th class="${i ? "num" : ""}">${escapeHtml(h)}</th>`).join("")}</tr></thead>
       <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td class="${i ? "num" : ""}">${escapeHtml(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
-    : `<div class="empty">${escapeHtml(empty || "期間內沒有資料")}</div>`};
+    : `<div class="empty">${escapeHtml(empty || "期間內沒有資料")}</div>`}
   `;
   if (charts[id]) { charts[id].dispose(); delete charts[id]; }
   return hasData;
@@ -563,7 +599,8 @@ function tableCard(id, title, sub, head, rowsHtml, empty) {
   if (!el) return;
   el.dataset.mode = "table";
   el.innerHTML = `
-    <div class="card-head"><div class="card-title">${escapeHtml(title)}${sub ? `<small>${escapeHtml(sub)}</small>` : ""}</div></div>
+    <div class="card-head"><div class="card-title">${escapeHtml(title)}${sub ? `<small>${escapeHtml(sub)}</small>` : ""}</div>
+      <div class="card-tools">${rowsHtml.length ? csvBtn(id) : ""}</div></div>
     ${rowsHtml.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr>${head.map((h, i) => `<th class="${i ? "num" : ""}">${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rowsHtml.join("")}</tbody></table></div>`
                       : `<div class="empty">${escapeHtml(empty || "沒有資料")}</div>`}`;
 }
@@ -646,7 +683,7 @@ function renderFunnel(f) {
 function renderRoster(f) {
   const keys = ["open", "push", "watch", "got", "read", "active"];
   const rows = ((f && f.roster) || []).map(r => `<tr>
-    <td>${escapeHtml(r.name)}</td>
+    <td>${escapeHtml(r.name)}${r.trial ? ' <span class="badge trial">體驗中</span>' : ""}</td>
     ${keys.map(k => `<td class="num">${r[k] ? "✓" : "—"}</td>`).join("")}
     <td class="num">${escapeHtml(r.stuck ? FUNNEL_LABELS[r.stuck] || r.stuck : "全部完成")}</td>
     <td class="num">${escapeHtml(fmtDay(r.created_at))}</td></tr>`);
@@ -677,15 +714,25 @@ function renderAll(s) {
   renderRoster(s.funnel);
 
   // ── KPI ──
-  const paid = (p.subscriptions.by_provider || []).filter(x => x.provider !== "manual").reduce((t, x) => t + Number(x.n), 0);
-  const manual = (p.subscriptions.by_provider || []).filter(x => x.provider === "manual").reduce((t, x) => t + Number(x.n), 0);
+  // 生效中的訂閱分三種：金流（真的有收錢）、手動指派、免費體驗（provider = 'trial'，沒收錢）。
+  // 2026-10-10 以前體驗被算成「付費」，三個體驗帳號讓付費訂閱與 MRR 都多了三份。
+  const byProv = p.subscriptions.by_provider || [];
+  const paid   = byProv.filter(x => x.provider !== "manual" && x.provider !== "trial").reduce((t, x) => t + Number(x.n), 0);
+  const manual = byProv.filter(x => x.provider === "manual").reduce((t, x) => t + Number(x.n), 0);
+  const trialN = byProv.filter(x => x.provider === "trial").reduce((t, x) => t + Number(x.n), 0);
+  const tr = p.trials || { active: 0, used: 0, converted: 0, ending_3d: 0, claimed_range: 0, list: [] };
+  // 線上函式還沒升到 2026-10-10 版：體驗、每人通知、分享與回饋全是 0，MRR 也還把體驗算進去——明講，不要讓人以為是真的 0
+  const staleFn = !p.trials;
+  document.getElementById("meta").insertAdjacentHTML("beforeend", staleFn
+    ? ' <span style="color:var(--warn)">· 資料庫函式尚未更新（migrate_admin_dashboard.sql），體驗／每人通知／分享區塊暫時全為 0</span>' : "");
   document.getElementById("kpis").innerHTML = [
     tile("註冊人數", fmtInt(u.total), { text: `期間新增 ${fmtInt(u.new_range)} · 今日 ${fmtInt(u.new_today)}`, cls: u.new_range ? "up" : "" }, "hero"),
     tile("今日活躍（DAU）", fmtInt(a.dau_today_real), { text: "不含管理者" }),
     tile("週活躍（WAU）", fmtInt(a.wau_real), { text: `不含管理者 · 共 ${fmtInt(ns.base)} 位` }),
     tile("月活躍（MAU）", fmtInt(a.mau_real), { text: a.mau_real ? `黏著度 DAU/MAU ${fmtPct(a.dau_today_real, a.mau_real)}` : "不含管理者" }),
-    tile("付費訂閱", fmtInt(paid), { text: `手動指派 ${fmtInt(manual)} · 7 日內到期 ${fmtInt(p.subscriptions.expiring_7d)}`, cls: p.subscriptions.expiring_7d ? "warn" : "" }),
-    tile("月經常收入 MRR", fmtMoney(p.mrr_twd), { text: `手動指派等值 ${fmtMoney(p.mrr_manual_twd)}` }),
+    tile("付費訂閱", fmtInt(paid), { text: `手動指派 ${fmtInt(manual)} · 體驗中 ${fmtInt(trialN)} · 7 日內到期 ${fmtInt(p.subscriptions.expiring_7d)}`, cls: p.subscriptions.expiring_7d ? "warn" : "" }),
+    tile("免費體驗", fmtInt(tr.active), { text: `體驗中 · 已結束 ${fmtInt(tr.used)} · 其中升級 ${fmtInt(tr.converted)}`, cls: tr.ending_3d ? "warn" : "" }),
+    tile("月經常收入 MRR", fmtMoney(p.mrr_twd), { text: `手動指派等值 ${fmtMoney(p.mrr_manual_twd)} · 體驗等值 ${fmtMoney(p.mrr_trial_twd)}（不計入）` }),
     tile("自選股（筆）", fmtInt(w.total), { text: `${fmtInt(w.distinct_stocks)} 檔 · 每人 ${w.avg_per_user ?? 0}` }),
     tile("進階訊號", fmtInt(r.total), { text: `其中真實使用者 ${fmtInt(r.total_real)} 條 · ${fmtInt(r.users_real)} 人` }),
     tile("推播裝置", fmtInt(al.push_subscriptions.total), { text: `${fmtInt(al.push_subscriptions.users)} 人已開通知（${fmtPct(al.push_subscriptions.users, u.total)}）`, cls: al.push_subscriptions.users < u.total ? "warn" : "up" }),
@@ -703,11 +750,24 @@ function renderAll(s) {
       xAxis: axisVal({ splitLine: { show: false }, axisLabel: { show: false } }), yAxis: axisCat(seen.map(x => x[0]), { inverse: true }),
       series: [hbarSeries("人數", seen.map(x => x[1]), S[0])] });
   }
-  tableCard("c-users", "使用者名單", `${fmtInt(u.list.length)} 人，依最近活動排序`,
-    ["使用者", "方案", "自選股", "規則", "推播裝置", "期間操作數", "最近活動", "註冊"],
+  // 方案欄分得出「付費／手動」與「體驗中」：體驗中的人 current_plan 是 pro，但沒有收錢。
+  // 通知欄是「期間寫進他通知匣的則數／其中真的推到裝置的則數」，日均＝則數÷期間天數。
+  const planCell = x => {
+    const plan = `<span class="badge ${escapeHtml(x.plan)}">${escapeHtml(x.plan)}</span>`;
+    if (x.trial === "active") return `${plan} <span class="badge trial">${TRIAL_LABELS.active}</span>`;
+    if (x.trial === "used")   return `${plan} <span class="badge">${TRIAL_LABELS.used}</span>`;
+    return plan;
+  };
+  tableCard("c-users", "使用者名單", `${fmtInt(u.list.length)} 人，依最近活動排序 · 通知欄＝期間通知匣則數／推到裝置的則數`,
+    ["使用者", "方案", "自選股", "規則", "推播裝置", "通知／推播", "日均", "已讀", "分享 出／入", "回饋 收／給", "期間操作數", "最近活動", "註冊"],
     u.list.map(x => `<tr><td>${escapeHtml(x.name)}${x.is_admin ? ' <span class="badge admin">管理者</span>' : ""}${x.is_demo ? ' <span class="badge demo">示範</span>' : ""}</td>
-      <td class="num"><span class="badge ${escapeHtml(x.plan)}">${escapeHtml(x.plan)}</span></td>
+      <td class="num">${planCell(x)}</td>
       <td class="num">${fmtInt(x.watch)}</td><td class="num">${fmtInt(x.rules)}</td><td class="num">${fmtInt(x.push)}</td>
+      <td class="num">${fmtInt(x.alerts_range)} / ${fmtInt(x.pushed_range)}</td>
+      <td class="num">${escapeHtml(String(x.alerts_per_day ?? 0))}</td>
+      <td class="num">${fmtPct(x.read_range, x.alerts_range)}</td>
+      <td class="num">${fmtInt(x.shares_out)} / ${fmtInt(x.shares_in)}</td>
+      <td class="num">${fmtInt(x.rx_in)} / ${fmtInt(x.rx_out)}</td>
       <td class="num">${fmtInt(x.events_range)}</td><td class="num" title="${escapeHtml(fmtDate(x.last_seen_at))}">${escapeHtml(ago(x.last_seen_at))}</td>
       <td class="num">${escapeHtml(fmtDay(x.created_at))}</td></tr>`));
 
@@ -761,18 +821,30 @@ function renderAll(s) {
   // ── 方案 ──
   const sub = p.subscriptions;
   document.getElementById("plan-tiles").innerHTML = [
-    tile("生效中的訂閱", fmtInt(sub.active), { text: `金流 ${fmtInt(paid)} · 手動 ${fmtInt(manual)}` }),
+    tile("生效中的訂閱", fmtInt(sub.active), { text: `金流 ${fmtInt(paid)} · 手動 ${fmtInt(manual)} · 體驗 ${fmtInt(trialN)}` }),
+    tile("免費體驗", `${fmtInt(tr.active)} 體驗中`, { text: `期間新領 ${fmtInt(tr.claimed_range)} · 3 天內結束 ${fmtInt(tr.ending_3d)} · 已結束 ${fmtInt(tr.used)}、升級 ${fmtInt(tr.converted)}`, cls: tr.ending_3d ? "warn" : "" }),
     tile("已請求取消", fmtInt(sub.cancel_requested), { text: "服務保留至當期結束", cls: sub.cancel_requested ? "warn" : "" }),
     tile("逾期／已過期", fmtInt(Number(sub.past_due) + Number(sub.expired)), { text: `past_due ${fmtInt(sub.past_due)} · 到期未續 ${fmtInt(sub.expired)}`, cls: (Number(sub.past_due) + Number(sub.expired)) ? "bad" : "" }),
     tile("期間收款", fmtMoney(p.payments_range.amount), { text: `${fmtInt(p.payments_range.count)} 筆 · 累計 ${fmtMoney(p.payments_total.amount)}` }),
     tile("訂單", `${fmtInt(p.orders.paid)} 已付`, { text: `待付 ${fmtInt(p.orders.pending)} · 失敗 ${fmtInt(p.orders.failed)} · 逾時 ${fmtInt(p.orders.expired)}`, cls: p.orders.failed ? "warn" : "" }),
     tile("AI 使用（期間）", fmtInt(p.ai_usage.range), { text: `今日 ${fmtInt(p.ai_usage.today)} · ${fmtInt(p.ai_usage.users_range)} 人 · ${(p.ai_usage.by_kind || []).map(k => `${k.kind} ${k.n}`).join("、") || "無"}` }),
   ].join("");
-  const byPlan = (p.by_plan || []).map(x => [`${x.name} · ${x.code}`, Number(x.users), x.price_twd]);
-  if (card("c-plans", "各方案人數", "依 current_plan() 推導，到期自動視為免費版", { head: ["方案", "人數", "月費"], rows: byPlan })) {
-    mountChart("c-plans", { ...baseOption(), xAxis: axisCat(byPlan.map(x => x[0])), yAxis: axisVal(),
-      series: [barSeries("人數", byPlan.map(x => x[1]), S[0], { label: { show: true, position: "top", color: css("--text-1"), fontSize: 11 } })] });
+  // 每個方案拆成「付費／手動」與「體驗中」兩段堆疊：體驗中的人用的是 pro 的功能，但不是 pro 的收入
+  const byPlan = (p.by_plan || []).map(x => [`${x.name} · ${x.code}`, Number(x.users) - Number(x.trial_users || 0), Number(x.trial_users || 0), x.price_twd]);
+  if (card("c-plans", "各方案人數", "依 current_plan() 推導；體驗中另外標色",
+      { head: ["方案", "付費／手動", "體驗中", "月費"], rows: byPlan,
+        legend: [{ name: "付費／手動", color: S[0] }, { name: "體驗中", color: S[1] }] })) {
+    mountChart("c-plans", { ...baseOption(), xAxis: axisCat(byPlan.map(x => x[0].split(" · ").pop()), { axisLabel: { interval: 0 } }), yAxis: axisVal(),
+      series: [barSeries("付費／手動", byPlan.map(x => x[1]), S[0], { stack: "plan", itemStyle: { color: S[0], borderColor: css("--surface"), borderWidth: 1, borderRadius: 0 } }),
+               barSeries("體驗中", byPlan.map(x => x[2]), S[1], { stack: "plan", itemStyle: { color: S[1], borderColor: css("--surface"), borderWidth: 1, borderRadius: [4, 4, 0, 0] },
+                         label: { show: true, position: "top", color: css("--text-1"), fontSize: 11, formatter: pt => fmtInt(byPlan[pt.dataIndex][1] + byPlan[pt.dataIndex][2]) } })] });
   }
+  tableCard("c-trials", "免費體驗名單", "每個帳號只能領一次；結束後自動回到免費版、不會扣款",
+    ["使用者", "體驗方案", "領取", "結束", "狀態"],
+    (tr.list || []).map(x => `<tr><td>${escapeHtml(x.name)}</td><td class="num"><span class="badge ${escapeHtml(x.plan)}">${escapeHtml(x.plan)}</span></td>
+      <td class="num">${escapeHtml(fmtDate(x.claimed_at))}</td><td class="num">${escapeHtml(fmtDate(x.period_end))}</td>
+      <td class="num">${x.state === "active" ? `<span class="badge trial">${TRIAL_LABELS.active}</span>` : escapeHtml(label(TRIAL_LABELS, x.state))}</td></tr>`),
+    "還沒有人領過免費體驗");
   const pm = (p.payments_by_month || []).map(x => [x.m, Number(x.amount), Number(x.count)]);
   if (card("c-payments", "每月收款", "近 12 個月，實際扣款金額（NT$）", { head: ["月份", "金額", "筆數"], rows: pm, empty: "尚無任何付款紀錄（金流結帳尚未開放）" })) {
     mountChart("c-payments", { ...baseOption(), xAxis: axisCat(pm.map(x => x[0])), yAxis: axisVal(),
@@ -848,22 +920,54 @@ function renderAll(s) {
   // ── 通知 ──
   const ps = al.push_subscriptions;
   document.getElementById("alert-tiles").innerHTML = [
-    tile("期間通知數", fmtInt(al.range), { text: `累計 ${fmtInt(al.total)} · 送達 ${fmtInt(al.users_range)} 人` }),
+    tile("期間通知數", fmtInt(al.range), { text: `累計 ${fmtInt(al.total)} · ${fmtInt(al.users_range)} 人收到` }),
     tile("已讀率", fmtPct(al.read_range, al.range), { text: `${fmtInt(al.read_range)} 則已讀` }),
     tile("推播成功率", fmtPct(al.push_ok, Number(al.push_ok) + Number(al.push_failed)), { text: `失敗 ${fmtInt(al.push_failed)} 則`, cls: al.push_failed ? "warn" : "" }),
     tile("強訊號（橘）", fmtInt((al.by_severity || []).filter(x => x.severity === "orange").reduce((t, x) => t + Number(x.n), 0)), { text: `注意（藍）${fmtInt((al.by_severity || []).filter(x => x.severity === "blue").reduce((t, x) => t + Number(x.n), 0))}` }),
     tile("推播裝置", fmtInt(ps.total), { text: (ps.by_platform || []).map(x => `${x.platform} ${x.n}`).join(" · ") || "無" }),
   ].join("");
-  const srcOrder = Array.from(new Set((al.by_source || []).map(x => x.source)));
+  // 來源先依標籤合併（daily_report 與 daily_report_web_push 都叫「每日報告」，原本在圖例出現兩次），
+  // 再依總量排序；六色用完把其餘折成灰色「其他」——序列色固定、不循環（dataviz），
+  // 2026-10-10 以前第七個來源會拿到跟第一個一樣的藍。
+  const srcTotals = {};
+  (al.by_source || []).forEach(x => { const k = label(SOURCE_LABELS, x.source); srcTotals[k] = (srcTotals[k] || 0) + Number(x.n); });
+  const srcAll = Object.keys(srcTotals).sort((a, b) => srcTotals[b] - srcTotals[a] || a.localeCompare(b));
+  const srcShown = srcAll.length > S.length ? srcAll.slice(0, S.length - 1) : srcAll;
+  const srcFolded = srcAll.slice(srcShown.length);
+  const srcOrder = srcFolded.length ? [...srcShown, "其他"] : srcShown;
+  const srcColor = i => srcOrder[i] === "其他" ? css("--text-muted") : S[i];
   const dayMap = {};
-  (al.by_day || []).forEach(x => { (dayMap[x.d] = dayMap[x.d] || {})[x.source] = Number(x.n); });
+  (al.by_day || []).forEach(x => {
+    let k = label(SOURCE_LABELS, x.source); if (srcFolded.includes(k)) k = "其他";
+    const row = (dayMap[x.d] = dayMap[x.d] || {}); row[k] = (row[k] || 0) + Number(x.n);
+  });
   const daysList = fillDays(from, today, [], "d", []).map(x => x.d);
-  const alertRows = daysList.map(d => [d, ...srcOrder.map(s => (dayMap[d] || {})[s] || 0)]);
-  if (card("c-alerts-day", "每日通知量", "依來源堆疊", { head: ["日期", ...srcOrder.map(s => label(SOURCE_LABELS, s))], rows: alertRows,
-      legend: srcOrder.map((s, i) => ({ name: label(SOURCE_LABELS, s), color: S[i % S.length] })), tall: true })) {
+  const alertRows = daysList.map(d => [d, ...srcOrder.map(k => (dayMap[d] || {})[k] || 0)]);
+  if (card("c-alerts-day", "每日通知量", srcFolded.length ? `依來源堆疊；「其他」＝${srcFolded.join("、")}` : "依來源堆疊",
+      { head: ["日期", ...srcOrder], rows: alertRows,
+        legend: srcOrder.map((k, i) => ({ name: k, color: srcColor(i) })), tall: true })) {
     mountChart("c-alerts-day", { ...baseOption(), xAxis: axisCat(daysList.map(mdLabel)), yAxis: axisVal(),
-      series: srcOrder.map((s, i) => barSeries(label(SOURCE_LABELS, s), alertRows.map(rw => rw[i + 1]), S[i % S.length],
-        { stack: "src", itemStyle: { color: S[i % S.length], borderColor: css("--surface"), borderWidth: 1, borderRadius: i === srcOrder.length - 1 ? [4, 4, 0, 0] : 0 } })) }, "tall");
+      series: srcOrder.map((k, i) => barSeries(k, alertRows.map(rw => rw[i + 1]), srcColor(i),
+        { stack: "src", itemStyle: { color: srcColor(i), borderColor: css("--surface"), borderWidth: 1, borderRadius: i === srcOrder.length - 1 ? [4, 4, 0, 0] : 0 } })) }, "tall");
+  }
+  // 每人每日通知量：一人一條線。六色用完就把其餘的人折進「其他」（灰），不另造顏色；
+  // 表格檢視列出每一個人，格子是「通知／推播」。不含管理者與示範帳號。
+  const pud = al.per_user_by_day || [];
+  const userTotals = {};
+  pud.forEach(x => { userTotals[x.name] = (userTotals[x.name] || 0) + Number(x.n); });
+  const userOrder = Object.keys(userTotals).sort((a, b) => userTotals[b] - userTotals[a] || a.localeCompare(b));
+  const shown = userOrder.slice(0, 6), folded = userOrder.slice(6);
+  const pudMap = {};
+  pud.forEach(x => { (pudMap[x.d] = pudMap[x.d] || {})[x.name] = { n: Number(x.n), pushed: Number(x.pushed) }; });
+  const pudRows = daysList.map(d => [d, ...userOrder.map(nme => { const c = (pudMap[d] || {})[nme]; return c ? `${c.n} / ${c.pushed}` : "0 / 0"; })]);
+  const seriesOf = names => daysList.map(d => names.reduce((t, nme) => t + (((pudMap[d] || {})[nme] || {}).n || 0), 0));
+  if (card("c-alerts-user", "每人每日通知量", "每位使用者每天寫進通知匣的則數；表格的格子是「通知／推播」。不含管理者",
+      { head: ["日期", ...userOrder], rows: pudRows, empty: "期間內沒有任何非管理者收到通知",
+        legend: [...shown.map((nme, i) => ({ name: nme, color: S[i], line: true })),
+                 ...(folded.length ? [{ name: `其他 ${folded.length} 人`, color: css("--text-muted"), line: true }] : [])], tall: true })) {
+    mountChart("c-alerts-user", { ...baseOption(), xAxis: axisCat(daysList.map(mdLabel), { boundaryGap: false }), yAxis: axisVal(),
+      series: [...shown.map((nme, i) => lineSeries(nme, seriesOf([nme]), S[i])),
+               ...(folded.length ? [lineSeries(`其他 ${folded.length} 人`, seriesOf(folded), css("--text-muted"), { lineStyle: { width: 2, color: css("--text-muted"), type: "dashed" } })] : [])] }, "tall");
   }
   const kinds = (al.by_kind || []).map(x => [label(KIND_LABELS, x.kind), Number(x.n)]);
   if (card("c-alert-kinds", "盤中訊號種類", "期間內 monitor 來源", { head: ["訊號", "則數"], rows: kinds })) {
@@ -887,6 +991,27 @@ function renderAll(s) {
     mountChart("c-push-platform", { ...baseOption(), xAxis: axisCat(pp.map(x => x[0])), yAxis: axisVal(),
       series: [barSeries("裝置數", pp.map(x => x[1]), S[0], { label: { show: true, position: "top", color: css("--text-1"), fontSize: 11 } })] });
   }
+
+  // ── 好友分享與回饋 ──
+  const so = s.social || { recipients: {}, reactions: {} };
+  const rc = so.recipients || {}, rx = so.reactions || {};
+  document.getElementById("social-tiles").innerHTML = [
+    tile("進行中的分享", fmtInt(so.shares_live), { text: `${fmtInt(so.sharers)} 人分享 · 期間新建 ${fmtInt(so.shares_range)}` }),
+    tile("接受中的收件", fmtInt(rc.accepted), { text: `${fmtInt(rc.users_accepted)} 人 · 待回應 ${fmtInt(rc.pending)} · 被額度擋住 ${fmtInt(rc.held)}`, cls: rc.held ? "warn" : "" }),
+    tile("拒絕／移除", fmtInt(Number(rc.declined || 0) + Number(rc.removed || 0)), { text: `拒絕 ${fmtInt(rc.declined)} · 移除 ${fmtInt(rc.removed)}` }),
+    tile("分享訊號通知", fmtInt(so.share_alerts_range), { text: "期間內來源為好友分享的通知" }),
+    tile("回饋貼圖累計", fmtInt(rx.total), { text: `期間 ${fmtInt(rx.range)} · ${fmtInt(rx.givers)} 人給、${fmtInt(rx.receivers)} 人收` }),
+  ].join("");
+  const rk = (rx.by_kind || []).map(x => [label(RX_LABELS, x.kind), Number(x.n)]);
+  if (card("c-rx-kinds", "回饋貼圖種類", "累計；哪一種回饋最常被按", { head: ["貼圖", "次數"], rows: rk, empty: "還沒有人給過回饋貼圖" })) {
+    mountChart("c-rx-kinds", { ...baseOption(), grid: { left: 8, right: 40, top: 8, bottom: 4, containLabel: true },
+      xAxis: axisVal({ splitLine: { show: false }, axisLabel: { show: false } }), yAxis: axisCat(rk.map(x => x[0]), { inverse: true }),
+      series: [hbarSeries("次數", rk.map(x => x[1]), S[0])] });
+  }
+  tableCard("c-sharers", "分享者", "進行中的分享、接受中的收件人、收到的回饋貼圖",
+    ["分享者", "分享", "收件人", "收到回饋"],
+    (so.top_sharers || []).map(x => `<tr><td>${escapeHtml(x.name)}</td><td class="num">${fmtInt(x.shares)}</td><td class="num">${fmtInt(x.recipients)}</td><td class="num">${fmtInt(x.rx_in)}</td></tr>`),
+    "目前沒有進行中的分享");
 
   // ── 事件與系統 ──
   const et = (ev.by_type || []).map(x => [label(EVENT_TYPE_LABELS, x.type), Number(x.n)]);
