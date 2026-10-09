@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="303">
+  <meta name="app-version" content="304">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=303" rel="stylesheet">
+  <link href="watchlist.css?v=304" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1419,9 +1419,6 @@
           <span class="fw-semibold d-none" id="kline-name"></span>
           <span class="badge bg-secondary" id="kline-industry" style="font-size:0.8rem;"></span>
           <span class="ms-auto" style="font-size:0.95rem;">現價 <strong id="kline-price"></strong></span>
-          <!-- 圖上最近一壓力、一支撐的價位（2026-10-09 Howard）：以前標在虛線右端、會跟著 y 軸縮放上下跑，
-               改寫在這裡固定位置，顏色與圖上的線同色（renderKLineLevelsChip） -->
-          <span id="kline-levels" class="kline-ma-chip" hidden></span>
           <span id="kline-ma" class="kline-ma-chip">MA —</span>
         </div>
         <div class="d-flex align-items-center flex-wrap gap-2 mb-2 kline-toolbar-row">
@@ -12082,7 +12079,6 @@ async function loadKLineIntoCard(sid) {
   document.getElementById("kline-price").textContent = _klinePriceText(sidKey, null);
   klineLegendSelected = null;      // 每檔股票從預設圖例開始
   setKLineMaInfo("讀取共用報表資料中...");
-  renderKLineLevelsChip(null);       // 上一檔的壓／撐不能留著給這一檔看
   document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">讀取 K 線資料中...</div>';
 
   try {
@@ -12216,28 +12212,6 @@ function setKLineMaInfo(text) {
   el.textContent = String(text || "").trim() || "MA —";
 }
 
-// 圖上關卡線的價位改寫在表頭（2026-10-09 Howard）：以前標籤畫在虛線右端（insideEndTop／Bottom），
-// y 軸隨可見區間自動縮放時標籤跟著上下跑、又蓋住最右邊幾根 K 棒。現在線照畫、數字固定放這裡，
-// 顏色與圖上的線同色（壓紅、撐綠），資料同一組：levels 的 index 0 就是離現價最近的那一條
-//（generator 的 _calc_support_resistance 已排好）。沒有關卡就整個膠囊藏起來。
-function renderKLineLevelsChip(levels) {
-  const el = document.getElementById("kline-levels");
-  if (!el) return;
-  const first = arr => {
-    const v = Number((Array.isArray(arr) ? arr : [])[0]);
-    return Number.isFinite(v) && v > 0 ? v : null;
-  };
-  const res = first(levels?.resistance);
-  const sup = first(levels?.support);
-  const seg = (label, v, color) =>
-    `<span class="kline-ma-seg"><i class="kline-ma-dot" style="background:${color};"></i>${label} ${escapeHtml(fmtPrice(v))}</span>`;
-  const segments = [];
-  if (res !== null) segments.push(seg("壓", res, KLINE_LEVEL_STYLE.resistance.color));
-  if (sup !== null) segments.push(seg("撐", sup, KLINE_LEVEL_STYLE.support.color));
-  el.hidden = segments.length === 0;
-  el.innerHTML = segments.join('<span class="kline-ma-sep">·</span>');
-}
-
 // K 線 → 評分明細：同一份 investment_scores（13 子項、變化原因、對照前期）對所有評分股都有，
 // 取代原本只有進榜 ~32 檔才有資料的「7 大面向分析」面板。
 function openScoreDetailFromKLine() {
@@ -12293,7 +12267,6 @@ function renderKLineChart(sid, period) {
   const periodData = stock[period] || {};
   const levels = stock.levels || {};
   const chips = stock.chips || {};
-  renderKLineLevelsChip(levels);     // 表頭的壓／撐與圖上的兩條線永遠是同一組數字
 
   const el = document.getElementById("kline-chart");
   klineMobileTooltipLocked = false;
@@ -12969,7 +12942,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   // 用 yAxis 形式的水平線，不綁 x 座標：以前用 dates[0]→dates[n-1] 兩點畫，預設視窗縮到最近 80 根後
   // dates[0] 不在可見範圍，整條線會被 ECharts 丟掉
   // 價位不再標在線上（2026-10-09 Howard）：標籤跟著虛線右端走，y 軸隨可見區間縮放時上下跳、
-  // 又蓋住最右邊幾根 K 棒。數字改寫在表頭的固定位置（renderKLineLevelsChip），線只留顏色：壓紅、撐綠。
+  // 又蓋住最右邊幾根 K 棒。數字改畫在圖例正下方那一列的固定位置（下面的 levelsRow），線只留顏色：壓紅、撐綠。
   const levelLine = (nv, rgb) => ({
     yAxis: nv,
     lineStyle: { color: `rgba(${rgb},0.85)`, type: "dashed", width: 1.4 },
@@ -13019,12 +12992,13 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   // 主圖拿到的比例也從 50% 拉到 ~66%（K 棒因此變高）。
   const chartH = Math.max(240, Math.round(chartHeight) || 440);
   const legendH = 24;                 // 單列可捲動圖例
+  const levelsH = 18;                 // 圖例正下方那一列：壓／撐價位（固定位置，不隨縮放平移動）
   const sliderH = mobile ? 16 : 18;   // 下方時間軸縮放條
   const sliderBottom = 4;
   const dateLabelH = 18;              // 最下面那排日期
   const gridGap = 6;                  // 主圖與副圖之間
   const subCount = hasChips ? 2 : 1;
-  const usable = Math.max(120, chartH - legendH - (sliderBottom + sliderH + dateLabelH) - gridGap * subCount);
+  const usable = Math.max(120, chartH - legendH - levelsH - (sliderBottom + sliderH + dateLabelH) - gridGap * subCount);
   // 兩個副圖分開算（2026-09-24 Howard：買賣超要看得更清楚，K 棒也要更長）。
   // 以前兩格一樣高，等於把高度平均分給「看得懂的」與「看不太出來的」：
   // 成交量是密集的正值長條，矮一點照樣讀得出相對高低；三大合計淨買超要跨 0 軸、
@@ -13036,11 +13010,12 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   // 再扣 ECharts 預設 8px 的標籤間距——再縮就會把高價股的數字切掉）。
   // 2026-09-24 試過連字一起縮到 10.5 換得 left=44，但那會把 2026-09-23「圖上的字太小」
   // 那次的修正整個倒回去，而且只多 8px 寬；Howard 選擇維持字級。
-  // 右邊原本 18px 純粹是留白：關卡線不帶標籤（價位寫在表頭 #kline-levels），沒東西要放，收到 8px。
+  // 右邊原本 18px 純粹是留白：關卡線不帶標籤（價位在圖例下那一列），沒東西要放，收到 8px。
   const gridBox = { left: 52, right: 8 };
-  const grids = [{ ...gridBox, top: legendH, height: mainH }];
-  grids.push({ ...gridBox, top: legendH + mainH + gridGap, height: volH });
-  if (hasChips) grids.push({ ...gridBox, top: legendH + mainH + gridGap + volH + gridGap, height: chipsH });
+  const topH = legendH + levelsH;     // 圖例＋壓／撐那列
+  const grids = [{ ...gridBox, top: topH, height: mainH }];
+  grids.push({ ...gridBox, top: topH + mainH + gridGap, height: volH });
+  if (hasChips) grids.push({ ...gridBox, top: topH + mainH + gridGap + volH + gridGap, height: chipsH });
   // 副圖 y 軸：成交量原始值是「股」，六位數在 46px 內放不下、也跟圖例的「(張)」對不上；
   // 統一換算成張、超過一萬張用「萬」，籌碼（本來就是張）同一個格式
   const fmtLots = lots => {
@@ -13112,6 +13087,19 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   });
   const graphic = [subTitle(1, "成交量(張)")];
   if (hasChips) graphic.push(subTitle(2, `${chipLabel}淨買超(張)`));
+  // 壓／撐價位：圖例正下方一列、固定位置（2026-10-09 Howard 第二輪：「要顯示在 K 線圖中，MA 那列的下方」）。
+  // 顏色與圖上的虛線同色、數字同一組（index 0＝離現價最近）。兩段文字橫排，寬度用 ECharts 自己量。
+  {
+    const font = "12px sans-serif";
+    const measure = t => (echarts.format?.getTextRect ? echarts.format.getTextRect(t, font).width : t.length * 8);
+    let x = gridBox.left + 4;
+    const put = (text, color) => {
+      graphic.push({ type: "text", left: x, top: legendH + 2, silent: true, z: 10, style: { text, fill: color, fontSize: 12 } });
+      x += measure(text) + 14;
+    };
+    if (resistanceLevels.length) put(`壓 ${fmtPrice(resistanceLevels[0])}`, KLINE_LEVEL_STYLE.resistance.color);
+    if (supportLevels.length) put(`撐 ${fmtPrice(supportLevels[0])}`, KLINE_LEVEL_STYLE.support.color);
+  }
 
   const series = [
     {
