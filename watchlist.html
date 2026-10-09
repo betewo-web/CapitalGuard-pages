@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="301">
+  <meta name="app-version" content="303">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=301" rel="stylesheet">
+  <link href="watchlist.css?v=303" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1419,6 +1419,9 @@
           <span class="fw-semibold d-none" id="kline-name"></span>
           <span class="badge bg-secondary" id="kline-industry" style="font-size:0.8rem;"></span>
           <span class="ms-auto" style="font-size:0.95rem;">現價 <strong id="kline-price"></strong></span>
+          <!-- 圖上最近一壓力、一支撐的價位（2026-10-09 Howard）：以前標在虛線右端、會跟著 y 軸縮放上下跑，
+               改寫在這裡固定位置，顏色與圖上的線同色（renderKLineLevelsChip） -->
+          <span id="kline-levels" class="kline-ma-chip" hidden></span>
           <span id="kline-ma" class="kline-ma-chip">MA —</span>
         </div>
         <div class="d-flex align-items-center flex-wrap gap-2 mb-2 kline-toolbar-row">
@@ -1736,6 +1739,7 @@ let klineLastBuildArgs = null;   // 轉向／視窗變高時要用同一份資�
 let klineLegendSelected = null;  // 使用者點過圖例後的開關狀態；切週期／籌碼重建圖表時帶回去，不要每次都重設
 let klineMaChipState = null;     // 表頭 MA 數字（{ ma, suffix }）：圖例切換時要重畫成同色＋淡化
 let klineTouchStartedLocked = false; // 這次觸控開始時十字線已鎖定：不動就放開＝解除，滑動＝移動十字線
+let klinePinch = null;               // 雙指手勢進行中的基準（見 beginKLinePinch）；null＝沒有雙指手勢
 let watchlistRows = [];
 let intradayQuoteMap = {};
 let intradayQuotesLoadingPromise = null;
@@ -12078,6 +12082,7 @@ async function loadKLineIntoCard(sid) {
   document.getElementById("kline-price").textContent = _klinePriceText(sidKey, null);
   klineLegendSelected = null;      // 每檔股票從預設圖例開始
   setKLineMaInfo("讀取共用報表資料中...");
+  renderKLineLevelsChip(null);       // 上一檔的壓／撐不能留著給這一檔看
   document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">讀取 K 線資料中...</div>';
 
   try {
@@ -12211,6 +12216,28 @@ function setKLineMaInfo(text) {
   el.textContent = String(text || "").trim() || "MA —";
 }
 
+// 圖上關卡線的價位改寫在表頭（2026-10-09 Howard）：以前標籤畫在虛線右端（insideEndTop／Bottom），
+// y 軸隨可見區間自動縮放時標籤跟著上下跑、又蓋住最右邊幾根 K 棒。現在線照畫、數字固定放這裡，
+// 顏色與圖上的線同色（壓紅、撐綠），資料同一組：levels 的 index 0 就是離現價最近的那一條
+//（generator 的 _calc_support_resistance 已排好）。沒有關卡就整個膠囊藏起來。
+function renderKLineLevelsChip(levels) {
+  const el = document.getElementById("kline-levels");
+  if (!el) return;
+  const first = arr => {
+    const v = Number((Array.isArray(arr) ? arr : [])[0]);
+    return Number.isFinite(v) && v > 0 ? v : null;
+  };
+  const res = first(levels?.resistance);
+  const sup = first(levels?.support);
+  const seg = (label, v, color) =>
+    `<span class="kline-ma-seg"><i class="kline-ma-dot" style="background:${color};"></i>${label} ${escapeHtml(fmtPrice(v))}</span>`;
+  const segments = [];
+  if (res !== null) segments.push(seg("壓", res, KLINE_LEVEL_STYLE.resistance.color));
+  if (sup !== null) segments.push(seg("撐", sup, KLINE_LEVEL_STYLE.support.color));
+  el.hidden = segments.length === 0;
+  el.innerHTML = segments.join('<span class="kline-ma-sep">·</span>');
+}
+
 // K 線 → 評分明細：同一份 investment_scores（13 子項、變化原因、對照前期）對所有評分股都有，
 // 取代原本只有進榜 ~32 檔才有資料的「7 大面向分析」面板。
 function openScoreDetailFromKLine() {
@@ -12266,6 +12293,7 @@ function renderKLineChart(sid, period) {
   const periodData = stock[period] || {};
   const levels = stock.levels || {};
   const chips = stock.chips || {};
+  renderKLineLevelsChip(levels);     // 表頭的壓／撐與圖上的兩條線永遠是同一組數字
 
   const el = document.getElementById("kline-chart");
   klineMobileTooltipLocked = false;
@@ -12410,8 +12438,12 @@ function showKLineMobileTooltipAt(point) {
 // 手機的十字線：長按出現並鎖定；鎖定後按住滑動＝逐根移動（台股 App 的慣例），
 // 原地點一下放開＝解除；點圖外也解除（bindKLineTouchInteraction 的 document 監聽）。
 function onKLineTouchStart(evt) {
-  if (!klineChart || !isKLineMobileMode()) return;
-  if (!evt?.touches || evt.touches.length !== 1) return;
+  if (!klineChart) return;
+  const touches = evt?.touches || [];
+  if (touches.length >= 2) { beginKLinePinch(evt); return; }   // 第二指落下＝雙指手勢開始
+  if (klinePinch) { evt.stopPropagation(); return; }           // 手勢沒收乾淨時的保險：不讓 zrender 看到
+  if (!isKLineMobileMode()) return;
+  if (touches.length !== 1) return;
   klineTouchMoved = false;
   klineTouchStartedLocked = klineMobileTooltipLocked;
   klineTouchStartPoint = getKLineTouchPoint(evt);
@@ -12426,6 +12458,7 @@ function onKLineTouchStart(evt) {
 }
 
 function onKLineTouchMove(evt) {
+  if (klinePinch) { onKLinePinchMove(evt); return; }
   if (!klineTouchStartPoint) return;
   const p = getKLineTouchPoint(evt);
   if (!p) return;
@@ -12443,7 +12476,19 @@ function onKLineTouchMove(evt) {
   }
 }
 
-function onKLineTouchEnd() {
+function onKLineTouchEnd(evt) {
+  if (klinePinch) {
+    const remaining = evt?.touches?.length || 0;
+    if (remaining > 0) {
+      // 還有手指在圖上：事件照樣不給 zrender，剩下的手指從現在的位置重新起算（雙指→單指變成平移）
+      evt.stopPropagation();
+      rebaselineKLinePinch(evt.touches);
+      return;
+    }
+    // 最後一指離開：手勢結束。這個 touchend 放行給 zrender，讓它把第一指 touchstart 開始的拖曳收尾（mouseup）
+    endKLinePinch();
+    return;
+  }
   clearKLineLongPressTimer();
   // 鎖定狀態下原地點一下就放開＝解除；有滑動的話留著（使用者剛把十字線移到想看的那根）
   if (klineTouchStartedLocked && !klineTouchMoved) hideKLineMobileTooltip();
@@ -12451,15 +12496,127 @@ function onKLineTouchEnd() {
   klineTouchStartPoint = null;
 }
 
+// ── 雙指縮放自己做（2026-10-09 Howard：「兩指按住較長時間，畫面會不預期的亂跑」）──────────
+// 根因在 ECharts 5 的 inside dataZoom：RoamController 把每一個雙指 touchmove 都當成固定一步
+//（pinchScale > 1 ? 1.1 : 1/1.1），與手指實際張開多少無關。快速捏合時方向一致、看起來正常；
+// 兩指按住不動時，手指的細微抖動讓每一格 touchmove 隨機往放大或縮小跳 10%，再加上 zrender 同時
+// 拿第一指的位移當拖曳平移，畫面就亂跑。
+// 改法：第二指落下起，觸控事件在容器層（capture）截下來不給 zrender（它的監聽掛在容器裡那層 div），
+// 縮放量用兩指距離的比例算、以兩指中點為錨，平移量用中點位移算，直接 dispatch dataZoom；
+// 放開到只剩一指就改成單指平移、全部放開才結束。長按十字線與雙指互斥：第二指落下就取消長按、解除鎖定。
+function klineTouchXY(t) {
+  const r = klineTouchDomEl.getBoundingClientRect();
+  return { x: t.clientX - r.left, y: t.clientY - r.top };
+}
+
+function klinePinchGeom(touches) {
+  const a = klineTouchXY(touches[0]);
+  if (touches.length < 2) return { dist: null, midX: a.x };
+  const b = klineTouchXY(touches[1]);
+  return { dist: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)), midX: (a.x + b.x) / 2 };
+}
+
+// 目前可見區間（x 軸 index 單位）與主圖的像素範圍：每一段手勢都從這裡起算。
+// 讀 getOption 的 start/end 百分比換算成 index（category 軸：100% ＝ n-1）；
+// 自己剛 dispatch 過的範圍優先用（lastRange），不依賴 ECharts 同步回寫 option 的時機。
+function klineZoomBaseline() {
+  if (!klineChart || klineChart.isDisposed() || !klineTouchDomEl) return null;
+  const n = klineLastBuildArgs?.[0]?.dates?.length || 0;
+  if (n < 2) return null;
+  const opt = klineChart.getOption();
+  const dz = opt?.dataZoom?.[0] || {};
+  const g = opt?.grid?.[0] || {};
+  const pct = v => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Number(v) / 100 * (n - 1) : null);
+  let s = pct(dz.start), e = pct(dz.end);
+  if (klinePinch?.lastRange) ({ s, e } = klinePinch.lastRange);
+  if (s === null) s = Number.isFinite(Number(dz.startValue)) ? Number(dz.startValue) : 0;
+  if (e === null) e = Number.isFinite(Number(dz.endValue)) ? Number(dz.endValue) : n - 1;
+  const left = Number(g.left) || 0;
+  const right = Number(g.right) || 0;
+  const width = Math.max(1, (klineTouchDomEl.clientWidth || 0) - left - right);
+  const minSpan = Math.max(1, Number(dz.minValueSpan) || 1);
+  const maxSpan = Math.max(minSpan, Number(dz.maxValueSpan) || (n - 1));
+  return { n, s, e, left, width, minSpan, maxSpan };
+}
+
+function rebaselineKLinePinch(touches) {
+  const base = klineZoomBaseline();
+  if (!base) { klinePinch = null; return; }
+  const geo = klinePinchGeom(touches);
+  klinePinch = {
+    ...base,
+    startDist: geo.dist, startMidX: geo.midX, fingers: touches.length,
+    lastRange: klinePinch?.lastRange || null,
+    pending: null, raf: klinePinch?.raf || 0,
+  };
+}
+
+function beginKLinePinch(evt) {
+  evt.stopPropagation();           // 第二指落下起 zrender 一律看不到這組觸控
+  clearKLineLongPressTimer();
+  klineTouchMoved = true;
+  klineTouchStartPoint = null;
+  klineTouchStartedLocked = false;
+  if (klineMobileTooltipLocked) hideKLineMobileTooltip();
+  rebaselineKLinePinch(evt.touches);
+}
+
+function onKLinePinchMove(evt) {
+  evt.stopPropagation();
+  if (evt.cancelable) evt.preventDefault();   // 不讓瀏覽器把雙指當成頁面捲動／縮放
+  const p = klinePinch;
+  const touches = evt.touches || [];
+  if (!p || !touches.length) return;
+  const geo = klinePinchGeom(touches);
+  const span0 = Math.max(1, p.e - p.s);
+  const scale = p.startDist && geo.dist ? geo.dist / p.startDist : 1;   // 兩指張開 → >1 → 區間變小（放大）
+  const span = Math.min(p.maxSpan, Math.max(p.minSpan, span0 / scale));
+  const f = Math.min(1, Math.max(0, (p.startMidX - p.left) / p.width));  // 錨點在區間裡的相對位置
+  const anchor = p.s + f * span0;
+  const shift = (geo.midX - p.startMidX) / p.width * span;               // 中點往右＝內容往右＝視窗往左
+  let s = anchor - f * span - shift;
+  let e = s + span;
+  if (s < 0) { e -= s; s = 0; }
+  if (e > p.n - 1) { s = Math.max(0, s - (e - (p.n - 1))); e = p.n - 1; }
+  p.pending = { s, e };
+  if (!p.raf) p.raf = requestAnimationFrame(flushKLinePinch);
+}
+
+function flushKLinePinch() {
+  const p = klinePinch;
+  if (!p) return;
+  p.raf = 0;
+  const r = p.pending;
+  p.pending = null;
+  if (!r || !klineChart || klineChart.isDisposed()) return;
+  p.lastRange = r;
+  // 用百分比 dispatch：ECharts 回寫 option 時四個範圍欄位一起覆寫，下一次 getOption 的 start/end 才讀得到。
+  // dataZoomIndex 0 是 inside，同軸的 slider 由 ECharts 連動更新。
+  klineChart.dispatchAction({ type: "dataZoom", dataZoomIndex: 0, start: r.s / (p.n - 1) * 100, end: r.e / (p.n - 1) * 100 });
+}
+
+function endKLinePinch() {
+  const p = klinePinch;
+  if (!p) return;
+  if (p.raf) cancelAnimationFrame(p.raf);
+  p.raf = 0;
+  flushKLinePinch();               // 最後一格還沒畫的先畫掉
+  klinePinch = null;
+  klineTouchStartPoint = null;
+  klineTouchMoved = false;
+}
+
 function detachKLineTouchInteraction() {
   if (klineTouchDomEl && klineTouchDomHandlers) {
-    klineTouchDomEl.removeEventListener("touchstart", klineTouchDomHandlers.start);
-    klineTouchDomEl.removeEventListener("touchmove", klineTouchDomHandlers.move);
-    klineTouchDomEl.removeEventListener("touchend", klineTouchDomHandlers.end);
-    klineTouchDomEl.removeEventListener("touchcancel", klineTouchDomHandlers.end);
+    // 與 bind 同一組旗標（capture: true），不然 removeEventListener 對不到
+    klineTouchDomEl.removeEventListener("touchstart", klineTouchDomHandlers.start, { capture: true });
+    klineTouchDomEl.removeEventListener("touchmove", klineTouchDomHandlers.move, { capture: true });
+    klineTouchDomEl.removeEventListener("touchend", klineTouchDomHandlers.end, { capture: true });
+    klineTouchDomEl.removeEventListener("touchcancel", klineTouchDomHandlers.end, { capture: true });
   }
   klineTouchDomEl = null;
   klineTouchDomHandlers = null;
+  klinePinch = null;
 
   if (klineTouchGlobalHandlers) {
     document.removeEventListener("touchstart", klineTouchGlobalHandlers.start, { capture: true });
@@ -12470,13 +12627,14 @@ function detachKLineTouchInteraction() {
 function bindKLineTouchInteraction() {
   if (!klineChart) return;
   detachKLineTouchInteraction();
-  if (!isKLineMobileMode()) return;
+  // 不再只限手機模式：雙指縮放的修正對任何有觸控的裝置都要生效（寬螢幕平板也會碰到 ECharts 那個 ±10%）；
+  // 長按十字線那段仍由 onKLineTouchStart 自己檢查 isKLineMobileMode
 
   const dom = klineChart.getDom();
   const handlers = {
     start: evt => onKLineTouchStart(evt),
     move: evt => onKLineTouchMove(evt),
-    end: () => onKLineTouchEnd(),
+    end: evt => onKLineTouchEnd(evt),
   };
 
   // 只留「點圖外關 tooltip」：以前還掛了 document 層的 touchmove，整個 K 線存活期間每一格捲動都跑
@@ -12487,10 +12645,12 @@ function bindKLineTouchInteraction() {
     },
   };
 
-  dom.addEventListener("touchstart", handlers.start, { passive: true });
-  dom.addEventListener("touchmove", handlers.move, { passive: true });
-  dom.addEventListener("touchend", handlers.end, { passive: true });
-  dom.addEventListener("touchcancel", handlers.end, { passive: true });
+  // capture：zrender 的監聽掛在容器裡那層 div，容器的 capture 監聽先跑，雙指期間 stopPropagation
+  // 它就收不到。touchmove 要 passive:false 才能在雙指時 preventDefault（單指不呼叫，捲動不受影響）。
+  dom.addEventListener("touchstart", handlers.start, { passive: true, capture: true });
+  dom.addEventListener("touchmove", handlers.move, { passive: false, capture: true });
+  dom.addEventListener("touchend", handlers.end, { passive: true, capture: true });
+  dom.addEventListener("touchcancel", handlers.end, { passive: true, capture: true });
   document.addEventListener("touchstart", globalHandlers.start, { passive: true, capture: true });
 
   klineTouchDomEl = dom;
@@ -12777,8 +12937,16 @@ const KLINE_MA_STYLE = {
   MA60: { color: "#d7dff2", width: 1.3 },   // 淡白：季線最長、最平，深色底上最清楚；不用純白，免得壓過 K 棒
 };
 
-function defaultKLineLegendSelected(mobile) {
-  return mobile ? { MA5: false, MA10: false } : {};
+// 關卡線顏色的單一來源：圖上的虛線（rgba 用 rgb）與表頭的壓／撐圓點（color）都讀這裡
+const KLINE_LEVEL_STYLE = {
+  resistance: { rgb: "239,83,80", color: "#ef5350" },   // 壓力：紅（台股紅＝漲，往上突破的那條）
+  support:    { rgb: "38,166,154", color: "#26a69a" },  // 支撐：綠
+};
+
+// 均線預設全部打開（2026-10-09 Howard）。以前手機只開 MA20／MA60、MA5／MA10 要自己點圖例，
+// 使用者以為均線不見了。參數留著是因為表頭與圖例兩處都用這個簽名；回傳空物件＝圖例每一條都開。
+function defaultKLineLegendSelected(_mobile) {
+  return {};
 }
 
 function buildKLineOption(pd, chips, levels, period, chartHeight) {
@@ -12800,19 +12968,16 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   const resistanceLevels = (levels.resistance || []).map(v => Number(v)).filter(v => Number.isFinite(v));
   // 用 yAxis 形式的水平線，不綁 x 座標：以前用 dates[0]→dates[n-1] 兩點畫，預設視窗縮到最近 80 根後
   // dates[0] 不在可見範圍，整條線會被 ECharts 丟掉
-  const levelLine = (nv, rgb, text, position) => ({
+  // 價位不再標在線上（2026-10-09 Howard）：標籤跟著虛線右端走，y 軸隨可見區間縮放時上下跳、
+  // 又蓋住最右邊幾根 K 棒。數字改寫在表頭的固定位置（renderKLineLevelsChip），線只留顏色：壓紅、撐綠。
+  const levelLine = (nv, rgb) => ({
     yAxis: nv,
     lineStyle: { color: `rgba(${rgb},0.85)`, type: "dashed", width: 1.4 },
-    label: {
-      // 底色要夠深：0.28 的半透明色壓在 K 棒上，字會跟紅綠棒混在一起看不清楚
-      // （2026-09-23 字放大之後更明顯，標籤變寬、蓋到的 K 棒更多）
-      show: true, formatter: text, position, distance: 4, fontSize: 12, color: "#eef3ff",
-      backgroundColor: "rgba(10,15,30,0.86)", borderColor: `rgba(${rgb},0.85)`, borderWidth: 1, borderRadius: 4, padding: [2, 5],
-    },
+    label: { show: false },
   });
   const markLines = [];
-  if (n > 0 && supportLevels.length) markLines.push(levelLine(supportLevels[0], "38,166,154", `支 ${fmtPrice(supportLevels[0])}`, "insideEndTop"));
-  if (n > 0 && resistanceLevels.length) markLines.push(levelLine(resistanceLevels[0], "239,83,80", `壓 ${fmtPrice(resistanceLevels[0])}`, "insideEndBottom"));
+  if (n > 0 && supportLevels.length) markLines.push(levelLine(supportLevels[0], KLINE_LEVEL_STYLE.support.rgb));
+  if (n > 0 && resistanceLevels.length) markLines.push(levelLine(resistanceLevels[0], KLINE_LEVEL_STYLE.resistance.rgb));
 
   // 預設視窗：日 80／週 52／月 36 根，三種週期同一公式。以前日K 的 dzStart 硬寫 0 → 一次畫出全部
   // ~729 根（手機上一根不到 0.5px 就是「擁擠、看不清」）；週／月的常數 720／5760 又大於資料量，一樣退化成 0。
@@ -12871,7 +13036,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
   // 再扣 ECharts 預設 8px 的標籤間距——再縮就會把高價股的數字切掉）。
   // 2026-09-24 試過連字一起縮到 10.5 換得 left=44，但那會把 2026-09-23「圖上的字太小」
   // 那次的修正整個倒回去，而且只多 8px 寬；Howard 選擇維持字級。
-  // 右邊原本 18px 純粹是留白：關卡標籤畫在格線內（insideEndTop／Bottom），沒東西要放，收到 8px。
+  // 右邊原本 18px 純粹是留白：關卡線不帶標籤（價位寫在表頭 #kline-levels），沒東西要放，收到 8px。
   const gridBox = { left: 52, right: 8 };
   const grids = [{ ...gridBox, top: legendH, height: mainH }];
   grids.push({ ...gridBox, top: legendH + mainH + gridGap, height: volH });
@@ -13035,8 +13200,8 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
     legend: {
       type: "scroll", data: legendData, top: 4, left: 46, right: 8, itemWidth: 12, itemGap: 8,
       textStyle: { fontSize: 12, color: "#dce7ff" }, pageIconSize: 11, pageTextStyle: { color: "#a6badf" },
-      // 手機預設只畫 MA20／MA60：四條均線疊在 K 棒上太滿，點圖例可以再開；
-      // 開過之後切週期／籌碼不重設（klineLegendSelected）
+      // 均線預設全開（2026-10-09 起；以前手機只開 MA20／MA60），點圖例可以關；
+      // 關過之後切週期／籌碼不重設（klineLegendSelected）
       selected: klineLegendSelected || defaultKLineLegendSelected(mobile),
     },
     graphic,
