@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="297">
+  <meta name="app-version" content="298">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=297" rel="stylesheet">
+  <link href="watchlist.css?v=298" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2957,7 +2957,7 @@ function trialHintHtml(kind) {
   if (!trialCovers(kind)) return "";
   const t = planState.trial;
   const name = t.plan_name || planNameOf(t.plan_code);
-  return `<span class="plan-trial-hint">或先<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('trial')">免費體驗 ${t.trading_days} 個交易日 →</button><span class="plan-trial-hint-sub">${escapeHtml(name)}完整功能、不需付款資料、每個帳號一次</span></span>`;
+  return `<span class="plan-trial-hint">或先<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('trial')">免費體驗 ${t.trading_days} 個交易日 →</button><span class="plan-trial-hint-sub">${escapeHtml(name)}完整功能、<b class="plan-safe">不需付款資料、不會扣款</b>、每個帳號一次</span></span>`;
 }
 
 // 功能型（不是數量型）的提示：統計頁、盤中雷達持續更新、混和訊號。
@@ -3238,7 +3238,7 @@ function subscriptionStatusHtml() {
   if (s.provider === "trial") {
     const left = tradingDaysLeftFrom(s.current_period_end);
     const freeName = freePlanName();
-    return `<div class="plan-status">${ICON_GIFT}免費體驗中，<b>${trialLastDayLabel(s.current_period_end)}</b> 整天都還是完整功能${left !== null ? `（還剩 ${left} 個交易日）` : ""}，隔天凌晨 0 點過後自動回到${escapeHtml(freeName)}，不會扣款。想繼續用不中斷，隨時可以升級。</div>`;
+    return `<div class="plan-status">${ICON_GIFT}免費體驗中，<b>${trialLastDayLabel(s.current_period_end)}</b> 整天都還是完整功能${left !== null ? `（還剩 ${left} 個交易日）` : ""}，<b class="plan-safe">隔天凌晨 0 點過後自動回到${escapeHtml(freeName)}，不會扣款</b>。想繼續用不中斷，隨時可以升級。</div>`;
   }
   if (s.provider === "manual") {
     return `<div class="plan-status">由管理員指派${s.note ? `（${escapeHtml(s.note)}）` : ""}，有效至 <b>${until}</b>。</div>`;
@@ -3282,9 +3282,9 @@ function renderPlanModal(focus) {
     // 關掉，名字要指向「最便宜而且有這一項」的那個方案，而不是永遠寫著旗艦版。
     mixed_signals: `${ICON_MIX}一條進階訊號放多個條件（混和訊號）需要${escapeHtml(cheapestPlanNameWith("mixed_signals"))}。`,
     kline_enabled: `${ICON_CANDLE}K 線圖需要付費方案。`,
-    trial:         `${ICON_GIFT}免費體驗不需要付款資料，到期自動回到${escapeHtml(freePlanName())}。`,
+    trial:         `${ICON_GIFT}<b class="plan-safe">免費體驗不需要付款資料，到期自動回到${escapeHtml(freePlanName())}、不會扣款</b>。`,
     // 從通知匣的體驗倒數提醒過來：到期前後都說得通，不必判斷現在過期了沒
-    trial_notice:  `${ICON_GIFT}免費體驗到期後會自動回到${escapeHtml(freePlanName())}，設定會保留；要繼續用完整功能可以在這裡升級。`,
+    trial_notice:  `${ICON_GIFT}<b class="plan-safe">免費體驗到期後會自動回到${escapeHtml(freePlanName())}，不會扣款</b>，設定會保留；要繼續用完整功能可以在這裡升級。`,
     deeplink:    pitch || "從官網過來的：先看看目前方案的用量，需要再升級。",
     paid:        "付款結果以綠界回呼為準。若方案尚未更新，請稍後再開啟這個面板確認。",
     pay_failed:  "綠界回報這次付款未成功，沒有扣款也沒有開通。可以重新選擇方案再試一次。",
@@ -8721,7 +8721,7 @@ function trialLockedLineHtml(feature) {
   if (!trialCovers(feature)) return "";
   const t = planState.trial;
   const name = t.plan_name || planNameOf(t.plan_code);
-  return `<div class="plan-locked-trial">還沒體驗過：可先<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('trial')">免費體驗 ${t.trading_days} 個交易日 →</button><div class="plan-trial-hint-sub">${escapeHtml(name)}完整功能、不需付款資料、到期自動回到${escapeHtml(freePlanName())}</div></div>`;
+  return `<div class="plan-locked-trial">還沒體驗過：可先<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('trial')">免費體驗 ${t.trading_days} 個交易日 →</button><div class="plan-trial-hint-sub">${escapeHtml(name)}完整功能、<b class="plan-safe">不需付款資料、到期自動回到${escapeHtml(freePlanName())}</b></div></div>`;
 }
 
 function renderKLineLocked() {
@@ -8789,7 +8789,7 @@ function trialOfferHtml(highlight) {
   const until = t.offer_until ? `<span class="plan-trial-until">優惠至 ${escapeHtml(t.offer_until)}</span>` : "";
   return `<div class="plan-trial${highlight ? " is-focus" : ""}" id="plan-trial">
     <div class="plan-trial-title">${ICON_GIFT}免費體驗 ${t.trading_days} 個交易日的${escapeHtml(name)}</div>
-    <div class="plan-trial-text">體驗期間就是完整的${escapeHtml(name)}，到 ${trialLastDayLabel(t.would_end)} 這天結束為止（隔天凌晨 0 點過後回到${escapeHtml(planState.plan.name)}）。不需要付款資料、不會扣款，每個帳號一次。</div>
+    <div class="plan-trial-text">體驗期間就是完整的${escapeHtml(name)}，到 ${trialLastDayLabel(t.would_end)} 這天結束為止。<b class="plan-safe">隔天凌晨 0 點過後自動回到${escapeHtml(planState.plan.name)}，不需要付款資料、不會扣款</b>，每個帳號一次。</div>
     ${rows}
     <button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center" id="plan-trial-go" onclick="claimTrial()">開始免費體驗</button>
     ${until}
@@ -8810,7 +8810,7 @@ async function claimTrial() {
       tone: "ok", title: "體驗已開始",
       lines: [
         `${planNameOf(r.plan_code)}的功能已全部開放，到 ${trialLastDayLabel(r.period_end)} 這天結束為止（${r.trading_days} 個交易日）。`,
-        `隔天凌晨 0 點過後自動回到${freePlanName()}，不會扣款；想繼續用，隨時可以在這裡升級。`,
+        { html: `<b class="plan-safe">隔天凌晨 0 點過後自動回到${escapeHtml(freePlanName())}，不會扣款</b>；想繼續用，隨時可以在這裡升級。` },
       ],
     });
   } catch (e) {

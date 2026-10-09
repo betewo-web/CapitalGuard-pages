@@ -4095,6 +4095,13 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .plan-status { margin-top: 0.7rem; font-size: 0.78rem; color: var(--text-1); line-height: 1.5; }
 .plan-status b { color: var(--text-0); }
 .plan-status-warn { color: #ffd9b3; }
+/* 「到期自動回到免費版、不會扣款」這類保證：全站同一個橘色強調（橘是唯一強調色）。
+   顏色只做強調、意義仍留在文字裡，所以同時加粗——純文字轉述（推播、LINE、截圖轉述）
+   讀到的還是同一句話。第二個選擇器是為了蓋過 .plan-status b 的 --text-0：同權重靠
+   檔案順序贏不穩，寫明一階才可靠（2026-09-22 字級改不動就是這個坑）。 */
+.plan-safe,
+.plan-status b.plan-safe,
+.plan-trial-text b.plan-safe { color: var(--sig-orange); font-weight: 700; }
 
 .plan-sec-title {
 	font-size: 0.78rem;
