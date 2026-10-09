@@ -3902,6 +3902,8 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	line-height: 1;
 }
 .bottom-nav-item.is-locked .bn-icon { position: relative; }
+/* 雷達那一顆裡的「回饋」鈕：接在來源籤旁邊 */
+.rtl-text .rx-chip { margin: 5px 0 0 6px; vertical-align: middle; }
 /* 盤中雷達不持續更新（免費版）：狀態字，不是警告 */
 .rtl-live-off { color: var(--text-muted); font-size: 0.72rem; }
 /* 「再加一個條件」被方案鎖住時：仍可按（按了給升級提示），但看得出是鎖著的 */

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="305">
+  <meta name="app-version" content="306">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=305" rel="stylesheet">
+  <link href="watchlist.css?v=306" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5042,6 +5042,7 @@ function switchTab(tab, silent = false) {
   // 否則會進到一個什麼都沒有的空殼頁。
   if (tab === "friends" && !frEnabled) tab = "home";
   const changed = currentTab !== tab;
+  if (tab !== "inbox") _rxOpenRow = null;     // 離開通知匣：展開的貼圖選單關掉（REACTIONS.md）
   // 離開通知頁：還在復原寬限內的那一則就地結案（復原條跟著畫面走，看不到了不能讓它吊著）
   if (changed && currentTab === "inbox") _inboxCommitDelete();
   if (changed && currentTab) trackActivity("tab_view", { tab });   // 開頁第一格算 app_open，不重複計
@@ -9470,6 +9471,7 @@ function openStockCard(sid, opts = {}) {
   if (!sidKey) return;
   const date = opts.date;
   _rtlScrollKey = "";     // 每次打開字卡，時間軸都從最右邊（現在）開始——上次捲到哪裡不算數
+  _rxRadarOpenEid = null; // 貼圖選單每次開卡都是收著的
   radarTimelineSid = sidKey;
   radarTimelineShare = opts.share || null;
   _refreshQuotesIfStale();      // 在別的分頁待了一陣子才開字卡：報價可能是幾分鐘前的
@@ -10089,8 +10091,8 @@ function radarStoryListHtml(story, opts = {}) {
       <div class="rtl-text">${share}
         <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
         ${text ? `<div class="rtl-desc">${escapeHtml(text)}</div>` : ""}
-        <span class="rtl-src rtl-src-${e.src}">${RTL_SRC_LABEL[e.src] || ""}</span>
-      </div></div>${rx ? `<div class="rtl-rx">${rxStripHtml(rx)}</div>` : ""}`;
+        <span class="rtl-src rtl-src-${e.src}">${RTL_SRC_LABEL[e.src] || ""}</span>${rx ? rxRadarChipHtml(rx, rtlEntryId(e)) : ""}
+      </div></div>${rx && _rxRadarOpenEid === rtlEntryId(e) ? `<div class="rtl-rx">${rxStripHtml(rx)}</div>` : ""}`;
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
   if (!html) {
@@ -13333,6 +13335,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
 
 document.getElementById("radarTimelineModal").addEventListener("hidden.bs.modal", () => {
   radarTimelineSid = null;
+  _rxRadarOpenEid = null;     // 關掉字卡：展開的貼圖選單也關（REACTIONS.md）
   stockCardTab = "radar";
   detachKLineTouchInteraction();
   if (klineChart) {
@@ -14606,21 +14609,46 @@ function rxStripHtml(row) {
 
 // 通知匣列上的「回饋」鈕（Howard 2026-10-09 晚：按下去不跳雷達，直接在列底下展開貼圖讓人點）。
 // 還沒給＝獎盃＋「回饋」；給過＝那個貼圖＋它的名字。
-let _rxOpenRow = null;   // 通知匣裡展開貼圖列的那一則（重畫也要留著）
-function rxInboxChipHtml(row) {
+// 選單只在按了鈕之後出現，選完就關、離開畫面也關（Howard 2026-10-09 晚第二輪）：
+// 兩個狀態各記一個，rxRepaint()（選完）、switchTab()（離開通知匣）、字卡關掉時清掉。
+let _rxOpenRow = null;        // 通知匣裡展開貼圖列的那一則（重畫也要留著）
+let _rxRadarOpenEid = null;   // 盤中雷達裡展開貼圖列的那一顆（rtlEntryId）
+// where＝"inline"（通知匣那一列）或 "radar"（雷達那一顆）；要開哪一個放在 data-*，handler 本身沒有任何插值
+// （test_frontend_escaping：onclick 裡每個 ${…} 都得過 jsAttr，乾脆不插）
+function _rxChipHtml(row, open, where, arg) {
   if (!rxReady() || String(row.source || "") === "reaction" || !rxOriginOf(row).shared) return "";
   const mine = String(row.my_reaction || "");
-  const open = _rxOpenRow === String(row.id);
   const inner = mine ? `${rxGlyph(mine, 18)}<span>${RX_LABEL[mine] || mine}</span>` : `${ICON_RX}<span>回饋</span>`;
   const tip = mine ? `你給了「${RX_LABEL[mine] || mine}」，點開可以換或收回` : "給分享的人一個回饋貼圖";
   return `<button type="button" class="rx-chip${mine ? " is-on" : ""}${open ? " is-open" : ""}" aria-expanded="${open}"`
+    + ` data-rx-open="${escapeHtml(where)}" data-rx-arg="${escapeHtml(String(arg))}"`
     + ` title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}"`
-    + ` onclick="event.stopPropagation(); rxToggleInline('${jsAttr(String(row.id))}')" onkeydown="event.stopPropagation()">${inner}</button>`;
+    + ` onclick="event.stopPropagation(); rxChipTap(this)" onkeydown="event.stopPropagation()">${inner}</button>`;
+}
+
+function rxChipTap(el) {
+  const arg = el.dataset.rxArg || "";
+  if (el.dataset.rxOpen === "radar") rxToggleRadar(arg);
+  else rxToggleInline(arg);
+}
+
+function rxInboxChipHtml(row) {
+  return _rxChipHtml(row, _rxOpenRow === String(row.id), "inline", String(row.id));
 }
 
 function rxToggleInline(rowId) {
   _rxOpenRow = _rxOpenRow === String(rowId) ? null : String(rowId);
   renderInbox();
+}
+
+// 盤中雷達那一顆：同一顆鈕，按了才把那一排畫在那一顆底下
+function rxRadarChipHtml(row, eid) {
+  return _rxChipHtml(row, _rxRadarOpenEid === String(eid), "radar", String(eid));
+}
+
+function rxToggleRadar(eid) {
+  _rxRadarOpenEid = _rxRadarOpenEid === String(eid) ? null : String(eid);
+  refreshRadarTimelineIfOpen();
 }
 
 // 展開的那一列：貼圖列放在那一則底下、占整個寬度（不在滑動的那一塊裡，往左滑不會把它帶走）
@@ -14676,12 +14704,12 @@ async function _rxWaitWarehouseRow(pending) {
   return null;
 }
 
-// 畫面上所有掛著這一則貼圖列的地方一起重畫（詳情卡、雷達），列上的小籤跟著
+// 按了貼圖（或失敗還原）之後：選單關掉、兩個畫面（通知匣、雷達）重畫，鈕上顯示選了哪一個
 function rxRepaint(row) {
-  const html = rxStripHtml(row);
-  document.querySelectorAll(`.rx-strip[data-rx-row="${String(row.id).replace(/["\\]/g, "")}"]`)
-    .forEach(el => { el.outerHTML = html; });
+  _rxOpenRow = null;
+  _rxRadarOpenEid = null;
   if (currentTab === "inbox") renderInbox();
+  refreshRadarTimelineIfOpen();
 }
 
 // 盤中雷達：故事列裡哪幾顆對得到好友分享來的那一則通知 → {rtlEntryId: row}。
