@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="298">
+  <meta name="app-version" content="300">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -382,6 +382,9 @@ const ACTION_LABELS = {
   inbox_read_all:    "全部標為已讀",
   inbox_delete:      "刪除單則通知",
   inbox_delete_undo: "復原刪除的通知",
+  reaction_give:     "給回饋貼圖",
+  reaction_clear:    "收回回饋貼圖",
+  reaction_summary_open: "看我收到的回饋",
   report_open:       "開每日報告",
   plan_open:         "開方案面板",
   plan_deeplink:     "官網深連結開方案",

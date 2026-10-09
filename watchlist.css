@@ -5009,3 +5009,81 @@ select.fr-input { width: 100%; }
 @media (prefers-reduced-motion: reduce) {
 	.wl-row.is-flash { animation: none; box-shadow: 0 0 0 2px var(--accent); }
 }
+
+/* ── 回饋貼圖（REACTIONS.md，2026-10-09）─────────────────────────────────────
+   顏色只做強調：橘是唯一強調色（已選的貼圖、收到的計數），未選的貼圖跟著文字色走。 */
+/* 帳號旁的籤：對話框＋數字。user chip 是一顆 button、裡面不能再放 button，所以它是 chip 的兄弟 */
+.rx-pill {
+	display: inline-flex; align-items: center; gap: 4px; position: relative;
+	font: inherit; font-size: 0.78rem; line-height: 1.2; cursor: pointer;
+	padding: 0.22rem 0.55rem; border-radius: 999px;
+	color: var(--sig-orange); background: rgba(255, 159, 67, 0.14); border: 1px solid rgba(255, 159, 67, 0.35);
+}
+.rx-pill:hover { background: rgba(255, 159, 67, 0.22); }
+.rx-pill .ic { width: 14px; height: 14px; }
+.rx-dot {
+	position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%;
+	background: var(--sig-orange); box-shadow: 0 0 0 2px var(--bg-0);
+}
+/* 好友名字旁的計數（好友看得到我的總數） */
+.rx-count {
+	display: inline-flex; align-items: center; gap: 3px; margin-left: 8px;
+	font-size: 12px; color: var(--sig-orange); vertical-align: middle; white-space: nowrap;
+}
+.rx-count .ic { width: 13px; height: 13px; }
+/* 通知匣列上的小籤：還沒給＝「回饋」字樣；給過＝那個貼圖 */
+.rx-chip {
+	display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text-muted);
+	border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; white-space: nowrap;
+}
+.rx-chip .ic { width: 12px; height: 12px; }
+.rx-chip.is-on { color: var(--sig-orange); border-color: rgba(255, 159, 67, 0.45); background: rgba(255, 159, 67, 0.12); padding: 2px 6px; }
+.rx-chip.is-on .ic { width: 14px; height: 14px; }
+/* 貼圖列：3×2 格。320px 寬減兩側留白＝288，三格各 96px，「淡淡的哀傷」放得下；一排六格只有 48px 會折行。
+   雷達那一列的分享鈕是 float:right，所以 clear:both */
+.rx-strip {
+	margin-top: 0.9rem; clear: both;
+	border: 1px solid var(--border); border-radius: 12px; padding: 0.7rem 0.75rem 0.6rem; background: var(--surface);
+}
+.rx-strip-title { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; font-weight: 700; color: var(--text-0); margin-bottom: 0.55rem; }
+.rx-strip-title .ic { width: 15px; height: 15px; color: var(--sig-orange); flex: 0 0 auto; }
+.rx-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.rx-btn {
+	display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+	min-height: 60px; padding: 6px 2px; border-radius: 10px; cursor: pointer;
+	font: inherit; font-size: 12px; line-height: 1.2; color: var(--text-1);
+	background: transparent; border: 1px solid var(--border); white-space: nowrap;
+}
+.rx-btn .ic { width: 26px; height: 26px; }
+.rx-btn:hover { border-color: rgba(146, 146, 163, 0.5); color: var(--text-0); }
+.rx-btn.is-on { color: var(--sig-orange); border-color: var(--sig-orange); background: rgba(255, 159, 67, 0.12); font-weight: 700; }
+.rx-strip-hint { margin-top: 0.5rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
+/* 分享者收到的：圖＋名字＋貼圖名 */
+.rx-recv-head { font-weight: 700; margin-bottom: 0.4rem; line-height: 1.5; }
+.rx-recv-list { list-style: none; margin: 0; padding: 0; }
+.rx-recv-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--border); }
+.rx-recv-list li:first-child { border-top: 0; }
+.rx-recv-glyph {
+	width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto;
+	color: var(--sig-orange); background: rgba(255, 159, 67, 0.12);
+}
+.rx-recv-glyph .ic { width: 22px; height: 22px; }
+.rx-recv-label { color: var(--text-1); margin-left: 6px; }
+.rx-recv-more { color: var(--text-muted); font-size: 0.85rem; }
+/* 我收到的回饋：總數、六格、最近 */
+.rx-sum-total { font-size: 0.95rem; margin-bottom: 0.6rem; }
+.rx-sum-total b { color: var(--sig-orange); font-size: 1.3rem; }
+.rx-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 1rem; }
+.rx-tile {
+	display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px;
+	border: 1px solid var(--border); border-radius: 10px; color: var(--sig-orange); font-size: 12px;
+}
+.rx-tile .ic { width: 24px; height: 24px; }
+.rx-tile b { font-size: 1.05rem; color: var(--text-0); }
+.rx-tile.is-zero { color: var(--text-muted); }
+.rx-tile.is-zero b { color: var(--text-muted); font-weight: 500; }
+.rx-tile-label { color: var(--text-1); white-space: nowrap; }
+.rx-recent li { cursor: pointer; border-radius: 10px; }
+.rx-recent li:hover { background: var(--surface); }
+#fr-btn-rx { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+#fr-btn-rx b { color: var(--sig-orange); }

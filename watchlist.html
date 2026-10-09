@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="298">
+  <meta name="app-version" content="300">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=298" rel="stylesheet">
+  <link href="watchlist.css?v=300" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -164,6 +164,10 @@
       <!-- 使用者 chip 兼方案入口：點開「方案與用量」面板（BILLING.md） -->
       <button id="nav-user" class="user-chip" type="button" onclick="openPlanModal()"
               title="方案與用量" aria-label="方案與用量"></button>
+      <!-- 回饋貼圖（REACTIONS.md）：收到的總數。chip 本身是一顆 button、裡面不能再放 button，
+           而且它的點擊是「方案與用量」——所以是它的兄弟。沒收到過、或後端還沒上線時不出現 -->
+      <button id="nav-rx" class="rx-pill" type="button" style="display:none" onclick="rxOpenSummary()"
+              title="我收到的回饋貼圖" aria-label="我收到的回饋貼圖"></button>
       <!-- 管理儀表板（ADMIN_DASHBOARD.md）：users.is_admin 才顯示；權限在伺服器端 admin_stats() 判定 -->
       <a id="nav-admin" class="btn btn-sm btn-outline-warning" href="admin.html" style="display:none"
          title="管理儀表板" aria-label="管理儀表板"><i data-icon="chart"></i><span class="d-none d-sm-inline ms-1">儀表板</span></a>
@@ -647,6 +651,8 @@
         <div class="fr-pane" id="fr-share-out">
           <div class="fr-toolbar">
             <button class="btn btn-sm btn-primary" id="fr-btn-new-share">新增</button>
+            <!-- 回饋貼圖（REACTIONS.md）：我收到的回饋。帳號旁的籤收到 0 個時不出現，這裡是一定找得到的入口 -->
+            <button class="btn btn-sm btn-outline-light fr-quiet" id="fr-btn-rx" type="button" style="display:none" onclick="rxOpenSummary()"></button>
           </div>
           <div class="panel-card fr-card">
             <ul class="fr-list" id="fr-shares-out"></ul>
@@ -1312,8 +1318,12 @@
         </div>
         <div id="alert-history-detail-body" class="text-light" style="white-space:pre-wrap;line-height:1.6;font-size:1rem"></div>
         <div id="alert-history-why" style="display:none"></div>
+        <!-- 回饋貼圖（REACTIONS.md）：分享來的那一則在這裡給貼圖；分享者收到的那一則在這裡看是誰給了什麼 -->
+        <div id="alert-history-rx" style="display:none"></div>
       </div>
       <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-rx-radar-btn" style="display:none" onclick="rxOpenRadarFromDetail()">查看盤中雷達</button>
+        <button type="button" class="btn btn-sm btn-outline-light" id="alert-history-rx-summary-btn" style="display:none" onclick="rxOpenSummary()">我收到的回饋</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-view-stock-btn" style="display:none" onclick="openStockFromDetail()">📈 查看股票</button>
         <button type="button" class="btn btn-sm btn-outline-light" id="alert-history-settings-btn" style="display:none" onclick="openSettingsFromDetail()">調整通知設定</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-report-btn" style="display:none" onclick="openDailyReportFromHistory()">開啟分析報告</button>
@@ -1323,6 +1333,20 @@
         <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteInboxFromDetail()">刪除這則</button>
         <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">關閉</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 回饋貼圖（REACTIONS.md）：我收到的回饋——總數、六種各幾次、最近是誰對哪一則。
+     點帳號旁的籤、分享分頁的那一顆鈕、或「○○ 給你的訊號回饋」那一則的按鈕進來 -->
+<div class="modal fade" id="rxSummaryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">我收到的回饋</h5>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3" id="rx-summary-body"></div>
     </div>
   </div>
 </div>
@@ -5661,6 +5685,10 @@ const SIGNAL_ICON_ART = {
     + '<g stroke="#fff" stroke-width="2.4" stroke-linecap="round" opacity=".8">'
     + '<line x1="18.5" y1="18" x2="29.5" y2="18"/><line x1="18.5" y1="24" x2="29.5" y2="24"/>'
     + '<line x1="18.5" y1="30" x2="25" y2="30"/></g>' },
+  // 回饋貼圖（REACTIONS.md）：對話框——「○○ 給你的訊號回饋」那一類
+  reaction: { inner:
+      '<path d="M11 13h26a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H24l-8 6v-6h-5a3 3 0 0 1-3-3V16a3 3 0 0 1 3-3z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>'
+    + '<line x1="18" y1="22" x2="30" y2="22" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>' },
   // 其他來源：同心圓（一則通知）
   generic: { inner:
       '<circle cx="24" cy="24" r="10" fill="none" stroke="#fff" stroke-width="3"/>'
@@ -5674,6 +5702,7 @@ function iconArtKeyOf(row) {
   if (SIGNAL_ICON_ART[kind]) return kind;
   const src = String(row.source || "");
   if (src === "rule") return "rule";
+  if (src === "reaction") return "reaction";
   if (src === "post_market" || src === "postmarket") return "post_market";
   if (src.startsWith("daily_report")) return "daily_report";
   return "generic";
@@ -7598,6 +7627,7 @@ function updateInboxBadge() {
   }
   _setAppBadge(n);   // 桌面／主畫面的 PWA 圖示未讀數
   _syncInboxUnreadChip(n);
+  rxRenderBadge();   // 帳號旁那顆籤的未讀點看的是通知匣裡的「回饋」列
 }
 
 // 「未讀」篩選籤帶數字（2026-10-08）：底部導覽的徽章在通知分頁上是看不到自己的
@@ -7702,6 +7732,7 @@ function renderInbox() {
         </div>
         <div class="ib-side">
           <span class="ib-time">${fmtTime(r.sent_at, dayLabelOf(r.sent_at) !== "今天")}</span>
+          ${rxInboxChipHtml(r)}
           <button type="button" class="ib-del" title="刪除這則通知" aria-label="刪除通知：${title}"
                   onclick="event.stopPropagation();deleteInboxRow('${jsAttr(String(r.id))}')"
                   onkeydown="event.stopPropagation()">${ICON_TRASH}</button>
@@ -7748,7 +7779,7 @@ const INBOX_RADAR_SOURCES = ["monitor", "rule"];
 // 內文那句「點這則通知查看方案」在這裡就變成死路（2026-10-03）。
 const INBOX_PLAN_SOURCES = ["trial"];
 // 來源徽章平常直接印 source（monitor／rule…）；新來源給個看得懂的字
-const INBOX_SOURCE_LABEL = { trial: "方案", share: "分享" };
+const INBOX_SOURCE_LABEL = { trial: "方案", share: "分享", reaction: "回饋" };
 
 // 這一則能不能在盤中雷達上指出來。**找得到對應的那一顆才回 true**——
 // 找不到就照舊開通知詳情，不要把人丟到一張寫著「沒有這天的紀錄」的空卡片上。
@@ -7809,6 +7840,17 @@ function openInboxDetail(rowId) {
   whyEl.innerHTML = whyHtml;
   whyEl.style.display = whyHtml ? "" : "none";
 
+  // 回饋貼圖（REACTIONS.md）：好友分享來的那一則給一排貼圖；分享者收到的「○○ 給你的訊號回饋」
+  // 畫成圖＋字（內文那一段就收起來，不然同一件事寫兩次），並給「查看盤中雷達」「我收到的回饋」兩條出口。
+  const isReaction = source === "reaction";
+  const rxEl = document.getElementById("alert-history-rx");
+  const rxHtml = isReaction ? rxReceivedHtml(row) : rxStripHtml(row);
+  rxEl.innerHTML = rxHtml;
+  rxEl.style.display = rxHtml ? "" : "none";
+  document.getElementById("alert-history-detail-body").style.display = isReaction ? "none" : "";
+  document.getElementById("alert-history-rx-radar-btn").style.display = isReaction && rxKeyParts(row) ? "inline-flex" : "none";
+  document.getElementById("alert-history-rx-summary-btn").style.display = isReaction && rxReady() ? "inline-flex" : "none";
+
   const sid = String(row.stock_id || "").trim();
   const wl = sid ? watchlistRows.find(w => String(w.stock_id).trim() === sid) : null;
   document.getElementById("alert-history-view-stock-btn").style.display = sid ? "inline-flex" : "none";
@@ -7860,7 +7902,10 @@ function buildWhyHtml(row) {
   // 好友分享的那一則講的是分享者的設定（內文最後一行會註明「來自 ○○ 的分享」）。同一檔
   // 自己的自選股與好友的分享可以並存，兩邊的開關與目標價各自生效，所以不能拿自己那一份
   // 去解釋這一則——目標價最明顯：分享者設 55、自己設 60，照自己的寫會變成「設定的上漲價格：60」。
-  const fromShare = /\n來自 .+ 的分享$/.test(String(row.body || ""));
+  // 先看 share_ids（migrate_reactions.sql 之後 monitor 寫的欄位），再退回內文那一行。那一行後面
+  // 可能接著「・點開可回饋貼圖」（REACTIONS.md），所以不釘在行尾。
+  const fromShare = (Array.isArray(row.share_ids) && row.share_ids.length > 0)
+    || /\n來自 .+ 的分享/.test(String(row.body || ""));
   const lines = [fromShare
     ? `這一則來自好友分享的 <b>${escapeHtml(name)} ${escapeHtml(sid)}</b> 訊號設定（內文最後一行是分享的人）`
     : `你已將 <b>${escapeHtml(name)} ${escapeHtml(sid)}</b> 加入自選股`];
@@ -9631,7 +9676,9 @@ function renderRadarTimeline(sid) {
   // 那天的參考價位）。在這裡原封不動存一份，而不是等按下去再重算一次——重算就是
   // 第二份真相，而分享出去的圖片沒人會回來核對（unknown-treated-as-known 那一類）。
   _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending, locked: lockedRow };
-  document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, { past, covered });
+  const storyOpts = { past, covered };
+  storyOpts.rx = rxRadarRowsByEid(story, sid, date);   // 回饋貼圖：分享來的那幾顆掛一排貼圖（REACTIONS.md）
+  document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, storyOpts);
   _paintRtlTarget();   // 重畫換掉了節點：正在閃的那一則要接著閃完
 }
 
@@ -9960,6 +10007,7 @@ function radarStoryListHtml(story, opts = {}) {
         <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
         ${e.text ? `<div class="rtl-desc">${escapeHtml(e.text)}</div>` : ""}
         <span class="rtl-src rtl-src-${e.src}">${RTL_SRC_LABEL[e.src] || ""}</span>
+        ${opts.rx && opts.rx[rtlEntryId(e)] ? rxStripHtml(opts.rx[rtlEntryId(e)]) : ""}
       </div></div>`;
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
@@ -10445,13 +10493,18 @@ async function refreshRules() {
         <button type="button" class="btn btn-outline-info rule-autopick-btn" onclick="autoPickRules('modal', this)">讓系統幫我選</button></div>
       <div class="rule-tpl-list">${ruleTemplateChipsHtml(tpls, "modal")}</div>` : "";
 
+  // 分享中的那幾檔：進階訊號的改動也會自動同步出去（2026-10-09）。這裡不分範圍講——
+  // 「全部自選股」的規則會進每一則分享的快照，而額度排名是整個帳號一起算的，
+  // 所以刪一條就可能動到不只一檔。
+  const shareBar = frShareRulesBar();
+
   // 個股範圍的說明列：清單是空的時候也要出現，否則從某一檔進來、畫面上
   // 卻只有「尚無進階訊號」＋一排範本，看不出按下去加的是誰的設定
-  const filterHtml = rulesStockFilter ? `
+  const filterHtml = shareBar + (rulesStockFilter ? `
       <div class="rule-filter-bar">
         <span>只列會套用到 <b>${escapeHtml(rulesStockFilter)} ${escapeHtml(stockNameOf(rulesStockFilter))}</b> 的訊號（含「全部自選股」的）。在這裡新增或一鍵加入的訊號，只會套用這一檔。</span>
         <button type="button" class="hs-link" onclick="rulesStockFilter = null; showRulesPane('list')">看全部</button>
-      </div>` : "";
+      </div>` : "");
 
   if (!alertRules.length) {
     listEl.innerHTML = filterHtml + `<div class="rules-empty">
@@ -11457,11 +11510,16 @@ function openAlertSettings(scope) {
   }
   const hintEl = document.getElementById("alert-scope-hint");
   if (hintEl) {
-    hintEl.textContent = !useAll
+    const base = !useAll
       ? "只影響這一檔。要換一檔或改選範圍，點左上角的返回。"
       : isEveryStock
         ? `按「完成」時，這一頁動過的項目會套用到全部 ${watchlistRows.length} 檔（沒動過的維持原樣）。`
         : `按「完成」時，這一頁動過的項目會套用到你勾選的 ${picked.length} 檔（沒動過的維持原樣）。`;
+    // 分享中的那幾檔：改動會自動同步給對象，所以要在他改之前就講（2026-10-09）
+    const share = frAutoSyncHint(useAll
+      ? picked.map(r => r.stock_id)
+      : [row.stock_id]);
+    hintEl.textContent = share ? `${base}${share}` : base;
   }
   // 自訂價位是「這一檔的價」，全部股票時整組不出現
   const priceGroup = document.getElementById("alert-price-group");
@@ -11640,7 +11698,13 @@ async function saveAlertDraft() {
     // 這次有把任何一項基礎訊號「打開」也算新增訊號：沒開推播的話接著問一次
     const turnedOn = ALERT_FIELDS.some(f => patch[f] === true);
     alertDraft = {};
-    msgEl.innerHTML = `<span class="alert-msg-ok">已儲存（${targets.length} 檔）</span>`;
+    // 分享中的那幾檔已經由 DB 的 trigger 同步出去了（migrate_share_autosync.sql）；
+    // 這裡只是把它說出來，並讓分享分頁下次打開時看到新的版本
+    const shared = targets.map(r => r.stock_id).filter(sid => frLiveShareOf(sid)).length;
+    if (shared) frReload().catch(() => {});
+    msgEl.innerHTML = `<span class="alert-msg-ok">已儲存（${targets.length} 檔）`
+      + (shared ? `，${shared === targets.length && targets.length === 1 ? "已同步給好友" : `其中 ${shared} 檔已同步給好友`}` : "")
+      + "</span>";
     renderCurrentTab();
     if (turnedOn) queuePushPromptAfterSignal();
     setTimeout(() => bootstrap.Modal.getInstance(document.getElementById("alertSettingsModal"))?.hide(), 500);
@@ -13524,8 +13588,11 @@ function _pushedAlertToInboxRow(a) {
     id: "pending:" + a.key, event_key: a.key, pending: true,
     title: String(a.title || ""), body: String(a.body || ""),
     stock_id: a.sid ? String(a.sid) : null, severity: a.sev ? String(a.sev) : null,
-    source: a.src === "rule" ? "rule" : "monitor",
+    // 分享類與回饋類的推播（share_push.py）也會進來：來源留著，點開才走得到該去的地方
+    source: ["rule", "share", "reaction"].includes(a.src) ? a.src : "monitor",
     sent_at: a.at ? String(a.at) : new Date().toISOString(), read_at: null,
+    // 回饋貼圖（REACTIONS.md）：這一則來自哪幾則分享。倉庫那列還沒到就先畫得出貼圖列
+    share_ids: Array.isArray(a.shares) && a.shares.length ? a.shares.map(String) : null,
   };
 }
 
@@ -14212,6 +14279,10 @@ const FR_ERRORS = {
   empty_payload:      "這一檔目前沒有開任何訊號，分享出去不會通知任何事",
   target_not_found:   "這一位已經不是這則分享的對象",
   optout_not_found:   "沒有這一筆「不再接收」",
+  // 回饋貼圖（REACTIONS.md）
+  not_yours:          "這一則通知不是你的",
+  not_share_origin:   "這一則不是好友分享來的，沒有人可以收貼圖",
+  bad_kind:           "沒有這種貼圖",
 };
 
 const FR_FLAG_LABELS = {
@@ -14228,6 +14299,258 @@ const FR_FLAG_LABELS = {
 const FR_RECIPIENT_STATUS = {
   pending: "等待回應", held: "等待回應", accepted: "已接受", declined: "未接受", removed: "已結束",
 };
+
+// ── 回饋貼圖（REACTIONS.md，Howard 2026-10-09）──────────────────────────────────────
+// 好友分享來的訊號通知可以回一個貼圖給分享者。鍵是「收件人的那一則通知」（alert_history.id）：
+// 一則對一位分享者一個貼圖，再按別的＝換掉、再按同一個＝收回。分享者那一側由資料庫的 trigger
+// 寫通知（source='reaction'）、reporter 推播；總量從 share_state().reactions 來（App 開啟時就有，
+// 不多一個請求）。代碼與順序要與 migrate_reactions.sql 的 reaction_kinds() 相同（test_reactions_contract 釘住）。
+const RX_KINDS = [
+  { code: "awesome",        label: "厲害" },
+  { code: "sharp_eye",      label: "有眼光" },
+  { code: "bittersweet",    label: "淡淡的哀傷" },
+  { code: "thanks",         label: "感謝提醒" },
+  { code: "it_happened",    label: "竟然發生了" },
+  { code: "watch_together", label: "一起觀察" },
+];
+// 線條風格、與全站圖示同一套 _svg()（16 格、1.5 描邊）。只有兩種狀態：未選跟著文字色、已選橘色
+// （橘是唯一強調色；紅綠只給漲跌、紫只做品牌）。不用 emoji：各平台長相不同，而且畫面上其他圖示都是線條。
+const RX_ART = {
+  awesome:        '<path d="M8 2.9l1.5 3.1 3.4.5-2.5 2.4.6 3.4L8 10.7l-3 1.6.6-3.4-2.5-2.4 3.4-.5z"/><path d="M13.4 1.6v1.6M12.6 2.4h1.6M2.4 12.2v1.4M1.7 12.9h1.4"/>',
+  sharp_eye:      '<path d="M1.8 8s2.3-4.1 6.2-4.1S14.2 8 14.2 8s-2.3 4.1-6.2 4.1S1.8 8 1.8 8z"/><circle cx="8" cy="8" r="2.2"/><circle cx="9" cy="7.1" r=".55" fill="currentColor" stroke="none"/>',
+  bittersweet:    '<circle cx="8" cy="8" r="6.1"/><path d="M5.6 6.5h.01M10.4 6.5h.01"/><path d="M5.7 10.6h4.6"/><path d="M11.2 7.9c-.6.9-.9 1.5-.9 2a.9.9 0 0 0 1.8 0c0-.5-.3-1.1-.9-2z"/>',
+  thanks:         '<path d="M4.4 7a3.6 3.6 0 0 1 7.2 0c0 2.6 1 3.5 1 3.5H3.4s1-.9 1-3.5z"/><path d="M6.6 12.5a1.5 1.5 0 0 0 2.8 0"/><path d="M11.3 2.5l.9.9 1.6-1.7"/>',
+  it_happened:    '<circle cx="8" cy="8" r="6.1"/><path d="M5.6 6.8h.01M10.4 6.8h.01"/><path d="M4.8 4.9l1.5-.6M11.2 4.9l-1.5-.6"/><circle cx="8" cy="10.4" r="1.5"/>',
+  watch_together: '<rect x="1.8" y="7.2" width="4.6" height="5.8" rx="1.3"/><rect x="9.6" y="7.2" width="4.6" height="5.8" rx="1.3"/><path d="M6.4 9.4h3.2M4.1 7.2V3.8h1.6M11.9 7.2V3.8h-1.6"/>',
+};
+const RX_LABEL = Object.fromEntries(RX_KINDS.map(k => [k.code, k.label]));
+const rxGlyph = (code, w = 26) => _svg(RX_ART[code] || "", w);
+// 對話框：帳號旁的籤、好友名字旁的計數、通知匣裡「回饋」那一類
+const ICON_RX = _svg('<path d="M2.6 3.4h10.8v6.6H8.2l-3.3 2.7V10H2.6z"/><path d="M5.6 6.7h4.8"/>', 14);
+
+// 後端有沒有上線：share_state() 回了 reactions 這個鍵才算（migrate_reactions.sql 跑過）。
+// 沒跑的資料庫整個功能不出現——不留一排按了沒反應的貼圖（與 frEnabled 同一套做法）。
+function rxReady() {
+  return !!(frEnabled && frShare && frShare.reactions);
+}
+
+// 這一則通知是不是好友分享來的：先看 share_ids（migrate_reactions.sql 之後 monitor 寫的欄位），
+// 再退回內文那一行「來自 ○○ 的分享」（舊列、或 Worker 還沒換版那幾天寫的列）。
+// names 給畫面上「給 ○○」用：share_ids 對得到「好友分享給我」的清單就用那裡的名字，不然拆內文。
+function rxOriginOf(row) {
+  const ids = Array.isArray(row && row.share_ids) ? row.share_ids.filter(Boolean).map(String) : [];
+  const m = String((row && row.body) || "").match(/(?:^|\n)來自 (.+?) 的分享/);
+  const inc = (frShare && frShare.incoming) || [];
+  const byId = ids.map(id => inc.find(s => s.share_id === id)).filter(Boolean).map(s => s.from_name).filter(Boolean);
+  const names = byId.length ? [...new Set(byId)] : (m ? m[1].split("、") : []);
+  return { shared: ids.length > 0 || !!m, ids, names };
+}
+
+// 給貼圖的那一排。掛兩個地方：通知詳情卡、盤中雷達被指到的那一顆（radarStoryListHtml）。
+// 整段 HTML 由這一支產生，按了之後 rxRepaint() 用同一支重畫，兩處永遠一致。
+// 3×2 格：320px 寬減兩側留白＝288，三格各 96px，「淡淡的哀傷」放得下；一排六格只有 48px，五個字會折行。
+function rxStripHtml(row) {
+  if (!row || !rxReady()) return "";
+  const o = rxOriginOf(row);
+  if (!o.shared) return "";
+  const who = o.names.length ? o.names.join("、") : "好友";
+  const mine = String(row.my_reaction || "");
+  const rid = String(row.id);
+  const btns = RX_KINDS.map(k => {
+    const on = mine === k.code;
+    return `<button type="button" class="rx-btn${on ? " is-on" : ""}" aria-pressed="${on}" data-rx-kind="${k.code}"`
+      + ` onclick="event.stopPropagation(); rxTap('${jsAttr(rid)}', '${jsAttr(k.code)}')">${rxGlyph(k.code)}<span>${k.label}</span></button>`;
+  }).join("");
+  const hint = mine
+    ? `已給 ${escapeHtml(who)}「${escapeHtml(RX_LABEL[mine] || mine)}」・再按一次收回，按別的換掉`
+    : `按一個貼圖，${escapeHtml(who)} 會收到`;
+  return `<div class="rx-strip" data-rx-row="${escapeHtml(rid)}" onclick="event.stopPropagation()">
+    <div class="rx-strip-title">${ICON_RX}給 ${escapeHtml(who)} 一個回饋貼圖</div>
+    <div class="rx-grid">${btns}</div>
+    <div class="rx-strip-hint">${hint}</div>
+  </div>`;
+}
+
+// 通知匣列上的小籤：還沒給＝「回饋」字樣；給過＝那個貼圖。列本身不能按（列的點擊是跳到雷達）。
+function rxInboxChipHtml(row) {
+  if (!rxReady() || String(row.source || "") === "reaction" || !rxOriginOf(row).shared) return "";
+  const mine = String(row.my_reaction || "");
+  return mine
+    ? `<span class="rx-chip is-on" title="你給了「${escapeHtml(RX_LABEL[mine] || mine)}」">${rxGlyph(mine, 14)}</span>`
+    : `<span class="rx-chip" title="點開可回饋貼圖">${ICON_RX}回饋</span>`;
+}
+
+// 按一個貼圖。先畫再送（樂觀更新），失敗就還原並講原因。再按同一個＝收回。
+async function rxTap(rowId, kind) {
+  let row = inboxRows.find(r => String(r.id) === String(rowId));
+  if (!row || !RX_LABEL[kind]) return;
+  if (row.pending) {
+    // 推播先到、倉庫那列還沒抓到：貼圖要掛在倉庫的 id 上，等它一下（最多三次）
+    row = await _rxWaitWarehouseRow(row);
+    if (!row) { frToast("通知還在同步，等一下再試", true); return; }
+  }
+  const before = String(row.my_reaction || "");
+  const clearing = before === kind;
+  row.my_reaction = clearing ? null : kind;
+  rxRepaint(row);
+  _inboxSaveCache();
+  try {
+    const res = clearing
+      ? await frRpc("reaction_clear", { p_alert_id: row.id })
+      : await frRpc("reaction_set", { p_alert_id: row.id, p_kind: kind });
+    if (!frOk(res)) throw new Error("rpc");
+    if (clearing) trackActivity("reaction_clear", { kind });
+    else trackActivity("reaction_give", { kind });
+    const to = ((res && res.to) || []).map(t => t.name).filter(Boolean).join("、") || "對方";
+    frToast(clearing ? "已收回" : `已給 ${to} 一個「${RX_LABEL[kind]}」`);
+  } catch (e) {
+    row.my_reaction = before || null;
+    rxRepaint(row);
+    _inboxSaveCache();
+  }
+}
+
+async function _rxWaitWarehouseRow(pending) {
+  const key = pending.event_key;
+  for (let i = 0; i < 3; i++) {
+    await refreshInbox(true).catch(() => {});
+    const hit = inboxRows.find(r => !r.pending && r.event_key === key);
+    if (hit) return hit;
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+  return null;
+}
+
+// 畫面上所有掛著這一則貼圖列的地方一起重畫（詳情卡、雷達），列上的小籤跟著
+function rxRepaint(row) {
+  const html = rxStripHtml(row);
+  document.querySelectorAll(`.rx-strip[data-rx-row="${String(row.id).replace(/["\\]/g, "")}"]`)
+    .forEach(el => { el.outerHTML = html; });
+  if (currentTab === "inbox") renderInbox();
+}
+
+// 盤中雷達：故事列裡哪幾顆對得到好友分享來的那一則通知 → {rtlEntryId: row}。
+// 不只從通知匣跳過來的那一顆——從首頁開字卡進來的，分享來的每一則也都能回饋。
+function rxRadarRowsByEid(story, sid, date) {
+  const map = {};
+  if (!rxReady()) return map;
+  for (const r of inboxRows) {
+    if (String(r.stock_id || "").trim() !== sid || taipeiDateKey(r.sent_at) !== date) continue;
+    if (!INBOX_RADAR_SOURCES.includes(String(r.source || "monitor"))) continue;
+    if (!rxOriginOf(r).shared) continue;
+    const hit = _rtlEntryForInboxRow(story, r);
+    if (hit) map[rtlEntryId(hit)] = r;
+  }
+  return map;
+}
+
+// ── 分享者那一側 ──
+// 「○○ 給你的訊號回饋」那一則：內文是 trigger 寫的文字（第一行是哪一則訊號、之後每行「名字：貼圖」），
+// 這裡把它畫成圖＋字。認的是貼圖的名字（RX_KINDS 的 label），與 SQL 的 reaction_label() 同一份。
+function rxReceivedHtml(row) {
+  const lines = String(row.body || "").split("\n");
+  const head = lines.shift() || "";
+  const byLabel = Object.fromEntries(RX_KINDS.map(k => [k.label, k.code]));
+  const items = lines.filter(Boolean).map(l => {
+    const m = l.match(/^(.+?)：(.+)$/);
+    if (!m || !byLabel[m[2]]) return `<li class="rx-recv-more">${escapeHtml(l)}</li>`;
+    return `<li><span class="rx-recv-glyph">${rxGlyph(byLabel[m[2]], 22)}</span><b>${escapeHtml(m[1])}</b>`
+      + `<span class="rx-recv-label">${escapeHtml(m[2])}</span></li>`;
+  }).join("");
+  return `<div class="rx-recv"><div class="rx-recv-head">${escapeHtml(head)}</div><ul class="rx-recv-list">${items}</ul></div>`;
+}
+
+// event_key＝reaction:<收件人那一則的 id>:<股票>:<日期>（trigger 寫的），點開要開那一檔那一天的盤中雷達
+function rxKeyParts(row) {
+  const m = String((row && row.event_key) || "").match(/^reaction:([0-9a-f-]{36}):([0-9A-Za-z]{2,10}):(\d{4}-\d{2}-\d{2})$/i);
+  return m ? { alertId: m[1], sid: m[2], date: m[3] } : null;
+}
+
+function rxOpenRadarFromDetail() {
+  const p = rxKeyParts(detailRow);
+  if (!p) return;
+  bootstrap.Modal.getInstance(document.getElementById("alertHistoryDetailModal"))?.hide();
+  openStockCard(p.sid, { date: p.date, tab: "radar" });
+}
+
+// 帳號旁的籤（#nav-rx）與分享分頁那一顆鈕：收到的總數；通知匣有未讀的回饋就多一個點
+function rxRenderBadge() {
+  const n = Number(frShare && frShare.reactions && frShare.reactions.total) || 0;
+  const ready = rxReady();
+  const el = document.getElementById("nav-rx");
+  if (el) {
+    if (!ready || !n) el.style.display = "none";
+    else {
+      const unread = inboxSupportsRead && inboxRows.some(r => String(r.source || "") === "reaction" && !r.read_at);
+      el.style.display = "";
+      el.innerHTML = `${ICON_RX}<span>${n > 999 ? "999+" : n}</span>${unread ? '<span class="rx-dot" aria-label="有新的回饋"></span>' : ""}`;
+    }
+  }
+  const btn = document.getElementById("fr-btn-rx");
+  if (btn) {
+    btn.style.display = ready ? "" : "none";
+    btn.innerHTML = `${ICON_RX}我收到的回饋${n ? ` <b>${n > 999 ? "999+" : n}</b>` : ""}`;
+  }
+}
+
+// 好友名字旁的計數（Howard 2026-10-09：好友看得到我的總數）。鍵是 #標籤，share_state 給的
+function rxFriendPill(tag) {
+  const f = frShare && frShare.reactions && frShare.reactions.friends;
+  const n = Number(f && f[String(tag || "")]) || 0;
+  return n ? `<span class="rx-count" title="收到的回饋貼圖">${ICON_RX}${n > 999 ? "999+" : n}</span>` : "";
+}
+
+// 「我收到的回饋」那張卡：總數、六種各幾次、最近 20 筆是誰對哪一則
+async function rxOpenSummary() {
+  if (!rxReady()) return;
+  trackActivity("reaction_summary_open");
+  const el = document.getElementById("rx-summary-body");
+  if (el) el.innerHTML = `<div class="fr-hint">載入中…</div>`;
+  const show = () => bootstrap.Modal.getOrCreateInstance(document.getElementById("rxSummaryModal")).show();
+  if (_closeOpenModals("rxSummaryModal")) setTimeout(show, 220); else show();
+  try {
+    const res = await frRpc("reaction_summary");
+    if (!frOk(res)) { if (el) el.innerHTML = `<div class="fr-hint">讀不到回饋資料</div>`; return; }
+    if (frShare && frShare.reactions) {   // 籤的數字跟著最新的
+      frShare.reactions.total = res.total;
+      frShare.reactions.by_kind = res.by_kind;
+      rxRenderBadge();
+    }
+    if (el) el.innerHTML = rxSummaryHtml(res);
+  } catch (e) {
+    if (el) el.innerHTML = `<div class="fr-hint">讀不到回饋資料</div>`;
+  }
+}
+
+function rxSummaryHtml(s) {
+  const by = (s && s.by_kind) || {};
+  const total = Number(s && s.total) || 0;
+  const tiles = RX_KINDS.map(k => {
+    const n = Number(by[k.code]) || 0;
+    return `<div class="rx-tile${n ? "" : " is-zero"}">${rxGlyph(k.code, 24)}<span class="rx-tile-label">${k.label}</span><b>${n}</b></div>`;
+  }).join("");
+  const rows = ((s && s.recent) || []).map(r => {
+    const sid = String(r.stock_id || "");
+    const date = taipeiDateKey(r.signal_at) || "";
+    return `<li role="button" tabindex="0" onclick="rxOpenRecent('${jsAttr(sid)}', '${jsAttr(date)}')"
+                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();rxOpenRecent('${jsAttr(sid)}', '${jsAttr(date)}');}">
+      <span class="rx-recv-glyph">${rxGlyph(r.kind, 22)}</span>
+      <span class="fr-grow"><b>${escapeHtml(r.from_name || "好友")}</b><span class="rx-recv-label">${escapeHtml(RX_LABEL[r.kind] || r.kind)}</span>
+        <div class="fr-hint">${escapeHtml(r.signal_title || sid)} · ${escapeHtml(fmtTime(r.signal_at, true))}</div></span>
+      <span class="fr-hint">${escapeHtml(frTime(r.at))}</span></li>`;
+  }).join("");
+  return `<div class="rx-sum-total">共收到 <b>${total}</b> 個回饋貼圖</div>
+    <div class="rx-tiles">${tiles}</div>
+    <h3 class="fr-h">最近</h3>
+    ${rows ? `<ul class="fr-list rx-recent">${rows}</ul>`
+           : `<div class="fr-empty">還沒有人給你回饋貼圖。分享一檔股票給好友，他收到訊號時可以回一個。</div>`}`;
+}
+
+function rxOpenRecent(sid, date) {
+  if (!sid) return;
+  bootstrap.Modal.getInstance(document.getElementById("rxSummaryModal"))?.hide();
+  openStockCard(sid, { date: date || null, tab: "radar" });
+}
 
 async function frRpc(fn, params) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
@@ -14358,6 +14681,7 @@ function frRenderBadge() {
     const dot = document.getElementById(id);
     if (dot) dot.style.display = c.shares ? "" : "none";
   }
+  rxRenderBadge();
 }
 
 async function frReload() {
@@ -14424,6 +14748,60 @@ function frRulesSummary(rules) {
   if (!list.length) return "沒有進階訊號";
   const names = list.map(r => r.name || "未命名").slice(0, 3).join("、");
   return escapeHtml(`進階訊號 ${list.length} 條：${names}${list.length > 3 ? "…" : ""}`);
+}
+
+// ── 設定改動自動同步（2026-10-09，migrate_share_autosync.sql）──────────────
+// 分享的快照由 DB 的 trigger 跟著改，前端這幾支只做兩件事：
+//   1. 設定面板上先講清楚「這一檔正分享給誰」——改之前就知道影響範圍
+//   2. 「訊號全關」的那一種自動同步刻意跳過，確認框要問得出來
+
+// 這一檔有沒有一則進行中的分享（一檔一則，所以找到就是它）
+function frLiveShareOf(sid) {
+  const want = String(sid || "").trim();
+  if (!want || !frEnabled) return null;
+  return ((frShare && frShare.outgoing) || [])
+    .find(s => s.live && String(s.stock_id || "").trim() === want) || null;
+}
+
+// 「我現在這一檔的設定是空的嗎」＝同步出去會變成要收件人決定留不留的那一則。
+// 只用手上現成的資料：自選股那一列（11 個開關＋2 個目標價）與進階訊號的條數。
+// ruleNudge.rules 沒有 enabled 欄，所以關掉的那幾條也算進來——寧可少問一句，
+// 也不要誤警；真的是空的，share_update 回來的 empty 會接手。
+function frShareWouldBeEmpty(sid) {
+  const want = String(sid || "").trim();
+  const row = (watchlistRows || []).find(r => String(r.stock_id || "").trim() === want);
+  if (!row) return false;                       // 不在自選股：同步不會改變設定
+  if (ALERT_FIELDS.some(f => row[f] !== false)) return false;
+  if (row.target_price_high != null && row.target_price_high !== "") return false;
+  if (row.target_price_low  != null && row.target_price_low  !== "") return false;
+  if (ruleNudge.rules == null) return false;    // 沒載到就不猜
+  return !ruleNudge.rules.some(r => !r.stock_id || String(r.stock_id).trim() === want);
+}
+
+// 進階訊號面板最上面那一條：有分享中的那幾檔才出現。用 rule-filter-bar 同一個樣式，
+// 它本來就是「這個面板現在的範圍是什麼」那一類的說明。
+function frShareRulesBar() {
+  const live = ((frShare && frShare.outgoing) || []).filter(s => s.live);
+  if (!frEnabled || !live.length) return "";
+  const names = live.slice(0, 3).map(s => s.stock_name || s.stock_id).join("、");
+  return `
+      <div class="rule-filter-bar">
+        <span>你正在分享 <b>${escapeHtml(names)}${live.length > 3 ? "…" : ""}</b>（${live.length} 檔）：
+        這裡的改動會自動同步給對象，連「全部自選股」的訊號也算。</span>
+      </div>`;
+}
+
+// 設定面板上那一句：這次要動的幾檔裡有幾檔正在分享。
+// 沒有分享中的就回空字串，整句不出現（絕大多數使用者看不到這一行）。
+function frAutoSyncHint(sids) {
+  const shares = (sids || []).map(frLiveShareOf).filter(Boolean);
+  if (!shares.length) return "";
+  const acc = shares.reduce((n, s) =>
+    n + ((s.recipients || []).filter(r => r.status === "accepted").length), 0);
+  if (shares.length > 1) return `其中 ${shares.length} 檔正在分享給好友，改動會自動同步過去。`;
+  return acc
+    ? `這一檔正分享給 ${acc} 位好友，改動會自動同步過去（他們不會收到通知）。`
+    : "這一檔正在分享中，對方接受時會拿到最新的設定。";
 }
 
 // ── 收到的分享：訊號跟我現在的設定差在哪（Howard 2026-10-07）──────────────
@@ -14564,7 +14942,7 @@ function frRenderFriends() {
   frList("fr-friends", frState.friends, f => `
     <li class="${frFlashClass("friend", f.tag).trim()}" data-flash-id="${escapeHtml(f.tag || "")}">
       <span class="fr-avatar">${ICON_USER}</span>
-      <span class="fr-grow">${frPerson(f.name, f.tag)}</span>
+      <span class="fr-grow">${frPerson(f.name, f.tag)}${rxFriendPill(f.tag)}</span>
       <button class="btn btn-sm btn-outline-light fr-quiet" data-fr="friend-remove"
               data-id="${escapeHtml(f.user_id)}" data-name="${escapeHtml(f.name || "")}"
               aria-label="刪除好友 ${escapeHtml(f.name || "")}">${ICON_TRASH}刪除</button>
@@ -14630,10 +15008,14 @@ function frRenderSharesOut() {
     // 送出端的對稱面（2026-10-09）：收件人早就看得到「差在哪」（share_compare），
     // 擁有者卻看不出「我改過設定但還沒同步出去」。三種狀態都寫在卡片上，不收進下一層——
     // 它要的是一個動作，藏起來就不會有人按。
+    //
+    // 自動同步上線後（migrate_share_autosync.sql）第三種只剩兩個來源：訊號全關（刻意
+    // 不靜默送出，那會讓收件人收到「要不要繼續留著」）與方案變動（沒有任何寫入落在
+    // watchlist／alert_rules，trigger 記不到）。所以這句不再寫「尚未同步」，要寫原因。
     const note = !s.live ? ""
       : s.empty ? `<div class="fr-hint fr-warn">這則分享目前沒有任何訊號，對象不會收到這一檔的通知</div>`
       : s.in_watchlist === false ? `<div class="fr-hint fr-warn">這一檔已不在你的自選股，同步不會改變設定</div>`
-      : s.in_sync === false ? `<div class="fr-hint fr-warn">設定已變更，尚未同步給 ${attached} 位對象</div>`
+      : s.in_sync === false ? `<div class="fr-hint fr-warn">${attached} 位對象手上還是上一份設定——訊號全關或方案變動時不會自動同步</div>`
       : "";
     return `
     <li class="fr-share ${s.live ? "" : "is-ended"}${frFlashClass("share-out", s.share_id)}" data-flash-id="${escapeHtml(s.share_id)}">
@@ -14641,7 +15023,9 @@ function frRenderSharesOut() {
         <button class="fr-share-head" data-fr="share-open" data-id="${escapeHtml(s.share_id)}" aria-expanded="${open}">
           <span class="fr-grow">
             <b>${escapeHtml(s.label)}</b>${ended ? `<span class="fr-chip">${ended}</span>` : ""}
-            <div class="fr-hint">建立 ${frDate(s.created_at)} · ${frExpiry(s.expires_at)} · ${rec.length} 人（${accepted} 已接受）${s.version > 1 ? ` · 第 ${s.version} 版` : ""}</div>
+            <!-- 「第 N 版」2026-10-09 拿掉：自動同步之後它數的是「我改過幾次設定」，
+                 對擁有者沒有意義，而且每動一個開關就 +1。 -->
+            <div class="fr-hint">建立 ${frDate(s.created_at)} · ${frExpiry(s.expires_at)} · ${rec.length} 人（${accepted} 已接受）</div>
             ${note}
           </span>
           <span class="fr-caret">${open ? "收合" : "展開"}${ICON_CHEVRON}</span>
@@ -14661,6 +15045,11 @@ function frRenderSharesOut() {
 //   * 同步設定：把這一檔目前的設定重新快照給所有對象（share_update）。已接受的人無感——
 //     不通知、不必確認，下一輪 monitor 就換過去。
 // 原本兩件事混在一顆「更新發送」裡，所以「只想多加一個人」會讓所有人收到「設定已更新」。
+//
+// 2026-10-09 晚：設定改動已經會自動同步（migrate_share_autosync.sql），所以那顆
+// 「同步目前設定」平常不該出現——它只剩兩個用途，有用途時才畫出來：
+//   * in_sync === false：自動同步跳過的那兩種（訊號全關、方案變動）
+//   * 有人拒絕過：重新邀請他（會送推播，所以不跟著自動同步跑）
 function frShareDetailHtml(s) {
   const rec = s.recipients || [];
   // 可以加的對象：還不是這則分享對象的好友（未接受／已結束的可以再邀請一次）
@@ -14670,6 +15059,10 @@ function frShareDetailHtml(s) {
   const lists = frState.groups || [];
   // 對象只剩一位時「減」就等於終止：那一顆留著反而讓人以為分享還會繼續
   const canDrop = s.live && attached.length > 1;
+  // 「同步目前設定」只在它真的有事可做時出現（自動同步上線之後）。兩件事都要做時
+  // 寫「同步目前設定」——share_update 本來就一次做完，確認框會把重新邀請講出來。
+  const declined = rec.filter(r => r.status === "declined").length;
+  const syncWhy = s.in_sync === false ? "sync" : declined ? "again" : "";
   return `
     <div class="fr-share-body">
       <div class="fr-hint">${frFlagSummary(s.base)}</div>
@@ -14706,10 +15099,13 @@ function frShareDetailHtml(s) {
       </details>
       ${s.live ? `
       <div class="fr-row">
+        ${syncWhy ? `
         <button class="btn btn-sm ${s.in_sync === false ? "btn-primary" : "btn-outline-light"}"
                 data-fr="share-sync" data-id="${escapeHtml(s.share_id)}"
                 data-name="${escapeHtml(s.label)}" data-n="${attached.length}"
-                data-empty="${s.empty ? "1" : ""}">${ICON_SEND}同步目前設定</button>
+                data-again="${declined}"
+                data-empty="${s.empty || frShareWouldBeEmpty(s.stock_id) ? "1" : ""}"
+                >${ICON_SEND}${syncWhy === "again" ? `重新邀請 ${declined} 位` : "同步目前設定"}</button>` : ""}
         <button class="btn btn-sm btn-outline-danger" data-fr="share-terminate" data-id="${escapeHtml(s.share_id)}"
                 data-name="${escapeHtml(s.label)}">${ICON_CLOSE}立即終止</button>
       </div>` : ""}
@@ -14748,7 +15144,7 @@ function frRenderSharesIn() {
       <button class="fr-share-head" data-fr="in-open" data-id="${sid(s)}" aria-expanded="${open}">
         <span class="fr-grow">
           <b>${escapeHtml(frShareName(s))}</b>${ended ? `<span class="fr-chip">${ended}</span>` : ""}
-          <div class="fr-hint">來自 ${escapeHtml(s.from_name || "好友")} · ${frExpiry(s.expires_at)}</div>
+          <div class="fr-hint">來自 ${escapeHtml(s.from_name || "好友")}${rxFriendPill(s.from_tag)} · ${frExpiry(s.expires_at)}</div>
           ${s.live === false ? "" : frCmpLine(s)}
         </span>
         <span class="fr-caret">${open ? "收合" : "展開"}${ICON_CHEVRON}</span>
@@ -15891,13 +16287,17 @@ document.addEventListener("click", async e => {
     confirms[act] = `以後不再接收 ${btn.dataset.from || "好友"} 分享的「${name}」？\n\n`
       + "他之後更新這一檔都不會再通知你。其他股票照舊；要恢復可以在「不再接收」那一格解除。";
   }
-  // 同步設定：已接受的人無感（不通知、不必確認），所以這裡要講的是「會不會動到別人」
+  // 同步設定：已接受的人無感（不通知、不必確認），所以這裡要講的是「會不會動到別人」。
+  // 自動同步上線後這顆只在兩種情況出現，兩種要講的不是同一件事：訊號全關要他知道
+  // 對象會被問留不留；只是為了重新邀請拒絕過的人，就要講「那個人會收到邀請」。
   if (act === "share-sync") {
     const n = Number(btn.dataset.n) || 0;
+    const again = Number(btn.dataset.again) || 0;
+    const tail = again ? `\n\n之前沒有接受的 ${again} 位會再收到一次邀請。` : "";
     confirms[act] = btn.dataset.empty
       ? `「${name}」目前沒有開任何訊號。\n\n同步出去之後${n ? `這 ${n} 位` : "對象"}會被問「要不要繼續留著」——`
-        + "這一檔不會再通知他們任何事。確定要同步嗎？"
-      : `把「${name}」目前的設定同步給${n ? ` ${n} 位` : ""}對象？\n\n已接受的人會立刻套用新設定，不會收到通知。`;
+        + "這一檔不會再通知他們任何事。確定要同步嗎？" + tail
+      : `把「${name}」目前的設定同步給${n ? ` ${n} 位` : ""}對象？\n\n已接受的人會立刻套用新設定，不會收到通知。` + tail;
   }
   // 移除我分享出去的那一則。進行中的會先終止（對象收到通知），所以兩種情況講的不是同一件事
   if (act === "share-delete") {
