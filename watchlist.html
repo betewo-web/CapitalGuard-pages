@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="304">
+  <meta name="app-version" content="305">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=304" rel="stylesheet">
+  <link href="watchlist.css?v=305" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5686,10 +5686,11 @@ const SIGNAL_ICON_ART = {
     + '<g stroke="#fff" stroke-width="2.4" stroke-linecap="round" opacity=".8">'
     + '<line x1="18.5" y1="18" x2="29.5" y2="18"/><line x1="18.5" y1="24" x2="29.5" y2="24"/>'
     + '<line x1="18.5" y1="30" x2="25" y2="30"/></g>' },
-  // 回饋貼圖（REACTIONS.md）：對話框——「○○ 給你的訊號回饋」那一類
+  // 回饋貼圖（REACTIONS.md）：獎盃——「○○ 給你的訊號回饋」那一類（與 ICON_RX 同一個形）
   reaction: { inner:
-      '<path d="M11 13h26a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H24l-8 6v-6h-5a3 3 0 0 1-3-3V16a3 3 0 0 1 3-3z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>'
-    + '<line x1="18" y1="22" x2="30" y2="22" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>' },
+      '<g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M16 10h16v9a8 8 0 0 1-16 0z"/><path d="M16 13h-5v3a5 5 0 0 0 5 5"/><path d="M32 13h5v3a5 5 0 0 1-5 5"/>'
+    + '<path d="M24 27v5"/><path d="M19.5 32h9"/><path d="M17 37h14"/></g>' },
   // 其他來源：同心圓（一則通知）
   generic: { inner:
       '<circle cx="24" cy="24" r="10" fill="none" stroke="#fff" stroke-width="3"/>'
@@ -7722,10 +7723,13 @@ function renderInbox() {
     const sid = String(r.stock_id || "").trim();
     const title = escapeHtml(_titleWithoutSid(r.title, sid));
     const dot = unread ? `<span class="ib-unread-dot" title="未讀" aria-label="未讀"></span>` : "";
+    // 刪除改成往左滑（Howard 2026-10-09 晚：列上的垃圾桶拿掉）：「刪除」鈕躲在列的右邊後面，
+    // 滑開才看得到；鍵盤用 Delete。通知詳情卡裡的「刪除這則」照舊。
     html += `
+      <div class="ib-swipe" data-rowid="${escapeHtml(String(r.id))}">
       <div class="inbox-item${unread ? " unread" : read ? " read" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
            onclick="openInboxItem('${jsAttr(String(r.id))}')"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxItem('${jsAttr(String(r.id))}');}">
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxItem('${jsAttr(String(r.id))}');}else if(event.key==='Delete'){event.preventDefault();deleteInboxRow('${jsAttr(String(r.id))}');}">
         ${signalIconSvg(r, 34)}
         <div class="ib-main">
           <div class="ib-title">${dot}${title}</div>
@@ -7734,14 +7738,86 @@ function renderInbox() {
         <div class="ib-side">
           <span class="ib-time">${fmtTime(r.sent_at, dayLabelOf(r.sent_at) !== "今天")}</span>
           ${rxInboxChipHtml(r)}
-          <button type="button" class="ib-del" title="刪除這則通知" aria-label="刪除通知：${title}"
-                  onclick="event.stopPropagation();deleteInboxRow('${jsAttr(String(r.id))}')"
-                  onkeydown="event.stopPropagation()">${ICON_TRASH}</button>
         </div>
-      </div>`;
+      </div>
+      <button type="button" class="ib-swipe-del" tabindex="-1" aria-label="刪除通知：${title}"
+              onclick="event.stopPropagation();deleteInboxRow('${jsAttr(String(r.id))}')">${ICON_TRASH}<span>刪除</span></button>
+      </div>${rxInlineHtml(r)}`;
   }
   listEl.innerHTML = html;
+  _ibSwipeInit();
   _paintInboxTarget();
+}
+
+// ── 通知匣：往左滑露出「刪除」──────────────────────────────────────────
+// 列本身 touch-action: pan-y——直的手勢瀏覽器照常捲清單，橫的才到這裡。
+// 用 pointer 事件（滑鼠也能拖），事件掛在 #inbox-list 上一次，列每次重畫都換新節點也不必重掛。
+const IB_SWIPE_OPEN = 88;     // 與 .ib-swipe-del 的寬度同值
+let _ibSwipe = null;          // 正在滑的那一列
+
+function _ibSwipeClose() {
+  document.querySelectorAll("#inbox-list .ib-swipe.is-open").forEach(w => {
+    w.classList.remove("is-open");
+    const it = w.querySelector(".inbox-item");
+    if (it) it.style.transform = "";
+  });
+}
+
+function _ibSwipeInit() {
+  const list = document.getElementById("inbox-list");
+  if (!list || list.dataset.swipeReady) return;
+  list.dataset.swipeReady = "1";
+  // 放手那一下會跟著一個 click：攔在捕獲階段，列自己的 onclick（點開這一則）就不會跑；
+  // 已經滑開的列點一下＝收回去，也不點開
+  list.addEventListener("click", e => {
+    const el = e.target.closest(".inbox-item");
+    if (!el) return;
+    const wrap = el.closest(".ib-swipe");
+    if (el.dataset.swiped === "1") {
+      delete el.dataset.swiped;
+      e.stopPropagation(); e.preventDefault();
+    } else if (wrap && wrap.classList.contains("is-open") && !e.target.closest("button")) {
+      _ibSwipeClose();
+      e.stopPropagation(); e.preventDefault();
+    }
+  }, true);
+  list.addEventListener("pointerdown", e => {
+    const el = e.target.closest(".inbox-item");
+    if (!el || (e.pointerType === "mouse" && e.button !== 0) || e.target.closest("button")) return;
+    _ibSwipe = { el, x: e.clientX, y: e.clientY, dx: 0, horizontal: null, id: e.pointerId };
+  });
+  list.addEventListener("pointermove", e => {
+    const s = _ibSwipe;
+    if (!s || e.pointerId !== s.id) return;
+    const dx = e.clientX - s.x, dy = e.clientY - s.y;
+    if (s.horizontal === null) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      s.horizontal = Math.abs(dx) > Math.abs(dy);
+      if (!s.horizontal) { _ibSwipe = null; return; }     // 直的：人在捲清單
+      try { s.el.setPointerCapture(e.pointerId); } catch (err) { /* 舊瀏覽器沒有也沒關係 */ }
+      const wrap = s.el.closest(".ib-swipe");
+      s.base = wrap && wrap.classList.contains("is-open") ? -IB_SWIPE_OPEN : 0;
+      if (!s.base) _ibSwipeClose();                        // 同時只開一列
+    }
+    s.dx = Math.max(-IB_SWIPE_OPEN, Math.min(0, s.base + dx));
+    s.el.style.transition = "none";
+    s.el.style.transform = `translateX(${s.dx}px)`;
+    s.el.dataset.swiped = "1";
+  });
+  const end = e => {
+    const s = _ibSwipe;
+    if (!s || e.pointerId !== s.id) return;
+    _ibSwipe = null;
+    if (s.horizontal !== true) return;
+    const wrap = s.el.closest(".ib-swipe");
+    const open = s.dx < -IB_SWIPE_OPEN / 2;
+    s.el.style.transition = "";
+    if (wrap) wrap.classList.toggle("is-open", open);
+    s.el.style.transform = open ? `translateX(-${IB_SWIPE_OPEN}px)` : "";
+    setTimeout(() => { delete s.el.dataset.swiped; }, 400);   // 放手那一下的 click 過了就解除
+  };
+  list.addEventListener("pointerup", end);
+  list.addEventListener("pointercancel", end);
 }
 
 let detailRow = null;   // 目前開啟詳情的通知 row
@@ -7841,11 +7917,13 @@ function openInboxDetail(rowId) {
   whyEl.innerHTML = whyHtml;
   whyEl.style.display = whyHtml ? "" : "none";
 
-  // 回饋貼圖（REACTIONS.md）：好友分享來的那一則給一排貼圖；分享者收到的「○○ 給你的訊號回饋」
-  // 畫成圖＋字（內文那一段就收起來，不然同一件事寫兩次），並給「查看盤中雷達」「我收到的回饋」兩條出口。
+  // 回饋貼圖（REACTIONS.md）：分享者收到的「○○ 給你的訊號回饋」畫成圖＋字（內文那一段就收起來，
+  // 不然同一件事寫兩次），並給「查看盤中雷達」「我收到的回饋」兩條出口。
+  // 給貼圖的那一排**不在這張卡上**（Howard 2026-10-09 晚）：通知匣那一則按「回饋」就展開、
+  // 雷達那一顆底下也有，點進詳情已經是第三層，再放一排是重複的。
   const isReaction = source === "reaction";
   const rxEl = document.getElementById("alert-history-rx");
-  const rxHtml = isReaction ? rxReceivedHtml(row) : rxStripHtml(row);
+  const rxHtml = isReaction ? rxReceivedHtml(row) : "";
   rxEl.innerHTML = rxHtml;
   rxEl.style.display = rxHtml ? "" : "none";
   document.getElementById("alert-history-detail-body").style.display = isReaction ? "none" : "";
@@ -10001,15 +10079,18 @@ function radarStoryListHtml(story, opts = {}) {
     // 桌機游標停住看得到「分享這則訊號」，讀螢幕軟體也讀得到。
     const share = `<button type="button" class="rtl-share" aria-label="分享這則訊號" title="分享這則訊號"`
       + ` onclick="event.stopPropagation(); shareRadarEntry('${jsAttr(rtlEntryId(e))}')">${ICON_SHARE}</button>`;
+    // 回饋貼圖（REACTIONS.md）：分享來的那一顆底下接一排貼圖，占整個寬度（不塞在 .rtl-text 那一欄裡，
+    // 左邊時間與圖示的位置也用上）；說明文字裡「來自 ○○ 的分享」那一行就不重複寫了（Howard 2026-10-09 晚）
+    const rx = opts.rx && opts.rx[rtlEntryId(e)];
+    const text = rx ? rxWithoutNote(e.text) : e.text;
     return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-eid="${escapeHtml(rtlEntryId(e))}" data-sev="${e.sev}"${link}>
       <div class="rtl-time">${fmtTime(e.at)}</div>
       ${signalIconSvg(rtlEntryIconRow(e), 38)}
       <div class="rtl-text">${share}
         <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
-        ${e.text ? `<div class="rtl-desc">${escapeHtml(e.text)}</div>` : ""}
+        ${text ? `<div class="rtl-desc">${escapeHtml(text)}</div>` : ""}
         <span class="rtl-src rtl-src-${e.src}">${RTL_SRC_LABEL[e.src] || ""}</span>
-        ${opts.rx && opts.rx[rtlEntryId(e)] ? rxStripHtml(opts.rx[rtlEntryId(e)]) : ""}
-      </div></div>`;
+      </div></div>${rx ? `<div class="rtl-rx">${rxStripHtml(rx)}</div>` : ""}`;
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
   if (!html) {
@@ -14461,11 +14542,13 @@ const FR_RECIPIENT_STATUS = {
 const RX_KINDS = [
   { code: "awesome",        label: "厲害" },
   { code: "sharp_eye",      label: "有眼光" },
-  { code: "bittersweet",    label: "淡淡的哀傷" },
+  { code: "bittersweet",    label: "淡淡哀傷" },
   { code: "thanks",         label: "感謝提醒" },
-  { code: "it_happened",    label: "竟然發生了" },
+  { code: "it_happened",    label: "竟然這樣" },
   { code: "watch_together", label: "一起觀察" },
 ];
+// 2026-10-09 晚改過字（四個字才放得進一排六格）：分享者通知匣裡改字前寫的那幾則仍要畫得出圖
+const RX_LEGACY_LABELS = { "淡淡的哀傷": "bittersweet", "竟然發生了": "it_happened" };
 // 線條風格、與全站圖示同一套 _svg()（16 格、1.5 描邊）。只有兩種狀態：未選跟著文字色、已選橘色
 // （橘是唯一強調色；紅綠只給漲跌、紫只做品牌）。不用 emoji：各平台長相不同，而且畫面上其他圖示都是線條。
 const RX_ART = {
@@ -14478,8 +14561,8 @@ const RX_ART = {
 };
 const RX_LABEL = Object.fromEntries(RX_KINDS.map(k => [k.code, k.label]));
 const rxGlyph = (code, w = 26) => _svg(RX_ART[code] || "", w);
-// 對話框：帳號旁的籤、好友名字旁的計數、通知匣裡「回饋」那一類
-const ICON_RX = _svg('<path d="M2.6 3.4h10.8v6.6H8.2l-3.3 2.7V10H2.6z"/><path d="M5.6 6.7h4.8"/>', 14);
+// 獎盃（Howard 2026-10-09：要有榮譽榜的形象，不是對話框）：帳號旁的籤、名字旁的計數、通知匣裡「回饋」那一類
+const ICON_RX = _svg('<path d="M4.6 2.6h6.8v3.6a3.4 3.4 0 0 1-6.8 0z"/><path d="M4.6 3.8H2.6v1.3a2.2 2.2 0 0 0 2 2.2"/><path d="M11.4 3.8h2v1.3a2.2 2.2 0 0 1-2 2.2"/><path d="M8 9.6v2.2"/><path d="M6.3 11.8h3.4"/><path d="M5.4 13.4h5.2"/>', 14);
 
 // 後端有沒有上線：share_state() 回了 reactions 這個鍵才算（migrate_reactions.sql 跑過）。
 // 沒跑的資料庫整個功能不出現——不留一排按了沒反應的貼圖（與 frEnabled 同一套做法）。
@@ -14499,9 +14582,10 @@ function rxOriginOf(row) {
   return { shared: ids.length > 0 || !!m, ids, names };
 }
 
-// 給貼圖的那一排。掛兩個地方：通知詳情卡、盤中雷達被指到的那一顆（radarStoryListHtml）。
-// 整段 HTML 由這一支產生，按了之後 rxRepaint() 用同一支重畫，兩處永遠一致。
-// 3×2 格：320px 寬減兩側留白＝288，三格各 96px，「淡淡的哀傷」放得下；一排六格只有 48px，五個字會折行。
+// 給貼圖的那一排。掛兩個地方：通知匣那一則按「回饋」展開的那一列、盤中雷達分享來的那一顆底下
+// （radarStoryListHtml）。整段 HTML 由這一支產生，按了之後 rxRepaint() 用同一支重畫，兩處永遠一致。
+// 只占一橫排、不寫標題與提示（Howard 2026-10-09 晚）：誰會收到寫在每顆的 aria-label／title，
+// 按下去的 toast 會講「已給 ○○ 一個『…』」。六格各 1/6：字最多四個（這也是改字的原因）。
 function rxStripHtml(row) {
   if (!row || !rxReady()) return "";
   const o = rxOriginOf(row);
@@ -14511,26 +14595,44 @@ function rxStripHtml(row) {
   const rid = String(row.id);
   const btns = RX_KINDS.map(k => {
     const on = mine === k.code;
+    const label = on ? `已給 ${who}「${k.label}」，再按一次收回` : `給 ${who}「${k.label}」`;
     return `<button type="button" class="rx-btn${on ? " is-on" : ""}" aria-pressed="${on}" data-rx-kind="${k.code}"`
-      + ` onclick="event.stopPropagation(); rxTap('${jsAttr(rid)}', '${jsAttr(k.code)}')">${rxGlyph(k.code)}<span>${k.label}</span></button>`;
+      + ` title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"`
+      + ` onclick="event.stopPropagation(); rxTap('${jsAttr(rid)}', '${jsAttr(k.code)}')">${rxGlyph(k.code, 22)}<span>${k.label}</span></button>`;
   }).join("");
-  const hint = mine
-    ? `已給 ${escapeHtml(who)}「${escapeHtml(RX_LABEL[mine] || mine)}」・再按一次收回，按別的換掉`
-    : `按一個貼圖，${escapeHtml(who)} 會收到`;
-  return `<div class="rx-strip" data-rx-row="${escapeHtml(rid)}" onclick="event.stopPropagation()">
-    <div class="rx-strip-title">${ICON_RX}給 ${escapeHtml(who)} 一個回饋貼圖</div>
-    <div class="rx-grid">${btns}</div>
-    <div class="rx-strip-hint">${hint}</div>
-  </div>`;
+  return `<div class="rx-strip" data-rx-row="${escapeHtml(rid)}" role="group" aria-label="給 ${escapeHtml(who)} 的回饋貼圖"`
+    + ` onclick="event.stopPropagation()"><div class="rx-grid">${btns}</div></div>`;
 }
 
-// 通知匣列上的小籤：還沒給＝「回饋」字樣；給過＝那個貼圖。列本身不能按（列的點擊是跳到雷達）。
+// 通知匣列上的「回饋」鈕（Howard 2026-10-09 晚：按下去不跳雷達，直接在列底下展開貼圖讓人點）。
+// 還沒給＝獎盃＋「回饋」；給過＝那個貼圖＋它的名字。
+let _rxOpenRow = null;   // 通知匣裡展開貼圖列的那一則（重畫也要留著）
 function rxInboxChipHtml(row) {
   if (!rxReady() || String(row.source || "") === "reaction" || !rxOriginOf(row).shared) return "";
   const mine = String(row.my_reaction || "");
-  return mine
-    ? `<span class="rx-chip is-on" title="你給了「${escapeHtml(RX_LABEL[mine] || mine)}」">${rxGlyph(mine, 14)}</span>`
-    : `<span class="rx-chip" title="點開可回饋貼圖">${ICON_RX}回饋</span>`;
+  const open = _rxOpenRow === String(row.id);
+  const inner = mine ? `${rxGlyph(mine, 18)}<span>${RX_LABEL[mine] || mine}</span>` : `${ICON_RX}<span>回饋</span>`;
+  const tip = mine ? `你給了「${RX_LABEL[mine] || mine}」，點開可以換或收回` : "給分享的人一個回饋貼圖";
+  return `<button type="button" class="rx-chip${mine ? " is-on" : ""}${open ? " is-open" : ""}" aria-expanded="${open}"`
+    + ` title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}"`
+    + ` onclick="event.stopPropagation(); rxToggleInline('${jsAttr(String(row.id))}')" onkeydown="event.stopPropagation()">${inner}</button>`;
+}
+
+function rxToggleInline(rowId) {
+  _rxOpenRow = _rxOpenRow === String(rowId) ? null : String(rowId);
+  renderInbox();
+}
+
+// 展開的那一列：貼圖列放在那一則底下、占整個寬度（不在滑動的那一塊裡，往左滑不會把它帶走）
+function rxInlineHtml(row) {
+  if (_rxOpenRow !== String(row.id)) return "";
+  const strip = rxStripHtml(row);
+  return strip ? `<div class="ib-rx">${strip}</div>` : "";
+}
+
+// 雷達那一顆的說明文字：分享來的那一則底下就是貼圖列，「來自 ○○ 的分享・點開可回饋貼圖」那一行不必再講一次
+function rxWithoutNote(text) {
+  return String(text || "").replace(/\n?來自 .+? 的分享(?:・[^\n]*)?(?=\n|$)/, "");
 }
 
 // 按一個貼圖。先畫再送（樂觀更新），失敗就還原並講原因。再按同一個＝收回。
@@ -14603,7 +14705,7 @@ function rxRadarRowsByEid(story, sid, date) {
 function rxReceivedHtml(row) {
   const lines = String(row.body || "").split("\n");
   const head = lines.shift() || "";
-  const byLabel = Object.fromEntries(RX_KINDS.map(k => [k.label, k.code]));
+  const byLabel = Object.assign(Object.fromEntries(RX_KINDS.map(k => [k.label, k.code])), RX_LEGACY_LABELS);
   const items = lines.filter(Boolean).map(l => {
     const m = l.match(/^(.+?)：(.+)$/);
     if (!m || !byLabel[m[2]]) return `<li class="rx-recv-more">${escapeHtml(l)}</li>`;
@@ -14646,11 +14748,15 @@ function rxRenderBadge() {
   }
 }
 
-// 好友名字旁的計數（Howard 2026-10-09：好友看得到我的總數）。鍵是 #標籤，share_state 給的
+// 名字旁的計數（Howard 2026-10-09：好友、來邀請的人、搜尋到的人都看得到對方收到的總數）
+function rxPillHtml(n) {
+  n = Number(n) || 0;
+  return n ? `<span class="rx-count" title="收到的回饋貼圖">${ICON_RX}${n > 999 ? "999+" : n}</span>` : "";
+}
+// 好友頁上的人：鍵是 #標籤，share_state 給的（好友＋雙向待回應的邀請）
 function rxFriendPill(tag) {
   const f = frShare && frShare.reactions && frShare.reactions.friends;
-  const n = Number(f && f[String(tag || "")]) || 0;
-  return n ? `<span class="rx-count" title="收到的回饋貼圖">${ICON_RX}${n > 999 ? "999+" : n}</span>` : "";
+  return rxPillHtml(f && f[String(tag || "")]);
 }
 
 // 「我收到的回饋」那張卡：總數、六種各幾次、最近 20 筆是誰對哪一則
@@ -15080,7 +15186,7 @@ function frRenderFriends() {
       <div class="fr-req-head">
         <span class="fr-avatar">${ICON_USER}</span>
         <span class="fr-grow">
-          ${frPerson(r.name, r.tag)}
+          ${frPerson(r.name, r.tag)}${rxFriendPill(r.tag)}
           <div class="fr-id">${escapeHtml(r.handle || r.user_id || "")}</div>
           <div class="fr-hint">${frTime(r.at)}</div>
         </span>
@@ -15105,7 +15211,7 @@ function frRenderFriends() {
   frShow("fr-sec-requests-out", rout.length > 0);
   frList("fr-requests-out", rout, r => `
     <li><span class="fr-avatar">${ICON_USER}</span>
-      <span class="fr-grow">${frPerson(r.name, r.tag)}
+      <span class="fr-grow">${frPerson(r.name, r.tag)}${rxFriendPill(r.tag)}
         <div class="fr-hint">${frTime(r.at)} 送出</div></span></li>`);
 }
 
@@ -16121,7 +16227,7 @@ async function frSearch() {
   box.innerHTML = `
     <ul class="fr-list"><li>
       <span class="fr-avatar">${ICON_USER}</span>
-      <span class="fr-grow">${frPerson(r.name, r.tag)}<div class="fr-id">${escapeHtml(shown)}</div></span>
+      <span class="fr-grow">${frPerson(r.name, r.tag)}${rxPillHtml(r.reactions)}<div class="fr-id">${escapeHtml(shown)}</div></span>
       ${btn}
     </li></ul>`;
   return r;       // 掃描／連結進來的要看查到什麼，才決定要不要直接送出邀請

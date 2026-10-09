@@ -1884,31 +1884,28 @@ body.modal-blocking .modal-backdrop.show {
 	margin-top: 3px;
 }
 
-/* 一則一則刪：顏色跟 .wl-icon-danger 同一套（平常是灰的，hover 才紅）——
-   每一列都有一顆，平常就紅會讓整頁看起來都在警告 */
-.ib-del {
-	flex: 0 0 auto;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 32px;
-	height: 32px;
-	padding: 0;
-	border: 1px solid rgba(140, 168, 220, 0.16);
-	border-radius: 10px;
-	background: rgba(255, 255, 255, 0.04);
-	color: #7e8aa4;
-	cursor: pointer;
-	transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+/* 一則一則刪改成往左滑（Howard 2026-10-09 晚：列上的垃圾桶拿掉）。
+   「刪除」鈕躲在列的右邊後面，列往左滑 88px 才露出來；列本身要有不透明底，滑到一半時才蓋得住它。
+   touch-action: pan-y——直的手勢瀏覽器照常捲清單，橫的才交給 pointer 事件。 */
+.ib-swipe { position: relative; overflow: hidden; border-radius: 14px; margin-bottom: 0.5rem; }
+.ib-swipe > .inbox-item {
+	margin-bottom: 0; z-index: 1;
+	background: var(--bg-0);
+	touch-action: pan-y;
+	will-change: transform;
+	transition: border-color 0.15s, transform 0.18s ease;
 }
-
-.ib-del .ic { display: block; flex-shrink: 0; }
-
-.ib-del:hover {
-	border-color: rgba(255, 95, 133, 0.55);
-	background: rgba(255, 95, 133, 0.13);
-	color: #ff8ba5;
+.ib-swipe > .inbox-item.unread { background: var(--surface-2); }
+.ib-swipe-del {
+	position: absolute; top: 0; right: 0; bottom: 0; width: 88px; z-index: 0;
+	display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+	border: 0; border-radius: 0 14px 14px 0; cursor: pointer;
+	background: rgba(255, 95, 133, 0.92); color: #fff;
+	font: inherit; font-size: 12px; line-height: 1;
 }
+.ib-swipe-del .ic { width: 16px; height: 16px; }
+/* 通知匣裡按「回饋」展開的那一排：在列的底下、占整個寬度 */
+.ib-rx { margin: -0.2rem 0 0.6rem; }
 
 /* 刪掉之後的復原條（INBOX_UNDO_MS 內）：虛線框，讓它看起來不是一則通知 */
 .inbox-undo {
@@ -5031,33 +5028,36 @@ select.fr-input { width: 100%; }
 	font-size: 12px; color: var(--sig-orange); vertical-align: middle; white-space: nowrap;
 }
 .rx-count .ic { width: 13px; height: 13px; }
-/* 通知匣列上的小籤：還沒給＝「回饋」字樣；給過＝那個貼圖 */
+/* 通知匣列上的「回饋」鈕（Howard 2026-10-09 晚：放大、按了在列底下展開貼圖）：
+   還沒給＝獎盃＋「回饋」；給過＝那個貼圖＋名字（橘）；展開中加深底色 */
 .rx-chip {
-	display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text-muted);
-	border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; white-space: nowrap;
+	display: inline-flex; align-items: center; gap: 4px;
+	min-height: 32px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+	font: inherit; font-size: 12.5px; line-height: 1; color: var(--text-1);
+	border: 1px solid var(--border); background: rgba(255, 255, 255, 0.04); white-space: nowrap;
 }
-.rx-chip .ic { width: 12px; height: 12px; }
-.rx-chip.is-on { color: var(--sig-orange); border-color: rgba(255, 159, 67, 0.45); background: rgba(255, 159, 67, 0.12); padding: 2px 6px; }
-.rx-chip.is-on .ic { width: 14px; height: 14px; }
-/* 貼圖列：3×2 格。320px 寬減兩側留白＝288，三格各 96px，「淡淡的哀傷」放得下；一排六格只有 48px 會折行。
-   雷達那一列的分享鈕是 float:right，所以 clear:both */
+.rx-chip .ic { width: 15px; height: 15px; flex: 0 0 auto; }
+.rx-chip:hover { border-color: rgba(146, 146, 163, 0.5); color: var(--text-0); }
+.rx-chip.is-on { color: var(--sig-orange); border-color: rgba(255, 159, 67, 0.45); background: rgba(255, 159, 67, 0.12); }
+.rx-chip.is-on .ic { width: 18px; height: 18px; }
+.rx-chip.is-open { background: rgba(255, 159, 67, 0.22); border-color: var(--sig-orange); }
+/* 貼圖列：一橫排六格（Howard 2026-10-09 晚）。320px 寬減留白＝272，一格 42px：字最多四個、11px，
+   所以「淡淡的哀傷」「竟然發生了」改成四個字。雷達那一列的分享鈕是 float:right，所以 clear:both */
 .rx-strip {
-	margin-top: 0.9rem; clear: both;
-	border: 1px solid var(--border); border-radius: 12px; padding: 0.7rem 0.75rem 0.6rem; background: var(--surface);
+	clear: both;
+	border: 1px solid var(--border); border-radius: 12px; padding: 6px; background: var(--surface);
 }
-.rx-strip-title { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; font-weight: 700; color: var(--text-0); margin-bottom: 0.55rem; }
-.rx-strip-title .ic { width: 15px; height: 15px; color: var(--sig-orange); flex: 0 0 auto; }
-.rx-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.rx-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
 .rx-btn {
 	display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-	min-height: 60px; padding: 6px 2px; border-radius: 10px; cursor: pointer;
-	font: inherit; font-size: 12px; line-height: 1.2; color: var(--text-1);
+	min-width: 0; min-height: 52px; padding: 5px 0 4px; border-radius: 10px; cursor: pointer;
+	font: inherit; font-size: 11px; line-height: 1.15; letter-spacing: -0.3px; color: var(--text-1);
 	background: transparent; border: 1px solid var(--border); white-space: nowrap;
 }
-.rx-btn .ic { width: 26px; height: 26px; }
+.rx-btn .ic { width: 22px; height: 22px; flex: 0 0 auto; }
+@media (max-width: 360px) { .rx-btn { font-size: 10px; } }
 .rx-btn:hover { border-color: rgba(146, 146, 163, 0.5); color: var(--text-0); }
 .rx-btn.is-on { color: var(--sig-orange); border-color: var(--sig-orange); background: rgba(255, 159, 67, 0.12); font-weight: 700; }
-.rx-strip-hint { margin-top: 0.5rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
 /* 分享者收到的：圖＋名字＋貼圖名 */
 .rx-recv-head { font-weight: 700; margin-bottom: 0.4rem; line-height: 1.5; }
 .rx-recv-list { list-style: none; margin: 0; padding: 0; }
@@ -5085,5 +5085,7 @@ select.fr-input { width: 100%; }
 .rx-tile-label { color: var(--text-1); white-space: nowrap; }
 .rx-recent li { cursor: pointer; border-radius: 10px; }
 .rx-recent li:hover { background: var(--surface); }
+/* 盤中雷達：分享來的那一顆底下接一排，占故事列的整個寬度（不在時間／圖示／文字三欄裡） */
+.rtl-rx { margin: 0 0 6px 0; padding: 0 6px; }
 #fr-btn-rx { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
 #fr-btn-rx b { color: var(--sig-orange); }
