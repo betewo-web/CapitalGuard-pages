@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="300">
+  <meta name="app-version" content="301">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=300" rel="stylesheet">
+  <link href="watchlist.css?v=301" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -15226,10 +15226,19 @@ function frRenderSharesIn() {
         </div>
       </li>`;
     }
-    // 進階訊號依我的方案生效：超出額度或需要混和訊號權限的部分不會發
-    const rulesNote = (s.rules_total > 0 && s.rules_active != null && s.rules_active < s.rules_total)
-      ? `<div class="fr-hint fr-warn">進階訊號 ${s.rules_active}／${s.rules_total} 條生效，${nextPlanFor("alert_rules")
-          ? "其餘升級方案後生效" : "其餘要先騰出額度（刪掉自己用不到的那幾條）才會生效"}</div>` : "";
+    // 分享的進階訊號**不佔**我自己的額度（2026-10-09 Howard：「只要我的股票上限沒到，
+    // 就是要可以接受收，跟我的進階訊號使用量無關」）。原本那句「其餘要先騰出額度」是
+    // 從頭錯的——新帳號一登入就被預設種子發滿 6 條，每一則分享都會是 0／6 條生效。
+    // 這句話剩下唯一一個用途：裡面有混和訊號（多條件）而我的方案沒有這個權限。
+    // 整則超出自選股上限的那一種由下面的 slotNote 講，同一則上不要講兩次。
+    // 也要我的方案真的沒有混和訊號才講。前端升版與 migration 之間有空窗（App 已經是新的、
+    // 資料庫還在用舊的 rules_active 算額度），沒有這個條件的話那段空窗裡會對著一個
+    // 混和訊號明明開著的人說「其餘是混和訊號」——寧願什麼都不說（2026-10-08 的教訓）。
+    const rulesNote = (s.rules_total > 0 && s.rules_active != null
+                       && s.rules_active < s.rules_total && shareIsMonitored(s.share_id)
+                       && !planAllows("mixed_signals"))
+      ? `<div class="fr-hint fr-warn">進階訊號 ${s.rules_active}／${s.rules_total} 條生效，其餘是混和訊號`
+        + `（一條放多個條件），需要${escapeHtml(cheapestPlanNameWith("mixed_signals"))}</div>` : "";
     // 整則都沒進監控（分享也算在自選股上限內，2026-10-06）：接受的時候額度還夠，
     // 後來降級或自選股變多才被擠出來。不講的話這一檔在首頁就只是「有 0 則訊號」。
     const slotNote = shareIsMonitored(s.share_id) ? ""
