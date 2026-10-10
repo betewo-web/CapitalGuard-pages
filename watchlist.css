@@ -1884,26 +1884,41 @@ body.modal-blocking .modal-backdrop.show {
 	margin-top: 3px;
 }
 
-/* 一則一則刪改成往左滑（Howard 2026-10-09 晚：列上的垃圾桶拿掉）。
-   「刪除」鈕躲在列的右邊後面，列往左滑 88px 才露出來；列本身要有不透明底，滑到一半時才蓋得住它。
-   touch-action: pan-y——直的手勢瀏覽器照常捲清單，橫的才交給 pointer 事件。 */
-.ib-swipe { position: relative; overflow: hidden; border-radius: 14px; margin-bottom: 0.5rem; }
-.ib-swipe > .inbox-item {
-	margin-bottom: 0; z-index: 1;
-	background: var(--bg-0);
-	touch-action: pan-y;
-	will-change: transform;
-	transition: border-color 0.15s, transform 0.18s ease;
-}
-.ib-swipe > .inbox-item.unread { background: var(--surface-2); }
-.ib-swipe-del {
-	position: absolute; top: 0; right: 0; bottom: 0; width: 88px; z-index: 0;
+/* ── 往左滑露出動作鈕（通知匣 2026-10-09，股票清單 2026-10-10）────────────────
+   三個清單共用：通知匣的每一則（刪除）、首頁「股票雷達」的每一列與設定頁的自選列（移除）。
+   .sw-wrap 是外框（overflow:hidden 藏住右邊那一顆）、.sw-face 是會被推開的列、
+   .sw-act 是露出來的那一顆。機制在 swipeBind()：拖曳中兩個都由 JS 設 inline transform
+   （.is-drag 關掉過渡），放手後清掉 inline，停在哪裡由 .is-open 決定。
+   touch-action: pan-y——直的手勢瀏覽器照常捲清單，橫的才交給 pointer 事件。
+   按鈕疊在列的上面（z-index 2）而不是藏在後面：首頁方塊與設定頁的列都是半透明底色，
+   藏在後面會透出一塊粉紅色（通知匣的列剛好有不透明底，所以原本看不出差別）。 */
+.sw-wrap { position: relative; overflow: hidden; }
+.sw-face { transform: translateX(0); touch-action: pan-y; will-change: transform; transition: transform 0.18s ease; }
+.sw-wrap.is-open .sw-face { transform: translateX(-88px); }
+.sw-act {
+	position: absolute; top: 0; right: 0; bottom: 0; width: 88px; z-index: 2;
+	transform: translateX(88px);
+	transition: transform 0.18s ease;
 	display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-	border: 0; border-radius: 0 14px 14px 0; cursor: pointer;
+	border: 0; cursor: pointer;
 	background: rgba(255, 95, 133, 0.92); color: #fff;
 	font: inherit; font-size: 12px; line-height: 1;
 }
-.ib-swipe-del .ic { width: 16px; height: 16px; }
+.sw-wrap.is-open .sw-act { transform: translateX(0); }
+/* 拖曳中跟著手指走（inline transform），不能有過渡；放手那 0.18 秒才滑回去 */
+.sw-wrap.is-drag .sw-face,
+.sw-wrap.is-drag .sw-act { transition: none; }
+.sw-act .ic { width: 16px; height: 16px; }
+
+/* 通知匣自己的樣子（機制在上面那一組）：圓角與列距，以及列的不透明底 */
+.ib-swipe { border-radius: 14px; margin-bottom: 0.5rem; }
+.ib-swipe > .inbox-item {
+	margin-bottom: 0;
+	background: var(--bg-0);
+	transition: border-color 0.15s, transform 0.18s ease;
+}
+.ib-swipe > .inbox-item.unread { background: var(--surface-2); }
+.ib-swipe-del { border-radius: 0 14px 14px 0; }
 /* 通知匣裡按「回饋」展開的那一排：在列的底下、占整個寬度 */
 .ib-rx { margin: -0.2rem 0 0.6rem; }
 
@@ -2336,6 +2351,15 @@ body.modal-blocking .modal-backdrop.show {
 	gap: 8px;
 }
 
+/* 每一列的外框（往左滑露出「移除」的那一層，2026-10-10）：方塊的陰影搬到這裡——
+   外框要 overflow:hidden 才藏得住右邊那一顆，而 box-shadow 畫在邊界外面，
+   留在方塊上會整個被裁掉。min-width: 0 的理由與 .home-grid 的 minmax(0, 1fr) 同一個。 */
+.home-tile-wrap {
+	min-width: 0;
+	border-radius: 16px;
+	box-shadow: var(--shadow-soft);
+}
+
 .home-tile {
 	display: flex;
 	flex-direction: column;
@@ -2344,7 +2368,6 @@ body.modal-blocking .modal-backdrop.show {
 	border: 1px solid var(--border);
 	border-radius: 16px;
 	background: var(--surface);
-	box-shadow: var(--shadow-soft);
 	cursor: pointer;
 	/* 保險（2026-10-07）：那一列是不換行的 flex，極窄螢幕＋最大字級時仍可能塞不下。
 	   裁在卡片邊界裡，才不會變成整頁的水平捲軸——寧可切在卡片內，不要動到整個畫面。 */
@@ -2506,7 +2529,11 @@ body.modal-blocking .modal-backdrop.show {
 }
 
 /* 範例方塊：虛線紫框＋「範例」籤，橫跨兩欄，底下說明它為什麼在這裡（沒有自己的歷史時才出現） */
-.home-tile.home-example { grid-column: 1 / -1; border: 1px dashed rgba(139, 124, 255, 0.55); background: rgba(139, 124, 255, 0.06); }
+/* 範例那一張不包往左滑的外框（沒有東西可以刪），陰影就留在它自己身上 */
+.home-tile.home-example {
+	grid-column: 1 / -1; border: 1px dashed rgba(139, 124, 255, 0.55);
+	background: rgba(139, 124, 255, 0.06); box-shadow: var(--shadow-soft);
+}
 .home-example-tag { font-size: 0.62rem; font-weight: 700; color: var(--accent); border: 1px solid rgba(139, 124, 255, 0.6); border-radius: 6px; padding: 2px 6px; line-height: 1; white-space: nowrap; }
 .home-example-note { font-size: 0.74rem; color: var(--text-1); line-height: 1.5; }
 .rtl-example .home-example-tag { margin-right: 0.35rem; }
@@ -5010,10 +5037,15 @@ select.fr-input { width: 100%; }
 .sa-text i { display: block; font-style: normal; font-size: 0.95rem; color: var(--text-muted); line-height: 1.5; }
 
 /* 從首頁跳過來的那一檔閃 3 秒（goStockSettings）。動畫與分享分頁共用 fr-flash：
-   同一件事（「你要找的是這一列」）在兩頁應該長得一樣。 */
-.wl-row.is-flash { animation: fr-flash 0.6s ease-in-out 5; border-radius: 12px; }
+   同一件事（「你要找的是這一列」）在兩頁應該長得一樣。
+   外框（.wl-swipe，往左滑那一層）也掛同一個 class：不喜歡動畫的人看到的是畫在邊界
+   外面的一圈外框，留在列上會被外框的 overflow:hidden 裁掉。 */
+.wl-swipe { min-width: 0; border-radius: 16px; }
+.wl-row.is-flash,
+.wl-swipe.is-flash { animation: fr-flash 0.6s ease-in-out 5; border-radius: 12px; }
 @media (prefers-reduced-motion: reduce) {
-	.wl-row.is-flash { animation: none; box-shadow: 0 0 0 2px var(--accent); }
+	.wl-row.is-flash,
+	.wl-swipe.is-flash { animation: none; box-shadow: 0 0 0 2px var(--accent); }
 }
 
 /* ── 回饋貼圖（REACTIONS.md，2026-10-09）─────────────────────────────────────

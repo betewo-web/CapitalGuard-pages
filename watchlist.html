@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="311">
+  <meta name="app-version" content="312">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=311" rel="stylesheet">
+  <link href="watchlist.css?v=312" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7729,8 +7729,8 @@ function renderInbox() {
     // 刪除改成往左滑（Howard 2026-10-09 晚：列上的垃圾桶拿掉）：「刪除」鈕躲在列的右邊後面，
     // 滑開才看得到；鍵盤用 Delete。通知詳情卡裡的「刪除這則」照舊。
     html += `
-      <div class="ib-swipe" data-rowid="${escapeHtml(String(r.id))}">
-      <div class="inbox-item${unread ? " unread" : read ? " read" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
+      <div class="ib-swipe sw-wrap" data-rowid="${escapeHtml(String(r.id))}">
+      <div class="inbox-item sw-face${unread ? " unread" : read ? " read" : ""}" data-sev="${sev}" data-rowid="${escapeHtml(String(r.id))}" role="button" tabindex="0"
            onclick="openInboxItem('${jsAttr(String(r.id))}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInboxItem('${jsAttr(String(r.id))}');}else if(event.key==='Delete'){event.preventDefault();deleteInboxRow('${jsAttr(String(r.id))}');}">
         ${signalIconSvg(r, 34)}
@@ -7743,81 +7743,95 @@ function renderInbox() {
           ${rxInboxChipHtml(r)}
         </div>
       </div>
-      <button type="button" class="ib-swipe-del" tabindex="-1" aria-label="刪除通知：${title}"
+      <button type="button" class="ib-swipe-del sw-act" tabindex="-1" aria-label="刪除通知：${title}"
               onclick="event.stopPropagation();deleteInboxRow('${jsAttr(String(r.id))}')">${ICON_TRASH}<span>刪除</span></button>
       </div>${rxInlineHtml(r)}`;
   }
   listEl.innerHTML = html;
-  _ibSwipeInit();
+  swipeBind(listEl);
   _paintInboxTarget();
 }
 
-// ── 通知匣：往左滑露出「刪除」──────────────────────────────────────────
-// 列本身 touch-action: pan-y——直的手勢瀏覽器照常捲清單，橫的才到這裡。
-// 用 pointer 事件（滑鼠也能拖），事件掛在 #inbox-list 上一次，列每次重畫都換新節點也不必重掛。
-const IB_SWIPE_OPEN = 88;     // 與 .ib-swipe-del 的寬度同值
-let _ibSwipe = null;          // 正在滑的那一列
+// ── 往左滑露出動作鈕（通知匣 2026-10-09，股票清單 2026-10-10 Howard）──────────
+// 三個清單共用這一支：通知匣（#inbox-list，露出「刪除」）、首頁「股票雷達」
+// （#home-watchlist，自選與好友分享兩格都有，露出「移除」）、設定頁的自選列（#wl-grid）。
+// 為什麼共用：手勢的細節每重寫一次就會少一樣——直的手勢要讓給捲動、放手那一下的 click
+// 不算點開、同時只開一列、滑鼠也要能拖、pointercancel 也要收尾。
+//
+// 結構：.sw-wrap（外框，overflow:hidden 藏住右邊那一顆）
+//         ＞ .sw-face（會被推開的那一列）＋ .sw-act（露出來的那一顆，position:absolute）
+// 拖曳中兩個都由這裡設 inline transform（.is-drag 關掉過渡），放手時把 inline 清掉、
+// 只留 .is-open，停在哪裡交給 CSS。按鈕疊在列的上面（z-index）而不是藏在後面：
+// 首頁方塊與設定頁的列都是半透明底色，放在後面會透出一塊粉紅色。
+const SWIPE_OPEN = 88;        // 露出來那一顆的寬度（與 .sw-act 的 width 同值）
+let _swipe = null;            // 正在滑的那一列
 
-function _ibSwipeClose() {
-  document.querySelectorAll("#inbox-list .ib-swipe.is-open").forEach(w => {
+// dx = null：拖曳結束，位移交回 CSS（.sw-wrap.is-open 決定停在 -SWIPE_OPEN 還是 0）
+function _swipeDrag(wrap, dx) {
+  if (!wrap) return;
+  wrap.classList.toggle("is-drag", dx !== null);
+  const face = wrap.querySelector(".sw-face"), act = wrap.querySelector(".sw-act");
+  if (face) face.style.transform = dx === null ? "" : `translateX(${dx}px)`;
+  if (act)  act.style.transform  = dx === null ? "" : `translateX(${dx + SWIPE_OPEN}px)`;
+}
+
+function swipeCloseAll(root) {
+  (root || document).querySelectorAll(".sw-wrap.is-open").forEach(w => {
     w.classList.remove("is-open");
-    const it = w.querySelector(".inbox-item");
-    if (it) it.style.transform = "";
+    _swipeDrag(w, null);
   });
 }
 
-function _ibSwipeInit() {
-  const list = document.getElementById("inbox-list");
+// list：清單容器。事件掛在它上面一次（dataset.swipeReady），列每次重畫都換新節點也不必重掛。
+function swipeBind(list) {
   if (!list || list.dataset.swipeReady) return;
   list.dataset.swipeReady = "1";
-  // 放手那一下會跟著一個 click：攔在捕獲階段，列自己的 onclick（點開這一則）就不會跑；
-  // 已經滑開的列點一下＝收回去，也不點開
+  // 放手那一下會跟著一個 click：攔在捕獲階段，列自己的 onclick（點開這一則／開盤中雷達）
+  // 就不會跑；已經滑開的列點一下＝收回去，也不點開。列上的小按鈕（通知匣的回饋籤、
+  // 首頁那顆「⋯」）照常點得到。
   list.addEventListener("click", e => {
-    const el = e.target.closest(".inbox-item");
+    const el = e.target.closest(".sw-face");
     if (!el) return;
-    const wrap = el.closest(".ib-swipe");
+    const wrap = el.closest(".sw-wrap");
     if (el.dataset.swiped === "1") {
       delete el.dataset.swiped;
       e.stopPropagation(); e.preventDefault();
     } else if (wrap && wrap.classList.contains("is-open") && !e.target.closest("button")) {
-      _ibSwipeClose();
+      swipeCloseAll(list);
       e.stopPropagation(); e.preventDefault();
     }
   }, true);
   list.addEventListener("pointerdown", e => {
-    const el = e.target.closest(".inbox-item");
+    const el = e.target.closest(".sw-face");
     if (!el || (e.pointerType === "mouse" && e.button !== 0) || e.target.closest("button")) return;
-    _ibSwipe = { el, x: e.clientX, y: e.clientY, dx: 0, horizontal: null, id: e.pointerId };
+    _swipe = { el, wrap: el.closest(".sw-wrap"), x: e.clientX, y: e.clientY,
+               dx: 0, horizontal: null, id: e.pointerId };
   });
   list.addEventListener("pointermove", e => {
-    const s = _ibSwipe;
+    const s = _swipe;
     if (!s || e.pointerId !== s.id) return;
     const dx = e.clientX - s.x, dy = e.clientY - s.y;
     if (s.horizontal === null) {
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
       s.horizontal = Math.abs(dx) > Math.abs(dy);
-      if (!s.horizontal) { _ibSwipe = null; return; }     // 直的：人在捲清單
+      if (!s.horizontal) { _swipe = null; return; }        // 直的：人在捲清單
       try { s.el.setPointerCapture(e.pointerId); } catch (err) { /* 舊瀏覽器沒有也沒關係 */ }
-      const wrap = s.el.closest(".ib-swipe");
-      s.base = wrap && wrap.classList.contains("is-open") ? -IB_SWIPE_OPEN : 0;
-      if (!s.base) _ibSwipeClose();                        // 同時只開一列
+      s.base = s.wrap && s.wrap.classList.contains("is-open") ? -SWIPE_OPEN : 0;
+      if (!s.base) swipeCloseAll(list);                     // 同時只開一列
     }
-    s.dx = Math.max(-IB_SWIPE_OPEN, Math.min(0, s.base + dx));
-    s.el.style.transition = "none";
-    s.el.style.transform = `translateX(${s.dx}px)`;
+    s.dx = Math.max(-SWIPE_OPEN, Math.min(0, s.base + dx));
+    _swipeDrag(s.wrap, s.dx);
     s.el.dataset.swiped = "1";
   });
   const end = e => {
-    const s = _ibSwipe;
+    const s = _swipe;
     if (!s || e.pointerId !== s.id) return;
-    _ibSwipe = null;
+    _swipe = null;
     if (s.horizontal !== true) return;
-    const wrap = s.el.closest(".ib-swipe");
-    const open = s.dx < -IB_SWIPE_OPEN / 2;
-    s.el.style.transition = "";
-    if (wrap) wrap.classList.toggle("is-open", open);
-    s.el.style.transform = open ? `translateX(-${IB_SWIPE_OPEN}px)` : "";
-    setTimeout(() => { delete s.el.dataset.swiped; }, 400);   // 放手那一下的 click 過了就解除
+    const open = s.dx < -SWIPE_OPEN / 2;
+    _swipeDrag(s.wrap, null);                               // inline 清掉，剩下的交給 CSS
+    if (s.wrap) s.wrap.classList.toggle("is-open", open);
+    setTimeout(() => { delete s.el.dataset.swiped; }, 400);  // 放手那一下的 click 過了就解除
   };
   list.addEventListener("pointerup", end);
   list.addEventListener("pointercancel", end);
@@ -8219,6 +8233,9 @@ function renderHome() {
     // 2026-10-06 起分享也算在上限內：自己的列看 active_watchlist，分享的看 monitored_shares。
     const locked = row._share ? !!row._share.locked : !isWatchRowActive(row);
     return { sid, name, active, counts, todayCount, total, standout, pending, locked,
+             // 往左滑露出的「移除」要用它：自選列刪的是 watchlist 那一列（rowId），
+             // 好友分享列移除的是那一則分享（shared.share_id）
+             rowId: row.id || "",
              shared: row._share || null,
              dir: pending ? null : homeDirectionOf(sid),
              limitKind: (active && (active.signal === "limit_up" || active.signal === "limit_down"))
@@ -8270,6 +8287,7 @@ function renderHome() {
     listEl.innerHTML = shown.length
       ? shown.map(r => homeTileHtml(r)).join("") + exampleHtml
       : emptyHtml;
+    swipeBind(listEl);     // 往左滑露出「移除」（事件掛在容器上，列重畫不必重掛）
   }
   homeRenderUpcoming();
   // 「今日股票資訊彙整」那一區 2026-09-27 搬到盤後分頁（見 renderTodayNews()）。這一句留在首頁：
@@ -8343,13 +8361,29 @@ function homeTileHtml(r) {
   const menu = r.shared ? "" : `<button type="button" class="home-tile-more"
         title="${escapeHtml(r.name)}：設定或分享" aria-label="${escapeHtml(r.name)} 的設定與分享"
         onclick="event.stopPropagation();openStockActionMenu('${jsAttr(r.sid)}')">${ICON_DOTS}</button>`;
-  return `<div class="home-tile${r.todayCount ? " is-hot" : ""}${r.locked ? " is-locked" : ""}" title="${
+  // 往左滑露出「移除」（Howard 2026-10-10）。這一頁沒有自己的清單——每一列都是別處那一份
+  // 資料的投影，所以移除刪的也是那一份，不是「只從雷達上拿掉」：
+  //   · 自選那一格 → 刪自選股，走設定頁同一個確認框（openRemoveStockConfirm）
+  //   · 好友分享那一格 → 移除那一則分享，跟分享頁的「移除」同一句確認、同一支 RPC
+  // 兩邊刪完都由 syncStockLists() 一起重抓（自選與分享共用同一份額度，見那支的註解）。
+  // tabindex="-1"：滑開才看得到的鈕不該進 Tab 順序；沒有觸控的人走「⋯」→ 設定 → 移除
+  // （#stockActionModal 上就是這麼寫的），好友分享則在分享分頁那一則上。
+  const del = r.shared
+    ? `<button type="button" class="sw-act" tabindex="-1"
+            aria-label="移除 ${escapeHtml(r.shared.from_name || "好友")} 分享的 ${escapeHtml(r.name)}"
+            onclick="event.stopPropagation();removeSharedStock('${jsAttr(r.shared.share_id)}')">${ICON_TRASH}<span>移除</span></button>`
+    : `<button type="button" class="sw-act" tabindex="-1"
+            aria-label="移除自選股 ${escapeHtml(r.name)}"
+            onclick="event.stopPropagation();openRemoveStockConfirm('${jsAttr(r.rowId)}')">${ICON_TRASH}<span>移除</span></button>`;
+  return `<div class="sw-wrap home-tile-wrap">
+      <div class="home-tile sw-face${r.todayCount ? " is-hot" : ""}${r.locked ? " is-locked" : ""}" title="${
       r.locked ? "超出目前方案的自選股上限，不再產生通知；升級後恢復" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
       <div class="home-tile-head">
         <span class="home-tile-name">${escapeHtml(r.name)}</span>${r.shared
           ? `<span class="home-tile-shared" title="好友分享給我">${ICON_SHARE}${escapeHtml(r.shared.from_name || "好友")}</span>` : ""}${dir}${live}
         <span class="home-tile-lead">${lead}</span>${menu}
       </div>
+      </div>${del}
     </div>`;
 }
 
@@ -11327,7 +11361,7 @@ function renderWatchlist(rows) {
 
     const item = document.createElement("article");
     // is-flash：從首頁那一列的「設定」跳過來的那一檔閃 3 秒（goStockSettings）
-    item.className = (active ? "wl-row" : "wl-row is-inactive") + wlFlashClass(sid);
+    item.className = (active ? "wl-row sw-face" : "wl-row sw-face is-inactive") + wlFlashClass(sid);
     item.dataset.id = row.id;
     item.dataset.sid = sid;
     // 2026-09-22：一列就是「名稱＋代號 …… 動作鈕」，超出方案時多一行標記。
@@ -11349,8 +11383,26 @@ function renderWatchlist(rows) {
       </div>
       ${tags.length ? `<div class="wl-tags">${tags.join("")}</div>` : ""}
     `;
-    grid.appendChild(item);
+    // 往左滑露出「移除」（Howard 2026-10-10）：與首頁雷達列同一個手勢（swipeBind），
+    // 列外面再包一層 .sw-wrap。右邊那顆 ✕ 留著——沒有觸控、用鍵盤或讀螢幕的人只剩它，
+    // 而且首頁「⋯ → 設定」那一句寫的就是「基礎訊號、進階訊號、移除」。
+    // 閃爍的 class 兩層都掛：外框 overflow:hidden 會裁掉畫在邊界外面的那一圈（見 .wl-swipe.is-flash）。
+    const wrap = document.createElement("div");
+    wrap.className = "sw-wrap wl-swipe" + wlFlashClass(sid);
+    wrap.appendChild(item);
+    // 露出來的那一顆。這一列本來就是用 createElement 接的，按鈕也一樣接上去——
+    // 不必把 row.id 塞進 onclick 字串（jsAttr 那一套只有用 innerHTML 的地方才需要）。
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "sw-act";
+    del.tabIndex = -1;      // 滑開才看得到的鈕不進 Tab 順序；鍵盤走列上那顆 ✕
+    del.setAttribute("aria-label", `移除 ${displayName} ${sid}`);
+    del.innerHTML = `${ICON_TRASH}<span>移除</span>`;
+    del.onclick = () => openRemoveStockConfirm(row.id);
+    wrap.appendChild(del);
+    grid.appendChild(wrap);
   });
+  swipeBind(grid);     // 往左滑露出「移除」（事件掛在容器上，列重畫不必重掛）
 }
 
 // ── 🌙 盤後（view-post）─────────────────────────────────────────────
@@ -11876,11 +11928,20 @@ function openRemoveStockConfirm(rowId) {
   const row = getWatchlistRowById(rowId);
   if (!row) return;
 
+  // 從首頁往左滑過來的：確認框是接下來要看的東西，那一列先滑回去（按取消時才不會
+  // 留著一顆露在外面的「移除」）
+  swipeCloseAll();
   removeModalRowId = rowId;
   const sid = String(row.stock_id || "").trim();
   const fallbackName = universe[sid]?.n || "";
   const displayName = getPreferredStockName(sid, row.stock_name) || fallbackName || "未命名";
-  document.getElementById("remove-stock-text").textContent = `確定要移除 ${sid} ${displayName} 嗎？`;
+  // 持股記在自選股那一列上（shares／avg_cost 是 watchlist 的欄位），移除會一起不見。
+  // 分享頁的「移除並接受」早就這麼寫了（有持股就多一句），往左滑之後更要講——
+  // 手勢比按鈕容易誤觸，而這是整句話裡唯一救不回來的東西。
+  // 同一段話接在後面（這個 <p> 是 textContent，換行會被摺掉）
+  const held = Number(row.shares) > 0
+    ? ` 這一列記有 ${Number(row.shares)} 股的持股紀錄，移除後會一起消失。` : "";
+  document.getElementById("remove-stock-text").textContent = `確定要移除 ${sid} ${displayName} 嗎？${held}`;
   const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("removeStockModal"));
   modal.show();
 }
@@ -13430,11 +13491,33 @@ async function updateAlert(rowId, field, value, notifyOnError = true) {
   }
 }
 
+// 刪一檔自選股或移除一則分享之後要同步的東西（2026-10-10 Howard：「刪除需要整體同步」）。
+// 自選股與「好友分享給我」共用同一份額度（BILLING.md、FRIENDS.md），所以任何一邊少一檔，
+// 另一邊看到的東西也會跟著變：
+//   · 自選股刪一檔 → 空出一格：原本「🔒 超出自選股上限」的分享可能變成在監控中
+//     （share_state 的 monitored_shares），被擋成「保留中」（held=limit）的邀請也可能
+//     變成按一下就能接受；自選股本身超過上限時，另一列也會跟著解鎖（active_watchlist）。
+//   · 分享移除一則 → 用量那一行（自選+分享）、方案面板的拆解、加自選股的前端預檢都要跟著變。
+// 四個入口（首頁雷達往左滑、設定頁的 ✕、分享頁的「移除」、「不再接收」）都走這一支：
+// 各自記得要重抓哪幾份，遲早有一處會漏——2026-10-10 之前就漏了一處（設定頁移除一檔之後，
+// 分享那一側的鎖與用量要等下次進分享分頁才會更新）。
+// opts.social：連好友清單（lab_social_state）一起重抓。分享分頁上的動作要（接受／移除
+// 之後整頁重畫，邀請與紅點也會變）；首頁與設定頁的刪除不會動到好友清單，只抓分享那一份。
+async function syncStockLists(opts) {
+  const social = !!(opts && opts.social);
+  await Promise.all([
+    loadWatchlist().catch(() => {}),                      // 自選列、active_watchlist、用量戳
+    // 分享的清單、monitored_shares、用量（frReload 連好友那一半，frReloadShares 只抓分享）
+    frEnabled ? (social ? frReload() : frReloadShares()).catch(() => {}) : null,
+  ]);
+  renderCurrentTab();     // 兩支各自只畫自己那一半，收尾統一在這裡重畫目前那一頁
+}
+
 async function removeStock(rowId, notifyOnError = true) {
   try {
     await sbDelete("watchlist", { "id": `eq.${rowId}` }, state.accessToken);
     trackActivity("watch_remove");
-    await loadWatchlist();
+    await syncStockLists();
   } catch (e) {
     if (notifyOnError) alert(`刪除失敗：${e.message}`);
     throw e;
@@ -15437,6 +15520,31 @@ function sharedInOf(sid) {
   return row ? { ...row._share, stock_name: row.stock_name } : null;
 }
 
+// 首頁雷達「好友分享」那一列往左滑的「移除」（Howard 2026-10-10）。分享分頁那一則上的
+// 「移除」走同一支 RPC、同一句確認（shareRemoveConfirmText）——兩個入口刪的是同一樣東西，
+// 講法不該有兩種。移除之後對方還可以再分享（會變成一則新的邀請）；要永遠不收是
+// 「不再接收這檔」，那一顆刻意只留在分享分頁：它封鎖的是「這位好友的這一檔」，
+// 比手勢該負責的範圍大。
+function shareRemoveConfirmText(name) {
+  return `移除「${name}」？之後不會再收到這檔的分享訊號。`;
+}
+
+async function removeSharedStock(shareId) {
+  const id = String(shareId || "").trim();
+  const s = ((frShare && frShare.incoming) || []).find(x => x.share_id === id);
+  if (!id || !s) return;
+  if (!window.confirm(shareRemoveConfirmText(frShareName(s)))) { swipeCloseAll(); return; }
+  try {
+    const res = await frRpc("share_remove", { p_share_id: id });
+    if (!frOk(res)) return;
+    trackActivity("share_remove", { source: "radar" });
+    frToast("已移除");
+    await syncStockLists();     // 分享少一則＝自選股那一側空出一格，兩邊一起重抓
+  } catch (err) {
+    frToast(String(err.message || err), true);
+  }
+}
+
 // 分享的進出會改變雷達要看哪些股票：重抓盤中報價與近 10 日格子，再重畫。
 // 只在代號集合真的變了才抓，不然每次進分享頁都白打兩個請求。
 let _frRadarKey = "";
@@ -15488,7 +15596,25 @@ function frRenderBadge() {
   rxRenderBadge();
 }
 
+// 只重抓 share_state（分享的清單、用量、哪幾則在監控中）。frReload() 會連
+// lab_social_state 一起抓——刪一檔股票不會動到好友清單，那是另一支 RPC。
+async function frReloadShares() {
+  if (!frEnabled) return;
+  const sh = await frRpc("share_state");
+  if (!sh || sh === FR_RPC_MISSING || sh.error) return;
+  frShare = sh;
+  if (frState) frRender();     // 用量那一行、🔒、保留中的邀請都在分享分頁上
+  frSyncRadar();               // 分享的股票有進出：盤中報價與近 10 日格子要跟著換
+}
+
+// 上一次開始重抓的時間：renderFriends()「進到這一頁就重抓一次」靠它防重複。
+// 刪一檔股票之後 syncStockLists() 會重畫好幾次（loadWatchlist 自己也會畫一次），
+// 每一次重畫都會走到 renderFriends——不擋的話一個動作要打四次 RPC（2026-10-10）。
+let _frReloadedAt = 0;
+const FR_RELOAD_MIN_MS = 3000;
+
 async function frReload() {
+  _frReloadedAt = Date.now();   // 先蓋章（不是抓完才蓋）：抓的這段時間裡的重畫也要擋掉
   const [s, sh] = await Promise.all([frRpc("lab_social_state"), frRpc("share_state")]);
   if (!frOk(s)) return false;
   frApplySocial(s);
@@ -15503,8 +15629,9 @@ async function renderFriends() {
   if (!frState) { await frReload(); return; }
   frRender();
   // 進到這一頁就重抓一次：對方的動作（接受、更新、終止）沒有推進來的管道，
-  // 不重抓的話畫面會停在登入那一刻。
-  frReload().catch(() => {});
+  // 不重抓的話畫面會停在登入那一刻。剛抓過（或正在抓）就不必再來一次——
+  // 這一頁每次重畫都會走到這裡，見 _frReloadedAt。
+  if (Date.now() - _frReloadedAt > FR_RELOAD_MIN_MS) frReload().catch(() => {});
 }
 
 // ── 小工具 ──
@@ -17072,6 +17199,9 @@ async function frSendShare() {
   }
 }
 
+// 會改到「自選+分享」那份額度的動作：收尾要連自選股那一側一起重抓（見下面的 syncStockLists）
+const SHARE_ACTS_STOCK = ["in-accept", "in-replace", "in-remove", "in-optout"];
+
 // ── 動作（事件委派；只認這一頁裡的按鈕）──
 document.addEventListener("click", async e => {
   const btn = e.target.closest("#view-friends [data-fr]");
@@ -17091,7 +17221,7 @@ document.addEventListener("click", async e => {
     "group-del":       `刪除常用名單「${name}」？已經送出的分享不受影響——名單只是挑人用的。`,
     "group-leave":     `退出常用名單「${name}」？已經收到的分享不受影響。`,
     "share-terminate": `立即終止「${name}」的分享？對方會收到通知，之後不會再收到這檔的分享訊號。`,
-    "in-remove":       `移除「${name}」？之後不會再收到這檔的分享訊號。`,
+    "in-remove":       shareRemoveConfirmText(name),
   };
   // 減分享對象：被移除的那一位會收到通知，已接受的人等於他的雷達會少一檔
   if (act === "target-remove") {
@@ -17224,7 +17354,6 @@ document.addEventListener("click", async e => {
         if (res.held === "limit") frToast("「自選+分享」已達上限，沒有移除任何東西", true);
         else frToast("已移除原有的，並接受這則分享"
                      + (res.rules_deleted ? `（一併移除 ${res.rules_deleted} 條只套用在這一檔的進階訊號）` : ""));
-        if (res.replaced === "watchlist") loadWatchlist().catch(() => {});   // 自選股少了一檔
         break;
       case "in-accept":
         // 接受被擋不是失敗：邀請轉成保留，畫面上會出現原因與解法
@@ -17233,7 +17362,13 @@ document.addEventListener("click", async e => {
         else frToast("已接受，這檔會出現在盤中「股票雷達」的「好友分享」那一格");
         break;
     }
-    await frReload();     // 裡面的 frSyncRadar() 會在分享的股票有進出時重抓雷達資料
+    // 接受／移除／不再接收／取代：股票的集合變了，而自選股與分享共用同一份額度——
+    // 自選列的鎖、用量與加自選股的預檢都要跟著變，所以收尾走 syncStockLists()
+    // （首頁往左滑與設定頁的 ✕ 走的是同一支，見那裡的註解）。其餘動作（好友、常用名單、
+    // 分享對象、同步設定）只動到分享這一側。
+    // 兩條路都會呼叫 frSyncRadar()，分享的股票有進出時重抓雷達資料。
+    if (SHARE_ACTS_STOCK.includes(act)) await syncStockLists({ social: true });
+    else await frReload();
   } catch (err) {
     frToast(String(err.message || err), true);
     btn.disabled = false;
