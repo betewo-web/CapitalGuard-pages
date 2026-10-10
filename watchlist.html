@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="310">
+  <meta name="app-version" content="311">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=310" rel="stylesheet">
+  <link href="watchlist.css?v=311" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9772,7 +9772,7 @@ function renderRadarTimeline(sid) {
   }
   _paintRtlTarget();   // 重畫換掉了節點：正在閃的那一則要接著閃完
   // 這一檔有沒有可以進去的對話（一次問一支 chat_rooms，沒有分享的股票連問都不問）
-  cvLoadRooms(sid).then(() => { cvPaintBar(); if (cvOpen) cvRestoreDraft(); }).catch(() => {});
+  cvLoadRooms(sid).then(() => { cvPaintBar(); if (cvOpen) cvAfterPaint(); }).catch(() => {});
 }
 
 // opts.past：畫過去的某一天——不畫「現在」游標、不拿今天的報價與月線當參考、壓力／支撐用 iq.levels（那天存下的）
@@ -15086,7 +15086,7 @@ function cvPanelHtml() {
       <span class="cv-mem" role="button" tabindex="0" onclick="cvToggleMembers()">成員 ${room.members_n || 1} 人 ${cvOpen.showMembers ? "▾" : "▸"}</span></div>
     <div class="cv-note">訊息保留 ${cvRetentionDays} 天${ended ? "・這則分享已結束" : ""}</div>
     ${cvOpen.showMembers ? `<div class="cv-members">${cvMembersHtml()}</div>` : ""}
-    <div class="cv-log" id="cv-log">${cvLogHtml()}</div>
+    <div class="cv-log" id="cv-log" onscroll="cvLogScroll(this)">${cvLogHtml()}</div>
     ${foot}</div>`;
 }
 
@@ -15162,15 +15162,16 @@ function cvRepaint() {
     _cvForceRepaint = true;
     try { refreshRadarTimelineIfOpen(); } finally { _cvForceRepaint = false; }
   }
-  cvRestoreDraft();
+  cvAfterPaint();
 }
 
 function cvRepaintLog() {
   const el = document.getElementById("cv-log");
   if (!el) { cvRepaint(); return; }
-  const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+  const atEnd = cvOpen._atEnd !== false
+    || el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
   el.innerHTML = cvLogHtml();
-  if (atEnd) el.scrollTop = el.scrollHeight;
+  if (atEnd) { el.scrollTop = el.scrollHeight; cvOpen._atEnd = true; }
 }
 
 function cvScrollLogToEnd() {
@@ -15181,6 +15182,23 @@ function cvScrollLogToEnd() {
 function cvRestoreDraft() {
   const el = document.getElementById("cv-input");
   if (el && cvOpen && cvOpen.shareId) el.value = cvDrafts[cvOpen.shareId] || "";
+}
+
+// 使用者捲到哪裡、是不是停在最底下（最新的那一則）
+function cvLogScroll(el) {
+  if (!cvOpen || !el) return;
+  cvOpen._logTop = el.scrollTop;
+  cvOpen._atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+}
+
+// 每一次重畫之後：打到一半的字、捲動位置都要回到原狀。
+// 不還原的話，盤中每 5 秒的那一次重畫會把人從正在讀的地方拉回最上面（最舊的那一則）。
+function cvAfterPaint() {
+  cvRestoreDraft();
+  const el = document.getElementById("cv-log");
+  if (!el || !cvOpen) return;
+  if (cvOpen._atEnd === false && cvOpen._logTop != null) el.scrollTop = cvOpen._logTop;
+  else el.scrollTop = el.scrollHeight;   // 預設停在最新的那一則
 }
 
 // 報價每 5 秒會重畫整張卡：正在打字時不要把輸入框換掉（游標會跑掉）
