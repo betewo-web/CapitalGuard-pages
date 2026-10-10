@@ -5193,3 +5193,18 @@ select.fr-input { width: 100%; }
 
 /* 一間房一條：連著好幾條時彼此靠緊一點（我分享出去的、好友分享給我的各一條） */
 .cv-bar + .cv-bar { margin-top: 4px; }
+
+/* 「已分享出去」與未讀數（CHAT.md 第三輪）。顏色照既有語彙：紫＝分享／可以按，
+   紅＝未讀數（--sig-red 的註解），橘藍留給訊號等級。 */
+.home-tile-out { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto;
+	font-size: 11.5px; color: #c6bbff; background: rgba(139, 124, 255, 0.14);
+	border-radius: 999px; padding: 1px 7px; }
+.home-tile-out .ic { width: 12px; height: 12px; }
+.home-tile-cv { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto;
+	font-size: 11.5px; font-weight: 700; color: #fff; background: var(--sig-red);
+	border-radius: 999px; padding: 1px 7px; }
+.home-tile-cv .ic { width: 12px; height: 12px; }
+.wl-tag-shared { color: #c6bbff; background: rgba(139, 124, 255, 0.14); }
+.hs-seg-unread { display: none; margin-left: 4px; font-size: 10.5px; font-weight: 700;
+	color: #fff; background: var(--sig-red); border-radius: 999px; padding: 0 5px; }
+.cv-dir { font-size: 11.5px; color: var(--text-muted); font-weight: 400; }

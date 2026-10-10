@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="313">
+  <meta name="app-version" content="314">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=313" rel="stylesheet">
+  <link href="watchlist.css?v=314" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -310,7 +310,7 @@
         <div class="hs-seg" id="home-filter" role="radiogroup" aria-label="股票雷達要看哪一種">
           <button type="button" role="radio" data-hf="mine" aria-checked="true" onclick="setHomeFilter('mine')"><i data-icon="star"></i>自選<span class="hs-seg-n"></span></button>
           <button type="button" role="radio" data-hf="held" aria-checked="false" onclick="setHomeFilter('held')"><i data-icon="wallet"></i>持股<span class="hs-seg-n"></span></button>
-          <button type="button" role="radio" data-hf="shared" aria-checked="false" onclick="setHomeFilter('shared')"><i data-icon="share"></i>好友分享<span class="hs-seg-n"></span></button>
+          <button type="button" role="radio" data-hf="shared" aria-checked="false" onclick="setHomeFilter('shared')"><i data-icon="share"></i>好友分享<span class="hs-seg-n"></span><span class="hs-seg-unread" id="hs-unread-shared"></span></button>
         </div>
 
         <!-- 「新增自選股」（2026-10-06 Howard）：從標題列右上搬到三格下面、置中、只留圖示。
@@ -686,6 +686,8 @@
 <nav id="bottom-nav" class="bottom-nav" style="display:none" aria-label="主導航">
   <button class="bottom-nav-item" data-tab="home" onclick="switchTab('home')">
     <span class="bn-icon" data-icon="home"></span><span>首頁</span>
+    <!-- 對話框的未讀總數（CHAT.md）：三個層次的最上層 -->
+    <span class="bn-badge" id="home-badge"></span>
   </button>
   <button class="bottom-nav-item" data-tab="scores" onclick="switchTab('scores')">
     <span class="bn-icon" data-icon="chart"></span><span>統計</span>
@@ -5004,6 +5006,7 @@ function _onAppResume() {
   // 但它在 focus 前已把目標寫進 Cache——回前景時補撿一次，訊息有到的話會被時間戳擋掉
   _consumePendingAlertFromCache();
   _consumePendingSignalsFromCache().then(_refreshQuotesOnPush).catch(() => {});
+  cvLoadUnread(true).catch(() => {});   // 回前景：對話的未讀數可能在背景變了
   _flushPushReceipts().catch(() => {});
 
   _scheduleAutoRefresh();
@@ -7845,6 +7848,15 @@ let detailRow = null;   // 目前開啟詳情的通知 row
 function openInboxItem(rowId) {
   const row = inboxRows.find(r => String(r.id) === String(rowId));
   if (!row) return;
+  // 對話（CHAT.md）：event_key 是 chat:<share_id>:<stock_id>:<日期>，點開直接進那一間房
+  if (String(row.source || "") === "chat") {
+    _markInboxRowRead(row);
+    trackActivity("inbox_open", { source: "chat" });
+    const parts = String(row.event_key || "").split(":");
+    if (parts.length >= 4 && parts[2]) { cvOpenFromInbox(parts[2], parts[1]); return; }
+    openInboxDetail(rowId);
+    return;
+  }
   // 分享類（好友邀請、分享邀請／更新／終止）：跳到「分享」分頁的那一則並閃 3 秒。
   // 這些通知要的是一個動作（同意、接受、確認），開一張只有文字的詳情卡是死路。
   if (String(row.source || "") === "share" && frEnabled) {
@@ -7873,7 +7885,7 @@ const INBOX_RADAR_SOURCES = ["monitor", "rule"];
 // 內文那句「點這則通知查看方案」在這裡就變成死路（2026-10-03）。
 const INBOX_PLAN_SOURCES = ["trial"];
 // 來源徽章平常直接印 source（monitor／rule…）；新來源給個看得懂的字
-const INBOX_SOURCE_LABEL = { trial: "方案", share: "分享", reaction: "回饋" };
+const INBOX_SOURCE_LABEL = { trial: "方案", share: "分享", reaction: "回饋", chat: "對話" };
 
 // 這一則能不能在盤中雷達上指出來。**找得到對應的那一顆才回 true**——
 // 找不到就照舊開通知詳情，不要把人丟到一張寫著「沒有這天的紀錄」的空卡片上。
@@ -8380,7 +8392,10 @@ function homeTileHtml(r) {
       r.locked ? "超出目前方案的自選股上限，不再產生通知；升級後恢復" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
       <div class="home-tile-head">
         <span class="home-tile-name">${escapeHtml(r.name)}</span>${r.shared
-          ? `<span class="home-tile-shared" title="好友分享給我">${ICON_SHARE}${escapeHtml(r.shared.from_name || "好友")}</span>` : ""}${dir}${live}
+          ? `<span class="home-tile-shared" title="好友分享給我">${ICON_SHARE}${escapeHtml(r.shared.from_name || "好友")}</span>`
+          : sharedOutSids().has(String(r.sid))
+          ? `<span class="home-tile-out" title="你已經把這一檔分享給好友">${ICON_SHARE}已分享出去</span>` : ""}${
+          cvTileUnreadHtml(r.sid)}${dir}${live}
         <span class="home-tile-lead">${lead}</span>${menu}
       </div>
       </div>${del}
@@ -11353,6 +11368,11 @@ function renderWatchlist(rows) {
     // 收盤價、事件、持股 2026-09-22 搬到「🌙 盤後」（Howard）：這一頁只做設定。
     // 超出方案的標記留著——它解釋的正是「為什麼這一檔沒有通知」，屬於設定。
     const tags = [];
+    // 已經分享給好友的那幾檔（CHAT.md 第三輪）：設定頁與首頁同一句話，
+    // 讓人知道「我改這裡的設定，好友那邊也會跟著變」（分享的快照是自動同步的）
+    if (sharedOutSids().has(sid)) {
+      tags.push(`<span class="wl-signal-badge wl-tag-shared" title="這一檔已經分享給好友，設定改動會自動同步過去">已分享出去</span>`);
+    }
     const active = isWatchRowActive(row);
     if (!active) {
       tags.push(`<span class="wl-signal-badge wl-tag-locked" title="超出目前方案的自選股上限，不再產生通知；升級後恢復">🔒 超出方案</span>`);
@@ -13964,6 +13984,8 @@ function _reapplyPushedSignals(map) {
 
 function ingestPushedAlert(a) {
   if (!a || !a.key) return false;
+  // 對話的推播（CHAT.md）：內文不含訊息內容，數字要自己去倉庫問
+  if (String(a.src || "") === "chat") cvLoadUnread(true).catch(() => {});
   // 免費版靠這個旗標決定「回到 App 時要不要補一次報價」（_refreshQuotesOnPush）
   _pushedSinceQuoteLoad = true;
   let changed = false;
@@ -14999,6 +15021,46 @@ function cvErrText(res) {
   return "";
 }
 
+// 未讀數（Howard 2026-10-10 第三輪）：底部「首頁」、首頁的「好友分享」鈕、那一格的每一檔。
+// chat_unread() 很瘦（不帶預覽與成員），所以開 App、回前景、收到推播之後各叫一次就夠。
+let cvUnread = { total: 0, shared: 0, rooms: {}, stocks: {} };
+let _cvUnreadAt = 0;
+
+async function cvLoadUnread(force = false) {
+  if (!cvReady()) return;
+  if (!force && Date.now() - _cvUnreadAt < 30000) return;   // 節流：畫面重畫不該各問一次
+  _cvUnreadAt = Date.now();
+  const res = await cvRpc("chat_unread", {});
+  if (!res || res.error) return;
+  cvUnread = { total: Number(res.total) || 0, shared: Number(res.shared) || 0,
+               rooms: res.rooms || {}, stocks: res.stocks || {} };
+  cvPaintUnread();
+}
+
+function cvPaintUnread() {
+  const put = (el, n) => {
+    if (!el) return;
+    el.textContent = n > 99 ? "99+" : String(n || "");
+    el.style.display = n ? "" : "none";
+  };
+  put(document.getElementById("home-badge"), cvUnread.total);
+  put(document.getElementById("hs-unread-shared"), cvUnread.shared);
+}
+
+// 首頁那一格右上的未讀數（我自己分享出去的那幾檔也會有——未讀是房間的事，不分方向）
+function cvTileUnreadHtml(sid) {
+  const n = (cvUnread.stocks || {})[String(sid)];
+  return n ? `<span class="home-tile-cv" title="${n} 則未讀訊息">${ICON_TALK_S}${n > 99 ? "99+" : n}</span>` : "";
+}
+
+// 從通知匣的「對話」那一則進房：開那一檔的字卡、停在盤中雷達、展開那一間
+async function cvOpenFromInbox(sid, shareId) {
+  openStockCard(String(sid || ""), { tab: "radar" });
+  await cvLoadRooms(String(sid || ""), true);
+  cvPaintBar();
+  if (cvRoomById(shareId)) cvEnter(String(shareId));
+}
+
 // 打開字卡／換股票時問一次。p_stock_id 給 null＝我的全部房間（分享分頁用）
 async function cvLoadRooms(sid, force = false) {
   const key = String(sid || "").trim();
@@ -15023,6 +15085,11 @@ function cvRoomTitle(room) {
   return room.other_name ? `與 ${room.other_name} 聊聊` : "與群組聊聊";
 }
 
+// 撞名時補的那一句：這一間是誰分享的
+function cvRoomDir(room) {
+  return room && room.mine ? "我分享的" : `${(room && room.owner_name) || "好友"} 分享的`;
+}
+
 // 面板裡的標題：一對一沿用列上那句；多人才講得出這個群組是誰的分享
 function cvPanelTitle(room) {
   if (!room) return "聊聊";
@@ -15037,10 +15104,14 @@ function cvPanelTitle(room) {
 // （Howard 2026-10-10 第二輪：不要再問「要進到哪一個對話」）。
 function cvBarHtml() {
   if (!cvReady() || !cvRooms.length) return "";
-  return cvRooms.map(r => cvBarRowHtml(r)).join("");
+  // 同一位好友可能同時「分享給我」又「收到我的分享」——兩間房的標題會一模一樣
+  // （都是「與 Emma 聊聊」），所以撞名的時候才補一句誰分享的（Howard 2026-10-10 第三輪）
+  const seen = {};
+  for (const r of cvRooms) { const t = cvRoomTitle(r); seen[t] = (seen[t] || 0) + 1; }
+  return cvRooms.map(r => cvBarRowHtml(r, seen[cvRoomTitle(r)] > 1)).join("");
 }
 
-function cvBarRowHtml(room) {
+function cvBarRowHtml(room, withDir = false) {
   const id = String(room.share_id);
   const unread = Number(room.unread) || 0;
   const open = !!(cvOpen && cvOpen.shareId === id);
@@ -15051,6 +15122,7 @@ function cvBarRowHtml(room) {
        aria-expanded="${open ? "true" : "false"}" onclick="cvToggle('${jsAttr(id)}')">
     <span class="cv-bar-ico">${ICON_TALK}</span>
     <span class="cv-bar-main"><span class="cv-bar-title">${escapeHtml(cvRoomTitle(room))}${
+      withDir ? `<span class="cv-dir">${escapeHtml(cvRoomDir(room))}</span>` : ""}${
       unread ? `<b class="cv-n">${unread > 99 ? "99+" : unread}</b>` : ""}</span>
       <span class="cv-bar-sub">${sub}</span></span>
     <span class="cv-bar-go">${open ? "收起" : "開啟"}</span>
@@ -15107,7 +15179,10 @@ function cvClose(mark = true) {
   cvStopPoll();
   cvOpen = null;
   cvRepaint();
-  if (mark && id) cvRpc("chat_mark_read", { p_share_id: id }).catch(() => {});
+  if (mark && id) {
+    cvRpc("chat_mark_read", { p_share_id: id })
+      .then(() => cvLoadUnread(true)).catch(() => {});
+  }
 }
 
 // 關掉字卡、切分頁、切日期都要收（不留一個在背景輪詢的面板）
@@ -15141,8 +15216,11 @@ function cvPanelHtml() {
          </div>`));
   // 標題不寫股票代號與名稱（字卡最上面已經寫了一次）；一對一就是「與 ○○ 聊聊」，
   // 多人才講得出這個群組是誰的分享（Howard 2026-10-10 第二輪）
+  // 同一檔兩間房時，面板標題也要帶上方向——不然進去之後分不出在跟哪一邊說話
+  const dir = cvRooms.filter(r => cvRoomTitle(r) === cvRoomTitle(room)).length > 1
+    ? `<span class="cv-dir">${escapeHtml(cvRoomDir(room))}</span>` : "";
   return `<div class="cv-panel">
-    <div class="cv-head"><b>${escapeHtml(cvPanelTitle(room))}</b>
+    <div class="cv-head"><b>${escapeHtml(cvPanelTitle(room))}</b>${dir}
       <span class="cv-mem" role="button" tabindex="0" onclick="cvToggleMembers()">成員 ${room.members_n || 1} 人 ${cvOpen.showMembers ? "▾" : "▸"}</span></div>
     <div class="cv-note">訊息保留 ${cvRetentionDays} 天${ended ? "・這則分享已結束" : ""}</div>
     ${cvOpen.showMembers ? `<div class="cv-members">${cvMembersHtml()}</div>` : ""}
@@ -15469,6 +15547,24 @@ function sharedInRows() {
                            locked: !shareIsMonitored(x.share_id) } }));
 }
 
+// 我已經分享出去的那幾檔（Howard 2026-10-10：自選那一側要看得出來）。
+// 「進行中」就算——對方還沒接受不代表沒分享出去，而且設定改動會自動同步給他
+// （FRIENDS.md 的 trg_share_autosync），那正是使用者需要知道的事。
+// 用 outgoing 陣列本身當快取鍵：share_state 每次重抓都是新的陣列。
+let _sharedOutCache = { src: null, set: new Set() };
+function sharedOutSids() {
+  const src = (frEnabled && frShare && frShare.outgoing) || null;
+  if (_sharedOutCache.src !== src) {
+    const set = new Set();
+    for (const x of src || []) {
+      if (x.live === false || x.ended) continue;
+      set.add(String(x.stock_id || "").trim());
+    }
+    _sharedOutCache = { src, set };
+  }
+  return _sharedOutCache.set;
+}
+
 // 好友分享的股票也算在自選股上限內（Howard 2026-10-06），超出的一樣鎖住：
 // 額度怎麼切是後端的事（monitor_shared_stocks：自己的自選股先佔，剩下的依接受先後），
 // share_state() 把結果當成 share_id 陣列回來。這裡只負責查表，不在瀏覽器重算排名——
@@ -15558,6 +15654,8 @@ function frPendingCounts() {
 }
 
 function frRenderBadge() {
+  cvLoadUnread().catch(() => {});   // 分享狀態變了，未讀也跟著重算（自帶節流）
+  cvPaintUnread();
   const c = frPendingCounts();
   const el = document.getElementById("friends-badge");
   if (el) { el.textContent = c.total > 99 ? "99+" : String(c.total || ""); el.style.display = c.total ? "" : "none"; }
