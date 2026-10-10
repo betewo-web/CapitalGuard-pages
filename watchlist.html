@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="309">
+  <meta name="app-version" content="310">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=309" rel="stylesheet">
+  <link href="watchlist.css?v=310" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1402,6 +1402,8 @@
         <!-- 分頁一：當日盤中雷達 -->
         <div class="rtl-pane" id="rtl-pane-radar">
           <div id="rtl-chart-wrap"></div>
+          <!-- 對話框（CHAT.md）：這一檔有分享、而且有人可以聊時才有東西（cvBarHtml） -->
+          <div id="cv-bar"></div>
           <div class="rtl-story-head" id="rtl-story-head">盤中發生了什麼</div>
           <div id="rtl-story"></div>
         </div>
@@ -9472,6 +9474,7 @@ function openStockCard(sid, opts = {}) {
   const date = opts.date;
   _rtlScrollKey = "";     // 每次打開字卡，時間軸都從最右邊（現在）開始——上次捲到哪裡不算數
   _rxRadarOpenEid = null; // 貼圖選單每次開卡都是收著的
+  if (sidKey !== radarTimelineSid) cvResetForCard();   // 換股票＝換房間（CHAT.md）
   radarTimelineSid = sidKey;
   radarTimelineShare = opts.share || null;
   _refreshQuotesIfStale();      // 在別的分頁待了一陣子才開字卡：報價可能是幾分鐘前的
@@ -9493,6 +9496,7 @@ function openRadarTimeline(sid, date = null, share = null) {
 // 而且多數人只看第一頁，沒必要每次開卡片都去下載 6MB 報告
 function switchStockCardTab(tab) {
   if (!STOCK_CARD_TABS.includes(tab)) tab = "radar";
+  if (tab !== "radar" && cvOpen) cvClose();   // 對話框只活在盤中雷達那一頁（CHAT.md）
   stockCardTab = tab;
   for (const t of STOCK_CARD_TABS) {
     const pane = document.getElementById(`rtl-pane-${t}`);
@@ -9513,6 +9517,7 @@ function switchStockCardTab(tab) {
 // 清單裡點一天：回到「盤中雷達」那一頁看那天（雷達的交易日就是「今天」那列）
 function rtlPickDate(date) {
   if (!radarTimelineSid) return;
+  if (cvOpen) cvClose();   // 錨點是那一天的某一顆（CHAT.md）
   radarTimelineDate = date === radarSessionDate() ? null : date;
   trackActivity("radar_timeline_pick", { stock: radarTimelineSid, date });
   renderRadarTimeline(radarTimelineSid);
@@ -9759,8 +9764,15 @@ function renderRadarTimeline(sid) {
   _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending, locked: lockedRow };
   const storyOpts = { past, covered };
   storyOpts.rx = rxRadarRowsByEid(story, sid, date);   // 回饋貼圖：分享來的那幾顆掛一排貼圖（REACTIONS.md）
-  document.getElementById("rtl-story").innerHTML = radarStoryListHtml(story, storyOpts);
+  // 對話框開著而且有人正在打字時，不要把故事列換掉——輸入框會被重建，游標跟著跑掉。
+  // 盤中每 5 秒就重畫一次，所以這個保護是必要的；使用者自己的動作走 cvRepaint（_cvForceRepaint）。
+  const storyEl = document.getElementById("rtl-story");
+  if (storyEl && (_cvForceRepaint || !cvHoldsRepaint())) {
+    storyEl.innerHTML = radarStoryListHtml(story, storyOpts);
+  }
   _paintRtlTarget();   // 重畫換掉了節點：正在閃的那一則要接著閃完
+  // 這一檔有沒有可以進去的對話（一次問一支 chat_rooms，沒有分享的股票連問都不問）
+  cvLoadRooms(sid).then(() => { cvPaintBar(); if (cvOpen) cvRestoreDraft(); }).catch(() => {});
 }
 
 // opts.past：畫過去的某一天——不畫「現在」游標、不拿今天的報價與月線當參考、壓力／支撐用 iq.levels（那天存下的）
@@ -10085,14 +10097,17 @@ function radarStoryListHtml(story, opts = {}) {
     // 左邊時間與圖示的位置也用上）；說明文字裡「來自 ○○ 的分享」那一行就不重複寫了（Howard 2026-10-09 晚）
     const rx = opts.rx && opts.rx[rtlEntryId(e)];
     const text = rx ? rxWithoutNote(e.text) : e.text;
-    return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-eid="${escapeHtml(rtlEntryId(e))}" data-sev="${e.sev}"${link}>
+    // 對話框（CHAT.md，Howard 2026-10-10 選的 A 案）：鈕放在圖示正下方——那一欄本來就空著，
+    // 說明文字一個字都不必讓。展開的面板是 .rtl-item 的兄弟（與 .rtl-rx 同一種寫法）。
+    const eid = rtlEntryId(e);
+    return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-eid="${escapeHtml(eid)}" data-sev="${e.sev}"${link}>
       <div class="rtl-time">${fmtTime(e.at)}</div>
-      ${signalIconSvg(rtlEntryIconRow(e), 38)}
+      <div class="cv-col">${signalIconSvg(rtlEntryIconRow(e), 38)}${cvItemBtnHtml(eid)}</div>
       <div class="rtl-text">${share}
         <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
         ${text ? `<div class="rtl-desc">${escapeHtml(text)}</div>` : ""}
         <span class="rtl-src rtl-src-${e.src}">${RTL_SRC_LABEL[e.src] || ""}</span>${rx ? rxRadarChipHtml(rx, rtlEntryId(e)) : ""}
-      </div></div>${rx && _rxRadarOpenEid === rtlEntryId(e) ? `<div class="rtl-rx">${rxStripHtml(rx)}</div>` : ""}`;
+      </div></div>${rx && _rxRadarOpenEid === rtlEntryId(e) ? `<div class="rtl-rx">${rxStripHtml(rx)}</div>` : ""}${cvItemPanelHtml(eid)}`;
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
   if (!html) {
@@ -13336,6 +13351,7 @@ function buildKLineOption(pd, chips, levels, period, chartHeight) {
 document.getElementById("radarTimelineModal").addEventListener("hidden.bs.modal", () => {
   radarTimelineSid = null;
   _rxRadarOpenEid = null;     // 關掉字卡：展開的貼圖選單也關（REACTIONS.md）
+  cvResetForCard();           // 對話框：停掉輪詢、標成已讀（CHAT.md）
   stockCardTab = "radar";
   detachKLineTouchInteraction();
   if (klineChart) {
@@ -14837,6 +14853,489 @@ function rxOpenRecent(sid, date) {
   if (!sid) return;
   bootstrap.Modal.getInstance(document.getElementById("rxSummaryModal"))?.hide();
   openStockCard(sid, { date: date || null, tab: "radar" });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 對話框（CHAT.md）：分享出去／分享給我的那一檔，在盤中雷達裡聊天
+//
+// 一間房＝一則分享（stock_shares.id），成員＝擁有者＋已接受的收件人——
+// 「建立在送出者的環境中，發送清單的人都進同一個對話框」。
+// 判斷有沒有房間只看 share_state()（不看 alert_history.share_ids，回饋貼圖才需要那個）：
+// 這樣擁有者自己那一檔的訊號也有入口，他那一列是自選股的訊號，身上沒有 share_ids。
+// 後端沒跑 migration（chat_rooms 回 PGRST202）就整個功能不出現。
+// ═══════════════════════════════════════════════════════════════════════
+const CV_ERRORS = {
+  lab_forbidden: "請先登入",
+  not_member:    "你已經不在這個對話裡了",
+  room_closed:   "這則分享已結束，不能再發言",
+  too_long:      `一次最多 ${500} 字`,
+  rate_limited:  "說得太快了，等一下再送",
+  not_found:     "這則訊息已經不在了",
+  not_allowed:   "只有自己發的訊息、或分享的人可以刪",
+  empty_body:    "還沒有輸入內容",
+  no_room:       "這一檔現在沒有可以進去的對話",
+};
+const CV_BODY_MAX     = 500;
+const CV_POLL_FAST_MS = 5000;     // 剛打開、或剛有人說話
+const CV_POLL_SLOW_MS = 20000;    // 安靜一分鐘之後
+const CV_CALM_MS      = 60000;    // 多久沒有新訊息算「安靜」
+const CV_STOP_MS      = 180000;   // 三分鐘沒有任何動靜就停（面板出現「點一下繼續」）
+// 氣泡：對話框自己的圖示（ICON_RX 那顆獎盃是回饋，兩件事不共用一個形）
+const ICON_TALK = _svg('<path d="M13.4 8.6c0 2.5-2.4 4.5-5.4 4.5-.8 0-1.6-.1-2.3-.4l-3 1 1-2.5A4.3 4.3 0 0 1 2.6 8.6C2.6 6.1 5 4.1 8 4.1s5.4 2 5.4 4.5Z"/><path d="M6 8.3h4M6 10.2h2.4"/>', 17);
+const ICON_TALK_S = _svg('<path d="M13.4 8.6c0 2.5-2.4 4.5-5.4 4.5-.8 0-1.6-.1-2.3-.4l-3 1 1-2.5A4.3 4.3 0 0 1 2.6 8.6C2.6 6.1 5 4.1 8 4.1s5.4 2 5.4 4.5Z"/>', 14);
+
+let cvMissing   = false;   // 後端沒上線
+let cvRooms     = [];      // 目前這一檔我進得去的房間（chat_rooms 回的）
+let cvRoomsKey  = "";      // 上面那一份是哪一檔的
+let cvOpen      = null;    // 展開中的那一間：{ shareId, eid, room, members, msgs, since, … }
+let cvDrafts    = {};      // share_id → 打到一半的字（每 5 秒重畫一次，不能弄丟）
+let _cvPollTimer = null;
+let _cvPendingSeq = 0;
+
+function cvReady() { return !!(frEnabled && !cvMissing && frShare && state.userId); }
+
+// 連分享都沒有的股票不必問後端。條件刻意比後端**寬**（不看 live、不看是否已接受）：
+// 寬了頂多多問一次回空陣列，窄了會讓真的有房間的那一檔整顆鈕消失。
+function cvStockHasShare(sid) {
+  if (!frShare) return false;
+  const s = String(sid || "").trim();
+  if (!s) return false;
+  return (frShare.incoming || []).some(x => String(x.stock_id) === s && x.status === "accepted")
+      || (frShare.outgoing || []).some(x => String(x.stock_id) === s
+            && (x.recipients || []).some(r => r.status === "accepted"));
+}
+
+async function cvRpc(fn, params) {
+  const res = await frRpc(fn, params);
+  if (res === FR_RPC_MISSING) { cvMissing = true; return null; }
+  return res;
+}
+
+function cvErrText(res) {
+  if (!res) return "這個功能還沒上線";
+  if (res.error) return CV_ERRORS[res.error] || `錯誤：${res.error}`;
+  return "";
+}
+
+// 打開字卡／換股票時問一次。p_stock_id 給 null＝我的全部房間（分享分頁用）
+async function cvLoadRooms(sid, force = false) {
+  const key = String(sid || "").trim();
+  if (!cvReady()) { cvRooms = []; cvRoomsKey = key; return; }
+  if (!force && cvRoomsKey === key) return;
+  cvRoomsKey = key;
+  if (key && !cvStockHasShare(key)) { cvRooms = []; return; }
+  const res = await cvRpc("chat_rooms", { p_stock_id: key || null });
+  if (!res || res.error) { cvRooms = []; return; }
+  cvRooms = Array.isArray(res.rooms) ? res.rooms : [];
+  cvRetentionDays = Number(res.retention_days) || cvRetentionDays;
+}
+let cvRetentionDays = 5;
+
+function cvRoomById(id) {
+  return cvRooms.find(r => String(r.share_id) === String(id)) || null;
+}
+function cvUnreadTotal() {
+  return cvRooms.reduce((n, r) => n + (Number(r.unread) || 0), 0);
+}
+function cvRoomTitle(room) {
+  if (!room) return "對話";
+  return room.mine ? `我分享給 ${Math.max(0, (room.members_n || 1) - 1)} 位好友`
+                   : `${room.owner_name || "好友"} 分享的`;
+}
+
+// ── 入口一：盤中雷達最上面那一條 ────────────────────────────────────────
+// Howard 2026-10-10：「要設計的更顯著是可以對話的地方」。所以不是一顆小圖示，
+// 而是一整條帶最新一則預覽的橫幅——「有人在這裡說話」比任何圖示都容易看懂。
+function cvBarHtml() {
+  if (!cvReady() || !cvRooms.length) return "";
+  const unread = cvUnreadTotal();
+  const last = cvRooms.filter(r => r.last_at)
+                      .sort((a, b) => new Date(b.last_at) - new Date(a.last_at))[0] || null;
+  const open = !!(cvOpen && !cvOpen.eid);
+  // 標題在這裡自己組（不接 cvRoomTitle）：那一支回的是「Emma 分享的」，
+  // 後面再接「的對話」會變成「Emma 分享的的對話」
+  const one = cvRooms[0] || {};
+  const title = cvRooms.length > 1
+    ? `${cvRooms.length} 個對話`
+    : (one.mine ? `我分享給 ${Math.max(0, (one.members_n || 1) - 1)} 位好友的對話`
+                : `${one.owner_name || "好友"} 分享的對話`);
+  const sub = last && last.last_text
+    ? `${escapeHtml(last.last_name || "好友")}：${escapeHtml(last.last_text)}`
+    : `還沒有人說話・點一下開始聊這一檔`;
+  return `<button type="button" class="cv-bar${unread ? " is-unread" : ""}${open ? " is-open" : ""}"
+       aria-expanded="${open ? "true" : "false"}" onclick="cvToggle('')">
+    <span class="cv-bar-ico">${ICON_TALK}</span>
+    <span class="cv-bar-main"><span class="cv-bar-title">${escapeHtml(title)}${
+      unread ? `<b class="cv-n">${unread > 99 ? "99+" : unread}</b>` : ""}</span>
+      <span class="cv-bar-sub">${sub}</span></span>
+    <span class="cv-bar-go">${open ? "收起" : "開啟"}</span>
+  </button>${open ? `<div class="cv-anchorless">${cvPanelHtml()}</div>` : ""}`;
+}
+
+function cvPaintBar() {
+  const el = document.getElementById("cv-bar");
+  if (el) el.innerHTML = cvBarHtml();
+}
+
+// ── 入口二：每一則訊號，圖示正下方那顆鈕（Howard 選的 A 案）────────────
+// 「對這一則說話」：送出的訊息會帶一行引用（錨點），房間還是同一間。
+function cvItemBtnHtml(eid) {
+  if (!cvReady() || !cvRooms.length) return "";
+  const on = !!(cvOpen && cvOpen.eid === String(eid));
+  return `<button type="button" class="cv-btn${on ? " is-open" : ""}"
+      aria-label="${on ? "收起對話" : "在這則訊號上對話"}" title="${on ? "收起對話" : "在這則訊號上對話"}"
+      onclick="event.stopPropagation(); cvToggle('${jsAttr(eid)}')">${ICON_TALK}</button>`;
+}
+
+function cvItemPanelHtml(eid) {
+  if (!cvOpen || cvOpen.eid !== String(eid)) return "";
+  return `<div class="cv-wrap">${cvPanelHtml()}</div>`;
+}
+
+// ── 開、關 ──────────────────────────────────────────────────────────────
+function cvToggle(eid) {
+  const key = String(eid || "");
+  if (cvOpen && cvOpen.eid === key) { cvClose(); return; }
+  if (!cvRooms.length) { frToast(CV_ERRORS.no_room, true); return; }
+  if (cvRooms.length === 1) { cvEnter(cvRooms[0].share_id, key); return; }
+  // 同一檔有好幾間房（兩位好友分享同一檔、或我自己也分享出去）：先選人。
+  // alert_history.share_ids 當初做成陣列就是因為這件事真的會發生。
+  cvOpen = { pick: true, eid: key };
+  cvRepaint();
+}
+
+async function cvEnter(shareId, eid) {
+  const id = String(shareId || "");
+  cvOpen = { shareId: id, eid: String(eid || ""), loading: true, msgs: [], members: {},
+             since: null, lastChangeAt: Date.now(), paused: false };
+  cvRepaint();
+  trackActivity("chat_open", { stock: radarTimelineSid || "", anchored: eid ? 1 : 0 });
+  const res = await cvRpc("chat_open", { p_share_id: id, p_limit: 50 });
+  if (!cvOpen || cvOpen.shareId !== id) return;          // 中途被關掉或換了一間
+  if (!res || res.error) {
+    frToast(cvErrText(res), true);
+    cvOpen = null; cvRepaint(); return;
+  }
+  cvOpen.loading = false;
+  cvOpen.room = res.room || null;
+  cvOpen.members = res.members || {};
+  cvOpen.membersRev = res.members_rev || "";
+  cvOpen.canPost = res.can_post !== false;
+  cvOpen.role = res.role || "member";
+  cvOpen.msgs = (res.messages || []).slice();
+  cvOpen.since = cvMaxUpd(cvOpen.msgs);
+  cvRetentionDays = Number(res.retention_days) || cvRetentionDays;
+  const room = cvRoomById(id);
+  if (room) room.unread = 0;
+  cvRepaint();
+  cvScrollLogToEnd();
+  cvSchedulePoll(CV_POLL_FAST_MS);
+}
+
+function cvClose(mark = true) {
+  const id = cvOpen && cvOpen.shareId;
+  cvStopPoll();
+  cvOpen = null;
+  cvRepaint();
+  if (mark && id) cvRpc("chat_mark_read", { p_share_id: id }).catch(() => {});
+}
+
+// 關掉字卡、切分頁、切日期都要收（不留一個在背景輪詢的面板）
+function cvResetForCard() {
+  if (cvOpen) cvClose(true);
+  cvRooms = []; cvRoomsKey = ""; cvDrafts = {};
+}
+
+function cvMaxUpd(rows) {
+  let v = null;
+  for (const m of rows || []) {
+    const t = m && (m.upd || m.at);
+    if (t && (!v || new Date(t) > new Date(v))) v = t;
+  }
+  return v;
+}
+
+// ── 畫面 ────────────────────────────────────────────────────────────────
+function cvPanelHtml() {
+  if (!cvOpen) return "";
+  if (cvOpen.pick) {
+    const rows = cvRooms.map(r => `<div class="cv-pick-row">
+      <span class="cv-grow"><b>${escapeHtml(cvRoomTitle(r))}</b>
+        <small>${r.members_n || 1} 人${r.last_at ? `・最後一則 ${escapeHtml(fmtTime(r.last_at))}` : "・還沒有人說話"}</small></span>
+      <button type="button" class="cv-go" onclick="cvEnter('${jsAttr(r.share_id)}', '${jsAttr(cvOpen.eid)}')">進入${
+        r.unread ? ` <b class="cv-n">${r.unread}</b>` : ""}</button></div>`).join("");
+    return `<div class="cv-panel"><div class="cv-head"><b>要跟誰的那一群說？</b>
+      <span class="cv-mem" role="button" onclick="cvClose()">收起</span></div>
+      <div class="cv-pick">${rows}</div></div>`;
+  }
+  const room = cvOpen.room || cvRoomById(cvOpen.shareId) || {};
+  const ended = room.live === false;
+  const name = escapeHtml(`${room.stock_name || ""} ${room.stock_id || ""}`.trim() || "這一檔");
+  const foot = cvOpen.loading ? "" : (ended || cvOpen.canPost === false
+    ? `<div class="cv-flag">這則分享已結束，不能再發言。訊息會在寫下 ${cvRetentionDays} 天後消失。</div>`
+    : (cvOpen.paused
+      ? `<div class="cv-flag">已暫停接收新訊息 <button type="button" onclick="cvResume()">點一下繼續</button></div>`
+      : `<div class="cv-send">
+           <textarea class="cv-input" id="cv-input" rows="1" maxlength="${CV_BODY_MAX}" placeholder="說點什麼…"
+             oninput="cvDraftSave(this.value)" onkeydown="cvInputKey(event)"></textarea>
+           <button type="button" class="cv-btn-send" onclick="cvSend()">送出</button>
+         </div>
+         <div class="cv-disclaimer">對話內容由使用者提供，不代表本服務的意見。成員都看得到你的暱稱。</div>`));
+  return `<div class="cv-panel">
+    <div class="cv-head"><b>${name}</b><span>・${escapeHtml(cvRoomTitle(room))}</span>
+      <span class="cv-mem" role="button" tabindex="0" onclick="cvToggleMembers()">成員 ${room.members_n || 1} 人 ${cvOpen.showMembers ? "▾" : "▸"}</span></div>
+    <div class="cv-note">訊息保留 ${cvRetentionDays} 天${ended ? "・這則分享已結束" : ""}</div>
+    ${cvOpen.showMembers ? `<div class="cv-members">${cvMembersHtml()}</div>` : ""}
+    <div class="cv-log" id="cv-log">${cvLogHtml()}</div>
+    ${foot}</div>`;
+}
+
+function cvMembersHtml() {
+  const m = (cvOpen && cvOpen.members) || {};
+  const rows = Object.keys(m).map(id => {
+    const p = m[id] || {};
+    return `<span class="cv-mem-chip">${escapeHtml(p.name || "好友")}${
+      p.tag ? `<span class="cv-tag">#${escapeHtml(p.tag)}</span>` : ""}${
+      p.owner ? `<span class="cv-owner">分享者</span>` : ""}${cvTrophyHtml(p.reactions)}</span>`;
+  }).join("");
+  return rows || `<span class="fr-hint">只有你一個人</span>`;
+}
+
+function cvTrophyHtml(n) {
+  n = Number(n) || 0;
+  return n ? `<span class="cv-trophy" title="收到的回饋貼圖">${ICON_RX}${n > 999 ? "999+" : n}</span>` : "";
+}
+
+function cvLogHtml() {
+  if (!cvOpen) return "";
+  if (cvOpen.loading) return `<div class="fr-hint">載入中…</div>`;
+  const rows = (cvOpen.msgs || []).filter(m => !m.deleted);
+  if (!rows.length) {
+    return `<div class="cv-empty">還沒有人說話。<br>這裡的訊息只有這則分享的成員看得到，保留 ${cvRetentionDays} 天。</div>`;
+  }
+  return rows.map(m => cvMsgHtml(m)).join("");
+}
+
+function cvMsgHtml(m) {
+  const mine = String(m.author) === String(state.userId);
+  const who = (cvOpen.members || {})[String(m.author)] || {};
+  const head = mine
+    ? `<span>我</span><span class="cv-time">${escapeHtml(fmtTime(m.at))}</span>`
+    : `<span>${escapeHtml(who.name || "好友")}</span>${
+        who.tag ? `<span class="cv-tag">#${escapeHtml(who.tag)}</span>` : ""}${
+        cvTrophyHtml(who.reactions)}<span class="cv-time">${escapeHtml(fmtTime(m.at))}</span>`;
+  const menu = m.pending ? "" : `<button type="button" class="cv-msg-more" aria-label="這則訊息的選項"
+      onclick="cvRowMenu('${jsAttr(m.id)}')">⋯</button>`;
+  const open = cvOpen._menu === String(m.id);
+  const acts = open ? `<div class="cv-acts">${
+      (mine || cvOpen.role === "owner") ? `<button type="button" onclick="cvDelete('${jsAttr(m.id)}')">刪除</button>` : ""}${
+      mine ? "" : `<button type="button" onclick="cvReport('${jsAttr(m.id)}')">檢舉</button>`}
+      <button type="button" onclick="cvRowMenu('')">取消</button></div>` : "";
+  return `<div class="cv-msg${mine ? " is-mine" : ""}${m.pending ? " is-pending" : ""}">
+    ${cvAnchorHtml(m)}<div class="cv-who">${head}${menu}</div>
+    <div class="cv-bubble">${escapeHtml(m.body || "")}</div>${acts}</div>`;
+}
+
+// 錨點：從雷達哪一顆按進來的。'row:<id>' 的標題是伺服器從通知列快照下來的；
+// '<kind>@<ms>' 只存了 kind，標題在這裡用前端那張對照表畫（SQL 不該有第二份）。
+function cvAnchorHtml(m) {
+  const key = String(m.anchor_key || "");
+  if (!key) return "";
+  let label = "";
+  if (m.anchor_title) {
+    label = _titleWithoutStock(m.anchor_title, radarTimelineSid || "",
+                               getPreferredStockName(radarTimelineSid || "", "") || "");
+  } else {
+    const kind = key.split("@")[0];
+    label = SIGNAL_LABEL_MAP[kind] || AUTO_SIGNAL_LABELS[kind] || kind;
+  }
+  const t = m.anchor_at ? ` ${fmtTime(m.anchor_at)}` : "";
+  return `<div class="cv-anchor">對 ${escapeHtml(label)}${escapeHtml(t)}</div>`;
+}
+
+let _cvForceRepaint = false;
+function cvRepaint() {
+  cvPaintBar();
+  // 面板掛在某一則訊號底下時，它在故事列的 HTML 裡。使用者自己的動作一定要畫出來，
+  // 所以這條路繞過「正在打字就不重畫」那道保護（那道是給每 5 秒的自動重畫用的）。
+  if (document.getElementById("rtl-story") && radarTimelineSid) {
+    _cvForceRepaint = true;
+    try { refreshRadarTimelineIfOpen(); } finally { _cvForceRepaint = false; }
+  }
+  cvRestoreDraft();
+}
+
+function cvRepaintLog() {
+  const el = document.getElementById("cv-log");
+  if (!el) { cvRepaint(); return; }
+  const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+  el.innerHTML = cvLogHtml();
+  if (atEnd) el.scrollTop = el.scrollHeight;
+}
+
+function cvScrollLogToEnd() {
+  const el = document.getElementById("cv-log");
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+function cvRestoreDraft() {
+  const el = document.getElementById("cv-input");
+  if (el && cvOpen && cvOpen.shareId) el.value = cvDrafts[cvOpen.shareId] || "";
+}
+
+// 報價每 5 秒會重畫整張卡：正在打字時不要把輸入框換掉（游標會跑掉）
+function cvHoldsRepaint() {
+  if (!cvOpen) return false;
+  const el = document.getElementById("cv-input");
+  if (!el) return false;
+  return document.activeElement === el || !!(el.value || "").trim();
+}
+
+function cvToggleMembers() {
+  if (!cvOpen) return;
+  cvOpen.showMembers = !cvOpen.showMembers;
+  cvRepaint();
+}
+
+// ── 輪詢（面板開著才跑；關著是 0 個請求）──────────────────────────────
+function cvStopPoll() {
+  if (_cvPollTimer) { clearTimeout(_cvPollTimer); _cvPollTimer = null; }
+}
+
+function cvSchedulePoll(ms) {
+  cvStopPoll();
+  if (!cvOpen || cvOpen.pick) return;
+  _cvPollTimer = setTimeout(() => { _cvPollTimer = null; cvPollOnce(); }, ms);
+}
+
+async function cvPollOnce() {
+  if (!cvOpen || cvOpen.pick || document.hidden) { cvSchedulePoll(CV_POLL_SLOW_MS); return; }
+  const idle = Date.now() - (cvOpen.lastChangeAt || 0);
+  if (idle > CV_STOP_MS) {   // 三分鐘沒有任何動靜：停下來，面板給一個「繼續」
+    cvOpen.paused = true;
+    cvStopPoll();
+    trackActivity("chat_pause", { stock: radarTimelineSid || "" });
+    cvRepaint();
+    return;
+  }
+  const id = cvOpen.shareId;
+  const res = await cvRpc("chat_poll", { p_share_id: id, p_since: cvOpen.since });
+  if (!cvOpen || cvOpen.shareId !== id) return;
+  if (res && !res.error) {
+    const fresh = Array.isArray(res.messages) ? res.messages : [];
+    if (fresh.length) {
+      cvMergeMessages(fresh);
+      cvOpen.since = cvMaxUpd(fresh) || cvOpen.since;
+      cvOpen.lastChangeAt = Date.now();
+      cvRepaintLog();
+      cvRpc("chat_mark_read", { p_share_id: id }).catch(() => {});
+    }
+    if (res.can_post === false && cvOpen.canPost !== false) { cvOpen.canPost = false; cvRepaint(); }
+    if (res.members_rev && res.members_rev !== cvOpen.membersRev) {
+      const full = await cvRpc("chat_open", { p_share_id: id, p_limit: 50 });
+      if (cvOpen && cvOpen.shareId === id && full && !full.error) {
+        cvOpen.members = full.members || cvOpen.members;
+        cvOpen.membersRev = full.members_rev || "";
+        cvRepaintLog();
+      }
+    }
+  }
+  cvSchedulePoll(Date.now() - (cvOpen.lastChangeAt || 0) > CV_CALM_MS ? CV_POLL_SLOW_MS : CV_POLL_FAST_MS);
+}
+
+function cvResume() {
+  if (!cvOpen) return;
+  cvOpen.paused = false;
+  cvOpen.lastChangeAt = Date.now();
+  cvRepaint();
+  cvPollOnce();
+}
+
+function cvMergeMessages(fresh) {
+  const by = new Map((cvOpen.msgs || []).map(m => [String(m.id), m]));
+  for (const m of fresh) {
+    if (m.deleted) by.delete(String(m.id));
+    else by.set(String(m.id), m);
+  }
+  cvOpen.msgs = [...by.values()].sort((a, b) => new Date(a.at) - new Date(b.at));
+}
+
+// ── 動作 ────────────────────────────────────────────────────────────────
+function cvDraftSave(v) {
+  if (cvOpen && cvOpen.shareId) cvDrafts[cvOpen.shareId] = String(v || "");
+}
+
+function cvInputKey(ev) {
+  // 手機 Enter 是換行（送出用按鈕）；桌機 Ctrl/⌘+Enter 送出
+  if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); cvSend(); }
+}
+
+async function cvSend() {
+  if (!cvOpen || cvOpen.pick) return;
+  const el = document.getElementById("cv-input");
+  const body = String((el && el.value) || "").trim();
+  if (!body) return;
+  if (body.length > CV_BODY_MAX) { frToast(CV_ERRORS.too_long, true); return; }
+  const id = cvOpen.shareId;
+  const pid = `pending:${++_cvPendingSeq}`;
+  const now = new Date().toISOString();
+  cvOpen.msgs.push({ id: pid, author: state.userId, body, at: now, upd: now, pending: true,
+                     anchor_key: cvOpen.eid || null });
+  cvOpen.lastChangeAt = Date.now();
+  if (el) el.value = "";
+  cvDraftSave("");
+  cvRepaintLog();
+  cvScrollLogToEnd();
+  trackActivity("chat_send", { stock: radarTimelineSid || "", anchored: cvOpen.eid ? 1 : 0 });
+  const res = await cvRpc("chat_send", { p_share_id: id, p_body: body,
+                                         p_anchor_key: cvOpen.eid || null });
+  if (!cvOpen || cvOpen.shareId !== id) return;
+  cvOpen.msgs = cvOpen.msgs.filter(m => m.id !== pid);
+  if (!res || res.error) {
+    frToast(cvErrText(res), true);
+    const back = document.getElementById("cv-input");
+    if (back && !back.value) { back.value = body; cvDraftSave(body); }
+    cvRepaintLog();
+    return;
+  }
+  if (res.message) {
+    cvMergeMessages([res.message]);
+    cvOpen.since = cvMaxUpd([res.message]) || cvOpen.since;
+  }
+  const room = cvRoomById(id);
+  if (room) { room.last_at = res.message && res.message.at; room.last_text = body; room.last_name = "我"; }
+  cvRepaintLog();
+  cvScrollLogToEnd();
+  cvPaintBar();
+  cvSchedulePoll(CV_POLL_FAST_MS);
+}
+
+function cvRowMenu(id) {
+  if (!cvOpen) return;
+  cvOpen._menu = cvOpen._menu === String(id) ? "" : String(id || "");
+  cvRepaintLog();
+}
+
+async function cvDelete(id) {
+  if (!cvOpen) return;
+  const mid = String(id || "");
+  cvOpen._menu = "";
+  const res = await cvRpc("chat_delete", { p_message_id: mid });
+  if (!res || res.error) { frToast(cvErrText(res), true); cvRepaintLog(); return; }
+  trackActivity("chat_delete");
+  cvOpen.msgs = (cvOpen.msgs || []).filter(m => String(m.id) !== mid);
+  cvRepaintLog();
+  frToast("已刪除");
+}
+
+async function cvReport(id) {
+  if (!cvOpen) return;
+  cvOpen._menu = "";
+  const res = await cvRpc("chat_report", { p_message_id: String(id || ""), p_reason: "" });
+  if (!res || res.error) { frToast(cvErrText(res), true); cvRepaintLog(); return; }
+  trackActivity("chat_report");
+  cvRepaintLog();
+  frToast("已送出檢舉，我們會看");
 }
 
 async function frRpc(fn, params) {
