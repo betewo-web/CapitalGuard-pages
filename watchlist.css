@@ -5136,17 +5136,6 @@ select.fr-input { width: 100%; }
    顏色只用既有的語彙：品牌紫做「可以按」（同 .rtl-share 的先例）、橘只給累積回饋數的
    獎盃、紅只給未讀數（--sig-red 的註解就是這樣寫的）。訊號等級的橘藍一個都不碰。 */
 
-/* 故事列左欄：圖示 ＋ 圖示正下方那顆鈕（Howard 2026-10-10 選的 A 案）。
-   .rtl-item > .sig-ico 那條原本的規則還留著——preview 的概念稿與任何沒包左欄的
-   路徑都還靠它，兩條並存比改掉舊的安全。 */
-.rtl-item > .cv-col { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; }
-.rtl-item > .cv-col > .sig-ico { flex: 0 0 auto; width: 38px; height: 38px; }
-.cv-btn { width: 38px; height: 38px; margin-top: 6px; border-radius: 50%; position: relative;
-	border: 1px solid var(--border); background: transparent; color: var(--text-1);
-	display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
-.cv-btn:hover { color: var(--text-0); border-color: rgba(146, 146, 163, 0.5); }
-.cv-btn.is-open { color: #c6bbff; border-color: var(--accent); background: rgba(139, 124, 255, 0.16); }
-
 /* 房間層級的入口：一整條、帶最新一則的預覽。Howard 2026-10-10：「要設計的更顯著是
    可以對話的地方」——「有人在這裡說話」比任何圖示都容易看懂，所以預覽是主角。 */
 .cv-bar { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
@@ -5176,7 +5165,6 @@ select.fr-input { width: 100%; }
 	background: rgba(146, 146, 163, 0.14); border-radius: 999px; padding: 3px 9px; }
 .cv-owner { font-size: 10.5px; color: #c6bbff; }
 .cv-log { display: flex; flex-direction: column; gap: 9px; margin: 9px 0; max-height: 270px; overflow-y: auto; }
-.cv-empty { font-size: 12.6px; color: var(--text-muted); line-height: 1.6; padding: 6px 2px; }
 .cv-msg { max-width: 88%; min-width: 0; }
 .cv-msg.is-mine { align-self: flex-end; }
 .cv-msg.is-pending { opacity: 0.55; }
@@ -5199,16 +5187,9 @@ select.fr-input { width: 100%; }
 .cv-input::placeholder { color: var(--text-muted); }
 .cv-btn-send { flex: 0 0 auto; padding: 7px 14px; border-radius: 10px; border: 0; font-size: 13.2px;
 	font-weight: 600; color: #120c2e; background: linear-gradient(135deg, #a78bfa, #8b7cff); cursor: pointer; }
-.cv-disclaimer { font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
 .cv-flag { font-size: 12.4px; color: var(--text-1); background: rgba(146, 146, 163, 0.12);
 	border: 1px solid var(--border); border-radius: 9px; padding: 6px 9px; margin-top: 6px; }
 .cv-flag button { background: none; border: 0; color: #c6bbff; padding: 0 2px; cursor: pointer; }
 
-/* 同一檔有好幾間房時先選人（兩位好友分享同一檔、或我自己也分享出去同一檔） */
-.cv-pick { font-size: 13px; color: var(--text-1); }
-.cv-pick-row { display: flex; align-items: center; gap: 8px; padding: 8px 2px; border-top: 1px solid var(--border); }
-.cv-pick-row:first-child { border-top: 0; }
-.cv-pick-row .cv-grow { flex: 1 1 auto; min-width: 0; }
-.cv-pick-row small { display: block; color: var(--text-muted); }
-.cv-go { flex: 0 0 auto; font-size: 12.4px; padding: 4px 10px; border-radius: 8px;
-	border: 1px solid var(--accent); background: rgba(139, 124, 255, 0.14); color: #c6bbff; cursor: pointer; }
+/* 一間房一條：連著好幾條時彼此靠緊一點（我分享出去的、好友分享給我的各一條） */
+.cv-bar + .cv-bar { margin-top: 4px; }
