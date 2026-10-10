@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="315">
+  <meta name="app-version" content="316">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=315" rel="stylesheet">
+  <link href="watchlist.css?v=316" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -15044,14 +15044,25 @@ async function cvLoadUnread(force = false) {
   cvPaintUnread();
 }
 
+let _cvPainting = false;
 function cvPaintUnread() {
-  const put = (el, n) => {
+  // 顯示值要明寫，不能用空字串：.bn-badge 與 .hs-seg-unread 的 CSS 預設都是
+  // display:none，而 style.display = "" 是「把行內樣式拿掉」＝回到那個 none，
+  // 籤就永遠不會出現（2026-10-11 Howard 回報「首頁按鈕沒有未讀數」就是這個）。
+  const put = (el, n, on) => {
     if (!el) return;
     el.textContent = n > 99 ? "99+" : String(n || "");
-    el.style.display = n ? "" : "none";
+    el.style.display = n ? on : "none";
   };
-  put(document.getElementById("home-badge"), cvUnread.total);
-  put(document.getElementById("hs-unread-shared"), cvUnread.shared);
+  put(document.getElementById("home-badge"), cvUnread.total, "block");
+  put(document.getElementById("hs-unread-shared"), cvUnread.shared, "inline-block");
+  // 每一格上的數字是 homeTileHtml 畫進去的，不重畫首頁就不會跟著消失
+  // （讀完對話回到首頁，那一檔還掛著舊數字——同一天回報的第三件事）。
+  if (currentTab === "home" && !_cvPainting) {
+    _cvPainting = true;
+    try { renderHome(); } catch { /* 畫不出來不該讓未讀數整個停擺 */ }
+    finally { _cvPainting = false; }
+  }
 }
 
 // 首頁那一格右上的未讀數（我自己分享出去的那幾檔也會有——未讀是房間的事，不分方向）
@@ -15665,7 +15676,9 @@ function frRenderBadge() {
   cvPaintUnread();
   const c = frPendingCounts();
   const el = document.getElementById("friends-badge");
-  if (el) { el.textContent = c.total > 99 ? "99+" : String(c.total || ""); el.style.display = c.total ? "" : "none"; }
+  // "block" 不是 ""：.bn-badge 的 CSS 預設是 display:none，寫空字串等於回到那個 none
+  // （與 updateInboxBadge 同一個寫法；2026-10-11 修，這顆籤從來沒有出現過）
+  if (el) { el.textContent = c.total > 99 ? "99+" : String(c.total || ""); el.style.display = c.total ? "block" : "none"; }
   for (const id of ["fr-dot-shares", "fr-dot-in"]) {
     const dot = document.getElementById(id);
     if (dot) dot.style.display = c.shares ? "" : "none";
