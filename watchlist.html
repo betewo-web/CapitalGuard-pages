@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="320">
+  <meta name="app-version" content="321">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=320" rel="stylesheet">
+  <link href="watchlist.css?v=321" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -15201,7 +15201,8 @@ function cvTileUnreadHtml(sid) {
 
 // 從通知匣的「對話」那一則進房：開那一檔的字卡、停在盤中雷達、展開那一間
 async function cvOpenFromInbox(sid, shareId) {
-  openStockCard(String(sid || ""), { tab: "radar" });
+  // 帶著 share 進去：這一則通知講的就是那一間房，卡片的「要看哪一邊」也該是它
+  openStockCard(String(sid || ""), { tab: "radar", share: String(shareId || "") || null });
   await cvLoadRooms(String(sid || ""), true);
   cvPaintBar();
   if (cvRoomById(shareId)) cvEnter(String(shareId));
@@ -15248,13 +15249,37 @@ function cvPanelTitle(room) {
 // 而是一整條帶最新一則預覽的橫幅——「有人在這裡說話」比任何圖示都容易看懂。
 // 我分享出去的與好友分享給我的是**不同的對話**，所以一間房就是一條、點哪一條進哪一間
 // （Howard 2026-10-10 第二輪：不要再問「要進到哪一個對話」）。
+// 這張卡是從哪一邊點進來的，就只給那一邊的房間（Howard 2026-10-11：「自選頁中點進去鴻海，
+// 只需要呈現『我分享的』對話框；好友分享頁中點進去，只需要呈現『Emma 分享的』」）。
+// 同一檔可能兩種關係都有（我分享給 Emma、Emma 也分享同一檔給我），兩條並排在同一張卡上
+// 看起來像重複的東西——而使用者點進來的那一刻就已經表達了他要哪一邊。
+//   radarTimelineShare 有值＝從「好友分享」那一格（或通知）進來的那一則 → 只給那一間
+//   null＝自選／持股那一格進來的                                      → 只給我分享出去的
+// 兩道保險：對不到就回到全部列出來（寧可多一條，也不要把唯一的入口弄不見）、
+// 正在開著的那一間永遠留著（否則面板會跟著消失，它是畫在那一列底下的）。
+function cvRoomsInContext() {
+  if (!cvRooms.length) return cvRooms;
+  const open = r => cvOpen && String(cvOpen.shareId) === String(r.share_id);
+  const pick = radarTimelineShare
+    ? cvRooms.filter(r => open(r) || String(r.share_id) === String(radarTimelineShare))
+    : cvRooms.filter(r => open(r) || r.mine);
+  return pick.length ? pick : cvRooms;
+}
+
+// 兩個方向都有房間、而這裡只畫得出一邊時，標題要寫清楚是哪一邊——
+// 看不到另一條，光靠「與 Emma 聊聊」分不出在跟哪一邊說話。
+function cvNeedsDir() {
+  return cvRooms.length > cvRoomsInContext().length;
+}
+
 function cvBarHtml() {
   if (!cvReady() || !cvRooms.length) return "";
   // 同一位好友可能同時「分享給我」又「收到我的分享」——兩間房的標題會一模一樣
   // （都是「與 Emma 聊聊」），所以撞名的時候才補一句誰分享的（Howard 2026-10-10 第三輪）
+  const rooms = cvRoomsInContext();
   const seen = {};
-  for (const r of cvRooms) { const t = cvRoomTitle(r); seen[t] = (seen[t] || 0) + 1; }
-  return cvRooms.map(r => cvBarRowHtml(r, seen[cvRoomTitle(r)] > 1)).join("");
+  for (const r of rooms) { const t = cvRoomTitle(r); seen[t] = (seen[t] || 0) + 1; }
+  return rooms.map(r => cvBarRowHtml(r, seen[cvRoomTitle(r)] > 1 || cvNeedsDir())).join("");
 }
 
 function cvBarRowHtml(room, withDir = false) {
@@ -15363,7 +15388,8 @@ function cvPanelHtml() {
   // 標題不寫股票代號與名稱（字卡最上面已經寫了一次）；一對一就是「與 ○○ 聊聊」，
   // 多人才講得出這個群組是誰的分享（Howard 2026-10-10 第二輪）
   // 同一檔兩間房時，面板標題也要帶上方向——不然進去之後分不出在跟哪一邊說話
-  const dir = cvRooms.filter(r => cvRoomTitle(r) === cvRoomTitle(room)).length > 1
+  const dir = (cvNeedsDir()
+               || cvRoomsInContext().filter(r => cvRoomTitle(r) === cvRoomTitle(room)).length > 1)
     ? `<span class="cv-dir">${escapeHtml(cvRoomDir(room))}</span>` : "";
   return `<div class="cv-panel">
     <div class="cv-head"><b>${escapeHtml(cvPanelTitle(room))}</b>${dir}
