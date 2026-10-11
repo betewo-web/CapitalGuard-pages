@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="330">
+  <meta name="app-version" content="331">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=330" rel="stylesheet">
+  <link href="watchlist.css?v=331" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1826,14 +1826,15 @@ let brokerHoldingsAt = null; // 最近一次同步時間（synced_at 最大值�
 // 但仍有生效中的訂閱，徽章與付款紀錄要認得它。
 const PLAN_CODES = ["free", "pro", "premium"];
 // 線上付款的前端總開關。**2026-10-11 起 false：電子發票還在申請，核准之前不收線上刷卡**
-// （收了錢開不出發票）。真正的鎖在後端 app_config.billing_checkout='closed'——create-order
+// （收了錢開不出發票）。對外不提發票，一律講「免費體驗中」（2026-10-12 起，
+// 見下面 BILLING_PAUSE_REASON）。真正的鎖在後端 app_config.billing_checkout='closed'——create-order
 // 一律回 503 checkout_unavailable，直接打端點或用舊版 App 同樣擋得住；這個旗標只管畫面，
 // 不要讓人按下去才被擋。恢復步驟見 BILLING.md「暫停線上付款」。
 // 暫停期間照舊的：取消續訂、免費體驗、既有約定的回呼與對帳、管理員手動指派方案。
 // 另一道鎖仍在：ECPAY_STAGE=true（綠界測試金鑰）時只有管理員能建單。
 const BILLING_CHECKOUT_ENABLED = false;
 // 暫停的原因只寫一次：方案面板與結果視窗共用，兩邊不會各講各話
-const BILLING_PAUSE_REASON = "電子發票作業還在申請中，線上刷卡付款暫停開放。";
+const BILLING_PAUSE_REASON = "免費體驗中，線上刷卡付款暫停開放。";
 // 暫停期間付費方案的 CTA：灰的、寫明原因，不送人去綠界
 const BILLING_PAUSE_CTA = '<button type="button" class="btn btn-sm btn-outline-light w-100" disabled>線上付款暫停中</button>';
 const BILLING_CONTACT_MAILTO = "mailto:howard.chen@betewo.com?subject=CapitalGuard%20%E5%8D%87%E7%B4%9A%E7%94%B3%E8%AB%8B";
