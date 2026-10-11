@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="325">
+  <meta name="app-version" content="327">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=325" rel="stylesheet">
+  <link href="watchlist.css?v=327" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -505,6 +505,21 @@
             <button type="button" class="filter-chip" data-f="large" onclick="setAppFontSize('large')">大</button>
             <button type="button" class="filter-chip" data-f="xlarge" onclick="setAppFontSize('xlarge')">特大</button>
           </div>
+        </div>
+      </div>
+
+      <!-- ── 意見回饋（FEEDBACK.md）────────────────────────────────────────
+           放在設定頁最下面：這是唯一「不知道去哪找就會來這裡」的那一頁。
+           底部導覽與首頁三格都已經滿了，再加一格會把版面撐開（v292 那次）。
+           後端還沒跑 migrate_user_feedback.sql 時整張卡藏著（fbEnabled=false）。 -->
+      <div class="card panel-card mt-3" id="fb-entry-card" style="display:none">
+        <div class="card-body p-3">
+          <div class="home-sec-title">
+            <span class="hs-label"><i data-icon="feedback"></i>意見回饋</span>
+            <span class="hs-link" id="fb-entry-count" style="display:none" onclick="fbOpen()">我送過的 →</span>
+          </div>
+          <p class="fb-hint">用得不順、哪裡看不懂、想要什麼功能，寫一段話給我們。回覆會出現在你的通知匣。</p>
+          <button type="button" class="btn btn-sm btn-primary" onclick="fbOpen()">寫意見</button>
         </div>
       </div>
 
@@ -1331,6 +1346,11 @@
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-report-btn" style="display:none" onclick="openDailyReportFromHistory()">開啟分析報告</button>
         <button type="button" class="btn btn-sm btn-outline-danger" id="alert-history-stop-rule-btn" style="display:none" onclick="stopRuleFromDetail()">停用此規則</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-plan-btn" style="display:none" onclick="openPlanFromHistory()">查看方案與用量</button>
+        <!-- 意見回饋（FEEDBACK.md）：「這一則不準／看不懂」只有在看到它的那一刻寫得出來。
+             刻意不在故事列每一則上再加一顆鈕（Howard 2026-10-10 第二輪拿掉對話鈕的那個理由）——
+             故事列的每一則點下去就是這張詳情卡，所以這裡就是「某一則訊號」的那個面。 -->
+        <button type="button" class="btn btn-sm btn-outline-light" id="fb-report-btn" style="display:none"
+                onclick="fbOpenForAlert()">回報這則</button>
         <!-- 列上的垃圾桶只有圖示，這裡給一個寫著字的同路入口（2026-10-06） -->
         <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteInboxFromDetail()">刪除這則</button>
         <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">關閉</button>
@@ -1349,6 +1369,51 @@
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-3" id="rx-summary-body"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 意見回饋（FEEDBACK.md）──────────────────────────────────────────
+     一個分類籤列、一個輸入框、一段可展開的附帶資訊、一張「我送過的」清單。
+     刻意不是問卷也不是星等評分：1–5 星沒有可行動的資訊，而多頁問卷沒人寫完。
+     **沒有公開的留言牆**——這裡寫的只有自己與我們看得到（migrate_user_feedback.sql
+     的 RPC 不回傳別人的任何一則）。
+     草稿存在 localStorage（fbDraftSave），所以版本閘的強制重載也救得回來。 -->
+<div class="modal fade" id="fbModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0" id="fb-title">意見回饋</h5>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <!-- 從某一則訊號進來時：講清楚這一則回報的是哪一件事 -->
+        <div class="fb-about" id="fb-about" style="display:none"></div>
+
+        <div class="fb-label">這是哪一種？</div>
+        <div class="chip-row" id="fb-cats"></div>
+
+        <div class="fb-label mt-3" id="fb-body-label">想說的話</div>
+        <textarea id="fb-body" class="fb-textarea" rows="5" maxlength="1000"
+                  placeholder="例如：盤中雷達的時間軸在我的手機上會被切掉右邊" oninput="fbOnInput()"></textarea>
+        <div class="fb-row">
+          <span class="fb-restored" id="fb-restored" style="display:none">已還原上次沒送出的內容</span>
+          <span class="fb-count" id="fb-count">0 / 1000</span>
+        </div>
+
+        <!-- 附帶資訊預設收起但看得到：明講比偷偷送好 -->
+        <details class="fb-diag">
+          <summary>附帶資訊（會一起送出）</summary>
+          <div id="fb-diag-body"></div>
+        </details>
+
+        <div class="fb-sent" id="fb-sent"></div>
+      </div>
+      <div class="modal-footer py-2">
+        <div class="fb-msg" id="fb-msg"></div>
+        <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">關閉</button>
+        <button type="button" class="btn btn-sm btn-primary" id="fb-send-btn" onclick="fbSend()">送出</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1849,6 +1914,8 @@ const ICON_PLUS    = _svg('<path d="M8 3.4v9.2M3.4 8h9.2"/>', 14);
 const ICON_SHARE   = _svg('<circle cx="4.2" cy="8" r="1.9"/><circle cx="11.8" cy="3.9" r="1.9"/><circle cx="11.8" cy="12.1" r="1.9"/><path d="M5.9 7.1 10.1 4.8M5.9 8.9l4.2 2.3"/>', 14);
 const ICON_INBOX   = _svg('<path d="M2.4 9.2 4 3.6h8l1.6 5.6"/><path d="M2.4 9.2v3.2h11.2V9.2h-3.3a2.3 2.3 0 0 1-4.6 0z"/>', 14);
 const ICON_CHEVRON = _svg('<path d="M4 6.2 8 10.2 12 6.2"/>', 14);
+// 意見回饋（FEEDBACK.md）：信封。刻意不用對話氣泡——氣泡已經是分享股的對話框（CHAT.md）
+const ICON_FEEDBACK = _svg('<rect x="2" y="3.6" width="12" height="8.8" rx="1.5"/><path d="M2.4 4.6 8 8.8l5.6-4.2"/>', 14);
 // 首頁「自選」每一列右邊那顆：點開「設定／分享」兩個選項。實心小點才看得出是三顆點
 // （線條圓圈在 14px 會糊成一條虛線）。
 const ICON_DOTS    = _svg('<circle cx="8" cy="3.2" r="1.15" fill="currentColor" stroke="none"/>'
@@ -1872,7 +1939,7 @@ const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2
                           news: ICON_EVENTS, calendar: ICON_CAL, moon: ICON_MOON, gear: ICON_GEAR,
                           filter: ICON_FILTER, friends: ICON_FRIENDS,
                           radar: ICON_RADAR, wallet: ICON_WALLET, share: ICON_SHARE,
-                          plus: ICON_PLUS };
+                          plus: ICON_PLUS, feedback: ICON_FEEDBACK };
   document.querySelectorAll("[data-icon]").forEach(el => {
     const ic = ICONS_BY_NAME[el.dataset.icon];
     if (ic) el.innerHTML = ic;
@@ -4624,6 +4691,9 @@ async function showMain() {
   // 好友（第四格）：問一次後端這個帳號能不能用，不能就讓那一格繼續藏著。
   // 不 await——它只決定一顆導覽鈕要不要出現，不該擋住整個登入流程。
   initFriendsTab().catch(() => {});
+  // 意見回饋（FEEDBACK.md）**刻意不在這裡問**：那會變成每次開 App 多一個請求（約 1 KB，
+  // 其中 979 B 是回應標頭），而絕大多數人永遠不會走到設定頁最下面。改成進設定頁才問一次
+  // （switchTab）、或從通知詳情卡按「回報這則」時現問（fbOpen）。
 
   // 從手機通知點進來（視窗原本沒開）：網址帶 ?alert=<event_key>#inbox。
   // 先記下要定位的那則，等 refreshInbox 抓回列表再置中；參數用完就從網址拿掉
@@ -5103,6 +5173,9 @@ function switchTab(tab, silent = false) {
     loadSharedReportData().then(() => renderScores()).catch(() => {});
   }
   if (tab === "scores" || tab === "home") refreshReportIfStale();
+  // 意見回饋（FEEDBACK.md）：入口在這一頁最下面，所以進來才問後端有沒有這個功能。
+  // 一個 session 只問一次（_fbTried），不進輪詢
+  if (tab === "watch") initFeedback().catch(() => {});
   // 輪詢間隔跟分頁有關（盤中雷達要快一點），換分頁就重排
   if (changed) _scheduleAutoRefresh();
   // 通知關著的那一行跟著分頁走：盤中頁與通知頁都要看得到（2026-09-27 Howard）
@@ -5723,6 +5796,11 @@ const SIGNAL_ICON_ART = {
       '<g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
     + '<path d="M38 24.5c0 6.6-6.3 12-14 12-2.1 0-4.1-.4-5.9-1.1L10 38l2.8-6.6A11.6 11.6 0 0 1 10 24.5c0-6.6 6.3-12 14-12s14 5.4 14 12Z"/>'
     + '<path d="M18.5 23h11M18.5 28.5h6.5"/></g>' },
+  // 意見回饋（FEEDBACK.md）：信封——「你的意見有回覆了」那一類。底色與對話同一個品牌紫：
+  // 它不是訊號，首頁的訊號格子不數它
+  feedback: { chip: "#6f5cff", inner:
+      '<g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+    + '<rect x="9" y="13" width="30" height="22" rx="3.5"/><path d="M10.5 15 24 26l13.5-11"/></g>' },
   // 其他來源：同心圓（一則通知）
   generic: { inner:
       '<circle cx="24" cy="24" r="10" fill="none" stroke="#fff" stroke-width="3"/>'
@@ -5738,6 +5816,7 @@ function iconArtKeyOf(row) {
   if (src === "rule") return "rule";
   if (src === "reaction") return "reaction";
   if (src === "chat") return "chat";
+  if (src === "feedback") return "feedback";
   if (src === "post_market" || src === "postmarket") return "post_market";
   if (src.startsWith("daily_report")) return "daily_report";
   return "generic";
@@ -7912,7 +7991,8 @@ const INBOX_RADAR_SOURCES = ["monitor", "rule"];
 // 內文那句「點這則通知查看方案」在這裡就變成死路（2026-10-03）。
 const INBOX_PLAN_SOURCES = ["trial"];
 // 來源徽章平常直接印 source（monitor／rule…）；新來源給個看得懂的字
-const INBOX_SOURCE_LABEL = { trial: "方案", share: "分享", reaction: "回饋", chat: "對話" };
+const INBOX_SOURCE_LABEL = { trial: "方案", share: "分享", reaction: "回饋", chat: "對話",
+                             feedback: "意見" };
 
 // 這一則能不能在盤中雷達上指出來。**找得到對應的那一顆才回 true**——
 // 找不到就照舊開通知詳情，不要把人丟到一張寫著「沒有這天的紀錄」的空卡片上。
@@ -8002,6 +8082,10 @@ function openInboxDetail(rowId) {
 
   document.getElementById("alert-history-open-plan-btn").style.display =
     INBOX_PLAN_SOURCES.includes(source) ? "inline-flex" : "none";
+
+  // 意見回饋（FEEDBACK.md）：「回報這則」。我們自己的回覆那一類不給（回報一則回覆沒有意義）
+  document.getElementById("fb-report-btn").style.display =
+    fbEnabled !== false && source !== "feedback" ? "inline-flex" : "none";
 
   // 進階訊號的通知才給停用按鈕。狀態型條件（ROE、毛利率…）會天天成立，
   // 使用者要能從通知本身直接關掉，而不是自己回去翻規則清單。
@@ -14050,6 +14134,9 @@ function ingestPushedAlert(a) {
   if (String(a.src || "") === "chat") cvLoadUnread(true).catch(() => {});
   // 回饋的推播（REACTIONS.md）：正在看的那張卡要重新問一次「這一顆收到了什麼」
   if (String(a.src || "") === "reaction") { rxMarksKey = null; refreshRadarTimelineIfOpen(); }
+  // 意見回饋（FEEDBACK.md）：我們回覆了。「我送過的」那一張清單跟著更新，
+  // 不必等下次開 App（只有這一類推播會多這一次請求）
+  if (String(a.src || "") === "feedback") initFeedback(true).catch(() => {});
   // 免費版靠這個旗標決定「回到 App 時要不要補一次報價」（_refreshQuotesOnPush）
   _pushedSinceQuoteLoad = true;
   let changed = false;
@@ -14645,6 +14732,316 @@ function _showPwaInstructionsModal(afterWait = false) {
     if (banner) banner.style.display = 'flex';
   }
 })();
+
+// ══ 意見回饋（FEEDBACK.md）═══════════════════════════════════════════
+// 兩個入口：設定頁最下面那張卡（一般）、通知詳情卡的「回報這則」（帶著那一則的脈絡）。
+// 送出的內容進 user_feedback，回覆走通知匣（source='feedback'）。
+//
+// 三件事是這一段存在的理由，不是附加功能：
+//   1. **草稿**：版本閘的 forceUpdate() 完全不看有沒有在打字就 location.reload()
+//      （一拿不到新版還每 15 秒再來一次）。所以草稿在 input 事件就寫進 localStorage，
+//      不是按送出才寫。localStorage 不受 service worker 升版影響；Cache Storage 會被
+//      activate 清掉（sw.js 只刻意留 PUSH_SYNC_CACHE），所以草稿不能放那裡。
+//   2. **脈絡快照**：送出時連版本、分頁、方案、裝置、哪一則訊號一起存。半年後讀這一則時
+//      程式已經不是這一版了，「畫面怪怪的」只要有版本號與分頁就重現得出來。
+//   3. **去重鍵**：每開一次輸入框產生一個 client_key，雙擊與「重載之後又按一次」都只會進一列。
+//
+// 後端還沒跑 migration（404/PGRST202）時 fbEnabled 留 false，兩個入口都藏起來。
+
+const FB_CATEGORIES = [
+  { code: "bug",       label: "問題回報" },
+  { code: "idea",      label: "功能建議" },
+  { code: "confusing", label: "畫面看不懂" },
+  { code: "billing",   label: "帳務問題" },
+];
+const FB_BODY_MAX = 1000;          // 與 SQL 的 fb_body_chk 同值（test_feedback_contract 釘住）
+const FB_DRAFT_PREFIX = "cg-fb-draft:";
+const FB_RPC_MISSING = Symbol("fb_rpc_missing");
+
+let fbEnabled = null;              // 後端有沒有這個功能；null＝還沒問過
+let _fbTried  = false;             // 這個 session 問過了沒（同一次開 App 不重複問）
+let fbItems   = [];                // 我送過的（feedback_list）
+let fbQuota   = null;              // { daily_limit, used_today }
+let fbCat     = FB_CATEGORIES[0].code;
+let fbCtx     = null;              // 從某一則訊號進來時的脈絡
+let fbKey     = null;              // 這一次輸入的去重鍵
+let fbSending = false;
+
+async function fbRpc(fn, params) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: sbHeaders(state.accessToken),
+    body: JSON.stringify(params || {}),
+  });
+  const text = await r.text();
+  if (r.status === 404 && text.includes("PGRST202")) return FB_RPC_MISSING;
+  if (!r.ok) throw new Error(`RPC ${fn} HTTP ${r.status}`);
+  return text ? JSON.parse(text) : null;
+}
+
+// 功能在不在、我送過幾則。**只在三個時機各問一次**：進設定頁、按「回報這則」、
+// 收到回覆的推播。開 App 不問——那會變成每人每次開 App 多付一個請求的標頭，
+// 而「每人每月 0.8 KB」這個估算的前提就是沒有任何人不必要地問。
+// force＝收到回覆時強制重抓（其餘情況同一個 session 只問一次）。
+async function initFeedback(force) {
+  if (_fbTried && !force) return;
+  if (!state.userId) return;
+  _fbTried = true;
+  try {
+    const res = await fbRpc("feedback_list", { p_limit: 10 });
+    if (res === FB_RPC_MISSING || !res || res.error) { fbEnabled = false; fbRenderEntry(); return; }
+    fbEnabled = true;
+    fbItems = Array.isArray(res.items) ? res.items : [];
+    fbQuota = { daily_limit: res.daily_limit, used_today: res.used_today };
+  } catch {
+    _fbTried = false;   // 離線：這次不算問過，下次進設定頁再試
+  }
+  fbRenderEntry();
+}
+
+function fbRenderEntry() {
+  const card = document.getElementById("fb-entry-card");
+  if (card) card.style.display = fbEnabled ? "" : "none";
+  const link = document.getElementById("fb-entry-count");
+  if (link) {
+    link.style.display = fbEnabled && fbItems.length ? "" : "none";
+    link.textContent = `我送過的 ${fbItems.length} 則 →`;
+  }
+}
+
+// ── 草稿 ──────────────────────────────────────────────────────────────
+// 鍵帶使用者 id：同一台裝置換帳號登入不該看到別人的草稿。
+function _fbDraftKey() { return FB_DRAFT_PREFIX + (state.userId || "anon"); }
+
+function fbDraftSave() {
+  const body = (document.getElementById("fb-body") || {}).value || "";
+  try {
+    if (!body.trim()) localStorage.removeItem(_fbDraftKey());
+    else localStorage.setItem(_fbDraftKey(), JSON.stringify({
+      body, cat: fbCat, ctx: fbCtx, key: fbKey, at: Date.now() }));
+  } catch { /* 無痕模式、配額滿：草稿存不了不該讓輸入壞掉 */ }
+}
+
+function fbDraftLoad() {
+  try { return JSON.parse(localStorage.getItem(_fbDraftKey()) || "null"); } catch { return null; }
+}
+
+function fbDraftClear() {
+  try { localStorage.removeItem(_fbDraftKey()); } catch { /* 同上 */ }
+}
+
+// ── 附帶資訊 ──────────────────────────────────────────────────────────
+// 白名單裡的鍵才會送（後端 feedback_context 再擋一次、每個值各自截短）：
+// 沒有這一道的話 context 就是一個瀏覽器說了算的 jsonb，儲存量沒有上限。
+function fbContext() {
+  const ctx = {
+    app_version: appVersion(),
+    tab: currentTab || "",
+    plan: (planState.plan && planState.plan.code) || "",
+    platform: _activityPlatform(),
+    ua: navigator.userAgent || "",
+  };
+  if (fbCtx) {
+    if (fbCtx.stock_id)     ctx.stock_id = fbCtx.stock_id;
+    if (fbCtx.event_key)    ctx.event_key = fbCtx.event_key;
+    if (fbCtx.alert_id)     ctx.alert_id = fbCtx.alert_id;
+    if (fbCtx.signal_title) ctx.signal_title = fbCtx.signal_title;
+    if (fbCtx.signal_at)    ctx.signal_at = fbCtx.signal_at;
+  }
+  return ctx;
+}
+
+function fbDiagHtml() {
+  const c = fbContext();
+  const rows = [
+    ["版本", `v${c.app_version}`],
+    ["分頁", c.tab || "—"],
+    ["方案", c.plan || "—"],
+    ["裝置", c.platform],
+  ];
+  if (c.stock_id) rows.push(["股票", c.stock_id]);
+  if (c.signal_title) rows.push(["訊號", c.signal_title]);
+  return rows.map(([k, v]) =>
+    `<div class="fb-diag-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`).join("")
+    + `<div class="fb-diag-note">瀏覽器與系統版本也會一起送（用來重現問題）。</div>`;
+}
+
+// ── 開啟 ──────────────────────────────────────────────────────────────
+// ctx 非空＝從某一則訊號進來：分類預設「問題回報」、標題與說明都講那一則。
+async function fbOpen(ctx) {
+  if (!_fbTried) await initFeedback();      // 從通知詳情卡進來的人可能從來沒走過設定頁
+  if (!fbEnabled) { frToast("這個版本還不支援意見回饋", true); return; }
+  fbCtx = ctx || null;
+  trackActivity("feedback_open", { from: fbCtx ? "alert" : "settings" });
+
+  const draft = fbDraftLoad();
+  // 草稿只在「同一個情境」還原：從訊號 A 寫到一半跳去訊號 B，不該把 A 的字帶過去
+  const sameCtx = !!draft && JSON.stringify(draft.ctx || null) === JSON.stringify(fbCtx);
+  fbCat = (sameCtx && draft.cat) || (fbCtx ? "bug" : FB_CATEGORIES[0].code);
+  fbKey = (sameCtx && draft.key) || _fbNewKey();
+
+  const body = document.getElementById("fb-body");
+  if (body) body.value = sameCtx ? (draft.body || "") : "";
+  const restored = document.getElementById("fb-restored");
+  if (restored) restored.style.display = sameCtx && (draft.body || "").trim() ? "" : "none";
+
+  document.getElementById("fb-title").textContent = fbCtx ? "回報這則" : "意見回饋";
+  const about = document.getElementById("fb-about");
+  if (about) {
+    about.style.display = fbCtx ? "" : "none";
+    if (fbCtx) about.innerHTML = `<span class="fb-about-k">關於</span>`
+      + `<span class="fb-about-v">${escapeHtml(fbCtx.label || fbCtx.signal_title || "這一則通知")}</span>`;
+  }
+  const label = document.getElementById("fb-body-label");
+  if (label) label.textContent = fbCtx ? "這一則哪裡不對？" : "想說的話";
+  if (body) body.placeholder = fbCtx
+    ? "例如：這則說突破壓力，但我看 K 線還沒過前高"
+    : "例如：盤中雷達的時間軸在我的手機上會被切掉右邊";
+
+  fbRenderCats();
+  fbOnInput();
+  document.getElementById("fb-diag-body").innerHTML = fbDiagHtml();
+  document.getElementById("fb-msg").textContent = "";
+  fbRenderSent();
+
+  const show = () => bootstrap.Modal.getOrCreateInstance(document.getElementById("fbModal")).show();
+  if (_closeOpenModals("fbModal")) setTimeout(show, 220); else show();
+}
+
+// 通知詳情卡的「回報這則」：把那一則的身分帶進來。
+function fbOpenForAlert() {
+  const row = detailRow;
+  if (!row) { fbOpen(); return; }
+  const sid = String(row.stock_id || "").trim();
+  fbOpen({
+    alert_id: String(row.id),
+    event_key: String(row.event_key || ""),
+    stock_id: sid,
+    signal_title: String(row.title || ""),
+    signal_at: row.sent_at || "",
+    label: `${row.title || "這一則通知"}（${fmtTime(row.sent_at, true)}）`,
+  });
+}
+
+function _fbNewKey() {
+  try { return crypto.randomUUID(); } catch { /* 舊瀏覽器沒有 randomUUID */ }
+  return `fb-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function fbRenderCats() {
+  const el = document.getElementById("fb-cats");
+  if (!el) return;
+  el.innerHTML = FB_CATEGORIES.map(c =>
+    `<button type="button" class="filter-chip${c.code === fbCat ? " active" : ""}"
+             onclick="fbPickCat('${jsAttr(c.code)}')">${escapeHtml(c.label)}</button>`).join("");
+}
+
+function fbPickCat(code) {
+  if (!FB_CATEGORIES.some(c => c.code === code)) return;
+  fbCat = code;
+  fbRenderCats();
+  fbDraftSave();
+}
+
+// 每次輸入：字數、送出鈕的可按狀態、草稿（節流 400ms——每一個字都寫 localStorage
+// 在舊 Android 上會卡頓，而 400ms 的損失最多是最後幾個字）
+let _fbDraftTimer = null;
+function fbOnInput() {
+  const body = (document.getElementById("fb-body") || {}).value || "";
+  const n = body.length;
+  const cnt = document.getElementById("fb-count");
+  if (cnt) {
+    cnt.textContent = `${n} / ${FB_BODY_MAX}`;
+    cnt.classList.toggle("is-full", n >= FB_BODY_MAX);
+  }
+  const btn = document.getElementById("fb-send-btn");
+  if (btn) btn.disabled = fbSending || !body.trim();
+  clearTimeout(_fbDraftTimer);
+  _fbDraftTimer = setTimeout(fbDraftSave, 400);
+}
+
+// ── 送出 ──────────────────────────────────────────────────────────────
+// 失敗一律**不清草稿**：離線、403、版本閘擋下來的那幾種，使用者的字還在框裡，
+// 關掉 App 再回來也還在。不做 Background Sync（一次送出不值得那套複雜度）。
+const FB_ERR_TEXT = {
+  forbidden:    "請先登入再送出。",
+  bad_key:      "送出失敗，請重新開啟這個視窗。",
+  bad_category: "請先選一個分類。",
+  empty:        "還沒有寫任何內容。",
+  too_long:     `最多 ${FB_BODY_MAX} 字。`,
+  rate_limited: "今天送出的則數已達上限，明天再來，或寫信到 howard.chen@betewo.com。",
+};
+
+async function fbSend() {
+  if (!fbEnabled || fbSending) return;
+  const el = document.getElementById("fb-body");
+  const body = (el && el.value || "").trim();
+  const msg = document.getElementById("fb-msg");
+  if (!body) { if (msg) msg.textContent = FB_ERR_TEXT.empty; return; }
+
+  fbSending = true;
+  const btn = document.getElementById("fb-send-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "送出中…"; }
+  if (msg) msg.textContent = "";
+  try {
+    const res = await fbRpc("feedback_send", {
+      p_client_key: fbKey, p_category: fbCat, p_body: body, p_context: fbContext() });
+    if (res === FB_RPC_MISSING) { if (msg) msg.textContent = "這個版本還不支援，請稍後再試。"; return; }
+    if (!res || res.error) {
+      if (msg) msg.textContent = FB_ERR_TEXT[res && res.error] || "送出失敗，請稍後再試。";
+      return;
+    }
+    fbDraftClear();
+    if (el) el.value = "";
+    fbKey = _fbNewKey();          // 下一則是新的一列，不會被去重鍵吃掉
+    fbOnInput();
+    frToast(res.duplicate ? "這一則已經送出過了" : "已送出，謝謝你的回饋");
+    trackActivity("feedback_send", { category: fbCat, from: fbCtx ? "alert" : "settings" });
+    await initFeedback(true);     // 清單與「今天還能送幾則」跟著更新
+    fbRenderSent();
+  } catch {
+    if (msg) msg.textContent = "送不出去（可能沒有網路）。內容已經留著，等一下再按送出。";
+  } finally {
+    fbSending = false;
+    if (btn) { btn.textContent = "送出"; }
+    fbOnInput();
+  }
+}
+
+// ── 我送過的 ──────────────────────────────────────────────────────────
+// 送完只跳一個 toast 就消失的話，沒有人會寫第二次。所以留在這裡，帶狀態。
+const FB_STATUS_TEXT = { new: "已送出", read: "已讀", replied: "已回覆", closed: "已結案" };
+
+function fbRenderSent() {
+  const el = document.getElementById("fb-sent");
+  if (!el) return;
+  if (!fbItems.length) {
+    const q = fbQuota && fbQuota.daily_limit
+      ? `<div class="fb-quota">每天最多 ${fbQuota.daily_limit} 則。</div>` : "";
+    el.innerHTML = q;
+    return;
+  }
+  const left = fbQuota ? Math.max(0, (fbQuota.daily_limit || 0) - (fbQuota.used_today || 0)) : null;
+  el.innerHTML = `<div class="fb-label mt-3">我送過的</div>`
+    + fbItems.map(it => `
+      <div class="fb-item">
+        <div class="fb-item-head">
+          <span class="fb-item-cat">${escapeHtml(it.category_label || fbLabelOf(it.category))}</span>
+          <span class="fb-item-st fb-st-${escapeHtml(it.status)}">${escapeHtml(FB_STATUS_TEXT[it.status] || it.status)}</span>
+          <span class="fb-item-at">${escapeHtml(fmtTime(it.created_at, true))}</span>
+        </div>
+        <div class="fb-item-body">${escapeHtml(it.body || "")}</div>
+        ${it.reply ? `<div class="fb-item-reply"><b>回覆</b>${escapeHtml(it.reply)}</div>` : ""}
+      </div>`).join("")
+    + (left === null ? "" : `<div class="fb-quota">今天還能送 ${left} 則。</div>`);
+}
+
+// 分類的字：清單印的是**送出那一刻存下來的** category_label，這一支只是舊列沒有
+// 快照時的退路。之後改分類名稱、刪掉某一類，舊紀錄都不會跟著變意思。
+function fbLabelOf(code) {
+  const hit = FB_CATEGORIES.find(c => c.code === code);
+  return hit ? hit.label : (code || "");
+}
 
 // ══ 分享（第四格）：好友、常用名單、加入好友、分享股 ═══════════════
 // 設計見 FRIENDS.md。後端是 lab_*（社交）與 stock_shares（分享股），目前只對

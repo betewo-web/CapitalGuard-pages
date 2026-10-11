@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="325">
+  <meta name="app-version" content="327">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -263,6 +263,11 @@
     <div class="card span-6" id="c-sharers"></div>
   </div>
 
+  <h2 class="sec">意見回饋 <small>使用者送來的意見與我們的回覆（FEEDBACK.md）</small></h2>
+  <div class="grid">
+    <div class="card span-12" id="c-feedback"></div>
+  </div>
+
   <h2 class="sec">事件與系統 <small>盤後事件產出、資料表與管線狀態</small></h2>
   <div class="grid">
     <div class="card span-6" id="c-events"></div>
@@ -395,6 +400,8 @@ const ACTION_LABELS = {
   inbox_read_all:    "全部標為已讀",
   inbox_delete:      "刪除單則通知",
   inbox_delete_undo: "復原刪除的通知",
+  feedback_open:     "開啟意見回饋",
+  feedback_send:     "送出意見回饋",
   reaction_give:     "給回饋貼圖",
   reaction_clear:    "收回回饋貼圖",
   reaction_summary_open: "看我收到的回饋",
@@ -1086,6 +1093,7 @@ async function loadStats(force) {
     showDash();
     renderAll(data);
     _lastLoadAt = Date.now();
+    loadFeedback().catch(() => {});   // 另一支 RPC，不該讓它的失敗弄掉整頁
   } catch (e) {
     if (e.code === "update_required" || e.status === 426) {
       showGate(`<div style="font-size:2rem">⬆️</div><h1>App 需要更新</h1><p>${escapeHtml(e.message)}</p><button class="btn primary" onclick="location.reload()">重新載入</button>`);
@@ -1100,6 +1108,70 @@ async function loadStats(force) {
     _loading = false;
     btn.classList.remove("is-busy"); btn.disabled = false;
     document.getElementById("dash").classList.remove("loading");
+  }
+}
+
+// ── 意見回饋（FEEDBACK.md）────────────────────────────────────────────────
+// 與 admin_stats() 分開一支 RPC：那一支是 STABLE 的單一 SQL，而這一支會寫
+// （回傳的那幾列順手從 new 標成 read，使用者那邊就看得到「已讀」）。
+// 不期間篩選：回饋的量級是每月幾十則，整份抓回來比較不會漏掉舊的沒回。
+let _fbRows = [];
+
+async function loadFeedback() {
+  const token = sessionToken();
+  if (!token) return;
+  const el = document.getElementById("c-feedback");
+  try {
+    const res = await sbRpc("feedback_admin_list", { p_limit: 200, p_open: false }, token);
+    if (!res || res.error) { if (el) el.innerHTML = `<div class="empty">讀不到意見回饋（${escapeHtml((res && res.error) || "未知")}）</div>`; return; }
+    _fbRows = Array.isArray(res.items) ? res.items : [];
+    renderFeedback(res);
+  } catch (e) {
+    // 404＝migrate_user_feedback.sql 還沒跑：講清楚，不要讓人以為是沒有人回饋
+    if (el) el.innerHTML = e.status === 404
+      ? `<div class="empty">尚未啟用：請先執行 migrate_user_feedback.sql</div>`
+      : `<div class="empty">讀不到意見回饋（${escapeHtml(e.message || e)}）</div>`;
+  }
+}
+
+const FB_ADMIN_STATUS = { new: "未讀", read: "已讀", replied: "已回覆", closed: "已結案" };
+
+function renderFeedback(res) {
+  const rows = _fbRows.map(r => {
+    const ctx = r.context || {};
+    const where = [ctx.app_version ? `v${ctx.app_version}` : "", ctx.tab || "", ctx.platform || "",
+                   ctx.stock_id || "", ctx.plan || ""].filter(Boolean).join(" · ");
+    const open = r.status === "new" || r.status === "read";
+    return `<tr>
+      <td>${escapeHtml(String(r.created_at || "").slice(0, 16).replace("T", " "))}</td>
+      <td>${escapeHtml(r.name || "—")}</td>
+      <td>${escapeHtml(r.category_label || r.category || "")}</td>
+      <td style="white-space:pre-wrap;max-width:28rem">${escapeHtml(r.body || "")}</td>
+      <td style="font-size:.75rem;opacity:.75">${escapeHtml(where)}${ctx.signal_title ? `<br>${escapeHtml(ctx.signal_title)}` : ""}</td>
+      <td>${escapeHtml(FB_ADMIN_STATUS[r.status] || r.status)}</td>
+      <td style="white-space:pre-wrap;max-width:20rem">${r.reply ? escapeHtml(r.reply) : (open ? `<button type="button" class="btn" style="padding:.2rem .55rem;font-size:.75rem" onclick="fbReply('${escapeHtml(String(r.id))}')">回覆</button>` : "—")}</td>
+    </tr>`;
+  });
+  tableCard("c-feedback", "意見回饋",
+    `共 ${fmtInt((res && res.total) || _fbRows.length)} 則、未結案 ${fmtInt((res && res.open) || 0)} 則；回覆會推播給對方並留在他的通知匣`,
+    ["時間", "使用者", "分類", "內容", "脈絡", "狀態", "回覆"], rows,
+    "還沒有人送過意見回饋");
+}
+
+// 回覆：一個 prompt 就夠（這一頁只有我們自己在看，不值得為它做一套表單）。
+// 留空＝取消；trigger 會替對方寫通知並推播。
+async function fbReply(id) {
+  const row = _fbRows.find(r => String(r.id) === String(id));
+  const text = window.prompt(`回覆「${(row && row.body || "").slice(0, 40)}」：
+（送出後會推播給對方並留在他的通知匣）`, "");
+  if (text === null) return;
+  if (!text.trim()) { alert("回覆是空的，沒有送出。"); return; }
+  try {
+    const res = await sbRpc("feedback_reply", { p_id: id, p_reply: text.trim() }, sessionToken());
+    if (!res || res.error) { alert(`回覆失敗：${(res && res.error) || "未知"}`); return; }
+    await loadFeedback();
+  } catch (e) {
+    alert(`回覆失敗：${e.message || e}`);
   }
 }
 
