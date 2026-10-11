@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="316">
+  <meta name="app-version" content="317">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=316" rel="stylesheet">
+  <link href="watchlist.css?v=317" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9820,6 +9820,10 @@ function renderRadarTimeline(sid) {
   _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending, locked: lockedRow };
   const storyOpts = { past, covered };
   storyOpts.rx = rxRadarRowsByEid(story, sid, date);   // 回饋貼圖：分享來的那幾顆掛一排貼圖（REACTIONS.md）
+  // 分享者那一側：我收到的回饋掛回那一顆訊號底下（唯讀）。rxMarks 由下面那支在背景補
+  const rxin = rxMarksByEid(story, sid, date);
+  storyOpts.rxin = rxin.map;
+  storyOpts.rxloose = rxin.loose;
   // 對話框開著而且有人正在打字時，不要把故事列換掉——輸入框會被重建，游標跟著跑掉。
   // 盤中每 5 秒就重畫一次，所以這個保護是必要的；使用者自己的動作走 cvRepaint（_cvForceRepaint）。
   const storyEl = document.getElementById("rtl-story");
@@ -9829,6 +9833,9 @@ function renderRadarTimeline(sid) {
   _paintRtlTarget();   // 重畫換掉了節點：正在閃的那一則要接著閃完
   // 這一檔有沒有可以進去的對話（一次問一支 chat_rooms，沒有分享的股票連問都不問）
   cvLoadRooms(sid).then(() => { cvPaintBar(); if (cvOpen) cvAfterPaint(); }).catch(() => {});
+  // 我收到的回饋（那一檔、那一天）。鍵沒換就不會發請求，所以每 5 秒的重畫不會變成
+  // 每 5 秒一個請求；真的問過一次才重畫一遍（問到的回饋要畫上去）。
+  rxLoadMarks(sid, date).then(fresh => { if (fresh) refreshRadarTimelineIfOpen(); }).catch(() => {});
 }
 
 // opts.past：畫過去的某一天——不畫「現在」游標、不拿今天的報價與月線當參考、壓力／支撐用 iq.levels（那天存下的）
@@ -10155,6 +10162,8 @@ function radarStoryListHtml(story, opts = {}) {
     const text = rx ? rxWithoutNote(e.text) : e.text;
     // 對話框的入口只有盤中雷達最上面那一條（Howard 2026-10-10 第二輪：每一則訊號都放一顆太多了）
     const eid = rtlEntryId(e);
+    // 分享者那一側：這一顆收到的回饋（opts.rxin，唯讀的一行）
+    const rxin = opts.rxin && opts.rxin[eid];
     return `<div class="rtl-item${e.rowId ? " is-link" : ""}" id="rtl-item-${i}" data-eid="${escapeHtml(eid)}" data-sev="${e.sev}"${link}>
       <div class="rtl-time">${fmtTime(e.at)}</div>
       ${signalIconSvg(rtlEntryIconRow(e), 38)}
@@ -10162,7 +10171,8 @@ function radarStoryListHtml(story, opts = {}) {
         <div class="rtl-title">${escapeHtml(e.title)}${lvl ? `<span class="rtl-lvl">${escapeHtml(lvl)}</span>` : ""}</div>
         ${text ? `<div class="rtl-desc">${escapeHtml(text)}</div>` : ""}
         <span class="rtl-src rtl-src-${e.src}">${RTL_SRC_LABEL[e.src] || ""}</span>${rx ? rxRadarChipHtml(rx, rtlEntryId(e)) : ""}
-      </div></div>${rx && _rxRadarOpenEid === rtlEntryId(e) ? `<div class="rtl-rx">${rxStripHtml(rx)}</div>` : ""}`;
+      </div></div>${rx && _rxRadarOpenEid === rtlEntryId(e) ? `<div class="rtl-rx">${rxStripHtml(rx)}</div>` : ""}${
+        rxin ? `<div class="rtl-rxin">${rxInHtml(rxin)}</div>` : ""}`;
   };
   let html = intraday.map((e, i) => item(e, i)).join("");
   if (!html) {
@@ -10183,6 +10193,10 @@ function radarStoryListHtml(story, opts = {}) {
     }
   }
   if (post.length) html += `<div class="rtl-divider">收盤後</div>` + post.map((e, i) => item(e, intraday.length + i)).join("");
+  // 對不到是哪一則的回饋：排在最上面（空清單時也要在——那正是「看不到」的那種情況）
+  if ((opts.rxloose || []).length) {
+    html = `<div class="rtl-rxin is-loose">${rxInHtml(opts.rxloose, true)}</div>` + html;
+  }
   return html;
 }
 
@@ -13993,6 +14007,8 @@ function ingestPushedAlert(a) {
   if (!a || !a.key) return false;
   // 對話的推播（CHAT.md）：內文不含訊息內容，數字要自己去倉庫問
   if (String(a.src || "") === "chat") cvLoadUnread(true).catch(() => {});
+  // 回饋的推播（REACTIONS.md）：正在看的那張卡要重新問一次「這一顆收到了什麼」
+  if (String(a.src || "") === "reaction") { rxMarksKey = null; refreshRadarTimelineIfOpen(); }
   // 免費版靠這個旗標決定「回到 App 時要不要補一次報價」（_refreshQuotesOnPush）
   _pushedSinceQuoteLoad = true;
   let changed = false;
@@ -14854,6 +14870,83 @@ function rxRadarRowsByEid(story, sid, date) {
   return map;
 }
 
+// 分享者那一側的雷達：那一顆訊號收到了什麼回饋（Howard 2026-10-11：「Emma 點了世芯的
+// 回饋，但我的盤中雷達裡看不到」）。回饋本來只在三個地方看得到——通知匣那一列、帳號旁的
+// 獎盃籤、點籤打開的「我收到的回饋」——而那一列上的「查看盤中雷達」把人帶到雷達，
+// 雷達上卻一點痕跡都沒有。上面那一排貼圖是**收件人**用的（「給回饋」的入口），
+// 分享者需要的是「收到了什麼」，所以另外一條路、唯讀、不能按。
+//
+// 兩道閘，平常一個請求都不會多：收到過回饋（share_state().reactions.total）、
+// 而且這一檔是我分享出去的。資料走 reaction_marks(股票, 日期)（migrate_reactions_v3.sql）。
+let rxMarks = [];                  // reaction_marks().marks
+let rxMarksKey = null;             // "股票|日期"：同一張卡每 5 秒重畫一次，鍵沒換就不要再問
+const RX_MARK_SLACK_MS = 180000;   // 對不到同一種訊號時，時間差幾分鐘內才算同一顆
+
+// 這一檔有沒有被我分享出去（已結束的那幾則也算：那幾天的回饋還在，雷達翻得回去）
+function rxSharedOutHasStock(sid) {
+  return ((frShare && frShare.outgoing) || []).some(s => String(s.stock_id || "") === String(sid));
+}
+
+async function rxLoadMarks(sid, date) {
+  const key = `${sid}|${date}`;
+  if (rxMarksKey === key) return false;
+  rxMarksKey = key;
+  const want = rxReady() && Number((frShare.reactions || {}).total) > 0 && rxSharedOutHasStock(sid);
+  if (!want) {
+    const had = rxMarks.length > 0;
+    rxMarks = [];
+    return had;
+  }
+  const res = await frRpc("reaction_marks", { p_stock_id: String(sid), p_date: String(date) });
+  rxMarks = (res && Array.isArray(res.marks)) ? res.marks : [];
+  return true;
+}
+
+// 回饋落在故事列的哪一顆 → { map: {rtlEntryId: [mark…]}, loose: [mark…] }
+function rxMarksByEid(story, sid, date) {
+  const map = {}, loose = [];
+  // 換股票／換日期的那一瞬間 rxMarks 還是上一檔的：鍵對不上就先不要畫
+  // （rxLoadMarks 問完會重畫一次）。畫錯檔比晚半秒嚴重得多。
+  if (rxMarksKey !== `${sid}|${date}`) return { map, loose };
+  for (const m of rxMarks) {
+    const hit = _rtlEntryForRxMark(story, m);
+    if (!hit) { loose.push(m); continue; }
+    const eid = rtlEntryId(hit);
+    (map[eid] = map[eid] || []).push(m);
+  }
+  return { map, loose };
+}
+
+// 對哪一顆：signal_reactions 存著原訊號的去重鍵，所以種類是確定的（內建訊號）。
+// 進階訊號的 event_key 是 <代號>:rule:<規則>:<日期>，而擁有者與收件人的規則是兩份
+// （收件人那一份是分享的複本、id 不同），所以種類對不出來——退一步用標題與時間：
+// 標題對得上的優先，再取時間最接近的那一顆。共用日誌（signal_history）裡沒有 event_key，
+// 這條退路與通知匣那一側的 _rtlEntryForInboxRow 是同一套想法。
+function _rtlEntryForRxMark(story, m) {
+  const ms = Date.parse((m && m.signal_at) || "") || 0;
+  if (!ms || !story.length) return null;
+  const kind = signalFromEventKey({ event_key: (m && m.event_key) || "" });
+  let cands = kind ? story.filter(e => e.key === kind) : [];
+  if (!cands.length) {
+    const title = String((m && m.signal_title) || "");
+    const byTitle = story.filter(e => e.title && title.includes(e.title));
+    cands = byTitle.length ? byTitle : story;
+  }
+  const hit = cands.reduce((a, b) => Math.abs(b.ms - ms) < Math.abs(a.ms - ms) ? b : a);
+  return Math.abs(hit.ms - ms) <= RX_MARK_SLACK_MS ? hit : null;
+}
+
+// 分享者看到的那一行（唯讀）：獎盃＋誰＋貼圖的名字。同一顆上好幾個人就並排。
+// loose＝對不到是哪一則訊號的那幾個（舊通知清掉了、那天的序列沒存下來…）：
+// 寧可畫在清單最上面，也不要整個不顯示——看不到才是 2026-10-11 要修的那件事。
+function rxInHtml(marks, loose = false) {
+  const items = (marks || []).map(m =>
+    `<span class="rx-in-one"><span class="rx-in-glyph">${rxGlyph(m.kind, 15)}</span>`
+    + `<b>${escapeHtml(m.from_name || "好友")}</b>`
+    + `<span class="rx-in-label">${escapeHtml(RX_LABEL[m.kind] || m.kind)}</span></span>`).join("");
+  return `<span class="rx-in-head">${ICON_RX}${loose ? "收到的回饋（對不到是哪一則）" : "收到的回饋"}</span>${items}`;
+}
+
 // ── 分享者那一側 ──
 // 「○○ 給你的訊號回饋」那一則：內文是 trigger 寫的文字（第一行是哪一則訊號、之後每行「名字：貼圖」），
 // 這裡把它畫成圖＋字。認的是貼圖的名字（RX_KINDS 的 label），與 SQL 的 reaction_label() 同一份。
@@ -14879,6 +14972,7 @@ function rxKeyParts(row) {
 function rxOpenRadarFromDetail() {
   const p = rxKeyParts(detailRow);
   if (!p) return;
+  rxMarksKey = null;        // 可能正看著同一張卡：鍵一樣就不會重新問，這裡強制問一次
   bootstrap.Modal.getInstance(document.getElementById("alertHistoryDetailModal"))?.hide();
   openStockCard(p.sid, { date: p.date, tab: "radar" });
 }
@@ -14962,6 +15056,7 @@ function rxSummaryHtml(s) {
 
 function rxOpenRecent(sid, date) {
   if (!sid) return;
+  rxMarksKey = null;        // 同上：剛收到的那一個要馬上畫得出來
   bootstrap.Modal.getInstance(document.getElementById("rxSummaryModal"))?.hide();
   openStockCard(sid, { date: date || null, tab: "radar" });
 }
@@ -16342,6 +16437,7 @@ function frFlashAt(kind, id) {
 
 // event_key 的形狀（migrate_stock_shares.sql 的 share_notify 呼叫）：
 //   share:<share_id>:invite[:vN]｜share:<share_id>:update:vN｜share:<share_id>:terminated
+//   share:<share_id>:resp:<#標籤>:<yes|no>:vN  好友回應了我的分享 → 跳到「我分享出去」那一則
 //   friend:<request_id>:request              有人想加我為好友 → 跳到那一則邀請
 //   friend:<request_id>:accepted:<#標籤>     對方同意了我的邀請 → 跳到好友清單裡的那一位
 // 回 true＝這則已經處理（跳過去了，或告訴使用者它已經不在了）；false＝不是分享類，照舊開詳情。
@@ -16352,6 +16448,9 @@ async function frOpenFromInbox(row) {
   const isFriend = m[1].toLowerCase() === "friend", id = m[2];
   // 「對方同意了」那一則：邀請本身已經結束，要指的是好友清單裡的那個人
   const accepted = isFriend ? key.match(/:accepted(?::([0-9a-f]{6}))?$/i) : null;
+  // 好友接受／沒有接受我的分享（share_respond_notify）：這一則講的是**我分享出去**的那一則。
+  // 不分出來的話會跑去「好友分享給我」裡找同一個 share_id，找不到就說「這則分享已經結束」。
+  const mine = !isFriend && /:resp:/i.test(key);
 
   switchTab("friends");
   await frReload().catch(() => {});      // 先拿最新的：那一則可能剛被對方終止、或自己已經處理過
@@ -16366,6 +16465,12 @@ async function frOpenFromInbox(row) {
     kind = "request";
     flashId = id;
     found = ((frState && frState.requests_in) || []).some(r => r.request_id === id);
+  } else if (mine) {
+    frSwitchSeg("shares");
+    frSwitchShare("out");
+    kind = "share-out";
+    flashId = id;
+    found = ((frShare && frShare.outgoing) || []).some(s => s.share_id === id);
   } else {
     frSwitchSeg("shares");
     frSwitchShare("in");
@@ -16375,7 +16480,9 @@ async function frOpenFromInbox(row) {
   }
   if (!found) {
     frToast(accepted ? "這位好友已經不在你的好友清單裡"
-            : isFriend ? "這則好友邀請已經處理過了" : "這則分享已經結束，或你已經處理過了");
+            : isFriend ? "這則好友邀請已經處理過了"
+            : mine ? "這則分享已經結束了"
+            : "這則分享已經結束，或你已經處理過了");
     return true;
   }
   if (kind === "share") frOpenIn = id;      // 跳過來的那一則直接展開：他點通知就是要看內容

@@ -5128,6 +5128,21 @@ select.fr-input { width: 100%; }
 .rx-recent li:hover { background: var(--surface); }
 /* 盤中雷達：分享來的那一顆底下接一排，占故事列的整個寬度（不在時間／圖示／文字三欄裡） */
 .rtl-rx { margin: 0 0 6px 0; padding: 0 6px; }
+/* 分享者那一側：那一顆訊號收到的回饋（唯讀，Howard 2026-10-11）。
+   貼圖列（.rtl-rx）是收件人按的，這一行是分享者看的——所以不是按鈕、沒有狀態，
+   橘色沿用「累積回饋」那一套（.rx-recv-glyph 同色系），紅綠仍然只給漲跌。
+   .is-loose＝對不到是哪一則訊號的那幾個，排在清單最上面。 */
+.rtl-rxin { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+	margin: -2px 0 8px; padding: 0 8px; font-size: 12.4px; color: var(--text-1); }
+.rtl-rxin.is-loose { margin: 0 0 10px; }
+.rx-in-head { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); }
+.rx-in-head .ic { width: 13px; height: 13px; color: var(--sig-orange); }
+.rx-in-one { display: inline-flex; align-items: center; gap: 4px; }
+.rx-in-glyph { display: inline-grid; place-items: center; width: 20px; height: 20px;
+	border-radius: 50%; color: var(--sig-orange); background: rgba(255, 159, 67, 0.12); }
+.rx-in-glyph .ic { width: 15px; height: 15px; }
+.rx-in-one b { font-weight: 600; }
+.rx-in-label { color: var(--text-muted); }
 #fr-btn-rx { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
 #fr-btn-rx b { color: var(--sig-orange); }
 
@@ -5205,6 +5220,14 @@ select.fr-input { width: 100%; }
 	border-radius: 999px; padding: 1px 7px; }
 .home-tile-cv .ic { width: 12px; height: 12px; }
 .wl-tag-shared { color: #c6bbff; background: rgba(139, 124, 255, 0.14); }
-.hs-seg-unread { display: none; margin-left: 4px; font-size: 10.5px; font-weight: 700;
-	color: #fff; background: var(--sig-red); border-radius: 999px; padding: 0 5px; }
+/* 「好友分享」那一格的未讀數。**絕對定位在右上角、不占那一格的行寬**
+   （2026-10-11 Howard：有未讀數時那四個字被擠成兩行）——390px 的機子上
+   「圖示＋好友分享＋檔數」已經用掉三分之一格的 103/119px，再往行裡塞一顆籤一定折行。
+   按鈕本身已經是 position: relative（分隔線用的），所以這裡只要擺位置。
+   直向與字分開：籤在上面那段 padding 裡，字還在原來那一行（preview/build_home_seg.py 量過）。
+   display 的預設是 none，cvPaintUnread() 明寫 inline-block（test_share_chat_contract 釘著）。 */
+.hs-seg-unread { display: none; position: absolute; top: 0; right: 2px;
+	min-width: 12px; height: 12px; padding: 0 4px; line-height: 12px; text-align: center;
+	font-size: 0.58rem; font-weight: 700;
+	color: #fff; background: var(--sig-red); border-radius: 999px; }
 .cv-dir { font-size: 11.5px; color: var(--text-muted); font-weight: 400; }
