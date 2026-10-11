@@ -4102,6 +4102,21 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 	border: 1px solid rgba(255, 159, 67, 0.35);
 }
 
+/* 線上付款暫停中的說明（貼在方案比較的灰鈕上面）。中性底色不用橘：
+   這是現況說明，不是要人馬上處理的警告——橘留給真的要注意的事。 */
+.plan-paused {
+	padding: 0.55rem 0.75rem;
+	margin-bottom: 0.7rem;
+	border-radius: 10px;
+	font-size: 0.8rem;
+	line-height: 1.55;
+	color: var(--text-1);
+	background: rgba(7, 12, 26, 0.7);
+	border: 1px solid rgba(121, 157, 255, 0.18);
+}
+/* 橘色的「不會扣款」不能被這條染回白的（同 .plan-status b 的坑） */
+.plan-paused b:not(.plan-safe) { color: var(--text-0); }
+
 .plan-current {
 	background: rgba(7, 12, 26, 0.7);
 	border: 1px solid rgba(121, 157, 255, 0.18);
@@ -4211,6 +4226,7 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 .plan-feat .ic,
 .plan-meter-head .ic,
 .plan-focus-hint .ic,
+.plan-paused .ic,
 .plan-status .ic,
 .plan-trial-title .ic,
 .plan-locked-title .ic,

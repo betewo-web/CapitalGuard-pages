@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="324">
+  <meta name="app-version" content="325">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=324" rel="stylesheet">
+  <link href="watchlist.css?v=325" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1760,10 +1760,17 @@ let brokerHoldingsAt = null; // 最近一次同步時間（synced_at 最大值�
 // basic 是 2026-09 舊制 NT$49（is_public=false，不在方案頁列出），
 // 但仍有生效中的訂閱，徽章與付款紀錄要認得它。
 const PLAN_CODES = ["free", "pro", "premium"];
-// 線上付款的前端總開關（緊急關閉用）。真正的鎖在 create-order：Secrets 還是綠界
-// 測試金鑰（ECPAY_STAGE=true）時只有管理員能建單，一般用戶會收到 503
-// checkout_unavailable 並看到「來信申請」的說明。換正式金鑰後不需要改前端。
-const BILLING_CHECKOUT_ENABLED = true;
+// 線上付款的前端總開關。**2026-10-11 起 false：電子發票還在申請，核准之前不收線上刷卡**
+// （收了錢開不出發票）。真正的鎖在後端 app_config.billing_checkout='closed'——create-order
+// 一律回 503 checkout_unavailable，直接打端點或用舊版 App 同樣擋得住；這個旗標只管畫面，
+// 不要讓人按下去才被擋。恢復步驟見 BILLING.md「暫停線上付款」。
+// 暫停期間照舊的：取消續訂、免費體驗、既有約定的回呼與對帳、管理員手動指派方案。
+// 另一道鎖仍在：ECPAY_STAGE=true（綠界測試金鑰）時只有管理員能建單。
+const BILLING_CHECKOUT_ENABLED = false;
+// 暫停的原因只寫一次：方案面板與結果視窗共用，兩邊不會各講各話
+const BILLING_PAUSE_REASON = "電子發票作業還在申請中，線上刷卡付款暫停開放。";
+// 暫停期間付費方案的 CTA：灰的、寫明原因，不送人去綠界
+const BILLING_PAUSE_CTA = '<button type="button" class="btn btn-sm btn-outline-light w-100" disabled>線上付款暫停中</button>';
 const BILLING_CONTACT_MAILTO = "mailto:howard.chen@betewo.com?subject=CapitalGuard%20%E5%8D%87%E7%B4%9A%E7%94%B3%E8%AB%8B";
 // 同意勾選旁的條款連結：官網的服務條款（五、7 日解除權）與退款政策
 const BILLING_TERMS_URL = "https://betewo-web.github.io/betewo-site/terms.html#t5";
@@ -3252,13 +3259,13 @@ function subscriptionStatusHtml() {
   const cancelBtn = `<button type="button" class="btn btn-xs btn-outline-danger ms-2" onclick="cancelSubscription()">取消續訂</button>`;
   // 扣款失敗要先判：plan_of() 這時已推導成 free，放在 free 之後永遠走不到
   if (s && s.status === "past_due") {
-    return `<div class="plan-status plan-status-warn">${ICON_WARN}上期扣款失敗，已暫回${escapeHtml(freePlanName())}。綠界下期仍會嘗試扣款；不想再扣請取消續訂，想繼續用請更新付款方式後重新訂閱。${agreementOpen ? cancelBtn : ""}</div>`;
+    return `<div class="plan-status plan-status-warn">${ICON_WARN}上期扣款失敗，已暫回${escapeHtml(freePlanName())}。綠界下期仍會嘗試扣款；不想再扣請取消續訂${BILLING_CHECKOUT_ENABLED ? "，想繼續用請更新付款方式後重新訂閱" : "（線上刷卡付款暫停開放中，暫時無法重新訂閱）"}。${agreementOpen ? cancelBtn : ""}</div>`;
   }
   if (!s || p.code === "free") {
     if (agreementOpen) {
       return `<div class="plan-status plan-status-warn">${ICON_WARN}先前的定期定額約定仍在綠界（服務已於 ${fmtPlanDate(s.current_period_end)} 到期）。不想再扣款請取消續訂。${cancelBtn}</div>`;
     }
-    return `<div class="plan-status">${escapeHtml(freePlanName())}使用中，隨時可升級。</div>`;
+    return `<div class="plan-status">${escapeHtml(freePlanName())}使用中${BILLING_CHECKOUT_ENABLED ? "，隨時可升級" : "；線上刷卡付款暫停開放中"}。</div>`;
   }
   const until = fmtPlanDate(s.current_period_end);
   if (s.cancel_requested_at) {
@@ -3267,7 +3274,7 @@ function subscriptionStatusHtml() {
   if (s.provider === "trial") {
     const left = tradingDaysLeftFrom(s.current_period_end);
     const freeName = freePlanName();
-    return `<div class="plan-status">${ICON_GIFT}免費體驗中，<b>${trialLastDayLabel(s.current_period_end)}</b> 整天都還是完整功能${left !== null ? `（還剩 ${left} 個交易日）` : ""}，<b class="plan-safe">隔天凌晨 0 點過後自動回到${escapeHtml(freeName)}，不會扣款</b>。想繼續用不中斷，隨時可以升級。</div>`;
+    return `<div class="plan-status">${ICON_GIFT}免費體驗中，<b>${trialLastDayLabel(s.current_period_end)}</b> 整天都還是完整功能${left !== null ? `（還剩 ${left} 個交易日）` : ""}，<b class="plan-safe">隔天凌晨 0 點過後自動回到${escapeHtml(freeName)}，不會扣款</b>。${BILLING_CHECKOUT_ENABLED ? "想繼續用不中斷，隨時可以升級。" : "線上刷卡付款暫停開放中；到期後想繼續用完整功能可以來信由管理員開通。"}</div>`;
   }
   if (s.provider === "manual") {
     return `<div class="plan-status">由管理員指派${s.note ? `（${escapeHtml(s.note)}）` : ""}，有效至 <b>${until}</b>。</div>`;
@@ -3340,6 +3347,9 @@ function renderPlanModal(focus) {
       ${subscriptionStatusHtml()}
     </div>`;
 
+  // 線上付款暫停中（BILLING_CHECKOUT_ENABLED=false）：付費方案的入口要寫明暫停，
+  // 但免費那張卡的鈕（取消續訂）照舊——不能因為暫停收款就讓人退不掉。
+  const payPaused = !BILLING_CHECKOUT_ENABLED;
   const cards = planState.plans.map(x => {
     const isCurrent = x.code === p.code;
     let cta;
@@ -3349,8 +3359,9 @@ function renderPlanModal(focus) {
       // 過期（2026-10-03）。後端本來就放行體驗中付款：create-order 只擋 provider
       // 不是 trial 的 active 訂閱，apply_ecpay_payment 的 ON CONFLICT 會把體驗列換成 ecpay。
       cta = isTrialNow() && x.price_twd > 0
-        ? `<button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center"
-                   onclick="startCheckout('${jsAttr(x.code)}')">正式訂閱${escapeHtml(x.name)}</button>`
+        ? (payPaused ? BILLING_PAUSE_CTA
+                     : `<button type="button" class="btn btn-sm btn-success btn-accent-sm w-100 justify-content-center"
+                   onclick="startCheckout('${jsAttr(x.code)}')">正式訂閱${escapeHtml(x.name)}</button>`)
         : `<button type="button" class="btn btn-sm btn-outline-light w-100" disabled>目前方案</button>`;
     } else if (x.price_twd === 0) {
       // 體驗中按這顆會打到 cancel-subscription，那支只支援 ecpay，回 501
@@ -3359,7 +3370,8 @@ function renderPlanModal(focus) {
         : `<button type="button" class="btn btn-sm btn-outline-light w-100" onclick="cancelSubscription()">改為${escapeHtml(x.name)}</button>`;
     } else {
       const up = x.price_twd > p.price_twd;
-      cta = `<button type="button" class="btn btn-sm ${up ? "btn-success btn-accent-sm" : "btn-outline-light"} w-100 justify-content-center"
+      cta = payPaused ? BILLING_PAUSE_CTA
+        : `<button type="button" class="btn btn-sm ${up ? "btn-success btn-accent-sm" : "btn-outline-light"} w-100 justify-content-center"
                onclick="startCheckout('${jsAttr(x.code)}')">${up ? "升級到" : "改為"}${escapeHtml(x.name)}</button>`;
     }
     const isFocus = !!(target && x.code === target.code);
@@ -3371,6 +3383,12 @@ function renderPlanModal(focus) {
         ${cta}
       </div>`;
   }).join("");
+
+  // 鈕為什麼是灰的，答案就貼在它正上方
+  const pausedNote = payPaused ? `
+    <div class="plan-paused">${ICON_WARN}<b>${escapeHtml(BILLING_PAUSE_REASON)}</b>
+      <b class="plan-safe">暫停期間不會建立訂單、也不會扣款</b>；已經在用的方案與設定都不受影響。
+      想先用完整功能可以領免費體驗，或<a href="${BILLING_CONTACT_MAILTO}">來信</a>由管理員開通。</div>` : "";
 
   const payments = planPayments && planPayments.length
     ? `<table class="plan-pay-table"><tbody>${planPayments.map(r => `
@@ -3387,6 +3405,7 @@ function renderPlanModal(focus) {
     ${current}
     ${trialOfferHtml(focus === "trial")}
     <div class="plan-sec-title">方案比較</div>
+    ${pausedNote}
     <div class="plan-grid">${cards}</div>
     ${comingSoon}
     <div class="plan-sec-title">付款紀錄</div>
@@ -3494,10 +3513,11 @@ async function _settlePaidReturn() {
 
 function checkoutClosedMessage() {
   showBillingResult({
-    tone: "info", title: "線上付款尚未開放",
+    tone: "info", title: "線上付款暫停開放",
     lines: [
-      "目前還沒有開放線上付款，沒有建立訂單、也沒有扣款。",
-      { html: `想先升級請<a href="${BILLING_CONTACT_MAILTO}">來信申請</a>，由管理員為你開通。` },
+      BILLING_PAUSE_REASON,
+      "沒有建立訂單，也沒有扣款。",
+      { html: `想先用完整功能請<a href="${BILLING_CONTACT_MAILTO}">來信申請</a>，由管理員為你開通。` },
     ],
     onClose: () => renderPlanModal(),
   });
