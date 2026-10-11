@@ -5241,7 +5241,13 @@ select.fr-input { width: 100%; }
 .cv-msg-more { background: none; border: 0; padding: 0 2px; color: var(--text-muted); cursor: pointer; line-height: 1; }
 .cv-anchor { font-size: 11.5px; color: var(--text-muted); background: rgba(146, 146, 163, 0.12);
 	border-left: 2px solid rgba(146, 146, 163, 0.5); border-radius: 0 6px 6px 0; padding: 3px 7px; margin: 3px 0; }
-.cv-bubble { margin-top: 3px; padding: 7px 10px; border-radius: 12px; background: var(--bg-2);
+/* 兩邊都要有框（2026-10-11 Howard：對方的訊息看起來沒有被包住）——
+   原本對方那一側是 --bg-2 (#14141f)，鋪在 .cv-panel 的 --surface 上只差 rgb(2,2,4)，
+   等於沒有底色；我自己那一側的紫色底才看得出是一顆泡泡。改成面板裡既有的中性灰
+   （.cv-anchor／.cv-mem-chip／.cv-flag 同一個值）＋一圈 var(--border)，
+   框由兩側共用、顏色仍照既有語彙分兩邊（紫＝我自己）。 */
+.cv-bubble { margin-top: 3px; padding: 7px 10px; border-radius: 12px;
+	background: rgba(146, 146, 163, 0.12); border: 1px solid var(--border);
 	font-size: 13.8px; line-height: 1.55; color: var(--text-0); white-space: pre-wrap; word-break: break-word; }
 .cv-msg.is-mine .cv-bubble { background: rgba(139, 124, 255, 0.16); }
 .cv-acts { display: flex; gap: 8px; margin-top: 4px; }
