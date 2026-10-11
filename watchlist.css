@@ -3438,13 +3438,23 @@ body.modal-blocking .modal-backdrop.show {
 .holding-row.score-row .hr-sid,
 .holding-row.score-row .hr-sub { color: var(--text-1); }
 
-/* 統計頁的「＋自選」：整列最右邊一欄（見 scoreRowHtml）。min-width 預留寬度，
-   有／沒有按鈕的列分數欄才對齊；字級放大時這一欄會撐寬，不會把字裁掉。 */
+/* 統計頁的「＋自選」：自己一欄，貼在分數欄左邊（見 scoreRowHtml）。min-width 預留寬度，
+   已在自選股的列沒有按鈕也佔同樣寬度，分數欄才不會左右位移；
+   字級放大時這一欄會撐寬，不會把字裁掉。 */
 .holding-row .hr-add {
 	flex: 0 0 auto;
 	display: flex;
 	justify-content: flex-end;
 	min-width: 4.1rem;
+	/* 列本身的 gap 是 0.7rem；按鈕與分數之間再多留一點，兩欄才不會黏在一起 */
+	margin-right: 0.5rem;
+}
+
+/* 分數欄固定寬：分數字串長短不一（「9分 ▲12.8」vs「56分」），不固定的話
+   左邊那顆按鈕的右緣會跟著分數長度左右跑——按鈕要對齊的就是這條線。 */
+.holding-row.score-row .hr-right {
+	flex: 0 0 auto;
+	min-width: 6.4rem;
 }
 
 .holding-row .hr-add .btn { white-space: nowrap; }

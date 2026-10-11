@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="322">
+  <meta name="app-version" content="323">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=322" rel="stylesheet">
+  <link href="watchlist.css?v=323" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -8842,8 +8842,9 @@ function scoreRowHtml(sid, s, opts = {}) {
   const q = getQuote(sid);
   const sub = [s?.industry_category, opts.note].filter(Boolean).map(escapeHtml).join(" · ");
   const inWatch = watchlistRows.some(r => String(r.stock_id || "").trim() === sid);
-  // ＋自選靠右：按鈕排在整列最後，不跟在股名後面（跟著股名會隨名字長短左右跑）。
-  // 已在自選股的那幾列留同寬的空位，右邊的分數欄才不會因為按鈕有無而位移。
+  // ＋自選靠右：按鈕自己一欄，貼著分數欄的左邊（不跟在股名後面——跟著股名會隨名字長短左右跑）。
+  // 兩個「對齊」都靠固定寬度撐出來：分數欄 .hr-right 固定寬，每一列的按鈕右緣才會同一條線；
+  // 已在自選股的那幾列留同寬的空位，分數欄才不會因為按鈕有無而位移。
   const addSlot = opts.allowAdd
     ? `<div class="hr-add">${inWatch ? "" : `<button class="btn btn-sm btn-outline-light btn-ghost" onclick="event.stopPropagation();addStockFromScores('${jsAttr(sid)}')">＋自選</button>`}</div>`
     : "";
@@ -8853,11 +8854,11 @@ function scoreRowHtml(sid, s, opts = {}) {
         <div class="hr-title">${escapeHtml(name)}</div>
         <div class="hr-sid">${sub || "&nbsp;"}</div>
       </div>
+      ${addSlot}
       <div class="hr-right">
         <div class="hr-price">${total != null ? `${total.toFixed(0)}<span class="score-unit">分</span>` : "—"} ${chgHtml}</div>
         <div class="hr-sub">${q ? `${fmtPrice(q.price)} ${fmtChgHtml(q.changePct)}` : ""}</div>
       </div>
-      ${addSlot}
     </div>`;
 }
 
