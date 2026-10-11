@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="319">
+  <meta name="app-version" content="320">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=319" rel="stylesheet">
+  <link href="watchlist.css?v=320" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9618,10 +9618,16 @@ function _mdOf(dateKey) {
 }
 
 // 盤中每 15 秒拉一次 intraday_state（推播到的訊號另由 ingestPushedAlert 即時插入）：時間軸開著就跟著重畫
+// 字卡開著就重畫。**判斷只看 radarTimelineSid**——它在 hidden.bs.modal 那一刻就被清成 null，
+// 所以「卡片關了」這件事它知道得比 CSS class 準。
+// 不可以再要求 .show：Bootstrap 的淡入要先等背景那層（約 150 毫秒）才把 class 掛上去，
+// 比它早回來的非同步重畫會整個被丟掉——2026-10-11 Howard：「第一次點進去看不到（收到的回饋
+// 那一行），退出再進去才有；點別檔再回來又沒有」。那正是 reaction_marks 的 RPC 比淡入快的時候
+// （第二次看得到是因為那時手上已經有快取，畫第一遍就畫得出來）。
+// 同一個坑也吃掉過 loadSignalHistory 回來的那一次重畫（過去某一天的序列）。
 function refreshRadarTimelineIfOpen() {
   if (!radarTimelineSid) return;
-  const el = document.getElementById("radarTimelineModal");
-  if (el && el.classList.contains("show")) renderRadarTimeline(radarTimelineSid);
+  if (document.getElementById("radarTimelineModal")) renderRadarTimeline(radarTimelineSid);
 }
 
 // K 線現在是同一張卡的第三個分頁，不必再關掉這一張（2026-09-22 之前是兩個 modal 搶 backdrop）
@@ -14901,9 +14907,12 @@ async function rxLoadMarks(sid) {
   const key = String(sid);
   if (rxMarksKey === key) return false;
   const had = rxMarks.length > 0;
-  rxMarksKey = key;
   rxMarks = [];     // 先清再問：問不到（網路、後端還沒跑 migration）時手上不能留著上一檔的
-  const want = rxReady() && Number((frShare.reactions || {}).total) > 0 && rxSharedOutHasStock(sid);
+  // 分享狀態還沒載進來（開 App 的頭幾百毫秒）＝「還不知道」，不是「沒有」：**不要記下鍵**，
+  // 記了的話這張卡在這個 session 裡就再也不會問第二次。
+  if (!rxReady()) { rxMarksKey = null; return had; }
+  rxMarksKey = key;
+  const want = Number((frShare.reactions || {}).total) > 0 && rxSharedOutHasStock(sid);
   if (!want) return had;
   const res = await frRpc("reaction_marks", { p_stock_id: key, p_date: null });
   rxMarks = (res && Array.isArray(res.marks)) ? res.marks : [];
