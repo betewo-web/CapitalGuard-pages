@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="318">
+  <meta name="app-version" content="319">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=318" rel="stylesheet">
+  <link href="watchlist.css?v=319" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9824,6 +9824,7 @@ function renderRadarTimeline(sid) {
   const rxin = rxMarksByEid(story, sid, date);
   storyOpts.rxin = rxin.map;
   storyOpts.rxloose = rxin.loose;
+  storyOpts.rxdays = rxin.days;
   // 對話框開著而且有人正在打字時，不要把故事列換掉——輸入框會被重建，游標跟著跑掉。
   // 盤中每 5 秒就重畫一次，所以這個保護是必要的；使用者自己的動作走 cvRepaint（_cvForceRepaint）。
   const storyEl = document.getElementById("rtl-story");
@@ -9835,7 +9836,7 @@ function renderRadarTimeline(sid) {
   cvLoadRooms(sid).then(() => { cvPaintBar(); if (cvOpen) cvAfterPaint(); }).catch(() => {});
   // 我收到的回饋（那一檔、那一天）。鍵沒換就不會發請求，所以每 5 秒的重畫不會變成
   // 每 5 秒一個請求；真的問過一次才重畫一遍（問到的回饋要畫上去）。
-  rxLoadMarks(sid, date).then(fresh => { if (fresh) refreshRadarTimelineIfOpen(); }).catch(() => {});
+  rxLoadMarks(sid).then(fresh => { if (fresh) refreshRadarTimelineIfOpen(); }).catch(() => {});
 }
 
 // opts.past：畫過去的某一天——不畫「現在」游標、不拿今天的報價與月線當參考、壓力／支撐用 iq.levels（那天存下的）
@@ -10193,6 +10194,12 @@ function radarStoryListHtml(story, opts = {}) {
     }
   }
   if (post.length) html += `<div class="rtl-divider">收盤後</div>` + post.map((e, i) => item(e, intraday.length + i)).join("");
+  // 不是這一天的回饋：一行捷徑，點一下換到那一天（2026-10-11 第二輪）。
+  // 雷達預設顯示最後一次有報價的交易日，而且日期籤只從那天往回排——
+  // 比它新的那一天（例如休市日的測試訊號）在畫面上完全到不了。
+  if ((opts.rxdays || []).length) {
+    html = `<div class="rtl-rxin is-loose">${rxDaysHtml(opts.rxdays)}</div>` + html;
+  }
   // 對不到是哪一則的回饋：排在最上面（空清單時也要在——那正是「看不到」的那種情況）
   if ((opts.rxloose || []).length) {
     html = `<div class="rtl-rxin is-loose">${rxInHtml(opts.rxloose, true)}</div>` + html;
@@ -14878,8 +14885,8 @@ function rxRadarRowsByEid(story, sid, date) {
 //
 // 兩道閘，平常一個請求都不會多：收到過回饋（share_state().reactions.total）、
 // 而且這一檔是我分享出去的。資料走 reaction_marks(股票, 日期)（migrate_reactions_v3.sql）。
-let rxMarks = [];                  // reaction_marks().marks
-let rxMarksKey = null;             // "股票|日期"：同一張卡每 5 秒重畫一次，鍵沒換就不要再問
+let rxMarks = [];                  // reaction_marks().marks（這一檔的所有日子）
+let rxMarksKey = null;             // 股票代號：同一張卡每 5 秒重畫一次，鍵沒換就不要再問
 const RX_MARK_SLACK_MS = 180000;   // 對不到同一種訊號時，時間差幾分鐘內才算同一顆
 
 // 這一檔有沒有被我分享出去（已結束的那幾則也算：那幾天的回饋還在，雷達翻得回去）
@@ -14887,32 +14894,41 @@ function rxSharedOutHasStock(sid) {
   return ((frShare && frShare.outgoing) || []).some(s => String(s.stock_id || "") === String(sid));
 }
 
-async function rxLoadMarks(sid, date) {
-  const key = `${sid}|${date}`;
+// 一次問這一檔的**所有日子**（p_date 給 null）：雷達預設顯示的那一天是最後一次有報價的
+// 交易日，回饋可能掛在別的日子，而日期籤只從那一天往回排——比它新的那一天在畫面上到不了。
+// 拿回全部才畫得出「其他日子收到的回饋」那一行（2026-10-11 第二輪，Howard：「我看不到」）。
+async function rxLoadMarks(sid) {
+  const key = String(sid);
   if (rxMarksKey === key) return false;
   const had = rxMarks.length > 0;
   rxMarksKey = key;
   rxMarks = [];     // 先清再問：問不到（網路、後端還沒跑 migration）時手上不能留著上一檔的
   const want = rxReady() && Number((frShare.reactions || {}).total) > 0 && rxSharedOutHasStock(sid);
   if (!want) return had;
-  const res = await frRpc("reaction_marks", { p_stock_id: String(sid), p_date: String(date) });
+  const res = await frRpc("reaction_marks", { p_stock_id: key, p_date: null });
   rxMarks = (res && Array.isArray(res.marks)) ? res.marks : [];
   return true;
 }
 
-// 回饋落在故事列的哪一顆 → { map: {rtlEntryId: [mark…]}, loose: [mark…] }
+// 回饋落在故事列的哪一顆 → { map: {rtlEntryId: [mark…]}, loose: [mark…], days: [{date, n}] }
+//   map   正在看的那一天、對得到訊號的
+//   loose 正在看的那一天、對不到是哪一則的
+//   days  不是這一天的（點一下換過去）——雷達預設那一天常常不是回饋所在的那一天
 function rxMarksByEid(story, sid, date) {
-  const map = {}, loose = [];
-  // 換股票／換日期的那一瞬間 rxMarks 還是上一檔的：鍵對不上就先不要畫
+  const map = {}, loose = [], byDay = {};
+  // 換股票的那一瞬間 rxMarks 還是上一檔的：鍵對不上就先不要畫
   // （rxLoadMarks 問完會重畫一次）。畫錯檔比晚半秒嚴重得多。
-  if (rxMarksKey !== `${sid}|${date}`) return { map, loose };
+  if (rxMarksKey !== String(sid)) return { map, loose, days: [] };
   for (const m of rxMarks) {
+    const d = taipeiDateKey(m.signal_at);
+    if (d !== date) { byDay[d] = (byDay[d] || 0) + 1; continue; }
     const hit = _rtlEntryForRxMark(story, m);
     if (!hit) { loose.push(m); continue; }
     const eid = rtlEntryId(hit);
     (map[eid] = map[eid] || []).push(m);
   }
-  return { map, loose };
+  const days = Object.keys(byDay).sort().reverse().map(d => ({ date: d, n: byDay[d] }));
+  return { map, loose, days };
 }
 
 // 對哪一顆：signal_reactions 存著原訊號的去重鍵，所以種類是確定的（內建訊號）。
@@ -14959,6 +14975,16 @@ function rxReceivedHtml(row) {
       + `<span class="rx-recv-label">${escapeHtml(m[2])}</span></li>`;
   }).join("");
   return `<div class="rx-recv"><div class="rx-recv-head">${escapeHtml(head)}</div><ul class="rx-recv-list">${items}</ul></div>`;
+}
+
+// 不是這一天的那幾個：一行日期捷徑。點下去 rtlPickDate 換日期（它接受任何一天，
+// 包括日期籤排不到的那幾天）。只有日期與數量，不寫誰給了什麼——那要換過去才看得到。
+function rxDaysHtml(days) {
+  const items = (days || []).map(d =>
+    `<button type="button" class="rx-in-day" onclick="event.stopPropagation(); rtlPickDate('${jsAttr(d.date)}')"`
+    + ` title="換到 ${escapeHtml(_mdOf(d.date))} 看那一天的回饋">${escapeHtml(_mdOf(d.date))}`
+    + `<span>${Number(d.n) || 0}</span></button>`).join("");
+  return `<span class="rx-in-head">${ICON_RX}其他日子收到的回饋</span>${items}`;
 }
 
 // event_key＝reaction:<收件人那一則的 id>:<股票>:<日期>（trigger 寫的），點開要開那一檔那一天的盤中雷達

@@ -5143,6 +5143,12 @@ select.fr-input { width: 100%; }
 .rx-in-glyph .ic { width: 15px; height: 15px; }
 .rx-in-one b { font-weight: 600; }
 .rx-in-label { color: var(--text-muted); }
+/* 「其他日子收到的回饋」的日期捷徑：可以按的東西是紫的（色彩語彙），數字跟著橘的回饋走 */
+.rx-in-day { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
+	border: 1px solid rgba(139, 124, 255, 0.45); border-radius: 999px;
+	background: rgba(139, 124, 255, 0.12); color: #c6bbff;
+	font-family: inherit; font-size: 12px; cursor: pointer; }
+.rx-in-day span { color: var(--sig-orange); font-weight: 700; }
 #fr-btn-rx { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
 #fr-btn-rx b { color: var(--sig-orange); }
 
