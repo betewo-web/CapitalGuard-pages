@@ -3437,6 +3437,17 @@ body.modal-blocking .modal-backdrop.show {
 .holding-row.score-row .score-unit { font-size: 0.82rem; font-weight: 500; margin-left: 0.08rem; color: var(--text-1); }
 .holding-row.score-row .hr-sid,
 .holding-row.score-row .hr-sub { color: var(--text-1); }
+
+/* 統計頁的「＋自選」：整列最右邊一欄（見 scoreRowHtml）。min-width 預留寬度，
+   有／沒有按鈕的列分數欄才對齊；字級放大時這一欄會撐寬，不會把字裁掉。 */
+.holding-row .hr-add {
+	flex: 0 0 auto;
+	display: flex;
+	justify-content: flex-end;
+	min-width: 4.1rem;
+}
+
+.holding-row .hr-add .btn { white-space: nowrap; }
 /* 「篩選示範」的分組標題：名稱一行、條件說明自己一行。共用的 .home-sec-title 是左右兩欄，
    中文標題會被右邊那段長說明擠成三行（2026-09-23）。 */
 .home-sec-title.scr-strategy { display: block; }
