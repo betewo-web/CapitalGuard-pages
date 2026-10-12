@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="337">
+  <meta name="app-version" content="338">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=337" rel="stylesheet">
+  <link href="watchlist.css?v=338" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -15597,9 +15597,11 @@ function rxDaysHtml(days) {
   return `<span class="rx-in-head">${ICON_RX}其他日子收到的回饋</span>${items}`;
 }
 
-// event_key＝reaction:<收件人那一則的 id>:<股票>:<日期>（trigger 寫的），點開要開那一檔那一天的盤中雷達
+// event_key＝reaction:<收件人那一則的 id>:<股票>:<日期>（trigger 寫的），點開要開那一檔那一天的盤中雷達。
+// LINE 卡片的回饋（migrate_share_links_notify.sql）是 reaction:card:<token>:<股票>:<日期>——沒有收件人那一則，
+// id 的位置放卡片的 token；只有 sid 與日期會被用到
 function rxKeyParts(row) {
-  const m = String((row && row.event_key) || "").match(/^reaction:([0-9a-f-]{36}):([0-9A-Za-z]{2,10}):(\d{4}-\d{2}-\d{2})$/i);
+  const m = String((row && row.event_key) || "").match(/^reaction:(card:[A-Za-z0-9_-]{16,32}|[0-9a-f-]{36}):([0-9A-Za-z]{2,10}):(\d{4}-\d{2}-\d{2})$/i);
   return m ? { alertId: m[1], sid: m[2], date: m[3] } : null;
 }
 
