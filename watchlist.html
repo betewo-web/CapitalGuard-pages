@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="338">
+  <meta name="app-version" content="339">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=338" rel="stylesheet">
+  <link href="watchlist.css?v=339" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -10754,7 +10754,13 @@ async function sendSignalShareCard() {
     open.href = urls.liff;
     open.style.display = "";
     btn.textContent = "卡片做好了";
-    note.innerHTML = "按上面那顆綠色的鈕會切到 LINE 選好友。卡片上的按鈕會開這個網頁："
+    // 第一次分享一定會先看到 LINE 的「認證」畫面（我們要的 chat_message.write 是新 scope，平台規定
+    // 必須取得同意，Console 沒有開關可以省略）。那張畫面長得像在要「加好友」，Howard 自己第一次就看
+    // 錯了（2026-10-12）——沒先講的話使用者會按「取消」，分享就斷在這裡。每個帳號只會問一次。
+    note.innerHTML = "按上面那顆綠色的鈕會切到 LINE 選好友。<br>"
+      + "第一次分享時，LINE 會先跳一張「認證」畫面請你允許「傳送訊息至聊天室」——"
+      + "那不是要你加好友，按「許可」就會出現選好友的面板（每個帳號只問一次）。<br>"
+      + "卡片上的按鈕會開這個網頁："
       + `<a href="${escapeHtml(urls.page)}" target="_blank" rel="noopener">${escapeHtml(urls.page)}</a>`
       + `<button type="button" class="btn btn-sm btn-outline-light sigshare-copy" onclick="_sigShareCardCopy()">複製網址</button>`;
   } catch (err) {
