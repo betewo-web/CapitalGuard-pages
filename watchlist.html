@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="339">
+  <meta name="app-version" content="340">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=339" rel="stylesheet">
+  <link href="watchlist.css?v=340" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1548,16 +1548,16 @@
       <button type="button" class="btn btn-primary btn-sm" id="sigshare-send" disabled onclick="sendSignalShare()">傳圖片給 LINE 好友</button>
       <button type="button" class="btn btn-outline-light btn-sm" id="sigshare-save" disabled onclick="saveSignalShare()">下載圖片</button>
     </div>
-    <!-- 第二條：只傳文字與網址。LINE 收到帶檔案的分享時只留圖片，所以圖與網址只能
-         各走各的（見 sendSignalShareLink 的註解）。 -->
-    <button type="button" class="btn btn-sm btn-success btn-line sigshare-link" id="sigshare-link" disabled onclick="sendSignalShareLink()">把網址也傳到 LINE</button>
     <!-- 第三條（2026-10-12）：LINE 卡片。圖先上傳成有網址的圖，再把 LINE 叫起來送一張
          Flex 卡片——圖＋兩顆按鈕（看訊號／回貼圖、免費安裝）。收到的人點得到按鈕，而且
          不必是使用者。要分兩步按：上傳要等，等完的那一下已經不算使用者手勢，瀏覽器會把
          window.open 擋掉，所以第二步是一顆真的 <a>（見 sendSignalShareCard）。 -->
-    <button type="button" class="btn btn-sm btn-outline-light sigshare-card" id="sigshare-card" disabled onclick="sendSignalShareCard()">做成 LINE 卡片（對方可點按鈕）</button>
+    <button type="button" class="btn btn-sm btn-primary sigshare-card" id="sigshare-card" disabled onclick="sendSignalShareCard()">傳送 LINE 卡片（好友可給予反饋）</button>
     <a class="btn btn-sm btn-success btn-line sigshare-card-open" id="sigshare-card-open" href="#" target="_blank" rel="noopener" style="display:none" onclick="_sigShareCardOpened()">開 LINE，選好友傳卡片</a>
     <div class="sigshare-card-note" id="sigshare-card-note" style="display:none"></div>
+    <!-- 只傳文字與網址那一條（排在卡片後面：2026-10-13 Howard 要它往下移）。LINE 收到帶
+         檔案的分享時只留圖片，所以圖與網址只能各走各的（見 sendSignalShareLink 的註解）。 -->
+    <button type="button" class="btn btn-sm btn-success btn-line sigshare-link" id="sigshare-link" disabled onclick="sendSignalShareLink()">把網址也傳到 LINE</button>
     <!-- 回去的路要看得見（2026-10-06 Howard：點進去之後畫面無法返回）。四條都有：
          這顆、右上角的 ✕、點圖片外面的暗底、手機的返回鍵。 -->
     <button type="button" class="sigshare-back" onclick="closeSignalShare()">關閉，回到訊號列表</button>
@@ -10682,7 +10682,7 @@ async function sendSignalShare() {
 // 收到的人點卡片 → share.html?t=<token>：看圖、回貼圖（不必是使用者）、加好友安裝。
 // 分享者在「我收到的回饋」看得到每一張卡片收到幾個（share_link_mine、rxAppendLinkFeedback）。
 const SIGNAL_SHARE_CARD_FN = "signal-share";
-const SIGNAL_SHARE_CARD_LABEL = "做成 LINE 卡片（對方可點按鈕）";
+const SIGNAL_SHARE_CARD_LABEL = "傳送 LINE 卡片（好友可給予反饋）";
 
 function _sigShareCardUrls(token) {
   const page = new URL("share.html", location.href);
@@ -10759,10 +10759,7 @@ async function sendSignalShareCard() {
     // 錯了（2026-10-12）——沒先講的話使用者會按「取消」，分享就斷在這裡。每個帳號只會問一次。
     note.innerHTML = "按上面那顆綠色的鈕會切到 LINE 選好友。<br>"
       + "第一次分享時，LINE 會先跳一張「認證」畫面請你允許「傳送訊息至聊天室」——"
-      + "那不是要你加好友，按「許可」就會出現選好友的面板（每個帳號只問一次）。<br>"
-      + "卡片上的按鈕會開這個網頁："
-      + `<a href="${escapeHtml(urls.page)}" target="_blank" rel="noopener">${escapeHtml(urls.page)}</a>`
-      + `<button type="button" class="btn btn-sm btn-outline-light sigshare-copy" onclick="_sigShareCardCopy()">複製網址</button>`;
+      + "那不是要你加好友，按「許可」就會出現選好友的面板（每個帳號只問一次）。";
   } catch (err) {
     if (gen !== _sigShareGen) return;
     btn.disabled = false;
@@ -10778,13 +10775,6 @@ async function sendSignalShareCard() {
 
 function _sigShareCardOpened() {
   trackActivity("signal_share_card_open", { sid: _sigShare.sid });
-}
-
-async function _sigShareCardCopy() {
-  const url = _sigShare.card && _sigShare.card.page;
-  if (!url) return;
-  try { await navigator.clipboard.writeText(url); frToast("網址已複製"); }
-  catch { frToast("複製失敗，請長按網址複製", true); }
 }
 
 // 只傳網址那一條（Howard 2026-10-06：分享出去時順便傳網站網址）。
