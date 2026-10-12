@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="332">
+  <meta name="app-version" content="333">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=332" rel="stylesheet">
+  <link href="watchlist.css?v=333" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -505,6 +505,23 @@
             <button type="button" class="filter-chip" data-f="large" onclick="setAppFontSize('large')">大</button>
             <button type="button" class="filter-chip" data-f="xlarge" onclick="setAppFontSize('xlarge')">特大</button>
           </div>
+        </div>
+      </div>
+
+      <!-- ── 重新顯示上線提醒（管理者專用）──────────────────────────
+           起步清單、進階訊號推薦、推播詢問、安裝精靈的節流全部記在 localStorage，
+           而且是裝置級的（刪帳號、重新登入都不會清）——同一台裝置換成新帳號時那四個
+           提醒都不會再出現，重驗上線流程就卡在這裡。?reset=seed 那條路在主畫面的
+           PWA 裡用不了（沒有網址欄），所以入口要在畫面上。只有管理者看得到：
+           一般使用者永遠只有一個帳號，這顆鍵對他只是看不懂的噪音。 -->
+      <div class="card panel-card mt-3" id="onboard-reset-card" style="display:none">
+        <div class="card-body p-3">
+          <div class="home-sec-title">
+            <span class="hs-label"><i data-icon="gear"></i>重新顯示上線提醒</span>
+          </div>
+          <p class="fb-hint">清掉這台裝置的提醒節流：起步清單、進階訊號推薦、推播詢問、安裝精靈。不動登入、自選股與任何伺端資料。</p>
+          <button type="button" class="btn btn-sm btn-primary" onclick="resetOnboardingNudges(this)">重設</button>
+          <div id="onboard-reset-msg" class="small mt-2"></div>
         </div>
       </div>
 
@@ -1766,10 +1783,17 @@ window.addEventListener("pagehide", () => { _trackForegroundSpan(); flushActivit
 async function loadAdminFlag() {
   const link = document.getElementById("nav-admin");
   if (!link || !state.accessToken) return;
+  // 設定頁的「重新顯示上線提醒」跟著同一條旗標：同一個查詢，不多發請求
+  const card = document.getElementById("onboard-reset-card");
   try {
     const rows = await sbGet("users", { select: "is_admin" }, state.accessToken);
-    link.style.display = rows && rows[0] && rows[0].is_admin ? "inline-flex" : "none";
-  } catch { link.style.display = "none"; }   // 欄位不存在（migration 未跑）就不顯示
+    const on = !!(rows && rows[0] && rows[0].is_admin);
+    link.style.display = on ? "inline-flex" : "none";
+    if (card) card.style.display = on ? "" : "none";
+  } catch {
+    link.style.display = "none";   // 欄位不存在（migration 未跑）就不顯示
+    if (card) card.style.display = "none";
+  }
 }
 
 // ── 全域狀態 ────────────────────────────────────────────────────
@@ -6522,6 +6546,48 @@ function watchSeedFirstUse() {
 
 function watchSeedSnoozed() {
   try { return Number(localStorage.getItem(WATCH_SEED_SNOOZE_KEY) || 0) > Date.now(); } catch { return false; }
+}
+
+// 起步清單沒出現時卡在哪一項（設定頁的重設鍵要講出來）。順序與 watchSeedShouldPrompt／
+// watchSeedFirstUse 的判斷一致：先前提（方案、清單、分享），再節流，最後才是挑不挑得出
+// 股票。手機上沒有 console，這一句是唯一的線索。
+function watchSeedBlockedReason() {
+  if (!planState.ready) return "方案狀態還沒載到（離線或 my_plan 失敗）";
+  if (watchlistRows.length) return `已經有 ${watchlistRows.length} 檔自選股`;
+  if (frSlotsExtra() > 0) return "好友分享給你的股票已經佔著格子";
+  if (watchSeedSnoozed()) return "這台裝置還在靜音期";
+  if (!largecap) return "largecap.json 沒載到";
+  if (!watchSeedPicks(watchSeedCount()).length) return "清單挑不出任何一檔（方案額度滿了？）";
+  return "";
+}
+
+// 四個提醒的節流鑰匙：起步清單（那一排與跳窗）、進階訊號推薦、推播詢問、安裝精靈。
+// 全部是「這台裝置的狀態」，所以沒綁 user_id，也沒有任何一條路會自己清。
+// 寫成函式而不是常數：PUSH_NUDGE_KEY 宣告在這一行之後，const 會在載入時踩到 TDZ
+// （ReferenceError 會讓整支 inline script 停掉，整個 App 變空白）。
+function onboardNudgeKeys() {
+  return [WATCH_SEED_SNOOZE_KEY, WATCH_SEED_POPUP_KEY,
+          RULE_NUDGE_SNOOZE_KEY, RULE_NUDGE_POPUP_KEY,
+          PUSH_NUDGE_KEY, ONBOARD_KEY];
+}
+
+async function resetOnboardingNudges(btn) {
+  for (const key of onboardNudgeKeys()) {
+    try { localStorage.removeItem(key); } catch {}
+  }
+  const msgEl = document.getElementById("onboard-reset-msg");
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "重設中…"; }
+  // 清單沒載到會被誤判成「挑不出股票」：先等它，再重畫，最後才下結論
+  await ensureLargecap().catch(() => {});
+  renderCurrentTab();
+  if (btn) { btn.disabled = false; btn.textContent = label; }
+  const why = watchSeedBlockedReason();
+  if (msgEl) {
+    msgEl.innerHTML = why
+      ? `<span class="text-warning">已清掉四個提醒的節流。起步清單目前仍然不會出現：${escapeHtml(why)}。</span>`
+      : `<span class="text-success">已清掉四個提醒的節流。起步清單會出現在這一頁與首頁的空清單上。</span>`;
+  }
 }
 
 function watchSeedShouldPrompt() {
