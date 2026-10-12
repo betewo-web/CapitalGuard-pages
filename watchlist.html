@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="331">
+  <meta name="app-version" content="332">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=331" rel="stylesheet">
+  <link href="watchlist.css?v=332" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -4512,6 +4512,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (!(await enforceAppVersion())) return;
 
   const qs = new URLSearchParams(location.search);
+  consumeSeedReset(qs);   // ?reset=seed：清掉這台裝置的起步清單節流
   stashPlanIntent(qs);   // 官網「開啟 App 升級」帶的 ?plan=：先收起來，登入與精靈之後再開
   stashFriendIntent(qs); // 好友條碼／連結帶的 ?friend=：一樣先收起來，分享功能確認能用之後再帶出那個人
   renderFriendIntentHint();   // 這個瀏覽器沒登入的話，登入畫面上要講清楚去哪裡掃（登入後那一區整個藏起來）
@@ -6420,6 +6421,22 @@ const WATCH_SEED_SNOOZE_DAYS = 7;
 const WATCH_SEED_POPUP_KEY = "cg-watch-seed-popup";
 const WATCH_SEED_POPUP_MAX = 3;
 const WATCH_SEED_POPUP_GAP_DAYS = 3;
+
+// 把這台裝置的起步清單節流歸零（?reset=seed）。那兩把鑰匙刻意是裝置級的（見上面的註解），
+// 所以同一個瀏覽器換成新帳號時起步清單不會再出現——重驗上線流程、或把 App 交給別人
+// 試用時就卡在這裡。手機沒有 console，一個網址是唯一一鍵做得到的出口。
+// 只清這兩個提醒用的 key：不碰登入、自選股，也不碰任何伺端資料。
+function consumeSeedReset(qs) {
+  if ((qs.get("reset") || "") !== "seed") return;
+  for (const key of [WATCH_SEED_SNOOZE_KEY, WATCH_SEED_POPUP_KEY]) {
+    try { localStorage.removeItem(key); } catch {}
+  }
+  // 從網址上拿掉，否則之後每次重載都再清一次（無害，但網址會一直帶著它）
+  const rest = new URLSearchParams(location.search);
+  rest.delete("reset");
+  const q = rest.toString();
+  history.replaceState(null, "", location.pathname + (q ? `?${q}` : "") + location.hash);
+}
 
 let largecap = null;          // null＝還沒載到或讀不到（舊版部署沒有這個檔）
 let _largecapPromise = null;
