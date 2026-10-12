@@ -3837,6 +3837,18 @@ body.modal-blocking .modal-backdrop.show {
    不是漲跌的綠——那組顏色只出現在數字上）。這裡只管版面，顏色交給 .btn-line。 */
 .sigshare-link { display: block; width: 100%; margin-top: 8px; }
 .sigshare-link:disabled { opacity: 0.45; }
+/* LINE 卡片（第三條）：鈕、做好之後的那顆 <a>、網址那一行 */
+.sigshare-card { display: block; width: 100%; margin-top: 8px; }
+.sigshare-card:disabled { opacity: 0.45; }
+.sigshare-card-open { display: block; width: 100%; margin-top: 8px; }
+.sigshare-card-note { margin-top: 8px; font-size: 12.5px; line-height: 1.6; color: var(--text-muted); word-break: break-all; }
+.sigshare-card-note a { color: var(--accent); }
+.sigshare-copy { margin-left: 8px; padding: 0 8px; font-size: 12px; line-height: 1.6; }
+/* 「我收到的回饋」底下：LINE 卡片各收到幾個 */
+.rx-links li { display: flex; gap: 10px; align-items: flex-start; }
+.rx-link-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.rx-link-chip { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border); font-size: 12px; color: var(--text-1); }
 
 /* 第二條出口，寫清楚回去哪裡——手機上「✕」不是每個人都會去按 */
 .sigshare-back {

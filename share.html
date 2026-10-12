@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="app-version" content="335">
+  <!-- 收到 LINE 卡片的人看的那一頁（FRIENDS.md「LINE 卡片分享」）。不需登入、不必是使用者。
+       noindex：這裡放的是一位使用者分享的一則訊號，不是給搜尋引擎看的公開內容。 -->
+  <meta name="robots" content="noindex, nofollow">
+  <meta property="og:title" content="CapitalGuard-股市雷達：有人分享了一則盤中訊號給你">
+  <meta property="og:description" content="點開看是哪一檔、幾點、發生了什麼。公開市場資料整理，不是投資建議。">
+  <meta property="og:image" content="https://betewo-web.github.io/betewo-site/og-cover.png?v=2">
+  <title>CapitalGuard-股市雷達 — 分享的訊號</title>
+  <style>
+    :root {
+      --bg-0: #0b0b13; --bg-1: #0f0f1a; --surface: rgba(23, 23, 36, 0.92);
+      --border: rgba(146, 146, 163, 0.2); --text-0: #f5f5f7; --text-1: #c9c9d4; --text-muted: #9292a3;
+      --accent: #8b7cff; --orange: #ff9f43; --line: #06c755;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg-0); color: var(--text-0); font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+           line-height: 1.55; min-height: 100vh; padding: 16px 14px 40px; }
+    .wrap { max-width: 560px; margin: 0 auto; }
+    .brand { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }
+    .brand b { color: var(--accent); font-weight: 700; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px; }
+    .stage img { display: block; width: 100%; height: auto; border-radius: 10px; background: var(--bg-1); }
+    .head { margin: 12px 0 4px; font-size: 18px; font-weight: 700; }
+    .sub  { font-size: 14px; color: var(--text-1); }
+    .by   { font-size: 12.5px; color: var(--text-muted); margin-top: 6px; }
+    .state { padding: 28px 10px; text-align: center; color: var(--text-1); }
+    .state b { display: block; font-size: 17px; color: var(--text-0); margin-bottom: 6px; }
+    h2 { font-size: 14px; font-weight: 700; color: var(--text-1); margin: 18px 0 8px; }
+    .rx { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .rx button { appearance: none; border: 1px solid var(--border); background: transparent; color: var(--text-1);
+                 border-radius: 12px; padding: 10px 4px; font-size: 13.5px; cursor: pointer; display: flex; flex-direction: column;
+                 align-items: center; gap: 4px; min-height: 52px; }
+    .rx button svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .rx button b { font-weight: 700; font-size: 12px; color: var(--text-muted); }
+    .rx button.on { border-color: var(--orange); color: var(--orange); }
+    .rx button.on b { color: var(--orange); }
+    .rx button:disabled { opacity: .5; cursor: default; }
+    .note { font-size: 12.5px; color: var(--text-muted); margin-top: 8px; min-height: 1.4em; }
+    .cta { margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
+    .btn { display: block; text-align: center; text-decoration: none; border-radius: 12px; padding: 12px 14px; font-weight: 700; font-size: 15px; }
+    .btn-line { background: var(--line); color: #fff; }
+    .btn-ghost { border: 1px solid var(--border); color: var(--text-1); font-weight: 500; font-size: 14px; }
+    .pitch { font-size: 14px; color: var(--text-1); }
+    .foot { margin-top: 22px; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+    .foot a { color: var(--text-muted); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><b>CapitalGuard-股市雷達</b><span>分享的盤中訊號</span></div>
+
+  <div class="card">
+    <div id="view" class="state">載入中…</div>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <div class="pitch" id="pitch">想在自己手機上收到這種訊號？加 LINE 好友就能免費開始，不用掃碼、不用下載。</div>
+    <div class="cta">
+      <a class="btn btn-line" id="cta-line" href="https://line.me/R/ti/p/@408csebn" rel="noopener">加 LINE 好友，免費開始</a>
+      <a class="btn btn-ghost" href="https://betewo-web.github.io/betewo-site/?ref=share" rel="noopener">CapitalGuard 是什麼</a>
+      <a class="btn btn-ghost" href="./watchlist.html" rel="noopener">我已經有 App，直接開啟</a>
+    </div>
+  </div>
+
+  <div class="foot">
+    公開市場資料整理，不是投資建議。這一頁的內容由一位 CapitalGuard 使用者分享，不代表任何買賣建議；
+    價位與訊號以分享當時的資料為準。連結自分享起 30 天後失效。
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
+const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
+const APP_VERSION   = (document.querySelector('meta[name="app-version"]') || {}).content || "0";
+// 貼圖的線條圖（與 App 的 RX_ART 同一組形；只有六個，複製比抽共用模組便宜）
+const RX_ART = {
+  awesome:        '<circle cx="12" cy="12" r="9"/><path d="M8 13.5c1 1.6 2.3 2.4 4 2.4s3-.8 4-2.4M9 9.5h.01M15 9.5h.01"/>',
+  sharp_eye:      '<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="3"/>',
+  bittersweet:    '<circle cx="12" cy="12" r="9"/><path d="M8.5 15.5c1-1.2 2.1-1.8 3.5-1.8s2.5.6 3.5 1.8M9 9.5h.01M15 9.5h.01"/>',
+  thanks:         '<path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10Z"/>',
+  it_happened:    '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/>',
+  watch_together: '<circle cx="8" cy="9" r="2.5"/><circle cx="16" cy="9" r="2.5"/><path d="M3.5 18c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4M11.5 18c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4"/>',
+};
+const ERR_TEXT = {
+  not_found:   ["找不到這則分享", "網址可能不完整，請向分享給你的人再要一次。"],
+  expired:     ["這則分享已過期", "連結自分享起 30 天後失效。"],
+  bad_kind:    ["這個貼圖不存在", ""],
+  bad_visitor: ["瀏覽器擋住了儲存空間", "換一個瀏覽器開這個連結再試。"],
+  full:        ["這則已經收到很多回饋", "分享者看得到前面那些。"],
+};
+const token = new URLSearchParams(location.search).get("t") || "";
+let data = null, busy = false;
+
+// 訪客 id：讓同一個人換貼圖不重算。存不進去（隱私模式）就這一次用完即丟。
+function visitorId() {
+  const key = "cg_share_visitor";
+  try {
+    let v = localStorage.getItem(key);
+    if (!v || v.length < 8) { v = randId(); localStorage.setItem(key, v); }
+    return v;
+  } catch { return window.__cgVisitor || (window.__cgVisitor = randId()); }
+}
+function randId() {
+  const a = new Uint8Array(16); crypto.getRandomValues(a);
+  return Array.from(a, b => b.toString(16).padStart(2, "0")).join("");
+}
+async function rpc(fn, params) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: { "apikey": SUPABASE_ANON, "Authorization": `Bearer ${SUPABASE_ANON}`,
+               "Content-Type": "application/json", "X-App-Version": APP_VERSION },
+    body: JSON.stringify(params || {}),
+  });
+  const text = await r.text();
+  if (r.status === 404 && text.includes("PGRST202")) return { error: "not_live" };
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return text ? JSON.parse(text) : null;
+}
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function tpeTime(iso) {
+  const d = new Date(iso); if (isNaN(d)) return "";
+  const p = new Intl.DateTimeFormat("zh-TW", { timeZone: "Asia/Taipei", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(d);
+  const g = t => (p.find(x => x.type === t) || {}).value || "";
+  return `${g("month")}/${g("day")} ${g("hour")}:${g("minute")}`;
+}
+function glyph(code) { return `<svg viewBox="0 0 24 24" aria-hidden="true">${RX_ART[code] || RX_ART.it_happened}</svg>`; }
+
+function showState(title, msg) {
+  document.getElementById("view").innerHTML = `<div class="state"><b>${esc(title)}</b>${esc(msg)}</div>`;
+}
+function render() {
+  const d = data;
+  const when = d.signal_at ? tpeTime(d.signal_at) : (d.trade_date || "");
+  const by = d.by_kind || {};
+  const kinds = Array.isArray(d.kinds) && d.kinds.length ? d.kinds : Object.keys(RX_ART).map(code => ({ code, label: code }));
+  const tiles = kinds.map(k => {
+    const n = Number(by[k.code]) || 0;
+    const on = d.mine === k.code;
+    return `<button type="button" class="${on ? "on" : ""}" data-kind="${esc(k.code)}" onclick="tap('${esc(k.code)}')" aria-pressed="${on}">${glyph(k.code)}<span>${esc(k.label)}</span><b>${n || ""}</b></button>`;
+  }).join("");
+  document.getElementById("view").className = "";
+  document.getElementById("view").innerHTML = `
+    <div class="stage"><img src="${esc(d.image_url)}" alt="${esc(`${d.stock_name} ${d.stock_id} ${d.title}`)}" ${d.image_w && d.image_h ? `width="${Number(d.image_w)}" height="${Number(d.image_h)}"` : ""}></div>
+    <div class="head">${esc(d.stock_name)} ${esc(d.stock_id)}</div>
+    <div class="sub">${esc(when)} ${esc(d.title)}</div>
+    <div class="by">${esc(d.owner_name || "一位使用者")} 用 CapitalGuard-股市雷達 分享給你</div>
+    <h2>回個貼圖給分享的人</h2>
+    <div class="rx" id="rx">${tiles}</div>
+    <div class="note" id="note">${d.mine ? "你已經回過了，再按一次可以換或收回。" : "按一個就送出，分享的人會在 App 裡看到。"}</div>`;
+}
+async function tap(kind) {
+  if (busy || !data) return;
+  busy = true;
+  const next = data.mine === kind ? "" : kind;      // 按同一個＝收回
+  document.querySelectorAll("#rx button").forEach(b => { b.disabled = true; });
+  try {
+    const res = await rpc("share_link_feedback", { p_token: token, p_visitor: visitorId(), p_kind: next });
+    if (!res || res.error) {
+      const t = ERR_TEXT[res && res.error] || ["送不出去", "請再試一次。"];
+      document.getElementById("note").textContent = `${t[0]}${t[1] ? "：" + t[1] : ""}`;
+    } else {
+      data.mine = res.mine; data.by_kind = res.by_kind || {};
+      render();
+      document.getElementById("note").textContent = res.mine ? "送出去了，分享的人會在 App 裡看到。" : "已收回。";
+    }
+  } catch (e) {
+    document.getElementById("note").textContent = `送不出去：${e.message}`;
+  } finally {
+    busy = false;
+    document.querySelectorAll("#rx button").forEach(b => { b.disabled = false; });
+  }
+}
+async function main() {
+  if (!token) { showState(...ERR_TEXT.not_found); return; }
+  let res;
+  try { res = await rpc("share_link_get", { p_token: token, p_visitor: visitorId() }); }
+  catch (e) { showState("讀不到這則分享", e.message); return; }
+  if (!res || res.error) {
+    const t = ERR_TEXT[res && res.error] || ["這個功能還沒上線", ""];
+    showState(t[0], t[1]); return;
+  }
+  data = res;
+  document.title = `${res.stock_name} ${res.stock_id} ${res.title} — CapitalGuard-股市雷達`;
+  render();
+}
+main();
+</script>
+</body>
+</html>

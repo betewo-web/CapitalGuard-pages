@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="334">
+  <meta name="app-version" content="335">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=334" rel="stylesheet">
+  <link href="watchlist.css?v=335" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1551,6 +1551,13 @@
     <!-- 第二條：只傳文字與網址。LINE 收到帶檔案的分享時只留圖片，所以圖與網址只能
          各走各的（見 sendSignalShareLink 的註解）。 -->
     <button type="button" class="btn btn-sm btn-success btn-line sigshare-link" id="sigshare-link" disabled onclick="sendSignalShareLink()">把網址也傳到 LINE</button>
+    <!-- 第三條（2026-10-12）：LINE 卡片。圖先上傳成有網址的圖，再把 LINE 叫起來送一張
+         Flex 卡片——圖＋兩顆按鈕（看訊號／回貼圖、免費安裝）。收到的人點得到按鈕，而且
+         不必是使用者。要分兩步按：上傳要等，等完的那一下已經不算使用者手勢，瀏覽器會把
+         window.open 擋掉，所以第二步是一顆真的 <a>（見 sendSignalShareCard）。 -->
+    <button type="button" class="btn btn-sm btn-outline-light sigshare-card" id="sigshare-card" disabled onclick="sendSignalShareCard()">做成 LINE 卡片（對方可點按鈕）</button>
+    <a class="btn btn-sm btn-success btn-line sigshare-card-open" id="sigshare-card-open" href="#" target="_blank" rel="noopener" style="display:none" onclick="_sigShareCardOpened()">開 LINE，選好友傳卡片</a>
+    <div class="sigshare-card-note" id="sigshare-card-note" style="display:none"></div>
     <!-- 回去的路要看得見（2026-10-06 Howard：點進去之後畫面無法返回）。四條都有：
          這顆、右上角的 ✕、點圖片外面的暗底、手機的返回鍵。 -->
     <button type="button" class="sigshare-back" onclick="closeSignalShare()">關閉，回到訊號列表</button>
@@ -1850,6 +1857,9 @@ const SITE_BASE_URL = "https://betewo-web.github.io/betewo-site/";
 // 「加 LINE 好友，取得登入碼」是靜態 HTML，href 裡寫著同一串，改帳號時要一起改。
 const LINE_OA_ID = "@408csebn";
 const LINE_ADD_FRIEND_URL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
+// LIFF app（與 liff-auth.html 同一個）：訊號分享的 LINE 卡片從這個網址把 LINE 叫起來
+// （FRIENDS.md「LINE 卡片分享」、sendSignalShareCard）
+const LIFF_ID = "2010668840-DXPfjNlx";
 const PLAN_COMING_SOON_NOTE = "AI 資料白話仍在開發，目前不包含在任何方案裡；完成後會先公告。";
 // 付款紀錄裡非公開方案的名字
 const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達（專業版）", premium: "廣域追蹤雷達（旗艦版）" };
@@ -10531,6 +10541,8 @@ async function buildSignalShareImage(ctx, e) {
     url: URL.createObjectURL(blob),
     // File 不是每個瀏覽器都有（舊的 iOS 只有 Blob）：沒有就只剩下載那條路
     file: typeof File === "function" ? new File([blob], name, { type: "image/png" }) : null,
+    // LINE 卡片（sendSignalShareCard）要的：原始尺寸給 Flex 的 aspectRatio、那一則給卡片文字
+    w: Math.round(svg.width * SIGNAL_SHARE.scale), h: Math.round(svg.height * SIGNAL_SHARE.scale), entry: e,
     name, sid: ctx.sid,
     text: `${ctx.name} ${ctx.sid}｜${day} ${fmtTime(e.at)} ${e.title}${lvl ? ` ${lvl}` : ""}`
       + `\nCapitalGuard-股市雷達（公開市場資料整理，不是投資建議）\n${FR_INVITE_URL}`,
@@ -10554,6 +10566,7 @@ function _sigShareReset() {
   if (_sigShare.url) URL.revokeObjectURL(_sigShare.url);   // blob 不收會一直佔記憶體
   _sigShare = { url: "", file: null, text: "", name: "", sid: "" };
   _sigShareGen += 1;   // 還在產生的那一張作廢（關掉之後才完成的圖沒人收，blob 會一直佔著）
+  _sigShareCardReset();
   for (const id of ["sigshare-send", "sigshare-save", "sigshare-link"]) {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = true;
@@ -10617,6 +10630,8 @@ async function shareRadarEntry(eid) {
   for (const id of ["sigshare-save", "sigshare-send", "sigshare-link"]) {
     document.getElementById(id).disabled = false;
   }
+  // LINE 卡片要上傳：沒有 File（舊 iOS）或沒登入就按不了
+  document.getElementById("sigshare-card").disabled = !(_sigShare.file && state.accessToken);
 }
 
 // opts.fromPop：是返回鍵把我們叫醒的，那一筆 history 已經退掉了，不要再 back 一次
@@ -10654,6 +10669,105 @@ async function sendSignalShare() {
     }
   }
   saveSignalShare();                                       // 不支援或面板打不開：至少把圖存下來
+}
+
+// ── LINE 卡片（2026-10-12；FRIENDS.md「LINE 卡片分享」）──────────────────────────
+// 圖片分享的天花板是「圖裡夾不了可以點的東西」：PNG 沒有點擊行為，LINE 收檔案時又把 text／url
+// 丟掉。要讓收到的人點得到按鈕，只能改送 LINE 自己的卡片（Flex Message），而卡片裡的圖必須是
+// 一個公開網址——所以多了 Edge Function signal-share：把這張 PNG 存成有網址的圖、記一列
+// signal_share_links、回一個 token。接著把 LINE 叫起來（liff.line.me/<LIFF_ID>?share=<token>）：
+// liff-auth.html 在 LINE 內建瀏覽器裡自動登入、組卡片、開「選好友」面板。
+// 為什麼不在這一頁直接呼叫 shareTargetPicker：這一頁是外部瀏覽器，官方文件寫明那樣可能跳出
+// LINE 的 email／密碼登入畫面（面板需要 SSO session，LINE App 自動登入拿不到）。
+// 收到的人點卡片 → share.html?t=<token>：看圖、回貼圖（不必是使用者）、加好友安裝。
+// 分享者在「我收到的回饋」看得到每一張卡片收到幾個（share_link_mine、rxAppendLinkFeedback）。
+const SIGNAL_SHARE_CARD_FN = "signal-share";
+const SIGNAL_SHARE_CARD_LABEL = "做成 LINE 卡片（對方可點按鈕）";
+
+function _sigShareCardUrls(token) {
+  const page = new URL("share.html", location.href);
+  page.search = `?t=${encodeURIComponent(token)}`;
+  return {
+    page: page.href,
+    liff: `https://liff.line.me/${LIFF_ID}?share=${encodeURIComponent(token)}`,
+  };
+}
+
+function _sigShareCardReset() {
+  const open = document.getElementById("sigshare-card-open");
+  const note = document.getElementById("sigshare-card-note");
+  const btn = document.getElementById("sigshare-card");
+  if (open) { open.style.display = "none"; open.href = "#"; }
+  if (note) { note.style.display = "none"; note.textContent = ""; }
+  if (btn) { btn.disabled = true; btn.textContent = SIGNAL_SHARE_CARD_LABEL; }
+}
+
+function _blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || "").replace(/^data:[^,]*,/, ""));
+    r.onerror = () => reject(new Error("讀不到圖片"));
+    r.readAsDataURL(blob);
+  });
+}
+
+async function sendSignalShareCard() {
+  if (!_sigShare.file || !state.accessToken) return;
+  const btn = document.getElementById("sigshare-card");
+  const note = document.getElementById("sigshare-card-note");
+  const open = document.getElementById("sigshare-card-open");
+  const ctx = _rtlShareCtx;
+  const gen = _sigShareGen;
+  btn.disabled = true;
+  btn.textContent = "上傳中…";
+  note.style.display = "";
+  note.textContent = "圖片要先變成有網址的圖，卡片上的按鈕才有地方可以去。";
+  trackActivity("signal_share_card", { sid: _sigShare.sid });
+  try {
+    const entry = _sigShare.entry || {};
+    const image_b64 = await _blobToBase64(_sigShare.file);
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/${SIGNAL_SHARE_CARD_FN}`, {
+      method: "POST",
+      headers: sbHeaders(state.accessToken),
+      body: JSON.stringify({
+        stock_id: _sigShare.sid,
+        stock_name: (ctx && ctx.name) || "",
+        title: entry.title || "",
+        body: _sigShare.text.split("\n")[0] || "",
+        signal_at: entry.at || null,
+        trade_date: (ctx && ctx.date) || null,
+        image_b64, image_w: _sigShare.w || 0, image_h: _sigShare.h || 0,
+      }),
+    });
+    const res = await r.json().catch(() => ({}));
+    if (gen !== _sigShareGen) return;                        // 中途關掉了
+    if (r.status === 404) throw new Error("這個功能還沒上線（signal-share 未部署）");
+    if (!r.ok || !res.ok) throw new Error(res.error || `HTTP ${r.status}`);
+    const urls = _sigShareCardUrls(res.token);
+    _sigShare.card = { token: res.token, ...urls };
+    open.href = urls.liff;
+    open.style.display = "";
+    btn.textContent = "卡片做好了";
+    note.innerHTML = "按上面那顆綠色的鈕會切到 LINE 選好友。卡片上的按鈕會開這個網頁："
+      + `<a href="${escapeHtml(urls.page)}" target="_blank" rel="noopener">${escapeHtml(urls.page)}</a>`
+      + `<button type="button" class="btn btn-sm btn-outline-light sigshare-copy" onclick="_sigShareCardCopy()">複製網址</button>`;
+  } catch (err) {
+    if (gen !== _sigShareGen) return;
+    btn.disabled = false;
+    btn.textContent = SIGNAL_SHARE_CARD_LABEL;
+    note.textContent = `卡片做不出來：${(err && err.message) || err}`;
+  }
+}
+
+function _sigShareCardOpened() {
+  trackActivity("signal_share_card_open", { sid: _sigShare.sid });
+}
+
+async function _sigShareCardCopy() {
+  const url = _sigShare.card && _sigShare.card.page;
+  if (!url) return;
+  try { await navigator.clipboard.writeText(url); frToast("網址已複製"); }
+  catch { frToast("複製失敗，請長按網址複製", true); }
 }
 
 // 只傳網址那一條（Howard 2026-10-06：分享出去時順便傳網站網址）。
@@ -15534,6 +15648,7 @@ async function rxOpenSummary() {
       rxRenderBadge();
     }
     if (el) el.innerHTML = rxSummaryHtml(res);
+    rxAppendLinkFeedback(el);   // LINE 卡片那一條的回饋（另一張表；migration 沒跑就不出現）
   } catch (e) {
     if (el) el.innerHTML = `<div class="fr-hint">讀不到回饋資料</div>`;
   }
@@ -15561,6 +15676,28 @@ function rxSummaryHtml(s) {
     <h3 class="fr-h">最近</h3>
     ${rows ? `<ul class="fr-list rx-recent">${rows}</ul>`
            : `<div class="fr-empty">還沒有人給你回饋貼圖。分享一檔股票給好友，他收到訊號時可以回一個。</div>`}`;
+}
+
+// LINE 卡片分享（share.html）收到的回饋：收的人不是使用者，記在 signal_share_link_feedback，
+// 不走 reaction_summary。RPC 不存在（migration 未跑）、沒做過卡片，就什麼都不加。
+async function rxAppendLinkFeedback(el) {
+  if (!el) return;
+  let res = null;
+  try { res = await frRpc("share_link_mine"); } catch { return; }
+  if (res === FR_RPC_MISSING || !res || res.error || !Array.isArray(res.links) || !res.links.length) return;
+  const rows = res.links.map(l => {
+    const by = l.by_kind || {};
+    const chips = RX_KINDS.filter(k => Number(by[k.code]) > 0)
+      .map(k => `<span class="rx-link-chip" title="${escapeHtml(k.label)}">${rxGlyph(k.code, 16)}${Number(by[k.code])}</span>`).join("");
+    const when = l.signal_at ? fmtTime(l.signal_at, true) : String(l.trade_date || "");
+    return `<li><span class="fr-grow"><b>${escapeHtml(l.stock_name || "")} ${escapeHtml(l.stock_id || "")}</b>
+        <span class="fr-hint"> · ${escapeHtml(when)} ${escapeHtml(l.title || "")}</span>
+        <div class="rx-link-chips">${chips || `<span class="fr-hint">還沒有人回饋</span>`}</div></span>
+      <span class="fr-hint">看了 ${Number(l.views) || 0} 次</span></li>`;
+  }).join("");
+  const box = document.createElement("div");
+  box.innerHTML = `<h3 class="fr-h">LINE 卡片收到的回饋</h3><ul class="fr-list rx-links">${rows}</ul>`;
+  el.appendChild(box);
 }
 
 function rxOpenRecent(sid, date) {
