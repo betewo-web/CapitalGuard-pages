@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="346">
+  <meta name="app-version" content="347">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=346" rel="stylesheet">
+  <link href="watchlist.css?v=347" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1503,7 +1503,10 @@
               <option value="monthly">月K</option>
             </select>
           </div>
-          <div class="kline-select-group">
+          <!-- 籌碼副圖的選單在沒有籌碼資料時整組隱藏（updateKLineChipsNote）：
+               2026-10-14 起 T86／櫃買三大法人的逐日原值暫停提供，這個選單只會選出
+               四種「無資料」。授權確認後資料回來，它自己就會出現。 -->
+          <div class="kline-select-group" id="kline-chips-group">
             <label class="kline-select-label" for="kline-chips-select">籌碼</label>
             <select id="kline-chips-select" class="form-select form-select-sm kline-select" onchange="switchKLineChipsView(this.value)">
               <option value="foreign">外資</option>
@@ -2081,12 +2084,41 @@ const EVENTS_OVERLAP_MS  = 10 * 60 * 1000;   // 游標往回多看一點：creat
 //            （`ev.content ? … : ""`），補到之後重畫即可，渲染邏輯不用動。
 // 再加上本機快取＋created_at 游標（作法與通知匣 refreshInbox 相同），每次開 App 從
 // 74.6 KB（那時還會重跑兩遍）降到 1.0–2.7 KB。
+// ── 授權狀態未確認的來源暫時不提供（2026-10-14，Howard）────────────────────
+// 與後端 config.PAUSE_UNLICENSED_SOURCES／PAUSED_EVENT_SOURCES 同一個決定，
+// 理由與恢復步驟寫在 config.py 與 DATA_SOURCES.md 第九節。這裡多擋一層的原因：
+// migration（RLS）還沒跑、或某一台還沒更新時，畫面不該先把它們顯示出來。
+// 停的是原值與直接轉述它的事件，自家算出來的分數不在此列。
+const PAUSE_UNLICENSED_SOURCES = true;
+const PAUSED_EVENT_SOURCES = PAUSE_UNLICENSED_SOURCES ? ["twse", "finmind"] : [];
+const PAUSED_RULE_TIERS    = PAUSE_UNLICENSED_SOURCES ? ["chips"] : [];
+// 這一版才開始選 source 欄，IndexedDB 裡的舊列沒有它——那些用 source_url 認，
+// 不然暫停的列會從本機快取被撿回來顯示。
+const _PAUSED_URL_HINTS = ["/rwd/zh/fund/T86", "/rwd/zh/marginTrading/", "/rwd/zh/exRight/",
+                           "/rwd/zh/announcement/", "insti/dailyTrade", "finmindtrade.com"];
+// 複合訊號的 source 是 signal_engine（自家衍生），但這幾個的文字直接轉述 T86／融資／
+// 季財報的內容，所以暫停期間一起不顯示（與 migrate_event_source_pause.sql 同一份清單）
+const PAUSED_EVENT_CODES = PAUSE_UNLICENSED_SOURCES ? [
+  "signal.institutional_entry",
+  "signal.strong_institutional_entry",
+  "signal.institutional_retail_conflict",
+  "signal.fundamental_strengthening",
+  "signal.fundamental_deteriorating",
+] : [];
+const isPausedEventSource  = ev =>
+  PAUSED_EVENT_SOURCES.includes(String(ev?.source || ""))
+  || PAUSED_EVENT_CODES.includes(String(ev?.event_code || ""))
+  || (PAUSED_EVENT_SOURCES.length && !ev?.source
+      && _PAUSED_URL_HINTS.some(h => String(ev?.source_url || "").includes(h)));
+const isPausedRuleType     = type => PAUSED_RULE_TIERS.includes((RULE_CATALOG_BY_TYPE[type] || {}).tier);
+
+// source 也要選：暫停哪些來源是看這一欄（以前只靠 source_url 推，新增來源時會漏）
 const EVENT_LIST_COLS   = "stock_id,event_date,event_type,title,importance,event_score,"
-                        + "direction,event_code,created_at,observed_at,source_url";
+                        + "direction,event_code,created_at,observed_at,source_url,source";
 // 前四欄是併回列表層那一列的鍵，不是要顯示的東西
 const EVENT_DETAIL_COLS = "stock_id,event_date,event_code,title,content,ai_analysis,score_breakdown,metrics";
 // Event Engine 的欄位還沒建（migration 未套用）時的退路：與 2026-09 以前的行為相同
-const EVENT_LEGACY_COLS = "stock_id,event_date,event_type,title,content,source_url,importance,ai_analysis";
+const EVENT_LEGACY_COLS = "stock_id,event_date,event_type,title,content,source_url,importance,ai_analysis,source";
 
 let stockEventsLegacyMode = false;     // 退到舊欄位：不分層、不快取（那個 schema 沒有 created_at）
 let _eventsCacheLoaded = false;
@@ -2118,13 +2150,18 @@ function _eventsFlatRows() {
 }
 
 // 依股號分組寫回 stockEvents。排序交給畫面（首頁看分數、個股面板看日期）
+// 事件列的唯一入口（新抓的、快取還原的、舊 schema 退路都經過這裡），所以
+// 「暫停提供的來源不顯示」只擋這一個地方就夠。
 function _eventsApplyRows(rows) {
   const map = {};
+  let paused = 0;
   for (const row of rows || []) {
     const sid = String(row?.stock_id || "").trim();
     if (!sid) continue;
+    if (isPausedEventSource(row)) { paused++; continue; }
     (map[sid] ||= []).push(row);
   }
+  if (paused) console.info(`[Events] ${paused} 列的來源暫停提供，不顯示`);
   stockEvents = map;
 }
 
@@ -5611,6 +5648,7 @@ async function fetchFinMindQuote(sid) {
 }
 
 async function loadFinMindQuotesForMissing(force = false) {
+  if (PAUSE_UNLICENSED_SOURCES) return finmindQuoteMap;   // 暫停提供：不向 FinMind 發請求
   const sids = [...new Set((watchlistRows || [])
     .map(r => String(r.stock_id || "").trim())
     .filter(sid => isStockId(sid)))];
@@ -6301,9 +6339,12 @@ async function seedDefaultRules() {
   for (const r of ruleNudge.rules || []) {
     for (const c of (Array.isArray(r.conditions) ? r.conditions : [])) if (c && c.type) owned.add(c.type);
   }
+  // 水位（seeded_limit）仍然照 RULE_TEMPLATES 的位置前進，只是暫停層的那幾條不發：
+  // 發了也不會成立。恢復之後水位已經過去，那幾條不會回頭補發——這是暫時狀態的代價。
   const tpls = (isNew && have > 0)
     ? []
-    : RULE_TEMPLATES.slice(from, want).filter(t => !t.conditions.some(c => owned.has(c.type)));
+    : RULE_TEMPLATES.slice(from, want).filter(t =>
+        !t.conditions.some(c => owned.has(c.type) || isPausedRuleType(c.type)));
 
   let added = 0, limitHit = false;
   if (tpls.length) {
@@ -6982,7 +7023,9 @@ function ruleTemplateSuggestions(max = 3, scopeSid = null) {
     if (scopeSid && r.stock_id && String(r.stock_id).trim() !== scopeSid) continue;
     for (const c of (Array.isArray(r.conditions) ? r.conditions : [])) if (c && c.type) owned.add(c.type);
   }
-  return RULE_TEMPLATES.filter(t => !t.conditions.some(c => owned.has(c.type))).slice(0, max);
+  return RULE_TEMPLATES
+    .filter(t => !t.conditions.some(c => owned.has(c.type) || isPausedRuleType(c.type)))
+    .slice(0, max);
 }
 
 // 首頁卡片與規則面板共用；ctx 決定訊息寫到哪個元素、加入後刷新哪一邊
@@ -7425,7 +7468,8 @@ function getQuote(sid) {
   const candidates = [
     _toQuoteCandidate(intradayQuoteMap?.[sid], 3),
     _toQuoteCandidate(getQuoteFromSharedData(sid), 2),
-    _toQuoteCandidate(finmindQuoteMap?.[sid], 1),
+    // FinMind 那一條暫停（條款禁止再散布）：盤中價仍由主機的快照提供
+    PAUSE_UNLICENSED_SOURCES ? null : _toQuoteCandidate(finmindQuoteMap?.[sid], 1),
   ].filter(Boolean);
 
   candidates.sort(_quoteCandidateOrder);
@@ -7451,14 +7495,18 @@ function _intradayQuoteIsClose(iq) {
   return !!c && c.mins >= SESSION_CLOSE_DONE_MINS;
 }
 
+// 2026-10-14：三個來源只剩第一個。FinMind（條款禁止再散布）與 MIS 快照（需授權）
+// 兩條退路在授權確認之前不用（PAUSE_UNLICENSED_SOURCES），所以當天收盤價要等
+// 日線／報告更新才出現；在那之前這一格顯示上一個交易日的收盤，日期籤會標出來
+// （_closeDateLabel）。恢復時把 PAUSE_UNLICENSED_SOURCES 關掉就回來。
 function getCloseQuote(sid) {
   const today = taipeiDateKey(new Date());
   const sessionOver = _isSessionOverToday();
   const iq = intradayQuoteMap?.[sid];
   const candidates = [
     _toQuoteCandidate(getQuoteFromSharedData(sid), 3),
-    _toQuoteCandidate(finmindQuoteMap?.[sid], 2),
-    _intradayQuoteIsClose(iq) ? _toQuoteCandidate(iq, 1) : null,
+    PAUSE_UNLICENSED_SOURCES ? null : _toQuoteCandidate(finmindQuoteMap?.[sid], 2),
+    PAUSE_UNLICENSED_SOURCES ? null : (_intradayQuoteIsClose(iq) ? _toQuoteCandidate(iq, 1) : null),
   ].filter(c => c && c.tradeDate && (c.tradeDate < today || (c.tradeDate === today && sessionOver)));
 
   candidates.sort(_quoteCandidateOrder);
@@ -7480,6 +7528,7 @@ const CLOSE_FINMIND_RETRY_MS = 30 * 60000;
 let _lastCloseFinMindAt = 0;
 
 async function loadFinMindCloseQuotes() {
+  if (PAUSE_UNLICENSED_SOURCES) return finmindQuoteMap;   // 暫停提供：不向 FinMind 發請求
   if (!_isSessionOverToday()) return finmindQuoteMap;
   if (Date.now() - _lastCloseFinMindAt < CLOSE_FINMIND_RETRY_MS) return finmindQuoteMap;
   const today = taipeiDateKey(new Date());
@@ -11220,7 +11269,10 @@ function describeCondition(c) {
     const label = p.label.replace(/（.*?）/g, "").trim();
     return label.includes("%") ? `${label.replace("%", "").trim()} ${v}%` : `${label} ${v}`;
   });
-  return parts.length ? `${spec.name}｜${parts.join("、")}` : spec.name;
+  const body = parts.length ? `${spec.name}｜${parts.join("、")}` : spec.name;
+  // 2026-10-14：籌碼層暫停提供（DATA_SOURCES.md 第九節）。既有規則留著不動，但要
+  // 講清楚它現在不會成立——不講的話看起來就是「設了卻不通知」。
+  return isPausedRuleType(c && c.type) ? `${body}（暫停提供）` : body;
 }
 
 function stockNameOf(sid) {
@@ -11348,7 +11400,8 @@ function openCondPicker(i) {
   const grouped = {};
   RULE_CATALOG.forEach(c => { (grouped[c.tier] = grouped[c.tier] || []).push(c); });
   const listEl = document.getElementById("cond-pick-list");
-  listEl.innerHTML = Object.keys(RULE_TIERS).map(t => `
+  // 暫停提供的那一層整組不列（PAUSED_RULE_TIERS）：選了也永遠不會成立
+  listEl.innerHTML = Object.keys(RULE_TIERS).filter(t => !PAUSED_RULE_TIERS.includes(t)).map(t => `
     <div class="cond-pick-group">
       <div class="cond-pick-group-head"><span class="rule-tier tier-${t}">${RULE_TIERS[t].label}</span><span class="cond-pick-group-note">${RULE_TIERS[t].note}</span></div>
       ${(grouped[t] || []).map(x => `
@@ -12952,7 +13005,9 @@ function renderKLineChart(sid, period) {
   if (!stock) return;
   const periodData = stock[period] || {};
   const levels = stock.levels || {};
-  const chips = stock.chips || {};
+  // 暫停提供期間不畫籌碼副圖，即使手上這份報告 payload 還帶著它（主機重啟與下一次
+  // 06:15 之間有空窗；PAUSE_UNLICENSED_SOURCES 的理由見 config.py）
+  const chips = PAUSE_UNLICENSED_SOURCES ? {} : (stock.chips || {});
 
   const el = document.getElementById("kline-chart");
   klineMobileTooltipLocked = false;
@@ -12986,6 +13041,14 @@ function updateKLineChipsNote(chips, period, periodData) {
   const series = Array.isArray(chips?.[view]) ? chips[view] : [];
   const hasValue = v => v !== null && v !== undefined && !Number.isNaN(Number(v));
   const hasData = Array.isArray(chips?.dates) && chips.dates.length > 0 && series.some(hasValue);
+  // 整份籌碼都沒有（暫停提供，或這一檔從來沒有）：把選單整組收起來，不要留一個
+  // 選什麼都是空的控制項。恢復時資料一回來就自己顯示。
+  const group = document.getElementById("kline-chips-group");
+  if (group) {
+    const anyChips = Array.isArray(chips?.dates) && chips.dates.length > 0;
+    group.style.display = anyChips ? "" : "none";
+    if (!anyChips) { note.textContent = ""; note.style.display = "none"; return; }
+  }
   let text = "";
   if (view !== "hide") {
     if (period !== "daily") text = "籌碼副圖只在日K顯示";
