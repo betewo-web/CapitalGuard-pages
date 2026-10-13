@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="341">
+  <meta name="app-version" content="342">
   <title>CapitalGuard-股市雷達 — LINE 帳號綁定</title>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
@@ -221,7 +221,7 @@ async function main() {
 // 這裡在 LINE 內建瀏覽器裡：讀那一則 → 組 Flex 卡片 → liff.shareTargetPicker 開「選好友」。
 // 為什麼要跑到 LINE 裡才做：外部瀏覽器呼叫 shareTargetPicker 需要 SSO 登入 session，LINE App
 // 自動登入拿不到，官方文件寫明「可能顯示電子郵件登入畫面」。在 LINE 裡則什麼登入畫面都沒有。
-// Flex 的限制：bubble（不能 carousel）、動作只能 uri。
+// Flex 的限制：bubble（不能 carousel）、動作只能 uri。卡片長什麼樣見 shareFlex。
 const APP_URL    = "https://betewo-web.github.io/CapitalGuard-pages/watchlist.html";
 const SHARE_PAGE = "https://betewo-web.github.io/CapitalGuard-pages/share.html";
 const SHARE_DISCLAIMER = "公開市場資料整理，不是投資建議";
@@ -272,31 +272,40 @@ async function shareMain(token) {
   await sharePick();    // 直接開面板，少按一次
 }
 
+// 卡片＝圖＋六格貼圖＋安裝（Howard 2026-10-13：文字說明全部拿掉——圖上已經有哪一檔、幾點、什麼訊號，
+// 底部也有免責那一行 SIGNAL_SHARE_FOOT，不必再寫一次）。
+// 貼圖直接做成卡片上的按鈕：LINE 規定使用者傳出去的卡片只能有「開網址」動作（postback 只有官方帳號的
+// 機器人能用，而且只能發給加過好友的人），所以每一格開 share.html 並帶 rx=<代碼>，頁面一載入就把回饋
+// 記下來——對方少按一次，但頁面本身不可能不開。貼圖的字從 share_link_get 回的 kinds 來（SQL 是單一來源）。
+const SHARE_KINDS_FALLBACK = [
+  { code: "awesome", label: "厲害" }, { code: "sharp_eye", label: "有眼光" }, { code: "bittersweet", label: "淡淡哀傷" },
+  { code: "thanks", label: "感謝提醒" }, { code: "it_happened", label: "竟然這樣" }, { code: "watch_together", label: "一起觀察" },
+];
 function shareFlex(d) {
-  const page = `${SHARE_PAGE}?t=${encodeURIComponent(_shareToken)}&src=card`;
+  const page = `${SHARE_PAGE}?t=${encodeURIComponent(_shareToken)}`;
   // hero 的 aspectRatio 是「寬:高」兩個整數，高不能超過寬的三倍（這張圖是橫的，沒這個問題）
   const w = Math.max(1, Number(d.image_w) || 1200), h = Math.max(1, Number(d.image_h) || 630);
   const gcd = (a, b) => (b ? gcd(b, a % b) : a);
   const k = gcd(w, h) || 1;
+  const kinds = Array.isArray(d.kinds) && d.kinds.length ? d.kinds : SHARE_KINDS_FALLBACK;
+  const rxBtn = (x) => ({
+    type: "button", style: "secondary", height: "sm", flex: 1,
+    action: { type: "uri", label: String(x.label || x.code).slice(0, 20), uri: `${page}&rx=${encodeURIComponent(x.code)}&src=rx` },
+  });
+  const rows = [];
+  for (let i = 0; i < kinds.length; i += 3) {
+    rows.push({ type: "box", layout: "horizontal", spacing: "sm", contents: kinds.slice(i, i + 3).map(rxBtn) });
+  }
   return {
     type: "bubble", size: "mega",
     hero: {
       type: "image", url: d.image_url, size: "full", aspectMode: "fit",
       aspectRatio: `${Math.round(w / k)}:${Math.round(h / k)}`, backgroundColor: "#0f0f1a",
-      action: { type: "uri", label: "看這則訊號", uri: page },
-    },
-    body: {
-      type: "box", layout: "vertical", spacing: "sm", contents: [
-        { type: "text", text: `${d.stock_name || ""} ${d.stock_id}`.trim() || "盤中訊號", weight: "bold", size: "lg", wrap: true },
-        { type: "text", text: d.body || d.title || "盤中訊號", size: "sm", color: "#555555", wrap: true },
-        { type: "text", text: `${d.owner_name || "朋友"} 用 CapitalGuard-股市雷達 分享給你`, size: "xs", color: "#8b7cff", wrap: true },
-        { type: "text", text: SHARE_DISCLAIMER, size: "xxs", color: "#999999", wrap: true },
-      ],
+      action: { type: "uri", label: "看這則訊號", uri: `${page}&src=card` },
     },
     footer: {
       type: "box", layout: "vertical", spacing: "sm", contents: [
-        { type: "button", style: "primary", color: "#7c5cff", height: "sm",
-          action: { type: "uri", label: "看訊號、回個貼圖", uri: page } },
+        ...rows,
         { type: "button", style: "link", height: "sm",
           action: { type: "uri", label: "我也要收到這種提醒（免費）", uri: `https://line.me/R/ti/p/${OA_BASIC_ID}` } },
       ],
