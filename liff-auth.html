@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="342">
+  <meta name="app-version" content="343">
   <title>CapitalGuard-股市雷達 — LINE 帳號綁定</title>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
@@ -277,6 +277,11 @@ async function shareMain(token) {
 // 貼圖直接做成卡片上的按鈕：LINE 規定使用者傳出去的卡片只能有「開網址」動作（postback 只有官方帳號的
 // 機器人能用，而且只能發給加過好友的人），所以每一格開 share.html 並帶 rx=<代碼>，頁面一載入就把回饋
 // 記下來——對方少按一次，但頁面本身不可能不開。貼圖的字從 share_link_get 回的 kinds 來（SQL 是單一來源）。
+// 卡片的底色＝App 的 --bg-1／--surface-2；圖示 PNG 在 PWA 的 Pages 上，改圖就把 SHARE_ICON_VER 加一（LINE 會快取）
+const SHARE_CARD_BG = "#0f0f1a";
+const SHARE_CARD_TILE_BG = "#1c1c2b";
+const SHARE_ICON_BASE = "https://betewo-web.github.io/CapitalGuard-pages/icons/rx";
+const SHARE_ICON_VER = "1";
 const SHARE_KINDS_FALLBACK = [
   { code: "awesome", label: "厲害" }, { code: "sharp_eye", label: "有眼光" }, { code: "bittersweet", label: "淡淡哀傷" },
   { code: "thanks", label: "感謝提醒" }, { code: "it_happened", label: "竟然這樣" }, { code: "watch_together", label: "一起觀察" },
@@ -288,25 +293,33 @@ function shareFlex(d) {
   const gcd = (a, b) => (b ? gcd(b, a % b) : a);
   const k = gcd(w, h) || 1;
   const kinds = Array.isArray(d.kinds) && d.kinds.length ? d.kinds : SHARE_KINDS_FALLBACK;
-  const rxBtn = (x) => ({
-    type: "button", style: "secondary", height: "sm", flex: 1,
+  // 一格＝圖＋小字（Howard 2026-10-13：按鈕的字太大顯示不完整，而且要有 App 那一套圖示）。
+  // Flex 的 button 字級固定不能縮，所以格子用 box（box 也能掛動作）：image 吃 PNG 網址（web/icons/rx/<code>.png，
+  // 從 App 的 RX_ART 截的、透明底）、text 用 xs。底色跟圖一樣是深色，整張卡片看起來是一塊。
+  const rxTile = (x) => ({
+    type: "box", layout: "vertical", flex: 1, spacing: "xs", paddingAll: "6px", cornerRadius: "8px",
+    backgroundColor: SHARE_CARD_TILE_BG, alignItems: "center",
     action: { type: "uri", label: String(x.label || x.code).slice(0, 20), uri: `${page}&rx=${encodeURIComponent(x.code)}&src=rx` },
+    contents: [
+      { type: "image", url: `${SHARE_ICON_BASE}/${encodeURIComponent(x.code)}.png?v=${SHARE_ICON_VER}`, size: "28px", aspectRatio: "1:1", aspectMode: "fit" },
+      { type: "text", text: String(x.label || x.code).slice(0, 8), size: "xs", color: "#f5f5f7", align: "center", wrap: false },
+    ],
   });
   const rows = [];
   for (let i = 0; i < kinds.length; i += 3) {
-    rows.push({ type: "box", layout: "horizontal", spacing: "sm", contents: kinds.slice(i, i + 3).map(rxBtn) });
+    rows.push({ type: "box", layout: "horizontal", spacing: "sm", contents: kinds.slice(i, i + 3).map(rxTile) });
   }
   return {
     type: "bubble", size: "mega",
     hero: {
       type: "image", url: d.image_url, size: "full", aspectMode: "fit",
-      aspectRatio: `${Math.round(w / k)}:${Math.round(h / k)}`, backgroundColor: "#0f0f1a",
+      aspectRatio: `${Math.round(w / k)}:${Math.round(h / k)}`, backgroundColor: SHARE_CARD_BG,
       action: { type: "uri", label: "看這則訊號", uri: `${page}&src=card` },
     },
     footer: {
-      type: "box", layout: "vertical", spacing: "sm", contents: [
+      type: "box", layout: "vertical", spacing: "sm", paddingAll: "10px", backgroundColor: SHARE_CARD_BG, contents: [
         ...rows,
-        { type: "button", style: "link", height: "sm",
+        { type: "button", style: "link", height: "sm", color: "#8b7cff",
           action: { type: "uri", label: "我也要收到這種提醒（免費）", uri: `https://line.me/R/ti/p/${OA_BASIC_ID}` } },
       ],
     },

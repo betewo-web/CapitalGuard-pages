@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="app-version" content="342">
+  <meta name="app-version" content="343">
   <!-- 收到 LINE 卡片的人看的那一頁（FRIENDS.md「LINE 卡片分享」）。不需登入、不必是使用者。
        noindex：這裡放的是一位使用者分享的一則訊號，不是給搜尋引擎看的公開內容。 -->
   <meta name="robots" content="noindex, nofollow">
@@ -35,7 +35,7 @@
     .rx button { appearance: none; border: 1px solid var(--border); background: transparent; color: var(--text-1);
                  border-radius: 12px; padding: 10px 4px; font-size: 13.5px; cursor: pointer; display: flex; flex-direction: column;
                  align-items: center; gap: 4px; min-height: 52px; }
-    .rx button svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .rx button svg { width: 22px; height: 22px; }
     .rx button b { font-weight: 700; font-size: 12px; color: var(--text-muted); }
     .rx button.on { border-color: var(--orange); color: var(--orange); }
     .rx button.on b { color: var(--orange); }
@@ -77,14 +77,14 @@
 const SUPABASE_URL  = "https://rnqdglmrkotutzmirivp.supabase.co";
 const SUPABASE_ANON = "sb_publishable_o4MJLqOmlmYmUBhloYbF1g_SzAgqSSs";
 const APP_VERSION   = (document.querySelector('meta[name="app-version"]') || {}).content || "0";
-// 貼圖的線條圖（與 App 的 RX_ART 同一組形；只有六個，複製比抽共用模組便宜）
+// 貼圖的線條圖：與 App 的 RX_ART 一字不差（test_share_links 釘住；只有六個，複製比抽共用模組便宜）
 const RX_ART = {
-  awesome:        '<circle cx="12" cy="12" r="9"/><path d="M8 13.5c1 1.6 2.3 2.4 4 2.4s3-.8 4-2.4M9 9.5h.01M15 9.5h.01"/>',
-  sharp_eye:      '<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="3"/>',
-  bittersweet:    '<circle cx="12" cy="12" r="9"/><path d="M8.5 15.5c1-1.2 2.1-1.8 3.5-1.8s2.5.6 3.5 1.8M9 9.5h.01M15 9.5h.01"/>',
-  thanks:         '<path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10Z"/>',
-  it_happened:    '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/>',
-  watch_together: '<circle cx="8" cy="9" r="2.5"/><circle cx="16" cy="9" r="2.5"/><path d="M3.5 18c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4M11.5 18c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4"/>',
+  awesome:        '<path d="M8 2.9l1.5 3.1 3.4.5-2.5 2.4.6 3.4L8 10.7l-3 1.6.6-3.4-2.5-2.4 3.4-.5z"/><path d="M13.4 1.6v1.6M12.6 2.4h1.6M2.4 12.2v1.4M1.7 12.9h1.4"/>',
+  sharp_eye:      '<path d="M1.8 8s2.3-4.1 6.2-4.1S14.2 8 14.2 8s-2.3 4.1-6.2 4.1S1.8 8 1.8 8z"/><circle cx="8" cy="8" r="2.2"/><circle cx="9" cy="7.1" r=".55" fill="currentColor" stroke="none"/>',
+  bittersweet:    '<circle cx="8" cy="8" r="6.1"/><path d="M5.6 6.5h.01M10.4 6.5h.01"/><path d="M5.7 10.6h4.6"/><path d="M11.2 7.9c-.6.9-.9 1.5-.9 2a.9.9 0 0 0 1.8 0c0-.5-.3-1.1-.9-2z"/>',
+  thanks:         '<path d="M4.4 7a3.6 3.6 0 0 1 7.2 0c0 2.6 1 3.5 1 3.5H3.4s1-.9 1-3.5z"/><path d="M6.6 12.5a1.5 1.5 0 0 0 2.8 0"/><path d="M11.3 2.5l.9.9 1.6-1.7"/>',
+  it_happened:    '<circle cx="8" cy="8" r="6.1"/><path d="M5.6 6.8h.01M10.4 6.8h.01"/><path d="M4.8 4.9l1.5-.6M11.2 4.9l-1.5-.6"/><circle cx="8" cy="10.4" r="1.5"/>',
+  watch_together: '<rect x="1.8" y="7.2" width="4.6" height="5.8" rx="1.3"/><rect x="9.6" y="7.2" width="4.6" height="5.8" rx="1.3"/><path d="M6.4 9.4h3.2M4.1 7.2V3.8h1.6M11.9 7.2V3.8h-1.6"/>',
 };
 const ERR_TEXT = {
   not_found:   ["找不到這則分享", "網址可能不完整，請向分享給你的人再要一次。"],
@@ -128,7 +128,8 @@ function tpeTime(iso) {
   const g = t => (p.find(x => x.type === t) || {}).value || "";
   return `${g("month")}/${g("day")} ${g("hour")}:${g("minute")}`;
 }
-function glyph(code) { return `<svg viewBox="0 0 24 24" aria-hidden="true">${RX_ART[code] || RX_ART.it_happened}</svg>`; }
+// 與 App 的 _svg() 同一組屬性：viewBox 16、1.5 描邊、圓頭。形狀是上面那份 RX_ART（test_share_links 釘住與 App 一字不差）
+function glyph(code) { return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${RX_ART[code] || RX_ART.it_happened}</svg>`; }
 
 function showState(title, msg) {
   document.getElementById("view").innerHTML = `<div class="state"><b>${esc(title)}</b>${esc(msg)}</div>`;
