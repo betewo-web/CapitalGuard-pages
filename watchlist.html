@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="344">
+  <meta name="app-version" content="345">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=344" rel="stylesheet">
+  <link href="watchlist.css?v=345" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -437,7 +437,7 @@
       <!-- 今日股票資訊彙整（2026-09-27 前叫「今日資料」）：同日從首頁搬到這一頁的最上面（Howard）。事件是 16:30 的
            fetch-events 寫進 stock_events 的（籌碼 T86、融資、技術量能、月營收、季財報、重大訊息），
            盤中那段時間這一區本來就沒有內容——收盤後要看的第一件事才是它。內容由 renderTodayNews() 畫。 -->
-      <div class="card panel-card mb-3">
+      <div class="card panel-card mb-3" id="post-news-card">
         <div class="card-body p-3">
           <div class="home-sec-title"><span class="hs-label"><i data-icon="news"></i>今日股票資訊彙整</span> <span class="hs-link" id="post-news-link" onclick="openTodayEventsPanel()">查看明細 →</span></div>
           <div id="post-news"></div>
@@ -1971,12 +1971,17 @@ let _alertFocusRetries = 0;
 let _pendingAlertFocusAt = 0;   // 何時開始等：等太久（換了分頁）就放棄，別在下次進通知頁時突然跳
 let _lastAlertClickAt = 0;      // 最後處理的那次點擊（SW 給的時間戳）：訊息與 Cache 備援兩條路只認一次
 let _alertJumpedThisBoot = false; // 這次開機是點通知進來的：別再疊推播／規則推薦視窗上去
-// 沒有 ?alert= 的通知（本機發的「今日股票資訊彙整」帶 #post）要去的分頁。
+// 沒有 ?alert=、只指定分頁（#<tab>）的通知要去的分頁。
 // 以前這條路是「當場 switchTab 就算了」，所以兩種情況會把點擊整個吞掉：
 // 還沒登入完（switchTab 的條件不成立），以及回前景時正好要套用新版（_maybeReload
 // 只把 ?alert= 帶過重載，分頁目標就留在舊頁面裡跟著消失）。
+// 2026-10-13 起本機的「今日股票資訊彙整」不走這條（改帶 ?alert= 進通知匣），
+// 但這條路留著：它是所有「只指定分頁」的通知的唯一出口。
 let pendingTabFocus = null;
 let _pendingTabFocusAt = 0;
+// 本機那一則「今日股票資訊彙整」的 event_key 前綴（`post_info:<台北日期>`）。
+// 推播的 tag、通知匣那一列、網址的 ?alert= 三處同值，和倉庫那邊的訊號鍵同一套規矩。
+const TODAY_INFO_KEY_PREFIX = "post_info:";
 // 閃爍改成「狀態」而不是掛在 DOM 上：列表在閃爍中途重畫（報告資料回來、回前景重抓）
 // 會把整段 innerHTML 換掉，掛在舊元素上的動畫就此消失——這是「有時候不閃」的原因。
 let _inboxTargetRowId = null;
@@ -5803,6 +5808,13 @@ const SIGNAL_ICON_ART = {
     + '<line x1="36" y1="19" x2="33" y2="22"/></g>'
     + '<line x1="8" y1="30" x2="40" y2="30" stroke="#fff" stroke-width="3" stroke-linecap="round"/>'
     + '<line x1="14" y1="37" x2="34" y2="37" stroke="#fff" stroke-width="2.4" stroke-linecap="round" opacity=".5"/>' },
+  // 今日股票資訊彙整（本機每日一則）：有紙頭的記事板，與盤後分頁區塊標題的 news 圖示同一個意思
+  post_info: { inner:
+      '<rect x="12" y="12" width="24" height="27" rx="3.5" fill="none" stroke="#fff" stroke-width="3"/>'
+    + '<rect x="19" y="7" width="10" height="5" rx="1.8" fill="#fff"/>'
+    + '<g stroke="#fff" stroke-width="2.4" stroke-linecap="round" opacity=".8">'
+    + '<line x1="17.5" y1="22" x2="30.5" y2="22"/><line x1="17.5" y1="28" x2="30.5" y2="28"/>'
+    + '<line x1="17.5" y1="34" x2="25" y2="34"/></g>' },
   // 每日報告：一張有三行字的報表
   daily_report: { inner:
       '<rect x="13" y="9" width="22" height="30" rx="3.5" fill="none" stroke="#fff" stroke-width="3"/>'
@@ -5842,6 +5854,7 @@ function iconArtKeyOf(row) {
   if (src === "chat") return "chat";
   if (src === "feedback") return "feedback";
   if (src === "post_market" || src === "postmarket") return "post_market";
+  if (src === "post_info") return "post_info";
   if (src.startsWith("daily_report")) return "daily_report";
   return "generic";
 }
@@ -7168,32 +7181,81 @@ function alertTypeLabel(row) {
   if (String(row.source || "").startsWith("daily_report")) return "每日報告";
   return "通知";
 }
-  function todayImportantInfoKey(rows) {
-    // 用台北日期，不要用 UTC：早上 8 點前 toISOString() 還停在昨天，
-    // 會讓「今天」的判斷比使用者早一天翻頁
-    const today = taipeiDateKey(new Date());
+  // 內容簽章：哪幾檔的哪幾件事。它變了才算「新的一份彙整」——通知再發一次（tag 相同，
+  // 系統會蓋掉前一則），通知匣那一則也更新成新的內容。
+  function todayImportantInfoSig(rows) {
     const sig = (rows || [])
       .map(({ sid, ev }) => `${sid}:${ev.event_type || ""}:${ev.title || ""}`)
       .join("|");
-    return `home_important_info_notified_${today}_${btoa(unescape(encodeURIComponent(sig))).slice(0, 24)}`;
+    return btoa(unescape(encodeURIComponent(sig))).slice(0, 24);
   }
-  
+
+  function todayImportantInfoKey(rows) {
+    // 用台北日期，不要用 UTC：早上 8 點前 toISOString() 還停在昨天，
+    // 會讓「今天」的判斷比使用者早一天翻頁
+    return `home_important_info_notified_${taipeiDateKey(new Date())}_${todayImportantInfoSig(rows)}`;
+  }
+
+  // 通知內文與通知匣內文同一份：前三則「代號 名稱：標題」
+  function todayInfoBodyLines(newsRows) {
+    return (newsRows || []).slice(0, 3).map(({ sid, ev }) => {
+      const name = universe[sid]?.n || "";
+      return `${sid}${name ? ` ${name}` : ""}：${ev.title || "無標題"}`;
+    });
+  }
+
+  // 「今日股票資訊彙整」在通知匣裡的那一則（2026-10-13 Howard：這則通知沒有進通知匣）。
+  // 一天一列、id 固定：內容變了是更新同一列，不是再長一列——使用者看到的那則通知本來
+  // 就是同一則。通知權限沒開的人也記：通知匣是「今天發生了什麼」的紀錄，不是推播的副本。
+  function todayInfoInboxId(date) { return `${LOCAL_INBOX_PREFIX}post-info:${date}`; }
+  function todayInfoEventKey(date) { return `${TODAY_INFO_KEY_PREFIX}${date}`; }
+
+  function recordTodayInfoInbox(newsRows) {
+    if (!Array.isArray(newsRows) || newsRows.length === 0) return null;
+    if (!state.userId) return null;   // 本機列的 localStorage 鍵跟著帳號走
+    const date = taipeiDateKey(new Date());
+    const id = todayInfoInboxId(date);
+    // 件數也進簽章：todayImportantInfoSig 截到 24 個字元，而「原本那幾件再多一件」的
+    // base64 前綴是一樣的——只看它的話，盤後陸續進來的事件不算內容有變
+    const sig = `${newsRows.length}:${todayImportantInfoSig(newsRows)}`;
+    const prev = inboxRows.find(r => String(r.id) === id) || _localInboxGet(id);
+    // renderHome 每次重畫都會走到這裡：內容沒變就什麼都不做，否則清單一直重畫
+    if (prev && prev.info_sig === sig) return prev;
+    const row = {
+      id, local: true, info_sig: sig,
+      source: "post_info", event_key: todayInfoEventKey(date), stock_id: null,
+      title: `今日股票資訊彙整：${newsRows.length} 則`,
+      body: todayInfoBodyLines(newsRows).join("\n"),
+      // 同一天只有第一次寫入算「這一則的時間」。16:30 的 fetch-events 是分批寫的，
+      // 後面幾件事陸續進來時只更新內容（件數與前三則），不重排到清單最上面、也不把
+      // 已讀改回未讀——通知本身一天也只發一次（todayImportantInfoKey）。
+      sent_at: prev ? prev.sent_at : new Date().toISOString(),
+      read_at: prev ? (prev.read_at || null) : null,
+    };
+    _localInboxPut(row);
+    inboxRows = _inboxSortRows(inboxRows.filter(r => String(r.id) !== id).concat([row]));
+    updateInboxBadge();
+    if (currentTab === "inbox") renderInbox();
+    return row;
+  }
+
   // 一律走 service worker 的 showNotification()，不要用 new Notification()：
   // Android Chrome 對那個建構子直接丟 TypeError（Illegal constructor），
   // iOS Safari 也不支援，等於這則通知以前只有桌機看得到、手機靜默失敗。
   // 點擊行為交給 sw.js 的 notificationclick，三個平台才會一致。
   async function sendTodayImportantInfoNotification(newsRows) {
     if (!Array.isArray(newsRows) || newsRows.length === 0) return;
+    // 先進通知匣：點推播要定位的就是那一列，而且它要在推播發出去之前就存在
+    const inboxRow = recordTodayInfoInbox(newsRows);
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     if (!("serviceWorker" in navigator)) return;
 
     const key = todayImportantInfoKey(newsRows);
     if (localStorage.getItem(key) === "1") return;
 
-    const topRows = newsRows.slice(0, 3).map(({ sid, ev }) => {
-      const name = universe[sid]?.n || "";
-      return `${sid}${name ? ` ${name}` : ""}：${ev.title || "無標題"}`;
-    });
+    const topRows = todayInfoBodyLines(newsRows);
+    const eventKey = inboxRow ? String(inboxRow.event_key)
+                              : todayInfoEventKey(taipeiDateKey(new Date()));
 
     try {
       const reg = await _swReadyOrNull();
@@ -7202,9 +7264,13 @@ function alertTypeLabel(row) {
         body: topRows.join("\n"),
         icon: NOTIFICATION_ICON,
         badge: NOTIFICATION_BADGE,
-        tag: `home-important-info-${taipeiDateKey(new Date())}`,
-        // 點通知要落在看得到這幾則的那一頁：2026-09-27 起這一區在盤後分頁
-        data: { url: new URL("watchlist.html#post", window.location.href).toString() },
+        // 三方同一把鍵（通知的 tag／通知匣那列的 event_key／網址的 ?alert=），與推播那條路一致
+        tag: eventKey,
+        // 2026-10-13 Howard：點通知先落在通知匣的那一則上並閃爍，再點那一則才去盤後分頁
+        // （openInboxItem → goTodayInfoFromInbox）。以前直接帶 #post，所以通知匣裡
+        // 從來找不到這一則，#post 那條路（pendingTabFocus）仍留著給其他只指定分頁的通知。
+        data: { url: new URL(`watchlist.html?alert=${encodeURIComponent(eventKey)}#inbox`,
+                             window.location.href).toString() },
       });
       localStorage.setItem(key, "1");
     } catch (e) {
@@ -7546,7 +7612,9 @@ function _inboxMergeRows(local, fresh, windowStart) {
 function _inboxCursorsOf(rows) {
   let cursor = null, read = null;
   for (const r of rows || []) {
-    if (r.pending) continue;
+    // 暫存列與本機列都不算游標：它們的 sent_at 比倉庫新，當成游標會讓下一次增量
+    // 查詢跳過倉庫裡真正的新列（本機的「今日股票資訊彙整」每天都比倉庫新一次）
+    if (r.pending || r.local) continue;
     if (r.sent_at && _inboxTs(r.sent_at) > _inboxTs(cursor)) cursor = r.sent_at;
     if (r.read_at && _inboxTs(r.read_at) > _inboxTs(read)) read = r.read_at;
   }
@@ -7557,7 +7625,8 @@ async function _inboxRestoreCache() {
   _inboxCacheLoaded = true;
   const saved = await _reportCacheGet(_inboxCacheKey()).catch(() => null);
   if (!saved || !Array.isArray(saved.rows)) return;
-  inboxRows = _inboxMergeRows(inboxRows, saved.rows, _inboxWindowStart());   // 開機時已推播進來的暫存列留著
+  // 併上本機列（今日股票資訊彙整）：點推播進來時要定位的就是它，而它只在 localStorage 裡
+  inboxRows = _inboxWithLocalRows(_inboxMergeRows(inboxRows, saved.rows, _inboxWindowStart()));   // 開機時已推播進來的暫存列留著
   const c = _inboxCursorsOf(inboxRows);
   _inboxCursor = c.cursor; _inboxReadCursor = c.read;
 }
@@ -7567,7 +7636,64 @@ function _inboxSaveCache() {
   if (!state.userId) return;
   const c = _inboxCursorsOf(inboxRows);
   _inboxCursor = c.cursor; _inboxReadCursor = c.read;
-  _reportCachePut(_inboxCacheKey(), { savedAt: Date.now(), rows: inboxRows.filter(r => !r.pending) }).catch(() => {});
+  // 本機列不進這一份：它的真相在 localStorage（_localInbox*），兩份會打架
+  _reportCachePut(_inboxCacheKey(), { savedAt: Date.now(), rows: inboxRows.filter(r => !r.pending && !r.local) }).catch(() => {});
+}
+
+// ── 本機通知列（只有「今日股票資訊彙整」一種）──────────────────────────────
+// 這一則不是推播，是前端自己 showNotification 發的（sendTodayImportantInfoNotification），
+// 所以 alert_history 裡沒有它——那張表的 INSERT 只開給後端的服務金鑰，前端寫不進去。
+// 2026-10-13 Howard 要它也進通知匣，而前端唯一寫得進去的地方就是本機：列存在 localStorage，
+// 每次抓通知時併進 inboxRows（_inboxWithLocalRows）。
+// 三件事一定要把本機列排除，否則會壞到倉庫那一邊：
+//   1. 游標（_inboxCursorsOf）——本機列的 sent_at 比倉庫新，會讓下一次增量查詢跳過真的新列
+//   2. 總數比對（refreshInbox 的 localN）——多算一列就每次都整段重抓
+//   3. 已讀／刪除的請求——本機列沒有倉庫 id，送出去只會換來一個 400
+const LOCAL_INBOX_PREFIX = "local:";          // 本機列的 id 前綴（倉庫的 id 不會長這樣）
+const LOCAL_INBOX_LIMIT = 20;                 // 一天一則、只留窗口內的，這個上限永遠用不到
+function _localInboxKey() { return `cg-local-inbox:${state.userId || "anon"}`; }
+
+// 讀出來的列一律補上 local: true：旗標是「這一列不在倉庫裡」的唯一判準，不能靠 id 的形狀
+function _localInboxAll() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(_localInboxKey()) || "[]");
+    if (!Array.isArray(raw)) return [];
+    const floor = _inboxTs(_inboxWindowStart());
+    return raw.filter(r => r && r.id && _inboxTs(r.sent_at) >= floor)
+              .map(r => ({ ...r, local: true }));
+  } catch { return []; }
+}
+
+function _localInboxWrite(rows) {
+  try { localStorage.setItem(_localInboxKey(), JSON.stringify(rows.slice(0, LOCAL_INBOX_LIMIT))); }
+  catch { /* 無痕模式或配額滿：這一則就只活在這次開著的期間 */ }
+}
+
+function _localInboxGet(id) {
+  return _localInboxAll().find(r => String(r.id) === String(id)) || null;
+}
+
+function _localInboxPut(row) {
+  _localInboxWrite([row].concat(_localInboxAll().filter(r => String(r.id) !== String(row.id))));
+}
+
+function _localInboxPatch(id, patch) {
+  const row = _localInboxGet(id);
+  if (row) _localInboxPut({ ...row, ...patch });
+}
+
+function _localInboxDrop(id) {
+  _localInboxWrite(_localInboxAll().filter(r => String(r.id) !== String(id)));
+}
+
+function _localInboxClear() { _localInboxWrite([]); }
+
+// 倉庫列併上本機列。同 id 以 localStorage 那一份為準：已讀與刪除都只記在那裡，
+// 記憶體裡的那份可能是上一次抓通知時併進來的舊副本。
+function _inboxWithLocalRows(rows) {
+  const locals = _localInboxAll();
+  const ids = new Set(locals.map(r => String(r.id)));
+  return _inboxSortRows((rows || []).filter(r => !ids.has(String(r.id))).concat(locals));
 }
 
 async function refreshInbox(force = true) {
@@ -7583,7 +7709,8 @@ async function refreshInbox(force = true) {
     if (params.or) {
       rows = _inboxMergeRows(inboxRows, fresh, windowStart);
       // 別台裝置清空／伺服器清理：總數對不上就整段重抓。本機已抓滿上限時對不了（伺服器可能更多），略過
-      const localN = rows.filter(r => !r.pending).length;
+      // 本機列不在倉庫裡：算進去就永遠對不上總數，每次抓通知都整段重抓
+      const localN = rows.filter(r => !r.pending && !r.local).length;
       // 本機已抓滿上限時對不了（伺服器一定更多），跳過比對
       let total = null;
       if (localN < INBOX_HISTORY_LIMIT) {
@@ -7601,13 +7728,17 @@ async function refreshInbox(force = true) {
     }
     // F1：推播先到、倉庫那列還沒寫進來的暫存列留著，倉庫已有的就讓位（在 _inboxMergeRows 裡）
     // 還在復原寬限內的那一則倉庫裡還在，整段重抓會把它撿回來——濾掉
-    inboxRows = _inboxDropDeleting(rows, _inboxDeleting && _inboxDeleting.row);
+    // 本機列在這裡併回來（整段重抓那條路把它濾掉了）；還在復原寬限內的那一則照樣要擋掉
+    inboxRows = _inboxDropDeleting(_inboxWithLocalRows(rows), _inboxDeleting && _inboxDeleting.row);
     const newestWarehouse = _inboxCursorsOf(inboxRows).cursor;
     _prunePendingSignalsCache(fresh.map(x => x.event_key).filter(Boolean),
                               _inboxTs(newestWarehouse)).catch(() => {});
     _inboxSaveCache();
     inboxLoadedAt = Date.now();
-    inboxSupportsRead = inboxRows.length === 0 || ("read_at" in inboxRows[0]);
+    // 探針要用倉庫那一邊的列：本機列自己一定有 read_at，拿它當樣本會在
+    // migrate_pwa_v2.sql 還沒跑的帳號上誤判成「已讀功能可用」
+    const readProbe = inboxRows.find(r => !r.local);
+    inboxSupportsRead = !readProbe || ("read_at" in readProbe);
     inboxLoadError = null;
     updateInboxBadge();
     renderCurrentTab();
@@ -7680,7 +7811,12 @@ function _applyPendingAlertFocus() {
       _alertFocusRetries++;
       setTimeout(() => refreshInbox(true), 3000);
     } else {
+      // 「今日股票資訊彙整」那一列只活在發出通知的那台裝置上（localStorage）：
+      // 換裝置、清過瀏覽器資料、或 localStorage 寫不進去時這裡找不到它。至少把人帶到
+      // 看得到那一份彙整的盤後分頁，別讓這次點擊什麼都不發生。
+      const wasTodayInfo = String(pendingAlertFocus).startsWith(TODAY_INFO_KEY_PREFIX);
       pendingAlertFocus = null;
+      if (wasTodayInfo) goTodayInfoFromInbox();
     }
     return;
   }
@@ -7997,6 +8133,14 @@ let detailRow = null;   // 目前開啟詳情的通知 row
 function openInboxItem(rowId) {
   const row = inboxRows.find(r => String(r.id) === String(rowId));
   if (!row) return;
+  // 「今日股票資訊彙整」（本機列）：跳到盤後分頁並把那張卡閃 3 秒（2026-10-13 Howard）。
+  // 它講的不是某一檔的訊號，開一張只有三行字的詳情卡等於把人留在原地
+  if (String(row.source || "") === "post_info") {
+    _markInboxRowRead(row);
+    trackActivity("inbox_open", { source: "post_info" });
+    goTodayInfoFromInbox();
+    return;
+  }
   // 對話（CHAT.md）：event_key 是 chat:<share_id>:<stock_id>:<日期>，點開直接進那一間房
   if (String(row.source || "") === "chat") {
     _markInboxRowRead(row);
@@ -8035,7 +8179,7 @@ const INBOX_RADAR_SOURCES = ["monitor", "rule"];
 const INBOX_PLAN_SOURCES = ["trial"];
 // 來源徽章平常直接印 source（monitor／rule…）；新來源給個看得懂的字
 const INBOX_SOURCE_LABEL = { trial: "方案", share: "分享", reaction: "回饋", chat: "對話",
-                             feedback: "意見" };
+                             feedback: "意見", post_info: "彙整" };
 
 // 這一則能不能在盤中雷達上指出來。**找得到對應的那一顆才回 true**——
 // 找不到就照舊開通知詳情，不要把人丟到一張寫著「沒有這天的紀錄」的空卡片上。
@@ -8070,7 +8214,9 @@ function _rtlEntryForInboxRow(story, row) {
 function _markInboxRowRead(row) {
   if (!inboxSupportsRead || !row || row.read_at || row.pending) return;
   row.read_at = new Date().toISOString();
-  sbPatch("alert_history", { "id": `eq.${row.id}` }, { read_at: row.read_at }, state.accessToken)
+  // 本機列在倉庫裡沒有對應的那一列：已讀只記在 localStorage
+  if (row.local) _localInboxPatch(row.id, { read_at: row.read_at });
+  else sbPatch("alert_history", { "id": `eq.${row.id}` }, { read_at: row.read_at }, state.accessToken)
     .catch(() => {});
   _inboxSaveCache();
   updateInboxBadge();
@@ -8218,6 +8364,8 @@ async function markAllRead() {
       { read_at: now }, state.accessToken);
     trackActivity("inbox_read_all");
     inboxRows.forEach(r => { if (!r.read_at) r.read_at = now; });
+    // 本機列的已讀要自己存一份（上面那個 PATCH 只動得到倉庫）
+    inboxRows.forEach(r => { if (r.local) _localInboxPatch(r.id, { read_at: r.read_at }); });
     _inboxSaveCache();
     updateInboxBadge();
     renderInbox();
@@ -8246,6 +8394,7 @@ async function clearAlertHistory() {
   try {
     await sbDelete("alert_history", { "user_id": `eq.${state.userId}` }, state.accessToken);
     inboxRows = [];
+    _localInboxClear();      // 本機列（今日股票資訊彙整）也是「全部通知」的一部分
     // 還在復原寬限內的那一則也沒了（倉庫整個清空了，再送一次 DELETE 沒有意義）
     if (_inboxDeleting) { clearTimeout(_inboxDeleting.timer); _inboxDeleting = null; }
     _inboxSaveCache();       // 本機清掉、游標歸零；不需要再抓回來（倉庫已空）
@@ -8327,6 +8476,9 @@ function _inboxCommitDelete() {
 
 async function _inboxDeleteServer(row, userId) {
   if (!userId) return;
+  // 本機列：倉庫裡本來就沒有，拿掉 localStorage 那一份就是刪掉。送 DELETE 只會換來
+  // 一個 400（id 不是倉庫的 uuid），然後 _inboxCommitDelete 會把那一則放回清單
+  if (row.local) { _localInboxDrop(row.id); return; }
   if (!row.pending) {
     await sbDelete("alert_history", { "user_id": `eq.${userId}`, "id": `eq.${row.id}` }, state.accessToken);
     return;
@@ -11867,6 +12019,33 @@ function renderTodayNews() {
   const newsLink = document.getElementById("post-news-link");
   if (newsLink) newsLink.style.display = newsRows.length ? "" : "none";
   return newsRows;
+}
+
+// ── 從通知匣的「今日股票資訊彙整」跳過來（openInboxItem）──────────────────
+// 切到盤後分頁、捲到那張卡、閃 3 秒。換頁本身沒有畫面語言：那張卡在最上面，
+// 不閃的話看起來像什麼都沒發生（同 flashAddStock 的理由）。
+const POST_NEWS_FLASH_MS = 3000;   // 與 watchlist.css 的 post-news-flash 同值（0.6 秒 × 5）
+let _postNewsFlashTimer = null;
+
+function flashPostNewsCard() {
+  const el = document.getElementById("post-news-card");
+  if (!el) return;
+  clearTimeout(_postNewsFlashTimer);
+  // 連按兩次要重新閃：class 還在的話 CSS 動畫不會重頭跑。拿掉之後讀一次版面
+  // （offsetWidth）強迫瀏覽器結算，不然「拿掉再加上」會被合併成什麼都沒改。
+  el.classList.remove("is-flash");
+  void el.offsetWidth;
+  el.classList.add("is-flash");
+  _postNewsFlashTimer = setTimeout(() => el.classList.remove("is-flash"), POST_NEWS_FLASH_MS);
+}
+
+function goTodayInfoFromInbox() {
+  switchTab("post");
+  // switchTab 之後才畫得完這一頁：等一拍再捲、再閃（同 focusAddStock）
+  setTimeout(() => {
+    document.getElementById("post-news-card")?.scrollIntoView({ block: "center", behavior: "smooth" });
+    flashPostNewsCard();
+  }, 80);
 }
 
 // "2026-09-18" → "9/18"：收盤日期標籤用，只在收盤後仍顯示前一日收盤時出現

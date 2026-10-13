@@ -5106,6 +5106,19 @@ select.fr-input { width: 100%; }
 	.wl-swipe.is-flash { animation: none; box-shadow: 0 0 0 2px var(--accent); }
 }
 
+/* 從通知匣的「今日股票資訊彙整」跳過來時閃 3 秒（goTodayInfoFromInbox）。
+   刻意不共用 fr-flash：那組 keyframes 的 0%／100% 把 background 設成 transparent，
+   掛在 .panel-card 上會讓卡片自己的底色（--surface）在動畫期間消失，看起來像閃掉一塊。
+   這裡只動外框與陰影，底色不碰。 */
+@keyframes post-news-flash {
+	0%, 100% { border-color: var(--border); box-shadow: var(--shadow-soft); }
+	50% { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+}
+#post-news-card.is-flash { animation: post-news-flash 0.6s ease-in-out 5; }
+@media (prefers-reduced-motion: reduce) {
+	#post-news-card.is-flash { animation: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+}
+
 /* ── 回饋貼圖（REACTIONS.md，2026-10-09）─────────────────────────────────────
    顏色只做強調：橘是唯一強調色（已選的貼圖、收到的計數），未選的貼圖跟著文字色走。 */
 /* 帳號旁的籤：對話框＋數字。user chip 是一顆 button、裡面不能再放 button，所以它是 chip 的兄弟 */
