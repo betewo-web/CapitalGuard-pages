@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="345">
+  <meta name="app-version" content="346">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=345" rel="stylesheet">
+  <link href="watchlist.css?v=346" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -446,6 +446,10 @@
 
       <div id="post-list" class="post-list"></div>
       <div id="post-empty" class="view-empty" style="display:none"></div>
+      <!-- 開放資料署名（同盤中頁，data/open_data.py ATTRIBUTION）：這一頁的彙整與收盤價
+           大半是兩個交易所的開放資料，而授權唯一的義務就是署名。以前只有盤中（評分）頁
+           有這一行，盤後頁沒有——署名要跟著資料出現的地方，不是放在某一頁就算了。 -->
+      <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
     </section>
 
     <section id="view-watch" class="app-view">
@@ -2490,7 +2494,6 @@ function renderEventMetrics(ev) {
 // 這裡把兩件事分開：標籤照後端 source_url 說「資料從哪來」，連結則指向同一份資料、
 // 同一檔個股的網頁版（Yahoo 股市的個股頁，2026-09-13 逐頁確認存在）；沒有網頁版的
 // （證交所公告）才連原始資料並標明。test_pwa_tabs 會比對後端寫出的每個 source_url 都對得到一列。
-const _isCalendarEvent = ev => ev.direction === "calendar" || ev.event_type === "conference";
 const _YAHOO_TW = (sid, page) => `https://tw.stock.yahoo.com/quote/${encodeURIComponent(sid)}/${page}`;
 const _EVENT_SOURCE_PAGES = [
   { match: "twse.com.tw/rwd/zh/exRight/TWT48U", label: "證交所 除權息預告表",
@@ -2504,10 +2507,15 @@ const _EVENT_SOURCE_PAGES = [
   { match: "finmindtrade.com", label: "FinMind 財報",
     page: (sid, ev) => _YAHOO_TW(sid, /eps/.test(String(ev.event_code || "")) ? "eps" : "income-statement"),
     pageLabel: "Yahoo 股市 財報" },
-  { match: "finance.yahoo.com/quote/", label: "Yahoo Finance 日K",
-    // 財報日／法說會日程沒有台灣版頁面，維持原本的 Yahoo Finance 個股頁（那是正常網頁，不是 JSON）
-    page: (sid, ev) => _isCalendarEvent(ev) ? ev.source_url : _YAHOO_TW(sid, "technical-analysis"),
-    pageLabel: (sid, ev) => _isCalendarEvent(ev) ? "Yahoo Finance 個股頁" : "Yahoo 股市 技術分析" },
+  // 技術／量能／價格事件的日線：2026-09-17 起來源就是證交所與櫃買的開放資料
+  // （data/price_store.py 的倉庫），但標籤一路寫著「Yahoo Finance 日K」到 2026-10-13 才改。
+  // 標籤說資料從哪來、連結指向同一份資料的個股網頁版，兩件事分開（同月營收那一列）。
+  { match: "twse.com.tw/rwd/zh/afterTrading/MI_INDEX", label: "證交所 每日收盤行情",
+    page: sid => _YAHOO_TW(sid, "technical-analysis"), pageLabel: "Yahoo 股市 技術分析" },
+  { match: "tpex.org.tw/www/zh-tw/afterTrading/otc", label: "櫃買中心 每日收盤行情",
+    page: sid => _YAHOO_TW(sid, "technical-analysis"), pageLabel: "Yahoo 股市 技術分析" },
+  { match: "tpex.org.tw/www/zh-tw/insti/dailyTrade", label: "櫃買中心 三大法人買賣超",
+    page: sid => _YAHOO_TW(sid, "institutional-trading"), pageLabel: "Yahoo 股市 法人買賣" },
   { match: "twse.com.tw/rwd/zh/announcement/announcement", label: "證交所 公告",
     page: null, pageLabel: "原始資料 (JSON)" },
 ];
