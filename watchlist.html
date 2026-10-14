@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="352">
+  <meta name="app-version" content="353">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=352" rel="stylesheet">
+  <link href="watchlist.css?v=353" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -351,11 +351,13 @@
           <div class="ms-breadth" id="ms-breadth"></div>
           <div class="ms-head">
             <span class="ms-h"><i data-icon="radar"></i>族群強度</span>
-            <!-- 兩種看法（2026-10-15 Howard「顯示的種類太少」）：
-                 等分＝34 類全部都在、照強度排；面積＝成交額佔比（錢在哪一塊）。 -->
+            <!-- 兩種看法（2026-10-15 Howard）：
+                 **等分**＝34 類全部都在、照強度排，下面的清單收起來（網格已經列完了）；
+                 **成交額**＝面積＝成交額佔比（錢在哪一塊），只畫得下 10 格，
+                 所以下面的「全部族群」清單要留著補完其餘的。 -->
             <span class="hs-seg ms-map-seg" id="ms-map-seg" role="radiogroup" aria-label="族群圖的看法">
               <button type="button" role="radio" data-map="grid" aria-checked="true" onclick="msSetMapMode('grid')">等分</button>
-              <button type="button" role="radio" data-map="area" aria-checked="false" onclick="msSetMapMode('area')">面積</button>
+              <button type="button" role="radio" data-map="area" aria-checked="false" onclick="msSetMapMode('area')">成交額</button>
             </span>
           </div>
           <!-- 等分網格（HTML）與面積熱力格（ECharts）只會有一個在畫面上 -->
@@ -366,11 +368,14 @@
           <!-- 全部族群（2026-10-14 Howard：「為什麼呈現的種類這麼少？」）：
                熱力格只畫得下 10 格，但資料有 30 幾類。這一份照強度排、每一類都在，
                點一列與點格子是同一個展開。預設只露前 10 列，其餘按鈕展開。 -->
-          <div class="ms-head">
-            <span class="ms-h"><i data-icon="chart"></i>全部族群</span>
-            <span class="ms-hint" id="ms-inds-hint"></span>
+          <!-- 只在「成交額」模式出現（等分網格已經列完 34 類，見 renderMarketStrength） -->
+          <div id="ms-inds-sec" style="display:none">
+            <div class="ms-head">
+              <span class="ms-h"><i data-icon="chart"></i>全部族群</span>
+              <span class="ms-hint" id="ms-inds-hint"></span>
+            </div>
+            <div class="ms-inds" id="ms-inds"></div>
           </div>
-          <div class="ms-inds" id="ms-inds"></div>
 
           <div class="ms-head">
             <span class="ms-h"><i data-icon="chart"></i>個股強度</span>
@@ -9306,9 +9311,15 @@ function renderMarketStrength() {
     : `<div class="home-tile-empty">${emptyText}</div>`;
   if (hasData && msMapMode === "area") msRenderTreemap(p);
   else if (!hasData) msDisposeCharts();
-  el("ms-inds").innerHTML = hasData ? msIndListHtml(p) : "";
+  // 「全部族群」清單只在成交額模式出現（2026-10-15 Howard）：等分網格已經把 34 類
+  // 都列完了，再放一份照強度排的清單是同一件事講兩次；而成交額那一版只畫得下 10 格，
+  // 清單就是補完其餘的那一份。
+  const listOn = msMapMode === "area" && hasData;
+  const indsSec = el("ms-inds-sec");
+  if (indsSec) indsSec.style.display = listOn ? "" : "none";
+  el("ms-inds").innerHTML = listOn ? msIndListHtml(p) : "";
   const hint = el("ms-inds-hint");
-  if (hint) hint.textContent = hasData ? `${p.industries.length} 類・照強度排` : "";
+  if (hint) hint.textContent = listOn ? `${p.industries.length} 類・照強度排` : "";
   msRenderDetail();
 }
 
@@ -9713,7 +9724,12 @@ function msRenderDetail() {
   box.innerHTML = `
     <div class="ms-dt-head">
       <span class="ms-dt-name">${escapeHtml(row.ind)}</span>
-      <span class="ms-dt-facts">強度 ${row.score}${msMomBadge(row.mom)}｜上漲 ${row.up_pct}%｜計分 ${row.n} 檔｜成交額佔比 ${row.share}%</span>
+      <span class="ms-dt-facts">強度 ${row.score}${msMomBadge(row.mom)}｜成員中位 ${
+        row.med === undefined ? "—" : row.med}｜上漲 ${row.up_pct}%｜計分 ${row.n} 檔｜成交額佔比 ${row.share}%</span>
+      <span class="ms-dt-note">${row.med !== undefined && row.score - row.med >= 12
+        ? "族群分數主要由成交額大的那幾檔撐起來，中位數沒那麼高。"
+        : (row.med !== undefined && row.med - row.score >= 12
+          ? "成交額大的那幾檔比整體弱，所以族群分數低於中位數。" : "")}</span>
       <button type="button" class="ms-dt-close" onclick="msOpenIndustry(null)" aria-label="收起">✕</button>
     </div>
     <div class="ms-dt-chart" id="ms-detail-chart"></div>

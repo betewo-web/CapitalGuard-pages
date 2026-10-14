@@ -5549,10 +5549,16 @@ select.fr-input { width: 100%; }
    不能跟著縮，也不要吃掉標題的空間。 */
 .ms-map-seg { display: inline-flex; flex: 0 0 auto; width: auto; padding: 2px;
 	border-radius: 10px; container-type: normal; }
-.ms-map-seg button { flex: 0 0 auto; padding: 0.2rem 0.5rem; font-size: 0.72rem;
-	border: 0; background: transparent; color: var(--text-muted); border-radius: 8px; }
+/* 2026-10-15 Howard：「按鈕要放大」。原本 0.72rem／0.2rem 內距看起來像說明文字，
+   不像按得下去的東西；拉到最小觸控目標（~32px 高）。 */
+.ms-map-seg button { flex: 0 0 auto; padding: 0.42rem 0.9rem; font-size: 0.86rem;
+	min-height: 32px; border: 0; background: transparent; color: var(--text-1);
+	border-radius: 9px; }
 .ms-map-seg button.is-on { background: rgba(146, 146, 163, 0.18); color: var(--text-0); font-weight: 600; }
 /* 輪動矩陣的欄位說明：數字沒有單位就讀不懂（2026-10-15 Howard 問「這些數字是什麼意思」） */
 .ms-rot-cols { display: flex; justify-content: space-between;
 	font-size: 0.66rem; color: var(--text-muted); padding: 0 0.6rem 3px; }
 .ms-rot-note b { color: var(--text-1); font-weight: 700; }
+/* 族群詳情的那一句：加權分與成員中位差很多時才出現（說明「是誰撐起來的」） */
+.ms-dt-note { grid-column: 1; font-size: 0.72rem; color: var(--sig-orange); }
+.ms-dt-note:empty { display: none; }
