@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="354">
+  <meta name="app-version" content="355">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=354" rel="stylesheet">
+  <link href="watchlist.css?v=355" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -363,6 +363,8 @@
           <!-- 等分網格（HTML）與面積熱力格（ECharts）只會有一個在畫面上 -->
           <div id="ms-grid-wrap"></div>
           <div class="ms-treemap" id="ms-treemap" style="display:none"></div>
+          <div class="ms-rot-note">每一格 ＝ 該族群成員的<b>成交額加權平均</b>強度；50 ≒ 與大盤同步。
+            點一格看成員中位數（不加權）與前三名——兩個數字差很多，就是少數幾檔撐起來的。</div>
           <!-- 點一格展開：那一族群的強度走勢（時間線）與成員榜 -->
           <div class="ms-detail" id="ms-detail" style="display:none"></div>
           <!-- 全部族群（2026-10-14 Howard：「為什麼呈現的種類這麼少？」）：
@@ -382,6 +384,11 @@
             <span class="ms-hint">依強度排序前 30</span>
           </div>
           <div class="ms-leaders" id="ms-leaders"></div>
+          <!-- 分數怎麼來的要寫出來（2026-10-15 Howard 問「個股強度的分數是什麼意思」）。
+               只能寫公式，不能寫每一檔的構面數值——超額可以反推回漲跌幅，那是原值。 -->
+          <div class="ms-rot-note">強度 ＝ 相對大盤超額 40% ＋ 量能倍數 30% ＋ 站上開盤價 15% ＋ 距 20 日高點 15%。
+            <b>50 分 ≒ 與大盤同步</b>；超額 ±3%、量能 3 倍就打到頂，所以同時滿分的不只一檔
+            （排序用未四捨五入的分數，同分時成交額大的在前）。</div>
           <div class="disclaimer-note">強度分數是公開資料的統計整理（0–100），不是推薦名單，也不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
           <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
         </div>
