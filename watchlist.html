@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="347">
+  <meta name="app-version" content="348">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=347" rel="stylesheet">
+  <link href="watchlist.css?v=348" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -300,7 +300,11 @@
             <span class="hs-label"><i data-icon="radar"></i>股票雷達</span>
           </span>
         </div>
-        <!-- 要看哪一種（2026-10-04 Howard）：自選／持股／好友分享 三選一，取代原本的「只列持股」撥片。
+        <!-- 要看哪一種（2026-10-04 Howard）：自選／市場／好友分享 三選一。
+             中間那一格 2026-10-14 從「持股」換成「市場」（Howard）：持股全靠手填、
+             多數人是空的，而那一格的位置是盤中最常按的；現在放「市場強度」——
+             開盤後每分鐘的族群與個股強度統計（見 MARKET_STRENGTH.md）。
+             持股資訊沒有消失：損益與股數仍在「🌙 盤後」每一張卡片的「持股」鈕裡。
              自己一排、三格等寬：塞在標題列裡的話，字級調大時三格加上右邊的入口鈕會擠不下。
              整排包在一個軌道裡（2026-10-06 Howard：原本三顆各自有框，看不出是分頁開關）——
              與首頁三分頁、分享中心第一層同一種容器，見 watchlist.css 的 .hs-seg。
@@ -309,7 +313,7 @@
              每一格後面的檔數由 renderHome 填（syncHomeFilter）；選了哪一格記在本機（HOME_FILTER_KEY）。 -->
         <div class="hs-seg" id="home-filter" role="radiogroup" aria-label="股票雷達要看哪一種">
           <button type="button" role="radio" data-hf="mine" aria-checked="true" onclick="setHomeFilter('mine')"><i data-icon="star"></i>自選<span class="hs-seg-n"></span></button>
-          <button type="button" role="radio" data-hf="held" aria-checked="false" onclick="setHomeFilter('held')"><i data-icon="wallet"></i>持股<span class="hs-seg-n"></span></button>
+          <button type="button" role="radio" data-hf="market" aria-checked="false" onclick="setHomeFilter('market')"><i data-icon="chart"></i>市場<span class="hs-seg-n"></span></button>
           <button type="button" role="radio" data-hf="shared" aria-checked="false" onclick="setHomeFilter('shared')"><i data-icon="share"></i>好友分享<span class="hs-seg-n"></span><span class="hs-seg-unread" id="hs-unread-shared"></span></button>
         </div>
 
@@ -332,6 +336,33 @@
         </div>
 
         <div class="home-grid" id="home-watchlist"></div>
+
+        <!-- ── 市場強度：「市場」那一格的內容（2026-10-14 Howard，取代「持股」）────
+             開盤後每分鐘一份：族群熱力格（面積＝成交額佔比、深淺＝強度）＋強勢個股榜。
+             資料由 reporter 的排程算好寫進 market_strength，前端只畫，不在這裡算分數
+             （COMPLIANCE.md：分數的定義只能有一份；也避免每台手機各算一次）。
+             **畫面上沒有股價、漲跌幅、成交量**——盤中報價的授權狀態未確認，
+             送到裝置上的只有自家算出來的分數（DATA_SOURCES.md 第十節）。 -->
+        <div class="ms-wrap" id="home-market" style="display:none">
+          <div class="ms-status" id="ms-status"></div>
+          <!-- 市場寬度：上漲／平／下跌家數佔比，配一條 09:00→現在的「上漲家數比例」走勢 -->
+          <div class="ms-breadth" id="ms-breadth"></div>
+          <div class="ms-head">
+            <span class="ms-h"><i data-icon="radar"></i>族群強度</span>
+            <span class="ms-hint">格子大小＝成交額佔比</span>
+          </div>
+          <!-- ECharts treemap。高度寫在 CSS（圖要先有高度才畫得出來） -->
+          <div class="ms-treemap" id="ms-treemap"></div>
+          <!-- 點一格展開：那一族群的強度走勢（時間線）與成員榜 -->
+          <div class="ms-detail" id="ms-detail" style="display:none"></div>
+          <div class="ms-head">
+            <span class="ms-h"><i data-icon="chart"></i>強勢個股</span>
+            <span class="ms-hint">強度前 30 名</span>
+          </div>
+          <div class="ms-leaders" id="ms-leaders"></div>
+          <div class="disclaimer-note">強度分數是公開資料的統計整理（0–100），不是推薦名單，也不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
+          <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
+        </div>
       </div>
 
       <!-- 「今日股票資訊彙整」那張卡 2026-09-27 搬到「盤後」分頁的最上面（Howard）：內容全部來自
@@ -2006,22 +2037,23 @@ let intradayOptionalCols = ["levels", "quote_at", "signals_today"];
 let inboxLoadError = null;
 let inboxFilter = "all";        // all / unread / important / stocks
 let scoresFilter = "screen";    // screen / picks / mine（2026-09-23 預設改成統計結果）
-// 首頁「股票雷達」要看哪一種（2026-10-04 Howard）：自選／持股／好友分享 三選一，取代原本的
-// 「只列持股」撥片。記在本機——換分頁、重開 App 都維持（2026-09-23 Howard：這個不要
-// 跟著分頁回預設，統計／通知那兩排篩選籤才要）。
+// 首頁「盤中」那一排要看哪一種（2026-10-04 Howard）：自選／市場／好友分享 三選一。
+// 記在本機——換分頁、重開 App 都維持（2026-09-23 Howard：這個不要跟著分頁回預設，
+// 統計／通知那兩排篩選籤才要）。
 //   mine   自己加的自選股（預設）
-//   held   有部位的那幾檔
+//   market 盤中市場強度（2026-10-14 取代「持股」，MARKET_STRENGTH.md）——
+//          它不是清單的篩選，是另一塊內容：選它的時候自選清單整個讓位
 //   shared 好友分享給我、已接受的
 const HOME_FILTER_KEY = "cg-home-filter";
-// 舊撥片存的值。只在還沒選過新的那一排時拿來接續：原本開著「只列持股」的人，升版後停在「持股」
-const HOLDINGS_ONLY_KEY = "cg-home-holdings-only";
-const HOME_FILTERS = ["mine", "held", "shared"];
-// 選到的那一種一檔都沒有時要講清楚是為什麼——空白是篩選造成的，不是資料沒來
+// 舊值一律回「自選」：2026-10-14 之前選著「持股」（held）、或更早那個撥片
+// （cg-home-holdings-only）的人升版後停在自選。「持股」那一格的功能沒有搬去別的格子
+// （損益與股數在「🌙 盤後」每張卡片的持股鈕裡），所以不該把他丟到「市場」——
+// 那是一個他沒選過的新畫面。
+const HOME_FILTERS = ["mine", "market", "shared"];
+// 選到的那一種一檔都沒有時要講清楚是為什麼——空白是篩選造成的，不是資料沒來。
+// market 不在這裡：那一格有自己的狀態行（msStatusHtml）。
 const HOME_FILTER_EMPTY = {
   mine:   "還沒有自選股。按上面那一排下面的「＋」加入；好友分享給你的股票在「好友分享」那一格。",
-  // 券商 API 還沒對使用者開放（同 .held 那一段的註解），所以不提「連券商同步」——
-  // 講一條使用者按不到的路，只會讓人去找一個不存在的開關
-  held:   "沒有持股部位。持股在「設定」分頁填股數。",
   shared: "還沒有好友分享給你的股票。好友分享後，到「分享」分頁的「好友分享給我」接受，就會出現在這裡。",
 };
 // 今日股票資訊彙整預設收合，只留第一條（Howard 2026-09-24）。刻意不寫進 localStorage：
@@ -2034,7 +2066,7 @@ let homeFilter = (() => {
   try {
     const v = localStorage.getItem(HOME_FILTER_KEY);
     if (HOME_FILTERS.includes(v)) return v;
-    return localStorage.getItem(HOLDINGS_ONLY_KEY) === "1" ? "held" : "mine";
+    return "mine";      // 認不得的舊值（"held"、舊撥片的 "1"）一律回自選
   } catch { return "mine"; }
 })();
 
@@ -4999,6 +5031,10 @@ async function _autoRefreshOnce() {
     // _hasMonitorPending()：剛加入的那一檔還沒拿到當日那列——停在哪一頁都要補拉，
     // 否則它整個盤中都停在「昨收＋0 則訊號」（見 _monitorPendingSids）
     if ((_intradayViewOpen() || _hasMonitorPending()) && liveQuotesAllowed()) { _lastQuoteRefreshAt = Date.now(); tasks.push(loadIntradayQuotes(true)); }
+    // 市場強度那一格開著時每輪拉一份（約 4 KB；後端每分鐘產一份新的）。
+    // 和盤中雷達同一條方案規則（plans.live_radar）：免費版不自動更新，
+    // 進那一格的那一次仍然會抓（_loadMarketIfStale），所以不是看不到，是不會自己變。
+    if (_marketViewOpen() && liveQuotesAllowed()) tasks.push(loadMarketStrength());
   } else if (_isSessionOverToday() && _closeQuoteMissing()) {
     tasks.push(loadIntradayQuotes(true, { full: true }).then(() => (_closeQuoteMissing() ? loadFinMindCloseQuotes() : null)));
   }
@@ -5236,7 +5272,10 @@ function switchTab(tab, silent = false) {
   // 重開 App 都維持（存在 localStorage，見 HOME_FILTER_KEY）
   if (!silent && location.hash !== `#${tab}`) location.hash = tab;
   if (tab === "inbox") refreshInbox(false);
-  if (changed && tab === "home") _refreshQuotesIfStale();   // 盤中報價只在首頁與字卡輪詢：回來時太舊就補一次
+  if (changed && tab === "home") {
+    _refreshQuotesIfStale();    // 盤中報價只在首頁與字卡輪詢：回來時太舊就補一次
+    _loadMarketIfStale();       // 停在「市場」那一格離開又回來：同理
+  }
   // 盤後頁要收盤價：主機沒寫到收盤時向 FinMind 補一次（那支自己限流），回來重畫
   if (tab === "post" && _isSessionOverToday() && _closeQuoteMissing()) {
     loadFinMindCloseQuotes().then(() => renderCurrentTab()).catch(() => {});
@@ -7061,7 +7100,10 @@ function renderRuleNudge() {
   const rules = ruleNudge.rules;
   const target = ruleNudgeTarget();
   const n = rules ? rules.length : 0;
-  const show = ruleNudgeShouldPrompt();
+  // 「市場」那一格不放它：那一行講的是自選股的規則設定，和畫面上的族群強度對不上。
+  // 判斷寫在這裡而不是 renderHome：這支還有四個呼叫點（新增規則、刪除規則、載入設定），
+  // 其中任何一個在那一格開著時被呼叫到，都會把它放回畫面上。
+  const show = ruleNudgeShouldPrompt() && !_marketViewOpen();
   card.style.display = show ? "" : "none";
   if (!show) return;
   // 一行就好（2026-09-20 把大卡拿掉）：新用戶第一眼要看到的是自己的股票，不是設定教學。
@@ -8624,29 +8666,36 @@ function renderHome() {
   // 頁面層級再數一次「幾檔有訊號」只是重複；狀態（盤中／收盤、資料時間、自選檔數）留在上面那一行。
 
   // 自選方塊：一檔一列（2026-09-22 Howard）。
-  // 要看哪一種由標題下面那一排決定（2026-10-04 Howard，取代原本的「只列持股」撥片）：
-  // 自選＝自己加的；持股＝有部位的那幾檔；好友分享＝好友分享給我、已接受的。
-  // 三種都只是少幾列——排序與每一列的內容完全一樣。
-  const heldMap = holdingBySid();
+  // 要看哪一種由標題下面那一排決定：自選＝自己加的；好友分享＝好友分享給我、已接受的。
+  // 這兩格只是少幾列——排序與每一列的內容完全一樣。
+  // 「市場」（2026-10-14 取代「持股」）不是清單的篩選而是另一塊內容：
+  // 自選清單整個收起來，換成市場強度那一區（見下面的 marketOn）。
   const byFilter = {
     mine:   rows.filter(r => !r.shared),
-    held:   homeHeldRows(rows, heldMap),
     shared: rows.filter(r => r.shared),
   };
-  syncHomeFilter({ mine: byFilter.mine.length, held: byFilter.held.length, shared: byFilter.shared.length });
+  syncHomeFilter({ mine: byFilter.mine.length, shared: byFilter.shared.length });
+  const marketOn = homeFilter === "market";
+  const marketEl = document.getElementById("home-market");
+  if (marketEl) marketEl.style.display = marketOn ? "" : "none";
   const shown = byFilter[homeFilter] || byFilter.mine;
   const listEl = document.getElementById("home-watchlist");
+  if (listEl) listEl.style.display = marketOn ? "none" : "";
   // 範例列是給「完全沒有歷史格子」的新帳號看的，照全部股票判斷；
-  // 只放在「自選」那一格——切到持股或分享時的空白是篩選造成的，不是沒資料
+  // 只放在「自選」那一格——切到市場或分享時的空白是篩選造成的，不是沒資料
   const example = homeFilter === "mine" && showcaseWanted(rows);
   // 一檔都沒有（自選與分享都是空的）＝新帳號進來的第一個畫面。只留一行灰字的話，他要自己找到
   // 那顆小按鈕；改成置中的大按鈕（Howard 2026-09-24），同時把那顆「＋」（2026-10-06 起在
   // 三格下面）與「自選／持股／好友分享」那一排收起來（.home-sec.is-empty），免得同一句話出現兩次、
   // 而且小的那顆反而更顯眼。篩選造成的空白不算——那時要講的是篩選，不是新增。
-  const noWatchlist = rows.length === 0;
+  // 「市場」那一格不算空帳號：空帳號的那組收起來（.is-empty）會把三格那一排
+  // 一起藏掉，新帳號就再也切不回自選了
+  const noWatchlist = rows.length === 0 && !marketOn;
   const secEl = listEl && listEl.closest(".home-sec");
   if (secEl) secEl.classList.toggle("is-empty", noWatchlist);
-  if (listEl) {
+  if (marketOn) {
+    renderMarketStrength();
+  } else if (listEl) {
     // 範例卡排在起步清單**之前**（2026-10-06 Howard：「本來會有聯發科範例，現在我沒看到」——
     // 起步清單夾在中間，把它推到 390px 手機的畫面外了）。順序是有意義的：
     // 範例卡回答「這個 App 會給我什麼」，起步清單才是「那我加哪幾檔」。
@@ -8671,18 +8720,9 @@ function renderHome() {
   sendTodayImportantInfoNotification(_collectTodayEvents());
 }
 
-// 「持股」那一格：有部位的股票，一檔只列一次。同一檔可能同時是自選股與好友分享的（並存），
-// 持股是自己的事，所以自己的那一列優先；自己沒有那一檔才列分享來的（同一檔好幾則分享只列第一則）。
-function homeHeldRows(rows, heldMap) {
-  const own = new Set(rows.filter(r => !r.shared).map(r => r.sid));
-  const seen = new Set();
-  return rows.filter(r => {
-    if (!heldMap.has(r.sid)) return false;
-    if (r.shared && (own.has(r.sid) || seen.has(r.sid))) return false;
-    if (r.shared) seen.add(r.sid);
-    return true;
-  });
-}
+// 「持股」那一格 2026-10-14 換成「市場」（Howard），那一格的清單過濾函式跟著移除。
+// 持股資訊沒有消失：股數與平均成本仍在「🌙 盤後」每張卡片的「持股」鈕裡（openHoldingsSheet），
+// 盤後清單也照舊把有部位的排在前面、每列寫出持股與損益（renderPost）。
 
 // 漲／平／跌：盤中即時（現價對前一日收盤），漲跌為零才是平——Howard 2026-09-20 定案：
 // 不設 ±x% 門檻。籤裡沒有數字，首頁不放股價與百分比。拿不到報價就不掛籤。
@@ -9073,13 +9113,16 @@ function syncAppFontSize() {
   syncFilterChips("font-size-chips", k);
 }
 
-// 首頁「股票雷達」切換要看哪一種（自選／持股／好友分享）。埋點名稱沿用 home_holdings_filter：
+// 首頁「盤中」那一排切換要看哪一種（自選／市場／好友分享）。埋點名稱沿用 home_holdings_filter：
 // 改了名，admin 儀表板上以前的資料就對不到標籤。內容從 {on} 換成 {mode}——選了哪一種。
 function setHomeFilter(mode) {
   homeFilter = HOME_FILTERS.includes(mode) ? mode : "mine";
   try { localStorage.setItem(HOME_FILTER_KEY, homeFilter); } catch {}
   trackActivity("home_holdings_filter", { mode: homeFilter });
   renderHome();
+  // 切到「市場」才去抓那一份（約 4 KB）：沒看的人不該付這個流量。
+  // renderHome 已經先畫過一次（手上有舊的就先顯示舊的），抓到再畫一次
+  _loadMarketIfStale();
 }
 
 // 今日股票資訊彙整的展開／收合（2026-09-27 起這一區在盤後分頁）。只重畫這一區就夠——
@@ -9092,7 +9135,8 @@ function togglePostNews() {
 }
 
 // 那一排的外觀跟著變數走，順便把每一格的檔數填上（0 不寫——「好友分享 0」對沒有好友的人
-// 只是雜訊）。renderHome 每次都叫一次，開 App 時記住的那一格才會亮著
+// 只是雜訊；「市場」沒有檔數，counts 裡沒有它的鍵）。renderHome 每次都叫一次，
+// 開 App 時記住的那一格才會亮著
 function syncHomeFilter(counts) {
   document.querySelectorAll("#home-filter [data-hf]").forEach(b => {
     const on = b.dataset.hf === homeFilter;
@@ -9101,10 +9145,349 @@ function syncHomeFilter(counts) {
     const n = b.querySelector(".hs-seg-n");
     if (n && counts) n.textContent = counts[b.dataset.hf] > 0 ? String(counts[b.dataset.hf]) : "";
   });
-  // 三格下面那顆「＋」只屬於「自選」（2026-10-06 Howard）：在持股與好友分享那兩格按它
+  // 三格下面那顆「＋」只屬於「自選」（2026-10-06 Howard）：在市場與好友分享那兩格按它
   // 會跳到設定頁加自選股，跟當下在看的東西對不上
   const add = document.getElementById("home-add-watch");
   if (add) add.classList.toggle("is-off", homeFilter !== "mine");
+}
+
+// ── 盤中市場強度（「市場」那一格；MARKET_STRENGTH.md）────────────────────────
+// 資料是 reporter 每分鐘算好、寫進 market_strength 的那一列（一個交易日一列、覆蓋式）。
+// 前端只畫不算：分數的定義只能有一份（COMPLIANCE.md），而「每台手機自己算」等於把
+// 全市場的報價原值送到裝置上——那正是 2026-10-14 決定不做的事（DATA_SOURCES.md 第十節）。
+// 所以這一整段裡**沒有任何地方碰得到股價、漲跌幅或成交量**：payload 只有分數、排名、
+// 家數佔比與成交額佔比。
+let marketPayload  = null;     // 最新那一份 payload（null＝還沒抓到／今天還沒有）
+let marketFetchedAt = 0;       // 上次抓到的本機時刻
+let marketLoadError = null;
+let marketIndOpen  = null;     // 展開中的族群名稱（null＝收著）
+let msTreemap = null, msTrend = null;
+
+// 盤中超過這段時間沒有新的一份＝後端那條線停了（排程沒跑、租約換手、MIS 連不上）。
+// 寫在畫面上而不是靜靜顯示舊資料：使用者看到的是「幾分鐘前的強弱」，那是會做決定的資訊。
+const MS_STALE_MS = 3 * 60 * 1000;
+// 強度 0–100 的單色階（橘，深→亮）。單色而不是紅綠：紅綠在全站專屬漲跌
+// （color-vocabulary-rules），而這一格根本不顯示漲跌幅；橘是唯一的強調色，
+// 「越亮＝越強」是同一個量的大小，不是多空。六階的亮度是遞增的（dataviz：
+// 順序色階只能單一色相、亮度單調），最弱那幾階對比度低是刻意的——它們要往後退，
+// 每一格另外有 1px 框線與直接標籤，形狀與數字不靠顏色讀。
+const MS_SCALE = ["#332c2e", "#523c2e", "#6f4f2d", "#96682f", "#cc8536", "#ff9f43"];
+function msColor(score) {
+  const s = Math.max(0, Math.min(100, Number(score) || 0));
+  return MS_SCALE[Math.min(MS_SCALE.length - 1, Math.floor(s / (100 / MS_SCALE.length)))];
+}
+
+// 「市場」那一格有沒有開著（抓資料與輪詢都看它）
+function _marketViewOpen() { return currentTab === "home" && homeFilter === "market"; }
+
+// 一個交易日一列，所以只要最新那一列。欄位全拿（select=*）：payload 是 JSONB，
+// 挑欄位省不了什麼，而少一個參數就少一處要跟著 migration 改的地方。
+async function loadMarketStrength() {
+  if (!state.userId) return;
+  try {
+    const rows = await sbGet("market_strength",
+      { "order": "trade_date.desc", "limit": "1" }, state.accessToken);
+    const row = Array.isArray(rows) ? rows[0] : null;
+    marketPayload = (row && row.payload) || null;
+    marketLoadError = null;
+  } catch (e) {
+    // 表還沒建（migration 沒跑）也走這裡：PostgREST 回 404／PGRST205。
+    // 畫面講「尚無資料」就好，不必讓使用者看見 SQL 名詞
+    marketLoadError = e;
+  }
+  marketFetchedAt = Date.now();
+  if (_marketViewOpen()) renderMarketStrength();
+}
+
+// 從別的地方切進「市場」那一格：手上那份超過一個輪詢間隔就先補一次，不等下一輪
+function _loadMarketIfStale() {
+  if (!_marketViewOpen()) return;
+  if (marketPayload && Date.now() - marketFetchedAt < QUOTE_MS_MARKET) return;
+  loadMarketStrength().catch(() => {});
+}
+
+function renderMarketStrength() {
+  const wrap = document.getElementById("home-market");
+  if (!wrap) return;
+  const p = marketPayload;
+  document.getElementById("ms-status").innerHTML = msStatusHtml(p);
+  const hasData = !!(p && Array.isArray(p.industries) && p.industries.length);
+  document.getElementById("ms-breadth").innerHTML = hasData ? msBreadthHtml(p) : "";
+  document.getElementById("ms-leaders").innerHTML = hasData
+    ? (p.leaders || []).map(msLeaderHtml).join("")
+    : `<div class="home-tile-empty">${marketPayload === null && !marketLoadError
+        ? "正在取得今天的市場統計…"
+        : "今天還沒有市場統計。開盤後每分鐘更新一次。"}</div>`;
+  // 展開中的族群這一輪可能不在清單裡了（它掉出前 16 格）——收起來比留一張對不上的詳情好
+  if (marketIndOpen && hasData && !(p.industries || []).some(i => i.ind === marketIndOpen)) {
+    marketIndOpen = null;
+  }
+  if (hasData) msRenderTreemap(p); else msDisposeCharts();
+  msRenderDetail();
+}
+
+// 狀態那一行：資料時刻、計分檔數，以及三種「畫面不會自己變」的情況。
+// 每一種都要寫出原因——只寫「10:03」而畫面停著，使用者會以為程式壞了。
+function msStatusHtml(p) {
+  if (marketLoadError && !p) return `<span class="ms-warn">市場統計讀取失敗，下一輪會自動重試。</span>`;
+  if (!p) return `<span class="text-muted">尚無資料</span>`;
+  const t = String(p.asof || "").slice(11, 16);
+  const stale = _isMarketOpenNow() && (Date.now() - Date.parse(p.asof) > MS_STALE_MS);
+  const bits = [`<b>${escapeHtml(t)}</b> 的統計`,
+                `計分 ${Number(p.valid || 0)} 檔（池 ${Number(p.pool || 0)} 檔）`];
+  // 免費版盤中不自動更新（和盤中雷達同一條規則，plans.live_radar）
+  if (_isMarketOpenNow() && !liveQuotesAllowed()) bits.push(`不自動更新（免費版）`);
+  const warn = stale ? `<span class="ms-warn">資料停在 ${escapeHtml(t)}，可能暫時沒有更新。</span>` : "";
+  return `<span class="text-muted">${bits.join("｜")}</span>${warn}`;
+}
+
+// 市場寬度：上漲／平／下跌家數佔比。一條堆疊條（2px 間隙把三段分開，dataviz 的
+// mark spec）＋一條「上漲家數比例」從 09:00 到現在的走勢——今天是越走越強還是越走越弱，
+// 這一條就講完了。數字在文字裡，顏色只是強調。
+function msBreadthHtml(p) {
+  const b = p.breadth || {};
+  const up = Number(b.up_pct || 0), down = Number(b.down_pct || 0);
+  const flat = Math.max(0, 100 - up - down);
+  const spark = msSparkSvg(b.trend || [], { w: 112, h: 28, min: 0, max: 100, base: 50 });
+  return `
+    <div class="ms-bd-row">
+      <div class="ms-bd-nums">
+        <span class="ms-bd-up">上漲 ${up}%</span>
+        <span class="ms-bd-flat">平 ${flat}%</span>
+        <span class="ms-bd-down">下跌 ${down}%</span>
+      </div>
+      <div class="ms-bd-spark" aria-hidden="true">${spark}</div>
+    </div>
+    <div class="ms-bd-bar" role="img" aria-label="上漲 ${up}%、平盤 ${flat}%、下跌 ${down}%">
+      <i style="width:${up}%"></i><i class="is-flat" style="width:${flat}%"></i><i class="is-down" style="width:${down}%"></i>
+    </div>
+    <div class="ms-bd-note">分母是這一輪算得出分數的 ${Number(b.n || 0)} 檔</div>`;
+}
+
+// 迷你走勢（inline SVG，不用圖表套件）：列表裡有三十幾條，每條都開一個 ECharts
+// 實例會把低階手機拖垮。2px 線、沒有座標軸與格線、只有最後一點有圓點——
+// 它的工作是「形狀」，精確的值在旁邊的數字裡。
+function msSparkSvg(values, opts) {
+  const o = Object.assign({ w: 96, h: 24, min: null, max: null, base: null }, opts || {});
+  const vs = (values || []).map(Number).filter(v => Number.isFinite(v));
+  if (vs.length < 2) return `<svg width="${o.w}" height="${o.h}" viewBox="0 0 ${o.w} ${o.h}"></svg>`;
+  const lo = o.min === null ? Math.min(...vs) : o.min;
+  const hi = o.max === null ? Math.max(...vs) : o.max;
+  const span = (hi - lo) || 1;
+  const pad = 3;
+  const x = i => pad + (o.w - 2 * pad) * (vs.length === 1 ? 0 : i / (vs.length - 1));
+  const y = v => o.h - pad - (o.h - 2 * pad) * ((v - lo) / span);
+  const pts = vs.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const baseLine = o.base === null ? "" :
+    `<line class="ms-spark-base" x1="${pad}" y1="${y(o.base).toFixed(1)}" x2="${o.w - pad}" y2="${y(o.base).toFixed(1)}"/>`;
+  const last = vs[vs.length - 1];
+  return `<svg class="ms-spark" width="${o.w}" height="${o.h}" viewBox="0 0 ${o.w} ${o.h}" aria-hidden="true">
+    ${baseLine}<polyline class="ms-spark-line" points="${pts}"/>
+    <circle class="ms-spark-dot" cx="${x(vs.length - 1).toFixed(1)}" cy="${y(last).toFixed(1)}" r="2.5"/>
+  </svg>`;
+}
+
+// 動能（近 15 分鐘的分數變化）。箭頭與數字講方向與大小，顏色只負責「值得看一眼」：
+// 上升用橘（唯一的強調色），其餘灰。紅綠不碰——那組顏色在全站專屬漲跌幅。
+function msMomBadge(mom) {
+  if (mom === null || mom === undefined) return "";
+  const m = Math.round(Number(mom) || 0);
+  const arrow = m >= 5 ? "↑" : m >= 2 ? "↗" : m <= -5 ? "↓" : m <= -2 ? "↘" : "→";
+  const cls = m >= 2 ? "is-rise" : "";
+  return `<span class="ms-mom ${cls}">${arrow}${m > 0 ? "+" : ""}${m}</span>`;
+}
+
+// 族群熱力格：面積＝成交額佔比、顏色＝強度分數。
+// 畫哪幾格：成交額前 10 類 ∪ 強度前 2 類（最多 12 格，其餘併成「其他」）。
+// · 只按成交額取會讓「小而強」的族群（例如航運）永遠看不到，只按強度取則讓面積
+//   失去意義——兩個都要。
+// · 12 格是量出來的：2026-10-14 在 390px 上畫 16 格，最小的幾格剩 30×30，
+//   標籤被截成「油」「電 3」「航」，等於畫了看不懂的東西。
+// · 「其他」那一格（灰、不可點）的佔比仍然要畫出來，不然所有格子的面積都在對一個
+//   不存在的 100% 分母。
+const MS_TILES = 10;                   // 最多畫幾格（含「其餘」那一格）
+const MS_TILE_LABEL_MIN_SHARE = 2.0;   // 佔比低於這個數的格子不寫字（寫了也是被截斷）
+// 格子裡的族群名要短。交易所的產業別最長有八個字（電腦及週邊設備業），390px 的
+// 熱力格放不下，ECharts 會截成「電腦及週…」甚至只剩一個字——2026-10-14 第一版
+// 就畫出了「油」「電 3」「航」這種看不懂的格子。
+// 規則：先查這張表，查不到就去掉結尾的「工業」／「業」再取前四個字。
+// 詳情面板與個股列仍然用全名（那裡放得下）。
+const MS_IND_SHORT = {
+  "電腦及週邊設備業": "電腦週邊", "電子零組件業": "電子零組", "其他電子業": "其他電子",
+  "通信網路業": "通信網路", "油電燃氣業": "油電燃氣", "金融保險業": "金融保險",
+  "建材營造業": "建材營造", "生技醫療業": "生技醫療", "資訊服務業": "資訊服務",
+  "電子通路業": "電子通路", "貿易百貨業": "貿易百貨", "農業科技業": "農業科技",
+  "文化創意業": "文化創意", "半導體業": "半導體", "其他業": "其他產業",
+};
+function msIndShort(name) {
+  const n = String(name || "");
+  return MS_IND_SHORT[n] || n.replace(/(工業|業)$/, "").slice(0, 4);
+}
+function msRenderTreemap(p) {
+  const el = document.getElementById("ms-treemap");
+  if (!el || typeof echarts === "undefined") return;
+  const inds = (p.industries || []).slice();
+  const byShare = inds.slice().sort((a, b) => b.share - a.share).slice(0, MS_TILES - 2);
+  const byScore = inds.slice().sort((a, b) => b.score - a.score).slice(0, 2);
+  const keep = [];
+  const seen = new Set();
+  for (const i of byShare.concat(byScore)) {
+    if (seen.has(i.ind)) continue;
+    seen.add(i.ind); keep.push(i);
+  }
+  const rest = inds.filter(i => !seen.has(i.ind));
+  const restShare = rest.reduce((s, i) => s + Number(i.share || 0), 0);
+  const data = keep
+    .sort((a, b) => b.share - a.share)
+    .map(i => ({
+      name: i.ind, value: Math.max(0.1, Number(i.share) || 0),
+      itemStyle: { color: msColor(i.score) },
+      label: { show: Number(i.share) >= MS_TILE_LABEL_MIN_SHARE },
+      _label: msIndShort(i.ind), _score: i.score,
+    }));
+  if (restShare > 0.5) {
+    // 叫「其餘 N 類」不叫「其他」：產業別裡本來就有「其他業」與「其他電子業」，
+    // 三個「其他」擺在同一張圖上讀不出哪個是合計
+    // 兩行（「其餘」／「24 類」）而不是一行：一行在窄格子裡會被截成「其餘 24…」
+    data.push({ name: "__rest__", value: restShare, _score: `${rest.length} 類`,
+                _label: "其餘",
+                itemStyle: { color: "#23232e" }, label: { show: true, color: "#9292a3" } });
+  }
+  if (!msTreemap || msTreemap.isDisposed() || msTreemap.getDom() !== el) {
+    if (msTreemap && !msTreemap.isDisposed()) msTreemap.dispose();
+    el.innerHTML = "";
+    msTreemap = echarts.init(el, null, { renderer: "canvas" });
+    // 點一格展開那一族群的詳情。「其他」是一堆族群的合計，點了沒有東西可展開
+    msTreemap.on("click", e => {
+      const name = e && e.data && e.data.name;
+      if (!name || name === "__rest__") return;   // 合計那一格是一堆族群，沒有東西可展開
+      msOpenIndustry(name === marketIndOpen ? null : name);
+    });
+  }
+  msTreemap.setOption({
+    animation: false,
+    // roam 關掉：手機上開著它，想往下捲頁面會變成拖圖
+    series: [{
+      type: "treemap", roam: false, nodeClick: false, breadcrumb: { show: false },
+      top: 0, bottom: 0, left: 0, right: 0,
+      itemStyle: { borderColor: "rgba(146,146,163,0.28)", borderWidth: 1, gapWidth: 2 },
+      label: {
+        show: true, position: "insideTopLeft", lineHeight: 15,
+        color: "#f5f5f7", fontSize: 12, fontWeight: 600,
+        overflow: "truncate", ellipsis: "…",
+        formatter: o => {
+          const d = o.data || {};
+          const label = d._label || o.name;
+          return d._score === null || d._score === undefined ? label : `${label}\n${d._score}`;
+        },
+      },
+      data,
+    }],
+    tooltip: { show: false },   // 手機沒有 hover；要細節就是點那一格（展開詳情）
+  }, { notMerge: true });
+  msTreemap.resize();
+}
+
+function msOpenIndustry(ind) {
+  marketIndOpen = ind || null;
+  trackActivity("market_industry", { ind: marketIndOpen || "" });
+  msRenderDetail();
+}
+
+// 族群詳情：那一族群今天的強度走勢（單一序列＝不必圖例）＋前三名成員。
+// 走勢用 ECharts 而不是 sparkline：這一張要讀得出「幾點開始轉強」，需要時間軸。
+function msRenderDetail() {
+  const box = document.getElementById("ms-detail");
+  if (!box) return;
+  const p = marketPayload;
+  const row = p && (p.industries || []).find(i => i.ind === marketIndOpen);
+  if (!row) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    if (msTrend && !msTrend.isDisposed()) { msTrend.dispose(); msTrend = null; }
+    return;
+  }
+  const members = (row.top || []).map(m => `
+    <button type="button" class="ms-mem" onclick="msTapStock('${jsAttr(m.sid)}')">
+      <span class="ms-mem-name">${escapeHtml(m.name)}</span>
+      <span class="ms-mem-sid">${escapeHtml(m.sid)}</span>
+      <span class="ms-mem-score" style="color:${msColor(m.score)}">${Number(m.score)}</span>
+    </button>`).join("");
+  box.style.display = "";
+  box.innerHTML = `
+    <div class="ms-dt-head">
+      <span class="ms-dt-name">${escapeHtml(row.ind)}</span>
+      <span class="ms-dt-facts">強度 ${row.score}${msMomBadge(row.mom)}｜上漲 ${row.up_pct}%｜計分 ${row.n} 檔｜成交額佔比 ${row.share}%</span>
+      <button type="button" class="ms-dt-close" onclick="msOpenIndustry(null)" aria-label="收起">✕</button>
+    </div>
+    <div class="ms-dt-chart" id="ms-detail-chart"></div>
+    <div class="ms-dt-mems">${members || '<span class="text-muted">這一輪沒有成員資料</span>'}</div>`;
+  const el = document.getElementById("ms-detail-chart");
+  if (!el || typeof echarts === "undefined") return;
+  if (msTrend && !msTrend.isDisposed()) msTrend.dispose();
+  msTrend = echarts.init(el, null, { renderer: "canvas" });
+  const vals = (row.trend || []).map(Number);
+  // 橫軸是「幾分鐘前」而不是絕對時刻：payload 只帶最近 60 點，而重啟後那串會變短——
+  // 寫死 09:00 起算的時刻會對不上（radar-timeline-redesign 的教訓：軸要誠實）
+  const n = vals.length;
+  msTrend.setOption({
+    animation: false,
+    grid: { left: 34, right: 10, top: 8, bottom: 20 },
+    xAxis: {
+      type: "category", boundaryGap: false,
+      data: vals.map((_, i) => (i === n - 1 ? "現在" : `${n - 1 - i} 分前`)),
+      axisLabel: { color: "#9292a3", fontSize: 10, showMaxLabel: true, interval: Math.max(0, Math.ceil(n / 4) - 1) },
+      axisLine: { lineStyle: { color: "rgba(146,146,163,0.25)" } }, axisTick: { show: false },
+    },
+    yAxis: {
+      type: "value", min: 0, max: 100, interval: 50,
+      axisLabel: { color: "#9292a3", fontSize: 10 },
+      splitLine: { lineStyle: { color: "rgba(146,146,163,0.15)" } },
+    },
+    series: [{
+      type: "line", data: vals, smooth: false, symbol: "none",
+      lineStyle: { width: 2, color: "#ff9f43" },
+      areaStyle: { color: "rgba(255,159,67,0.12)" },
+      markPoint: {
+        symbol: "circle", symbolSize: 8, silent: true,
+        data: n ? [{ coord: [n - 1, vals[n - 1]], itemStyle: { color: "#ff9f43" } }] : [],
+        label: { show: false },
+      },
+    }],
+  }, { notMerge: true });
+  msTrend.resize();
+}
+
+// 強勢個股一列：排名、名稱、代號、強度分數、動能、迷你走勢。
+// **沒有股價也沒有漲跌幅**（見這一段開頭的註解）。點一列的去處由 msTapStock 決定。
+function msLeaderHtml(r) {
+  return `
+    <button type="button" class="ms-lead" onclick="msTapStock('${jsAttr(r.sid)}')">
+      <span class="ms-ld-rank">${Number(r.rank)}</span>
+      <span class="ms-ld-main">
+        <span class="ms-ld-name">${escapeHtml(r.name)}</span>
+        <span class="ms-ld-sub">${escapeHtml(r.sid)}・${escapeHtml(r.ind)}</span>
+      </span>
+      <span class="ms-ld-spark">${msSparkSvg(r.trend || [], { w: 64, h: 22, min: 0, max: 100 })}</span>
+      <span class="ms-ld-score" style="color:${msColor(r.score)}">${Number(r.score)}</span>
+      <span class="ms-ld-mom">${msMomBadge(r.mom)}</span>
+    </button>`;
+}
+
+// 點一檔：已經在自選（或好友分享）清單裡就開個股字卡（那裡才有報價、關卡與 K 線，
+// 走的是既有的登入與方案檢查）；不在清單裡的就跳到設定頁、代號填好等他按新增——
+// 自動加進去會偷偷吃掉方案的自選股額度。
+function msTapStock(sid) {
+  const key = String(sid || "").trim();
+  if (!key) return;
+  trackActivity("market_stock", { sid: key });
+  if (watchlistRows.some(r => String(r.stock_id).trim() === key)) { openRadarTimeline(key); return; }
+  addStockFromScores(key);
+}
+
+function msDisposeCharts() {
+  if (msTreemap && !msTreemap.isDisposed()) { msTreemap.dispose(); msTreemap = null; }
+  if (msTrend && !msTrend.isDisposed()) { msTrend.dispose(); msTrend = null; }
 }
 
 // ── 統計結果（使用者自己設的排序與條件，存在本機） ──
