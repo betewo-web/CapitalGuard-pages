@@ -355,6 +355,14 @@
           <div class="ms-treemap" id="ms-treemap"></div>
           <!-- 點一格展開：那一族群的強度走勢（時間線）與成員榜 -->
           <div class="ms-detail" id="ms-detail" style="display:none"></div>
+          <!-- 全部族群（2026-10-14 Howard：「為什麼呈現的種類這麼少？」）：
+               熱力格只畫得下 10 格，但資料有 30 幾類。這一份照強度排、每一類都在，
+               點一列與點格子是同一個展開。預設只露前 10 列，其餘按鈕展開。 -->
+          <div class="ms-head">
+            <span class="ms-h"><i data-icon="chart"></i>全部族群</span>
+            <span class="ms-hint" id="ms-inds-hint"></span>
+          </div>
+          <div class="ms-inds" id="ms-inds"></div>
           <div class="ms-head">
             <span class="ms-h"><i data-icon="chart"></i>強勢個股</span>
             <span class="ms-hint">強度前 30 名</span>
@@ -9223,7 +9231,44 @@ function renderMarketStrength() {
     marketIndOpen = null;
   }
   if (hasData) msRenderTreemap(p); else msDisposeCharts();
+  document.getElementById("ms-inds").innerHTML = hasData ? msIndListHtml(p) : "";
+  const hint = document.getElementById("ms-inds-hint");
+  if (hint) hint.textContent = hasData ? `${p.industries.length} 類・照強度排` : "";
   msRenderDetail();
+}
+
+// 全部族群：照強度排，每一類都在（熱力格只畫得下 10 格，而資料有 30 幾類）。
+// 預設露前 MS_IND_PREVIEW 列——37 列一次攤開要捲過 1,200px 才看得到強勢個股。
+const MS_IND_PREVIEW = 10;
+let msIndsExpanded = false;
+function msIndListHtml(p) {
+  const inds = p.industries || [];
+  const shown = msIndsExpanded ? inds : inds.slice(0, MS_IND_PREVIEW);
+  const rows = shown.map((i, n) => `
+    <button type="button" class="ms-ind ${i.ind === marketIndOpen ? "is-on" : ""}"
+            onclick="msOpenIndustry('${jsAttr(i.ind)}')">
+      <span class="ms-in-rank">${n + 1}</span>
+      <span class="ms-in-main">
+        <span class="ms-in-name">${escapeHtml(i.ind)}</span>
+        <span class="ms-in-bar"><i style="width:${Math.max(2, Number(i.score))}%;background:${msColor(i.score)}"></i></span>
+      </span>
+      <span class="ms-in-facts">
+        <span class="ms-in-score" style="color:${msColor(i.score)}">${Number(i.score)}</span>
+        <span class="ms-in-sub">上漲 ${Number(i.up_pct)}%・${Number(i.n)} 檔</span>
+      </span>
+      <span class="ms-in-mom">${msMomBadge(i.mom)}</span>
+    </button>`).join("");
+  const more = inds.length > MS_IND_PREVIEW
+    ? `<button type="button" class="ms-more" onclick="msToggleInds()">${
+        msIndsExpanded ? "收合" : `顯示全部 ${inds.length} 類`}</button>`
+    : "";
+  return rows + more;
+}
+
+function msToggleInds() {
+  msIndsExpanded = !msIndsExpanded;
+  trackActivity("market_inds_toggle", { on: msIndsExpanded ? 1 : 0 });
+  document.getElementById("ms-inds").innerHTML = msIndListHtml(marketPayload || {});
 }
 
 // 狀態那一行：資料時刻、計分檔數，以及三種「畫面不會自己變」的情況。
@@ -9234,7 +9279,7 @@ function msStatusHtml(p) {
   const t = String(p.asof || "").slice(11, 16);
   const stale = _isMarketOpenNow() && (Date.now() - Date.parse(p.asof) > MS_STALE_MS);
   const bits = [`<b>${escapeHtml(t)}</b> 的統計`,
-                `計分 ${Number(p.valid || 0)} 檔（池 ${Number(p.pool || 0)} 檔）`];
+                `計分 ${Number(p.valid || 0).toLocaleString()}／全市場 ${Number(p.pool || 0).toLocaleString()} 檔`];
   // 免費版盤中不自動更新（和盤中雷達同一條規則，plans.live_radar）
   if (_isMarketOpenNow() && !liveQuotesAllowed()) bits.push(`不自動更新（免費版）`);
   const warn = stale ? `<span class="ms-warn">資料停在 ${escapeHtml(t)}，可能暫時沒有更新。</span>` : "";
@@ -9361,7 +9406,7 @@ function msRenderTreemap(p) {
     msTreemap.on("click", e => {
       const name = e && e.data && e.data.name;
       if (!name || name === "__rest__") return;   // 合計那一格是一堆族群，沒有東西可展開
-      msOpenIndustry(name === marketIndOpen ? null : name);
+      msOpenIndustry(name);                       // 收合由 msOpenIndustry 自己判（與清單同一條路）
     });
   }
   msTreemap.setOption({
@@ -9389,9 +9434,13 @@ function msRenderTreemap(p) {
 }
 
 function msOpenIndustry(ind) {
-  marketIndOpen = ind || null;
+  // 點已經展開的那一類＝收起來（熱力格與清單都走這裡，行為要一樣）
+  marketIndOpen = (ind && ind !== marketIndOpen) ? ind : null;
   trackActivity("market_industry", { ind: marketIndOpen || "" });
   msRenderDetail();
+  // 清單那一份要跟著換亮著的那一列
+  const list = document.getElementById("ms-inds");
+  if (list && marketPayload) list.innerHTML = msIndListHtml(marketPayload);
 }
 
 // 族群詳情：那一族群今天的強度走勢（單一序列＝不必圖例）＋前三名成員。
