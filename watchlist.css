@@ -5381,15 +5381,18 @@ select.fr-input { width: 100%; }
 .ms-bd-row { display: flex; align-items: center; gap: 0.5rem; }
 .ms-bd-nums { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; gap: 0.1rem 0.6rem;
 	font-size: 0.82rem; font-weight: 600; color: var(--text-1); }
-.ms-bd-up { color: var(--text-0); }
+.ms-bd-up { color: var(--chg-up); font-weight: 700; }
+.ms-bd-down { color: var(--chg-down); }
 .ms-bd-spark { flex: 0 0 auto; }
 .ms-bd-bar { display: flex; gap: 2px; margin-top: 0.5rem; height: 8px;
 	border-radius: 999px; overflow: hidden; background: rgba(146, 146, 163, 0.12); }
 /* 三段：上漲用強調色、平盤與下跌退成灰階。紅綠不碰——那組顏色全站專屬漲跌幅，
    而這一條講的是「家數」，不是哪一檔漲了多少 */
-.ms-bd-bar i { display: block; height: 100%; background: var(--sig-orange); border-radius: 2px; }
-.ms-bd-bar i.is-flat { background: rgba(146, 146, 163, 0.5); }
-.ms-bd-bar i.is-down { background: rgba(146, 146, 163, 0.28); }
+/* 2026-10-15：這一條講的就是上漲／下跌家數，跟著改成台股紅綠（強度色階同一套）。
+   數字就寫在上面那一行，顏色不是唯一的編碼。 */
+.ms-bd-bar i { display: block; height: 100%; background: var(--chg-up); border-radius: 2px; }
+.ms-bd-bar i.is-flat { background: rgba(146, 146, 163, 0.45); }
+.ms-bd-bar i.is-down { background: var(--chg-down); }
 .ms-bd-note { margin-top: 0.35rem; font-size: 0.72rem; color: var(--text-muted); }
 
 .ms-head { display: flex; align-items: baseline; justify-content: space-between;

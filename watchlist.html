@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="353">
+  <meta name="app-version" content="354">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=353" rel="stylesheet">
+  <link href="watchlist.css?v=354" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9219,18 +9219,26 @@ const MS_STALE_MS = 3 * 60 * 1000;
 // 「越亮＝越強」是同一個量的大小，不是多空。六階的亮度是遞增的（dataviz：
 // 順序色階只能單一色相、亮度單調），最弱那幾階對比度低是刻意的——它們要往後退，
 // 每一格另外有 1px 框線與直接標籤，形狀與數字不靠顏色讀。
-// 2026-10-15 Howard：「強度顯示視覺上不夠吸睛」。原本是橘的單色階（弱＝接近背景色），
-// 結果整張圖是一片土黃——因為大部分族群落在 30–60 分，而那一段剛好是最暗的幾階。
-// 改成**發散色階**：橘（強）↔ 藍（弱），中間是中性灰。
-// 50 分不是隨便挑的中點：強度的第一個構面是「相對大盤超額」，與大盤同步時它剛好得
-// 0.5，所以 50 ＝ 與大盤同步。兩端都飽和，弱的也看得見，畫面不會只剩一種顏色。
-// 紅綠仍然專給方向（市場訊號那一格的上漲／下跌訊號），橘↔藍只講強弱，兩套不混。
+// 強度 0–100 的發散色階。**2026-10-15 Howard 定案改用台股的紅綠**：
+// 強＝紅、弱＝綠、與大盤同步＝中性灰。
+//
+// 沿革與取捨（兩次都換過，理由留著免得有人又改回去）：
+//   單色階（橘）→ 弱端接近背景色，而多數族群落在 30–60 分，整張圖變成一片土黃
+//   橘↔藍 → 兩端都看得見了，但要多學一套顏色語言
+//   紅↔綠（現在）→ 台股本來就紅漲綠跌，而市場訊號那一格的方向也是紅綠，
+//                  整個 App 變成同一句話：紅＝往上那一邊、綠＝往下那一邊
+//
+// 50 分不是隨便挑的中點：強度的第一個構面是「相對大盤超額」，與大盤同步時它剛好
+// 得 0.5。所以中性灰那一段的意思很明確——跟著大盤走。
+//
+// 紅綠對色盲不友善，所以**顏色永遠不是唯一的編碼**：每一格都直接寫著分數，
+// 網格又照強度排序（位置也在講同一件事）。改版時不要把數字拿掉。
 const MS_SCALE = [
-  { max: 25,  c: "#2e7fd4" },   // 明顯弱於大盤
-  { max: 42,  c: "#2a5f94" },
+  { max: 25,  c: "#2ed573" },   // 明顯弱於大盤（--chg-down）
+  { max: 42,  c: "#1f9e55" },
   { max: 58,  c: "#3a3a46" },   // 與大盤同步：中性，要退到背景去
-  { max: 75,  c: "#cc7a2e" },
-  { max: 101, c: "#ff9f43" },   // 明顯強於大盤
+  { max: 75,  c: "#c0455c" },
+  { max: 101, c: "#ff6b81" },   // 明顯強於大盤（--chg-up）
 ];
 function msColor(score) {
   const s = Math.max(0, Math.min(100, Number(score) || 0));
@@ -9758,11 +9766,11 @@ function msRenderDetail() {
     },
     series: [{
       type: "line", data: vals, smooth: false, symbol: "none",
-      lineStyle: { width: 2, color: "#ff9f43" },
-      areaStyle: { color: "rgba(255,159,67,0.12)" },
+      lineStyle: { width: 2, color: msColor(row.score) },
+      areaStyle: { color: "rgba(146,146,163,0.10)" },
       markPoint: {
         symbol: "circle", symbolSize: 8, silent: true,
-        data: n ? [{ coord: [n - 1, vals[n - 1]], itemStyle: { color: "#ff9f43" } }] : [],
+        data: n ? [{ coord: [n - 1, vals[n - 1]], itemStyle: { color: msColor(row.score) } }] : [],
         label: { show: false },
       },
     }],
