@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="348">
+  <meta name="app-version" content="349">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=348" rel="stylesheet">
+  <link href="watchlist.css?v=349" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -338,7 +338,7 @@
         <div class="home-grid" id="home-watchlist"></div>
 
         <!-- ── 市場強度：「市場」那一格的內容（2026-10-14 Howard，取代「持股」）────
-             開盤後每分鐘一份：族群熱力格（面積＝成交額佔比、深淺＝強度）＋強勢個股榜。
+             開盤後每分鐘一份：族群熱力格（面積＝成交額佔比、深淺＝強度）＋個股強度榜。
              資料由 reporter 的排程算好寫進 market_strength，前端只畫，不在這裡算分數
              （COMPLIANCE.md：分數的定義只能有一份；也避免每台手機各算一次）。
              **畫面上沒有股價、漲跌幅、成交量**——盤中報價的授權狀態未確認，
@@ -363,9 +363,22 @@
             <span class="ms-hint" id="ms-inds-hint"></span>
           </div>
           <div class="ms-inds" id="ms-inds"></div>
+
+          <!-- ── 市場脈動（2026-10-14 Howard：訊號的數目與種類要能和漲跌一起觀測）──
+               三層共用一條 09:00–13:30 的時間軸：
+               ① 訊號脈動：每分鐘 ↑上漲訊號／↓下跌訊號 的則數（雙向柱——數目給柱高、方向給上下，
+                  顏色因此不必扛方向）
+               ② 族群輪動：族群 × 15 分鐘的淨訊號矩陣（熱帶會從一列移到另一列＝資金輪動）
+               ③ 種類：每種一條迷你走勢＋今日累計，點一種就只看那一種
+               點族群／點種類會互相過濾，狀態在 msPulseFilter。 -->
           <div class="ms-head">
-            <span class="ms-h"><i data-icon="chart"></i>強勢個股</span>
-            <span class="ms-hint">強度前 30 名</span>
+            <span class="ms-h"><i data-icon="radar"></i>市場脈動</span>
+            <span class="ms-hint" id="ms-pulse-hint"></span>
+          </div>
+          <div class="ms-pulse" id="ms-pulse"></div>
+          <div class="ms-head">
+            <span class="ms-h"><i data-icon="chart"></i>個股強度</span>
+            <span class="ms-hint">依強度排序前 30</span>
           </div>
           <div class="ms-leaders" id="ms-leaders"></div>
           <div class="disclaimer-note">強度分數是公開資料的統計整理（0–100），不是推薦名單，也不是投資建議；本服務非證券投資顧問事業，投資決策請自行判斷。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
@@ -9234,11 +9247,29 @@ function renderMarketStrength() {
   document.getElementById("ms-inds").innerHTML = hasData ? msIndListHtml(p) : "";
   const hint = document.getElementById("ms-inds-hint");
   if (hint) hint.textContent = hasData ? `${p.industries.length} 類・照強度排` : "";
+  document.getElementById("ms-pulse").innerHTML = hasData ? msPulseHtml(p) : "";
+  const ph = document.getElementById("ms-pulse-hint");
+  if (ph) ph.textContent = msPulseHint(p);
   msRenderDetail();
 }
 
+// 脈動那一區的小字：今日多空總數，以及「從幾點開始累積」。
+// 後者非寫不可：盤中才啟動（或重啟）時，第一輪會把「此刻已經成立的」一次全算進去——
+// 那是當下的狀態快照，不是那一分鐘真的發生一千多則。
+function msPulseHint(p) {
+  const pu = (p && p.pulse) || {};
+  if (!pu.kinds || !pu.kinds.length) return "";
+  const bits = [`上漲訊號 ${Number(pu.total_up || 0)}・下跌訊號 ${Number(pu.total_down || 0)} 則`];
+  const start = Number(pu.start_min);
+  if (Number.isFinite(start) && start > 0) {
+    const h = 9 + Math.floor(start / 60), m = start % 60;
+    bits.push(`自 ${h}:${String(m).padStart(2, "0")} 起累積`);
+  }
+  return bits.join("｜");
+}
+
 // 全部族群：照強度排，每一類都在（熱力格只畫得下 10 格，而資料有 30 幾類）。
-// 預設露前 MS_IND_PREVIEW 列——37 列一次攤開要捲過 1,200px 才看得到強勢個股。
+// 預設露前 MS_IND_PREVIEW 列——37 列一次攤開要捲過 1,200px 才看得到個股那一段。
 const MS_IND_PREVIEW = 10;
 let msIndsExpanded = false;
 function msIndListHtml(p) {
@@ -9263,6 +9294,112 @@ function msIndListHtml(p) {
         msIndsExpanded ? "收合" : `顯示全部 ${inds.length} 類`}</button>`
     : "";
   return rows + more;
+}
+
+// ── 市場脈動：訊號的數目 × 種類 × 時間 × 族群 ────────────────────────────────
+// 只畫，不算——所有判定（哪一檔、哪一種、幾點成立）都在後端用與雷達同一份規則算好。
+// 篩選狀態：null＝全部；{kind}＝只看那一種；族群用 marketIndOpen（與熱力格共用）。
+let msPulseKind = null;
+// 方向的顏色：紅＝上漲訊號、綠＝下跌訊號（台股語彙）。強度那邊仍然只用橘的單色階——
+// 整頁兩種顏色語言各管一件事：橘＝多強、紅綠＝往哪邊。
+const MS_UP_COLOR = "#ff6b81", MS_DOWN_COLOR = "#2ed573";
+// 輪動矩陣的色階上限：單一檔的族群一天兩則空訊號就是「每百檔 -200」，
+// 不封頂的話整張圖的對比會被那一格吃掉。值仍然是真的，只是顏色到頂。
+const MS_ROT_CAP = 80;
+
+function msPulseHtml(p) {
+  const pu = p.pulse || {};
+  const kinds = pu.kinds || [];
+  if (!kinds.length) {
+    return `<div class="home-tile-empty">今天還沒有訊號。開盤後每分鐘累積。</div>`;
+  }
+  const ind = marketIndOpen;
+  return msPulseBarsHtml(pu) + msRotHtml(pu, ind) + msKindsHtml(kinds);
+}
+
+// ① 訊號脈動：每分鐘的則數，上漲訊號往上、下跌訊號往下。
+// 用 inline SVG 而不是 ECharts：這是一排等寬的柱子，不需要座標軸、縮放或 tooltip，
+// 而這一頁已經有兩個 ECharts 實例了。
+function msPulseBarsHtml(pu) {
+  const up = (msPulseKind ? (pu.kinds.find(k => k.k === msPulseKind) || {}).series || [] : pu.up) || [];
+  const down = msPulseKind ? [] : (pu.down || []);
+  const n = Math.max(up.length, down.length);
+  const anyBar = up.some(v => v) || down.some(v => v);
+  if (!n || !anyBar) {
+    // 剛啟動（或盤中重啟）：此刻已成立的那些只進「今日累計」，柱圖要從下一分鐘才長得出來。
+    // 畫一個空框加一句話，比畫一條壓扁的線誠實
+    return `<div class="ms-pl-empty">脈動從下一分鐘開始累積。<br>
+      剛啟動時先把此刻已經成立的訊號記進今日累計，那不是某一分鐘發生的事。</div>`;
+  }
+  const w = 320, h = 72, mid = h / 2, bw = Math.max(1.5, w / n - 1);
+  const peak = Math.max(1, ...up, ...down);
+  const bars = [];
+  for (let i = 0; i < n; i++) {
+    const x = (w / n) * i;
+    const u = Number(up[i] || 0), d = Number(down[i] || 0);
+    if (u) bars.push(`<rect x="${x.toFixed(1)}" y="${(mid - (mid - 2) * u / peak).toFixed(1)}" width="${bw.toFixed(1)}" height="${((mid - 2) * u / peak).toFixed(1)}" fill="${MS_UP_COLOR}" rx="1"/>`);
+    if (d) bars.push(`<rect x="${x.toFixed(1)}" y="${mid.toFixed(1)}" width="${bw.toFixed(1)}" height="${((mid - 2) * d / peak).toFixed(1)}" fill="${MS_DOWN_COLOR}" rx="1"/>`);
+  }
+  const label = msPulseKind ? `只看「${escapeHtml(SIGNAL_ABBR[msPulseKind] || msPulseKind)}」` : "↑上漲訊號　↓下跌訊號";
+  return `
+    <div class="ms-pl-head">
+      <span>${label}</span>
+      <span class="ms-pl-peak">單分鐘最多 ${peak} 則</span>
+    </div>
+    <svg class="ms-pl-bars" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <line x1="0" y1="${mid}" x2="${w}" y2="${mid}" class="ms-pl-axis"/>
+      ${bars.join("")}
+    </svg>
+    <div class="ms-pl-axis-lbl"><span>${n} 分鐘前</span><span>現在</span></div>`;
+}
+
+// ② 族群輪動矩陣：列＝族群、欄＝15 分鐘、格＝每百檔的淨訊號。
+// 紅綠發散、中性深灰；點一列＝展開那一族群（與熱力格、清單同一個入口）。
+function msRotHtml(pu, openInd) {
+  const rows = (pu.rot || []).filter(r => r.up + r.down > 0).slice(0, 12);
+  if (!rows.length) return "";
+  const cells = r => (r.cells || []).map(v => {
+    const x = Math.max(-1, Math.min(1, Number(v) / MS_ROT_CAP));
+    const bg = !x ? "rgba(146,146,163,0.10)"
+      : x > 0 ? `rgba(255,107,129,${(0.18 + 0.72 * x).toFixed(2)})`
+              : `rgba(46,213,115,${(0.18 + 0.72 * -x).toFixed(2)})`;
+    return `<i style="background:${bg}"></i>`;
+  }).join("");
+  return `
+    <div class="ms-rot-head"><span>族群輪動</span><span>09:00 → 現在，一格 ${Number(pu.bucket_min || 15)} 分鐘</span></div>
+    <div class="ms-rot">
+      ${rows.map(r => `
+        <button type="button" class="ms-rot-row ${r.ind === openInd ? "is-on" : ""}"
+                onclick="msOpenIndustry('${jsAttr(r.ind)}')">
+          <span class="ms-rot-name">${escapeHtml(msIndShort(r.ind))}</span>
+          <span class="ms-rot-cells">${cells(r)}</span>
+          <span class="ms-rot-net" style="color:${r.net > 0 ? MS_UP_COLOR : r.net < 0 ? MS_DOWN_COLOR : "var(--text-muted)"}">${r.net > 0 ? "+" : ""}${Math.round(r.net)}</span>
+        </button>`).join("")}
+    </div>
+    <div class="ms-rot-note">${rows.some(r => (r.cells || []).some(v => v))
+      ? "格子深淺＝那 15 分鐘每百檔的淨訊號（紅＝上漲訊號多、綠＝下跌訊號多）"
+      : "格子要等下一分鐘起才開始累積；右邊的淨值已經是今天的全部"}</div>`;
+}
+
+// ③ 種類：兩字縮寫＋今日累計＋自己的時間形狀。點一種，上面的柱圖只畫那一種。
+function msKindsHtml(kinds) {
+  return `
+    <div class="ms-kinds">
+      ${kinds.slice(0, 12).map(k => `
+        <button type="button" class="ms-kind ${k.k === msPulseKind ? "is-on" : ""}"
+                onclick="msPickKind('${jsAttr(k.k)}')">
+          <span class="ms-kd-name">${escapeHtml(SIGNAL_ABBR[k.k] || k.k)}</span>
+          <span class="ms-kd-n">${Number(k.n)}</span>
+          <span class="ms-kd-spark">${msSparkSvg(k.series || [], { w: 52, h: 18, min: 0 })}</span>
+        </button>`).join("")}
+    </div>`;
+}
+
+function msPickKind(kind) {
+  msPulseKind = (kind && kind !== msPulseKind) ? kind : null;
+  trackActivity("market_pulse_kind", { kind: msPulseKind || "" });
+  const el = document.getElementById("ms-pulse");
+  if (el && marketPayload) el.innerHTML = msPulseHtml(marketPayload);
 }
 
 function msToggleInds() {
@@ -9507,7 +9644,7 @@ function msRenderDetail() {
   msTrend.resize();
 }
 
-// 強勢個股一列：排名、名稱、代號、強度分數、動能、迷你走勢。
+// 個股強度一列：排名、名稱、代號、強度分數、動能、迷你走勢。
 // **沒有股價也沒有漲跌幅**（見這一段開頭的註解）。點一列的去處由 msTapStock 決定。
 function msLeaderHtml(r) {
   return `
