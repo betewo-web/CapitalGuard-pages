@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="351">
+  <meta name="app-version" content="352">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=351" rel="stylesheet">
+  <link href="watchlist.css?v=352" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9426,32 +9426,42 @@ function msRotHtml(pu, openInd) {
   }).join("");
   return `
     <div class="ms-rot-head"><span>族群輪動</span><span>09:00 → 現在，一格 ${Number(pu.bucket_min || 15)} 分鐘</span></div>
+    <div class="ms-rot-cols"><span>族群</span><span>右欄＝今日淨訊號／百檔</span></div>
     <div class="ms-rot">
       ${rows.map(r => `
         <button type="button" class="ms-rot-row ${r.ind === openInd ? "is-on" : ""}"
-                onclick="msOpenIndustry('${jsAttr(r.ind)}')">
+                onclick="msOpenIndustry('${jsAttr(r.ind)}')"
+                title="${escapeHtml(r.ind)}：今日上漲訊號 ${Number(r.up)} 則、下跌訊號 ${Number(r.down)} 則，${Number(r.n)} 檔計分 → 每百檔淨 ${r.net > 0 ? "+" : ""}${Math.round(r.net)}">
           <span class="ms-rot-name">${escapeHtml(msIndShort(r.ind))}</span>
           <span class="ms-rot-cells">${cells(r)}</span>
           <span class="ms-rot-net" style="color:${r.net > 0 ? MS_UP_COLOR : r.net < 0 ? MS_DOWN_COLOR : "var(--text-muted)"}">${r.net > 0 ? "+" : ""}${Math.round(r.net)}</span>
         </button>`).join("")}
     </div>
-    <div class="ms-rot-note">${rows.some(r => (r.cells || []).some(v => v))
-      ? "格子深淺＝那 15 分鐘每百檔的淨訊號（紅＝上漲訊號多、綠＝下跌訊號多）"
-      : "格子要等下一分鐘起才開始累積；右邊的淨值已經是今天的全部"}</div>`;
+    <div class="ms-rot-note">
+      右欄＝（今日上漲訊號 − 下跌訊號）÷ 計分檔數 × 100。除以檔數才比得了：
+      半導體 180 檔，不除的話它永遠最大。${rows.some(r => (r.cells || []).some(v => v))
+      ? "格子是同一個數字拆進每 15 分鐘（紅＝上漲訊號多、綠＝下跌訊號多）。"
+      : "格子要等下一分鐘起才開始累積；右欄已經是今天的全部。"}</div>`;
 }
 
-// ③ 種類：兩字縮寫＋今日累計＋自己的時間形狀。點一種，上面的柱圖只畫那一種。
+// ③ 種類：兩字縮寫＋今日幾檔＋自己的時間形狀。點一種，上面的柱圖只畫那一種。
+// 數字的意思一定要寫出來（2026-10-15 Howard 問了）：它是**今天有幾檔出現過這一種**，
+// 不是出現幾次——同一檔同一種一天只算一次（後端的 SignalLog 去重，與雷達列那顆
+// 兩字縮寫籤同一套規則）。全名與門檻在 AUTO_SIGNAL_LABELS，掛在每一顆的 title 上。
 function msKindsHtml(kinds) {
   return `
     <div class="ms-kinds">
       ${kinds.slice(0, 12).map(k => `
         <button type="button" class="ms-kind ${k.k === msPulseKind ? "is-on" : ""}"
-                onclick="msPickKind('${jsAttr(k.k)}')">
+                onclick="msPickKind('${jsAttr(k.k)}')"
+                title="${escapeHtml(AUTO_SIGNAL_LABELS[k.k] || SIGNAL_LABEL_MAP[k.k] || k.k)}：今天 ${Number(k.n)} 檔出現過">
           <span class="ms-kd-name">${escapeHtml(SIGNAL_ABBR[k.k] || k.k)}</span>
           <span class="ms-kd-n">${Number(k.n)}</span>
           <span class="ms-kd-spark">${msSparkSvg(k.series || [], { w: 52, h: 18, min: 0 })}</span>
         </button>`).join("")}
-    </div>`;
+    </div>
+    <div class="ms-rot-note">數字＝今天有幾<b>檔</b>出現過這一種訊號（同一檔同一種一天只算一次），
+      不是出現幾次。長按一顆看全名與門檻；點一下上面的柱圖只畫那一種。</div>`;
 }
 
 function msPickKind(kind) {
