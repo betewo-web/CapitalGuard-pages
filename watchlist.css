@@ -5522,3 +5522,33 @@ select.fr-input { width: 100%; }
 .ms-pl-empty { padding: 0.9rem 0.8rem; font-size: 0.76rem; line-height: 1.6;
 	color: var(--text-muted); background: var(--surface);
 	border: 1px dashed var(--border); border-radius: 12px; }
+
+/* 族群等分網格（2026-10-15）：一格一類、34 類全部都在、照強度排。
+   面積＝成交額的那一版留著（切換），但預設是這個——成交額極度偏斜
+   （半導體 33%、電子零組 20%、其餘幾乎全在 1% 以下），面積一旦編碼它，
+   放得下的種類就只剩那幾個。這裡把成交額降級成每格底下那一條細線。
+   4 欄是量出來的：390px 扣掉頁面左右留白，一格約 88px，短名（最多四字）＋
+   兩位數分數剛好；5 欄會讓四字名被截。 */
+.ms-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
+.ms-cell { position: relative; display: flex; flex-direction: column; align-items: flex-start;
+	justify-content: space-between; min-width: 0; height: 54px; padding: 5px 6px 7px;
+	border: 1px solid rgba(146, 146, 163, 0.22); border-radius: 8px;
+	color: #f5f5f7; text-align: left; }
+.ms-cell.is-on { box-shadow: inset 0 0 0 2px var(--text-0); }
+.ms-cell-name { font-size: 0.72rem; font-weight: 600; line-height: 1.1; white-space: nowrap;
+	overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45); }
+/* 分數是這一格的主角：字級與粗細都拉開，掃一眼先看到數字再看名字 */
+.ms-cell-score { font-size: 1.15rem; font-weight: 700; line-height: 1;
+	font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45); }
+.ms-cell-share { position: absolute; left: 6px; right: 6px; bottom: 4px; height: 2px;
+	border-radius: 999px; background: rgba(0, 0, 0, 0.28); overflow: hidden; }
+.ms-cell-share i { display: block; height: 100%; background: rgba(255, 255, 255, 0.55); }
+/* 標題列裡的小切換：沿用 .hs-seg 的軌道，但縮到一行文字的高度 */
+/* .hs-seg 的基底是「整排佔滿、三格等寬」，這裡是標題列右邊的小切換：
+   不能跟著縮，也不要吃掉標題的空間。 */
+.ms-map-seg { display: inline-flex; flex: 0 0 auto; width: auto; padding: 2px;
+	border-radius: 10px; container-type: normal; }
+.ms-map-seg button { flex: 0 0 auto; padding: 0.2rem 0.5rem; font-size: 0.72rem;
+	border: 0; background: transparent; color: var(--text-muted); border-radius: 8px; }
+.ms-map-seg button.is-on { background: rgba(146, 146, 163, 0.18); color: var(--text-0); font-weight: 600; }

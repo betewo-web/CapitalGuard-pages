@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="350">
+  <meta name="app-version" content="351">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=350" rel="stylesheet">
+  <link href="watchlist.css?v=351" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -351,10 +351,16 @@
           <div class="ms-breadth" id="ms-breadth"></div>
           <div class="ms-head">
             <span class="ms-h"><i data-icon="radar"></i>族群強度</span>
-            <span class="ms-hint">格子大小＝成交額佔比</span>
+            <!-- 兩種看法（2026-10-15 Howard「顯示的種類太少」）：
+                 等分＝34 類全部都在、照強度排；面積＝成交額佔比（錢在哪一塊）。 -->
+            <span class="hs-seg ms-map-seg" id="ms-map-seg" role="radiogroup" aria-label="族群圖的看法">
+              <button type="button" role="radio" data-map="grid" aria-checked="true" onclick="msSetMapMode('grid')">等分</button>
+              <button type="button" role="radio" data-map="area" aria-checked="false" onclick="msSetMapMode('area')">面積</button>
+            </span>
           </div>
-          <!-- ECharts treemap。高度寫在 CSS（圖要先有高度才畫得出來） -->
-          <div class="ms-treemap" id="ms-treemap"></div>
+          <!-- 等分網格（HTML）與面積熱力格（ECharts）只會有一個在畫面上 -->
+          <div id="ms-grid-wrap"></div>
+          <div class="ms-treemap" id="ms-treemap" style="display:none"></div>
           <!-- 點一格展開：那一族群的強度走勢（時間線）與成員榜 -->
           <div class="ms-detail" id="ms-detail" style="display:none"></div>
           <!-- 全部族群（2026-10-14 Howard：「為什麼呈現的種類這麼少？」）：
@@ -9208,10 +9214,23 @@ const MS_STALE_MS = 3 * 60 * 1000;
 // 「越亮＝越強」是同一個量的大小，不是多空。六階的亮度是遞增的（dataviz：
 // 順序色階只能單一色相、亮度單調），最弱那幾階對比度低是刻意的——它們要往後退，
 // 每一格另外有 1px 框線與直接標籤，形狀與數字不靠顏色讀。
-const MS_SCALE = ["#332c2e", "#523c2e", "#6f4f2d", "#96682f", "#cc8536", "#ff9f43"];
+// 2026-10-15 Howard：「強度顯示視覺上不夠吸睛」。原本是橘的單色階（弱＝接近背景色），
+// 結果整張圖是一片土黃——因為大部分族群落在 30–60 分，而那一段剛好是最暗的幾階。
+// 改成**發散色階**：橘（強）↔ 藍（弱），中間是中性灰。
+// 50 分不是隨便挑的中點：強度的第一個構面是「相對大盤超額」，與大盤同步時它剛好得
+// 0.5，所以 50 ＝ 與大盤同步。兩端都飽和，弱的也看得見，畫面不會只剩一種顏色。
+// 紅綠仍然專給方向（市場訊號那一格的上漲／下跌訊號），橘↔藍只講強弱，兩套不混。
+const MS_SCALE = [
+  { max: 25,  c: "#2e7fd4" },   // 明顯弱於大盤
+  { max: 42,  c: "#2a5f94" },
+  { max: 58,  c: "#3a3a46" },   // 與大盤同步：中性，要退到背景去
+  { max: 75,  c: "#cc7a2e" },
+  { max: 101, c: "#ff9f43" },   // 明顯強於大盤
+];
 function msColor(score) {
   const s = Math.max(0, Math.min(100, Number(score) || 0));
-  return MS_SCALE[Math.min(MS_SCALE.length - 1, Math.floor(s / (100 / MS_SCALE.length)))];
+  for (const step of MS_SCALE) if (s < step.max) return step.c;
+  return MS_SCALE[MS_SCALE.length - 1].c;
 }
 
 // 市場那兩格（強度／訊號）有沒有開著。抓資料與輪詢都看它——兩格是同一份 payload
@@ -9269,10 +9288,24 @@ function renderMarketStrength() {
   }
   el("ms-status").innerHTML = msStatusHtml(p);
   el("ms-breadth").innerHTML = hasData ? msBreadthHtml(p) : "";
+  // 兩種族群圖只畫開著的那一種：等分網格是 HTML，面積熱力格是 ECharts
+  const grid = el("ms-grid-wrap"), tree = el("ms-treemap");
+  if (grid && tree) {
+    grid.style.display = msMapMode === "grid" ? "" : "none";
+    tree.style.display = msMapMode === "grid" ? "none" : "";
+    grid.innerHTML = (hasData && msMapMode === "grid") ? msGridHtml(p) : "";
+  }
+  const seg = el("ms-map-seg");
+  if (seg) seg.querySelectorAll("[data-map]").forEach(b => {
+    const on = b.dataset.map === msMapMode;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+  });
   el("ms-leaders").innerHTML = hasData
     ? (p.leaders || []).map(msLeaderHtml).join("")
     : `<div class="home-tile-empty">${emptyText}</div>`;
-  if (hasData) msRenderTreemap(p); else msDisposeCharts();
+  if (hasData && msMapMode === "area") msRenderTreemap(p);
+  else if (!hasData) msDisposeCharts();
   el("ms-inds").innerHTML = hasData ? msIndListHtml(p) : "";
   const hint = el("ms-inds-hint");
   if (hint) hint.textContent = hasData ? `${p.industries.length} 類・照強度排` : "";
@@ -9513,7 +9546,42 @@ function msMomBadge(mom) {
 //   標籤被截成「油」「電 3」「航」，等於畫了看不懂的東西。
 // · 「其他」那一格（灰、不可點）的佔比仍然要畫出來，不然所有格子的面積都在對一個
 //   不存在的 100% 分母。
-const MS_TILES = 10;                   // 最多畫幾格（含「其餘」那一格）
+// 族群圖有兩種看法（2026-10-15 Howard：「顯示的種類太少」）：
+//   grid 等分網格——**34 類全部都在**，照強度排，強的在左上角。成交額變成每格底下
+//        那一條細線，資訊沒丟，但不再決定能不能看見。
+//   area 面積＝成交額的熱力格（原本那種）——回答「錢在哪一塊」，但成交額極度偏斜
+//        （半導體 33%、電子零組 20%，其餘全在 1% 以下），所以放得下的種類就是那幾個。
+// 預設 grid：種類數與可讀性都贏，而「錢在哪」切一下就看得到。記在本機。
+const MS_MAP_KEY = "cg-ms-map";
+let msMapMode = (() => {
+  try { return localStorage.getItem(MS_MAP_KEY) === "area" ? "area" : "grid"; }
+  catch { return "grid"; }
+})();
+function msSetMapMode(mode) {
+  msMapMode = mode === "area" ? "area" : "grid";
+  try { localStorage.setItem(MS_MAP_KEY, msMapMode); } catch {}
+  trackActivity("market_map_mode", { mode: msMapMode });
+  renderMarketStrength();
+}
+
+// 等分網格：一格一類，照強度由高到低。4 欄 × 9 列放得下 34 類，每格約 88×54px——
+// 族群短名、強度數字、成交額佔比細線都塞得進去（390px 實測）。
+function msGridHtml(p) {
+  const inds = (p.industries || []).slice().sort((a, b) => b.score - a.score);
+  if (!inds.length) return "";
+  const maxShare = Math.max(...inds.map(i => Number(i.share) || 0), 0.1);
+  return `<div class="ms-grid">${inds.map(i => `
+    <button type="button" class="ms-cell ${i.ind === marketIndOpen ? "is-on" : ""}"
+            style="background:${msColor(i.score)}"
+            onclick="msOpenIndustry('${jsAttr(i.ind)}')"
+            title="${escapeHtml(i.ind)}：強度 ${Number(i.score)}、上漲 ${Number(i.up_pct)}%、${Number(i.n)} 檔">
+      <span class="ms-cell-name">${escapeHtml(msIndShort(i.ind))}</span>
+      <span class="ms-cell-score">${Number(i.score)}</span>
+      <span class="ms-cell-share"><i style="width:${Math.max(3, 100 * (Number(i.share) || 0) / maxShare)}%"></i></span>
+    </button>`).join("")}</div>`;
+}
+
+const MS_TILES = 10;                   // 面積模式最多畫幾格（含「其餘」那一格）
 const MS_TILE_LABEL_MIN_SHARE = 2.0;   // 佔比低於這個數的格子不寫字（寫了也是被截斷）
 // 格子裡的族群名要短。交易所的產業別最長有八個字（電腦及週邊設備業），390px 的
 // 熱力格放不下，ECharts 會截成「電腦及週…」甚至只剩一個字——2026-10-14 第一版
