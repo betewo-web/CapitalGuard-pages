@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="356">
+  <meta name="app-version" content="357">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=356" rel="stylesheet">
+  <link href="watchlist.css?v=357" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9502,7 +9502,11 @@ function msPulseBarsHtml(pu) {
 // ② 族群輪動矩陣：列＝族群、欄＝15 分鐘、格＝每百檔的淨訊號。
 // 紅綠發散、中性深灰；點一列＝展開那一族群（與熱力格、清單同一個入口）。
 function msRotHtml(pu, openInd) {
-  const rows = (pu.rot || []).filter(r => r.up + r.down > 0).slice(0, 12);
+  // **不截斷**（2026-10-15 Howard：「沒看到半導體」）：照淨訊號排的話，跌最兇的
+  // 那幾類在最後面，而那正是下跌日最該看的——當天半導體淨 −173（上漲訊號 11／
+  // 下跌訊號 335）排第 33 名，只畫前 12 列就剛好看不到它。
+  // 一列約 20px，33 類約 660px：這一區本來就是「整個市場的輪動」，該有這個長度。
+  const rows = (pu.rot || []).filter(r => r.up + r.down > 0);
   if (!rows.length) return "";
   const cells = r => (r.cells || []).map(v => {
     const x = Math.max(-1, Math.min(1, Number(v) / MS_ROT_CAP));
@@ -9532,13 +9536,15 @@ function msRotHtml(pu, openInd) {
 }
 
 // ③ 種類：兩字縮寫＋今日幾檔＋自己的時間形狀。點一種，上面的柱圖只畫那一種。
+// 全部種類都畫（2026-10-15 起不截斷）：16 種兩欄排下來 8 列，而被截掉的那幾種
+// 偏偏是今天只出現幾檔的那些——數量小才是值得看一眼的事。
 // 數字的意思一定要寫出來（2026-10-15 Howard 問了）：它是**今天有幾檔出現過這一種**，
 // 不是出現幾次——同一檔同一種一天只算一次（後端的 SignalLog 去重，與雷達列那顆
 // 兩字縮寫籤同一套規則）。全名與門檻在 AUTO_SIGNAL_LABELS，掛在每一顆的 title 上。
 function msKindsHtml(kinds) {
   return `
     <div class="ms-kinds">
-      ${kinds.slice(0, 12).map(k => `
+      ${kinds.map(k => `
         <button type="button" class="ms-kind ${k.k === msPulseKind ? "is-on" : ""}"
                 onclick="msPickKind('${jsAttr(k.k)}')"
                 title="${escapeHtml(AUTO_SIGNAL_LABELS[k.k] || SIGNAL_LABEL_MAP[k.k] || k.k)}：今天 ${Number(k.n)} 檔出現過">
