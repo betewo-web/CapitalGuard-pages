@@ -5565,3 +5565,7 @@ select.fr-input { width: 100%; }
 /* 族群詳情的那一句：加權分與成員中位差很多時才出現（說明「是誰撐起來的」） */
 .ms-dt-note { grid-column: 1; font-size: 0.72rem; color: var(--sig-orange); }
 .ms-dt-note:empty { display: none; }
+/* 強弱比較的切換：影響整頁的分數，所以自己一列、放在狀態行下面 */
+.ms-bench { display: flex; align-items: center; gap: 0.5rem; padding: 0 0.15rem 0.35rem; }
+.ms-bench-label { font-size: 0.78rem; font-weight: 600; color: var(--text-1); }
+#ms-bench-note { padding-bottom: 0.5rem; }

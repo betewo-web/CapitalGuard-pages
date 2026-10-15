@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="355">
+  <meta name="app-version" content="356">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=355" rel="stylesheet">
+  <link href="watchlist.css?v=356" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -347,6 +347,16 @@
              送到裝置上的只有自家算出來的分數（DATA_SOURCES.md 第十節）。 -->
         <div class="ms-wrap" id="home-market" style="display:none">
           <div class="ms-status" id="ms-status"></div>
+          <!-- 強弱跟誰比（2026-10-15 Howard：兩種模式讓使用者選）。影響整頁的分數，
+               所以放在狀態行下面、族群圖上面，不是塞進某一區的標題列。 -->
+          <div class="ms-bench">
+            <span class="ms-bench-label">強弱比較</span>
+            <span class="hs-seg ms-map-seg" id="ms-bench-seg" role="radiogroup" aria-label="強弱跟誰比">
+              <button type="button" role="radio" data-bench="mkt" aria-checked="true" onclick="msSetBench('mkt')">對大盤</button>
+              <button type="button" role="radio" data-bench="abs" aria-checked="false" onclick="msSetBench('abs')">絕對漲跌</button>
+            </span>
+          </div>
+          <div class="ms-rot-note" id="ms-bench-note"></div>
           <!-- 市場寬度：上漲／平／下跌家數佔比，配一條 09:00→現在的「上漲家數比例」走勢 -->
           <div class="ms-breadth" id="ms-breadth"></div>
           <div class="ms-head">
@@ -9285,16 +9295,59 @@ function _loadMarketIfStale() {
   loadMarketStrength().catch(() => {});
 }
 
+// 強弱要跟誰比（2026-10-15 Howard：「兩種模式讓使用者選」）。
+//   mkt 相對大盤超額（預設，沿用原本的做法）——「有沒有贏過大盤」
+//   abs 個股絕對漲跌幅——「它自己是漲還是跌」
+// 為什麼兩種都要：2026-10-15 盤中 81% 的股票在跌，但成交額加權的大盤被權值股殺到
+// −4.9%，於是多數股票「贏過大盤」＝整張圖一片紅。那不是算錯，但「大多數在跌」與
+// 「滿畫面都強」同時出現，一定有一個不是使用者當下想問的問題。
+// 兩種分數都由後端算好一起送（前端沒有漲跌幅可以重算，也不該有）。
+const MS_BENCH_KEY = "cg-ms-bench";
+let msBenchMode = (() => {
+  try { return localStorage.getItem(MS_BENCH_KEY) === "abs" ? "abs" : "mkt"; }
+  catch { return "mkt"; }
+})();
+function msSetBench(mode) {
+  msBenchMode = mode === "abs" ? "abs" : "mkt";
+  try { localStorage.setItem(MS_BENCH_KEY, msBenchMode); } catch {}
+  trackActivity("market_bench_mode", { mode: msBenchMode });
+  renderMarketStrength();
+}
+// 兩種模式各自的一句話。**對大盤那一句要帶上大盤的數字**：2026-10-15 盤中
+// 81% 的股票在跌、而大盤 −4.9%，不寫出來沒有人猜得到為什麼滿畫面是紅的。
+function msBenchNote(p) {
+  const mkt = p && p.bench_mkt;
+  const b = (p && p.breadth) || {};
+  if (msBenchMode === "abs") {
+    return `<b>絕對漲跌</b>：紅＝這一檔（或這一類）自己在漲。今天 ${Number(b.down_pct || 0)}% 的股票在跌，` +
+           `所以綠的會比較多。`;
+  }
+  const m = (mkt === null || mkt === undefined) ? "" :
+    `大盤 <b>${mkt > 0 ? "+" : ""}${mkt}%</b>（成交額加權，權值股影響大）。`;
+  return `<b>對大盤</b>：紅＝跌得比大盤少（或漲得比它多），<b>不是「在漲」</b>。${m}` +
+         `今天 ${Number(b.down_pct || 0)}% 的股票在跌，但多數跌得比大盤少，所以紅的會比較多——` +
+         `要看誰自己在漲，切到「絕對漲跌」。`;
+}
+
+// 目前模式的那一份族群與個股。舊的那一列（沒有 modes）仍然讀得出來——
+// 升版當天線上那一列還是舊格式，不退回去的話整頁會變空白。
+function msView(p) {
+  const v = p && p.modes && p.modes[msBenchMode];
+  if (v) return v;
+  return { industries: (p && p.industries) || [], leaders: (p && p.leaders) || [] };
+}
+
 // 「市場強度」與「市場訊號」兩格共用這一支：同一份 payload 的兩半，只畫開著的那一半。
 // 不畫另一半不只是省工——ECharts 在 display:none 的容器裡量到的寬高是 0，畫了也是白的。
 function renderMarketStrength() {
   const p = marketPayload;
-  const hasData = !!(p && Array.isArray(p.industries) && p.industries.length);
+  const view = msView(p);
+  const hasData = !!(view.industries && view.industries.length);
   const emptyText = marketPayload === null && !marketLoadError
     ? "正在取得今天的市場統計…"
     : "今天還沒有市場統計。開盤後每分鐘更新一次。";
   // 展開中的族群這一輪可能不在清單裡了——收起來比留一張對不上的詳情好
-  if (marketIndOpen && hasData && !(p.industries || []).some(i => i.ind === marketIndOpen)) {
+  if (marketIndOpen && hasData && !view.industries.some(i => i.ind === marketIndOpen)) {
     marketIndOpen = null;
   }
   const el = id => document.getElementById(id);
@@ -9315,6 +9368,14 @@ function renderMarketStrength() {
     tree.style.display = msMapMode === "grid" ? "none" : "";
     grid.innerHTML = (hasData && msMapMode === "grid") ? msGridHtml(p) : "";
   }
+  const bseg = el("ms-bench-seg");
+  if (bseg) bseg.querySelectorAll("[data-bench]").forEach(b => {
+    const on = b.dataset.bench === msBenchMode;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+  });
+  const bnote = el("ms-bench-note");
+  if (bnote) bnote.innerHTML = msBenchNote(p);
   const seg = el("ms-map-seg");
   if (seg) seg.querySelectorAll("[data-map]").forEach(b => {
     const on = b.dataset.map === msMapMode;
@@ -9322,7 +9383,7 @@ function renderMarketStrength() {
     b.setAttribute("aria-checked", on ? "true" : "false");
   });
   el("ms-leaders").innerHTML = hasData
-    ? (p.leaders || []).map(msLeaderHtml).join("")
+    ? (view.leaders || []).map(msLeaderHtml).join("")
     : `<div class="home-tile-empty">${emptyText}</div>`;
   if (hasData && msMapMode === "area") msRenderTreemap(p);
   else if (!hasData) msDisposeCharts();
@@ -9334,7 +9395,7 @@ function renderMarketStrength() {
   if (indsSec) indsSec.style.display = listOn ? "" : "none";
   el("ms-inds").innerHTML = listOn ? msIndListHtml(p) : "";
   const hint = el("ms-inds-hint");
-  if (hint) hint.textContent = listOn ? `${p.industries.length} 類・照強度排` : "";
+  if (hint) hint.textContent = listOn ? `${view.industries.length} 類・照強度排` : "";
   msRenderDetail();
 }
 
@@ -9358,7 +9419,7 @@ function msPulseHint(p) {
 const MS_IND_PREVIEW = 10;
 let msIndsExpanded = false;
 function msIndListHtml(p) {
-  const inds = p.industries || [];
+  const inds = msView(p).industries || [];
   const shown = msIndsExpanded ? inds : inds.slice(0, MS_IND_PREVIEW);
   const rows = shown.map((i, n) => `
     <button type="button" class="ms-ind ${i.ind === marketIndOpen ? "is-on" : ""}"
@@ -9603,7 +9664,7 @@ function msSetMapMode(mode) {
 // 等分網格：一格一類，照強度由高到低。4 欄 × 9 列放得下 34 類，每格約 88×54px——
 // 族群短名、強度數字、成交額佔比細線都塞得進去（390px 實測）。
 function msGridHtml(p) {
-  const inds = (p.industries || []).slice().sort((a, b) => b.score - a.score);
+  const inds = (msView(p).industries || []).slice().sort((a, b) => b.score - a.score);
   if (!inds.length) return "";
   const maxShare = Math.max(...inds.map(i => Number(i.share) || 0), 0.1);
   return `<div class="ms-grid">${inds.map(i => `
@@ -9638,7 +9699,7 @@ function msIndShort(name) {
 function msRenderTreemap(p) {
   const el = document.getElementById("ms-treemap");
   if (!el || typeof echarts === "undefined") return;
-  const inds = (p.industries || []).slice();
+  const inds = (msView(p).industries || []).slice();
   const byShare = inds.slice().sort((a, b) => b.share - a.share).slice(0, MS_TILES - 2);
   const byScore = inds.slice().sort((a, b) => b.score - a.score).slice(0, 2);
   const keep = [];
@@ -9722,7 +9783,7 @@ function msRenderDetail() {
   const box = document.getElementById("ms-detail");
   if (!box) return;
   const p = marketPayload;
-  const row = p && (p.industries || []).find(i => i.ind === marketIndOpen);
+  const row = p && (msView(p).industries || []).find(i => i.ind === marketIndOpen);
   if (!row) {
     box.style.display = "none";
     box.innerHTML = "";
