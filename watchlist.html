@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="357">
+  <meta name="app-version" content="358">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=357" rel="stylesheet">
+  <link href="watchlist.css?v=358" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -353,7 +353,7 @@
             <span class="ms-bench-label">強弱比較</span>
             <span class="hs-seg ms-map-seg" id="ms-bench-seg" role="radiogroup" aria-label="強弱跟誰比">
               <button type="button" role="radio" data-bench="mkt" aria-checked="true" onclick="msSetBench('mkt')">對大盤</button>
-              <button type="button" role="radio" data-bench="abs" aria-checked="false" onclick="msSetBench('abs')">絕對漲跌</button>
+              <button type="button" role="radio" data-bench="abs" aria-checked="false" onclick="msSetBench('abs')">只看漲跌</button>
             </span>
           </div>
           <div class="ms-rot-note" id="ms-bench-note"></div>
@@ -9319,18 +9319,25 @@ function msBenchNote(p) {
   const mkt = p && p.bench_mkt;
   const b = (p && p.breadth) || {};
   if (msBenchMode === "abs") {
-    return `<b>絕對漲跌</b>：紅＝這一檔（或這一類）自己在漲。今天 ${Number(b.down_pct || 0)}% 的股票在跌，` +
-           `所以綠的會比較多。`;
+    return `<b>只看漲跌</b>：不算強度，只看今天的價位是漲還是跌。` +
+           `族群的數字＝<b>這一類有幾成在漲</b>（50 ＝一半一半）；個股只分漲／平／跌三態。` +
+           `今天 ${Number(b.down_pct || 0)}% 的股票在跌。` +
+           `<br>每一檔漲跌多少（百分比）不會送到裝置上（那是報價原值），所以這裡看得到方向、看不到幅度。`;
   }
   const m = (mkt === null || mkt === undefined) ? "" :
     `大盤 <b>${mkt > 0 ? "+" : ""}${mkt}%</b>（成交額加權，權值股影響大）。`;
   return `<b>對大盤</b>：紅＝跌得比大盤少（或漲得比它多），<b>不是「在漲」</b>。${m}` +
          `今天 ${Number(b.down_pct || 0)}% 的股票在跌，但多數跌得比大盤少，所以紅的會比較多——` +
-         `要看誰自己在漲，切到「絕對漲跌」。`;
+         `要看誰自己在漲，切到「只看漲跌」。`;
 }
 
 // 目前模式的那一份族群與個股。舊的那一列（沒有 modes）仍然讀得出來——
 // 升版當天線上那一列還是舊格式，不退回去的話整頁會變空白。
+// 這個模式下的數字不是強度：族群是「幾成在漲」、個股是三態方向。
+// 畫面上的單位與文字都要跟著換，不然 64 會被讀成「強度 64」。
+function msIsDir() { return msBenchMode === "abs"; }
+const MS_DIR_LABEL = { 85: "漲", 50: "平", 15: "跌" };
+
 function msView(p) {
   const v = p && p.modes && p.modes[msBenchMode];
   if (v) return v;
@@ -9430,8 +9437,8 @@ function msIndListHtml(p) {
         <span class="ms-in-bar"><i style="width:${Math.max(2, Number(i.score))}%;background:${msColor(i.score)}"></i></span>
       </span>
       <span class="ms-in-facts">
-        <span class="ms-in-score" style="color:${msColor(i.score)}">${Number(i.score)}</span>
-        <span class="ms-in-sub">上漲 ${Number(i.up_pct)}%・${Number(i.n)} 檔</span>
+        <span class="ms-in-score" style="color:${msColor(i.score)}">${Number(i.score)}${msIsDir() ? "%" : ""}</span>
+        <span class="ms-in-sub">${msIsDir() ? "在漲的家數比例" : `上漲 ${Number(i.up_pct)}%`}・${Number(i.n)} 檔</span>
       </span>
       <span class="ms-in-mom">${msMomBadge(i.mom)}</span>
     </button>`).join("");
@@ -9677,9 +9684,9 @@ function msGridHtml(p) {
     <button type="button" class="ms-cell ${i.ind === marketIndOpen ? "is-on" : ""}"
             style="background:${msColor(i.score)}"
             onclick="msOpenIndustry('${jsAttr(i.ind)}')"
-            title="${escapeHtml(i.ind)}：強度 ${Number(i.score)}、上漲 ${Number(i.up_pct)}%、${Number(i.n)} 檔">
+            title="${escapeHtml(i.ind)}：${msIsDir() ? `${Number(i.up_pct)}% 在漲` : `強度 ${Number(i.score)}`}、${Number(i.n)} 檔計分">
       <span class="ms-cell-name">${escapeHtml(msIndShort(i.ind))}</span>
-      <span class="ms-cell-score">${Number(i.score)}</span>
+      <span class="ms-cell-score">${Number(i.score)}${msIsDir() ? "%" : ""}</span>
       <span class="ms-cell-share"><i style="width:${Math.max(3, 100 * (Number(i.share) || 0) / maxShare)}%"></i></span>
     </button>`).join("")}</div>`;
 }
@@ -9806,8 +9813,10 @@ function msRenderDetail() {
   box.innerHTML = `
     <div class="ms-dt-head">
       <span class="ms-dt-name">${escapeHtml(row.ind)}</span>
-      <span class="ms-dt-facts">強度 ${row.score}${msMomBadge(row.mom)}｜成員中位 ${
-        row.med === undefined ? "—" : row.med}｜上漲 ${row.up_pct}%｜計分 ${row.n} 檔｜成交額佔比 ${row.share}%</span>
+      <span class="ms-dt-facts">${msIsDir()
+        ? `${row.up_pct}% 在漲${msMomBadge(row.mom)}｜計分 ${row.n} 檔｜成交額佔比 ${row.share}%`
+        : `強度 ${row.score}${msMomBadge(row.mom)}｜成員中位 ${
+            row.med === undefined ? "—" : row.med}｜上漲 ${row.up_pct}%｜計分 ${row.n} 檔｜成交額佔比 ${row.share}%`}</span>
       <span class="ms-dt-note">${row.med !== undefined && row.score - row.med >= 12
         ? "族群分數主要由成交額大的那幾檔撐起來，中位數沒那麼高。"
         : (row.med !== undefined && row.med - row.score >= 12
@@ -9863,7 +9872,7 @@ function msLeaderHtml(r) {
         <span class="ms-ld-sub">${escapeHtml(r.sid)}・${escapeHtml(r.ind)}</span>
       </span>
       <span class="ms-ld-spark">${msSparkSvg(r.trend || [], { w: 64, h: 22, min: 0, max: 100 })}</span>
-      <span class="ms-ld-score" style="color:${msColor(r.score)}">${Number(r.score)}</span>
+      <span class="ms-ld-score" style="color:${msColor(r.score)}">${msIsDir() ? (MS_DIR_LABEL[r.score] || "—") : Number(r.score)}</span>
       <span class="ms-ld-mom">${msMomBadge(r.mom)}</span>
     </button>`;
 }
