@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="359">
+  <meta name="app-version" content="360">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=359" rel="stylesheet">
+  <link href="watchlist.css?v=360" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19466,16 +19466,16 @@ const AI_INTENTS = {
   market_strength:  ["setHomeFilter", { mode: "market" }],
   market_signals:   ["setHomeFilter", { mode: "signals" }],
   holdings:         ["assistantHoldings", {}],
-  inbox:            ["switchTab", { tab: "inbox" }],
+  inbox:            ["assistantInbox", {}],
   watch_add:        ["assistantWatchAdd", {}],
   watch_remove:     ["assistantWatchRemove", {}],
   basic_signal_set: ["assistantBasicSignalSet", {}],
   price_target_set: ["assistantPriceTargetSet", {}],
   rule_create:      ["openRuleEditorPrefilled", {}],
-  rule_manage:      ["openRulesModal", {}],
+  rule_manage:      ["assistantRules", {}],
   holdings_set:     ["assistantHoldingsSet", {}],
   share_stock:      ["switchTab", { tab: "friends" }],
-  plan:             ["openPlanModal", {}],
+  plan:             ["assistantPlan", {}],
   push_setup:       ["assistantPushSetup", {}],
   system_status:    ["assistantSystemStatus", {}],
   glossary:         ["assistantGlossary", {}],
@@ -19591,10 +19591,92 @@ function aiIntroHtml(withChips) {
   });
 }
 
-function aiPushCard(c) {
-  aiLog.push({ kind: "card", html: aiCardHtml(c) });
+function aiPushCard(c, id) {
+  aiLog.push({ kind: "card", html: aiCardHtml(c), id: id || null });
   if (aiLog.length > AI_LOG_MAX) aiLog.splice(0, aiLog.length - AI_LOG_MAX);
 }
+
+// 同一張卡原地換內容（確認卡 → 處理中 → 結果卡）；找不到就補在最後
+function aiReplaceCard(id, c) {
+  const i = aiLog.findIndex(m => m.id === id);
+  if (i < 0) { aiPushCard(c, id); return; }
+  aiLog[i] = { kind: "card", html: aiCardHtml(c), id };
+}
+
+// ── 確認卡（Phase 3，ASSISTANT.md 第十四節 B）：填好 → 確認 → 寫入 ─────────────
+// 要寫的每一格先填好列在卡上；按金色主鍵才執行 spec.run()（它只呼叫既有的寫入函式），
+// 卡原地變成結果卡；「改一下」開既有面板；「取消」留一行。按了什麼都回寫 assistant_log_outcome。
+let aiPending = {};        // 卡片 id → spec
+let _aiCardSeq = 0;
+
+function aiConfirmCard(spec) {
+  const id = "ac" + (++_aiCardSeq);
+  aiPending[id] = spec;
+  const actions = [{ label: spec.mainLabel || "確定", act: "confirm", data: { id }, main: true }];
+  if (spec.alt) actions.push({ label: spec.alt.label, act: spec.alt.act, data: spec.alt.data });
+  actions.push({ label: "取消", act: "cancel", data: { id } });
+  return { _id: id, head: spec.head, sub: spec.sub, rows: spec.rows, text: spec.text, actions };
+}
+
+async function aiRunConfirm(id) {
+  const spec = aiPending[id];
+  if (!spec || spec.busy) return;
+  spec.busy = true;
+  aiReplaceCard(id, { head: spec.head, sub: "處理中…", rows: spec.rows, muted: true });
+  renderAssistant();
+  let result;
+  try { result = await spec.run(); } catch (e) { console.error("assistant confirm failed:", e); result = aiErrorCard(e); }
+  delete aiPending[id];
+  aiReplaceCard(id, result || { text: "完成。" });
+  aiOutcome(spec.log_id, null, !!result && !result.failed);
+  renderAssistant();
+}
+
+function aiCancelConfirm(id) {
+  const spec = aiPending[id];
+  if (!spec) return;
+  delete aiPending[id];
+  aiReplaceCard(id, { text: "已取消。", muted: true });
+  aiOutcome(spec.log_id, null, false);
+  renderAssistant();
+}
+
+function aiErrorCard(e) {
+  const msg = String((e && e.message) || e || "");
+  if (isLimitError(e, "watchlist")) return aiLimitCard("watchlist");
+  if (isLimitError(e, "alert_rules")) return aiLimitCard("alert_rules");
+  if (msg.includes("dup:share")) return { text: "好友已經分享了設定完全相同的這一檔給你，不需要再加。", muted: true, failed: true };
+  if (msg.includes("23505") || msg.includes("unique")) return { text: "已經在清單裡了。", muted: true, failed: true };
+  return { text: `沒有成功：${msg.slice(0, 120)}`, muted: true, failed: true };
+}
+
+function aiLimitCard(kind) {
+  const what = kind === "watchlist" ? "自選股" : "進階訊號";
+  const lim = planLimitOf(kind);
+  return { text: `${what}已達方案上限${lim != null ? `（${lim}）` : ""}。`, failed: true,
+           actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] };
+}
+
+// ── 寫入類共用 ──────────────────────────────────────────────────
+function aiRowOf(sid) {
+  return (watchlistRows || []).find(w => String(w.stock_id || "").trim() === String(sid || "").trim()) || null;
+}
+function aiQuoteOf(sid) { return getQuote(sid) || getCloseQuote(sid) || null; }
+function aiWatchFull() {
+  return !!(planState.ready && planState.plan && watchlistRows.length + frSlotsExtra() >= planState.plan.watch_limit);
+}
+function aiWatchUsage() {
+  return planState.ready && planState.plan ? `${watchlistRows.length + frSlotsExtra()}／${planState.plan.watch_limit}` : String(watchlistRows.length);
+}
+// 與 addStock() 同一條：預設訊號同一個物件、同一個埋點、加完重抓清單
+async function aiAddStockById(sid) {
+  const name = getPreferredStockName(sid, universe[sid]?.n) || universe[sid]?.n || "";
+  await sbPost("watchlist", { user_id: state.userId, stock_id: sid, stock_name: name, ...WATCH_SIGNAL_DEFAULTS }, state.accessToken);
+  trackActivity("watch_add", { stock: sid });
+  await loadWatchlist();
+  return aiRowOf(sid);
+}
+function aiFieldLabel(f) { return FR_FLAG_LABELS[f] || f; }
 
 function aiBindOnce() {
   const log = document.getElementById("ai-log");
@@ -19612,6 +19694,8 @@ function aiBindOnce() {
 function aiAct(act, data) {
   if (act === "send") { assistantSend(String(data.text || "")); return; }
   if (act === "open") { aiOpen(data); return; }
+  if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
+  if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
   if (act === "pick") {    // 反問卡：使用者選了哪一類 → 用同一組槽位在本機執行，並回寫是哪一個
     aiOutcome(data.log_id, data.intent, null);
     aiRun(data.intent, data.slots || {}, { log_id: data.log_id, meta: "使用者選的" });
@@ -19619,7 +19703,12 @@ function aiAct(act, data) {
   }
 }
 
+// 「去那一頁」鍵：字卡、分頁、方案、基礎訊號面板、進階訊號、持股——都是既有的入口
 function aiOpen(d) {
+  if (d.plan) { openPlanModal(); return; }
+  if (d.rules) { openRulesModal(); return; }
+  if (d.alert !== undefined && d.alert !== null) { openAlertSettings(d.alert); return; }
+  if (d.holdings) { openHoldingsSheet(String(d.holdings)); return; }
   if (d.sid) openStockCard(String(d.sid), { tab: d.tab || "radar" });
   else if (d.tab) switchTab(String(d.tab));
 }
@@ -19717,8 +19806,10 @@ function aiRun(intent, slots, opts) {
   const args = Object.assign({}, spec ? spec[1] : {}, (opts && opts.args) || {}, slots || {});
   let card = null;
   try { card = h(slots || {}, args, opts || {}); } catch (e) { console.error("assistant action failed:", fn, e); card = { text: "這個動作剛才沒有成功，請再試一次。", muted: true }; }
-  if (card) { card.meta = card.meta || (opts && opts.meta); aiPushCard(card); }
-  aiOutcome(opts && opts.log_id, null, true);
+  if (card) { card.meta = card.meta || (opts && opts.meta); aiPushCard(card, card._id); }
+  // 確認卡：executed 等按了主鍵／取消才回寫；其餘現在就算執行過
+  if (card && card._id && aiPending[card._id]) aiPending[card._id].log_id = opts && opts.log_id;
+  else aiOutcome(opts && opts.log_id, null, true);
 }
 
 function aiNeedStock() {
@@ -19733,9 +19824,14 @@ const ASSISTANT_ACTIONS = {
       const rows = todaySignalsOf(sid).map(r => ({ label: _titleWithoutSid(String(r.title || ""), sid) || "訊號", value: "", note: fmtTime(r.sent_at) }));
       return { head: `${aiStockName(sid)} ${sid}`, sub: rows.length ? `今天 ${rows.length} 則訊號` : "今天還沒有訊號", rows, actions: [aiOpenBtn(sid, "radar")] };
     }
-    const hot = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(s => isStockId(s) && todaySignalsOf(s).length);
-    switchTab("home"); setHomeFilter("mine");
-    return { text: hot.length ? `今天有訊號的自選股：${hot.map(aiStockName).join("、")}。已打開盤中頁。` : "今天自選股還沒有訊號。已打開盤中頁。" };
+    // 整份自選股：每檔一列（今天幾則），有訊號的排前面；不跳頁，看完再決定要開哪一檔
+    const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId);
+    if (!sids.length) return { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
+    const rows = sids.map(s => ({ sid: s, n: todaySignalsOf(s).length })).sort((a, b) => b.n - a.n).slice(0, 12)
+      .map(x => ({ label: aiStockName(x.sid), value: x.n ? `${x.n} 則` : "—", note: x.sid }));
+    const hot = rows.filter(r => r.value !== "—").length;
+    return { head: "今天的訊號", sub: hot ? `${hot} 檔有訊號` : "今天還沒有訊號", rows,
+             actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
   },
   openStockCard(slots, args) {
     if (!slots.stock) return aiNeedStock();
@@ -19796,8 +19892,30 @@ const ASSISTANT_ACTIONS = {
     const label = { inbox: "通知", friends: "分享", post: "盤後", scores: "統計", watch: "設定", home: "盤中" }[tab] || tab;
     return { text: `已打開${label}。` };
   },
-  openPlanModal() { openPlanModal(); return { text: "已打開方案與用量。" }; },
-  openRulesModal() { openRulesModal(); return { text: "已打開進階訊號。" }; },
+  assistantPlan() {
+    const p = planState.ready ? planState.plan : null;
+    if (!p) { openPlanModal(); return { text: "已打開方案與用量。" }; }
+    return { head: "方案與用量", sub: p.name || planTierLabel(),
+             rows: [{ label: "自選股", value: aiWatchUsage(), note: "含好友分享" },
+                    { label: "進階訊號", value: `${(alertRules || []).length}／${p.rule_limit ?? "—"}`, note: "" }],
+             actions: [{ label: "看方案與升級 ›", act: "open", data: { plan: true } }] };
+  },
+  assistantRules() {
+    const rules = alertRules || [];
+    if (!rules.length) return { text: "還沒有進階訊號。", actions: [{ label: "打開進階訊號 ›", act: "open", data: { rules: true } }] };
+    const rows = rules.slice(0, 10).map(r => ({
+      label: r.name || describeCondition((r.conditions || [])[0]), value: r.enabled ? "開" : "關",
+      note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股" }));
+    return { head: `進階訊號 ${rules.length}／${planLimitOf("alert_rules") ?? "—"}`, rows,
+             actions: [{ label: "打開進階訊號 ›", act: "open", data: { rules: true } }] };
+  },
+  assistantInbox() {
+    const today = (inboxRows || []).filter(r => isToday(r.sent_at));
+    const rows = today.slice(0, 5).map(r => ({ label: aiStockName(String(r.stock_id || "").trim()) || "系統",
+      value: _titleWithoutSid(String(r.title || ""), String(r.stock_id || "").trim()), note: fmtTime(r.sent_at) }));
+    return { head: "通知", sub: today.length ? `今天 ${today.length} 則` : "今天還沒有通知", rows,
+             actions: [{ label: "打開通知 ›", act: "open", data: { tab: "inbox" } }] };
+  },
   fbOpen() { fbOpen(null); return { text: "已打開意見回饋。" }; },
   assistantPushSetup() {
     switchTab("home");
@@ -19811,34 +19929,190 @@ const ASSISTANT_ACTIONS = {
   assistantHelp() { return { bodyHtml: aiIntroHtml(false).replace(/^<div class="ai-card[^>]*>|<\/div>$/g, ""), rawCard: true }; },
   assistantRefuse(slots, args, opts) { return { text: opts.say || "這個服務只整理與解釋公開資料，不提供買賣或進出場建議。", muted: true }; },
   assistantOutOfScope(slots, args, opts) { return { text: opts.say || AI_FALLBACK, muted: true }; },
-  // ── 寫入類：Phase 2 先帶到既有的頁面，使用者在那裡按；Phase 3 接確認卡＋直接執行 ──
+  // ── 寫入類（Phase 3，第十四節 B）：填好 → 確認卡 → 既有的寫入函式 ─────────────
+  // 「兩段合一張」：要寫的那一檔不在自選股時，確認卡直接寫「加入並…？」，主鍵一次做兩件事。
   assistantWatchAdd(slots) {
-    focusAddStock();
-    if (slots.stock) setTimeout(() => { const inp = document.getElementById("inp-stock"); if (inp && !inp.value) inp.value = slots.stock; }, 120);
-    return { text: slots.stock ? `已打開設定頁並填好 ${aiStockName(slots.stock)}，按「新增」就加進自選股。` : "已打開設定頁，在上面的輸入框打股票名稱再按「新增」。" };
+    const sid = slots.stock;
+    if (!sid) return { text: "要加哪一檔？打股票名稱或代號，例如「把天鈺加進自選」。", muted: true };
+    const name = aiStockName(sid);
+    if (aiRowOf(sid)) return { text: `${name} 已經在自選股裡。`, actions: [aiOpenBtn(sid, "radar")] };
+    if (aiWatchFull()) return aiLimitCard("watchlist");
+    return aiConfirmCard({
+      head: "加入自選股？",
+      rows: [{ label: "股票", value: `${name} ${sid}`, note: universe[sid]?.i || "" },
+             { label: "自選股", value: aiWatchUsage(), note: "加入後 +1" }],
+      mainLabel: "加入",
+      run: async () => { await aiAddStockById(sid); return { text: `已加入 ${name}，基礎訊號預設全開。`, actions: [aiOpenBtn(sid, "radar")] }; },
+    });
   },
   assistantWatchRemove(slots) {
-    switchTab("watch");
-    return { text: slots.stock ? `${aiStockName(slots.stock)} 在設定頁那一列的右邊有「✕」可以移除。已打開設定頁。` : "在設定頁每一列右邊的「✕」可以移除。已打開設定頁。" };
-  },
-  assistantBasicSignalSet(slots) {
-    const row = slots.stock ? (watchlistRows || []).find(w => String(w.stock_id || "").trim() === slots.stock) : null;
-    if (row) openAlertSettings(row.id); else openAlertSettingsPicker();
-    return { text: "基礎訊號的開關在這裡，這一版還不能直接幫你切，請在面板裡按。" };
+    const sid = slots.stock;
+    if (!sid) return { text: "要移除哪一檔？例如「把天鈺移除」。", muted: true };
+    const name = aiStockName(sid);
+    const row = aiRowOf(sid);
+    if (!row) {
+      return sharedInSids().includes(sid)
+        ? { text: `${name} 是好友分享給你的，不是自選股；要停止接收請到分享分頁。`, actions: [{ label: "去分享分頁 ›", act: "open", data: { tab: "friends" } }] }
+        : { text: `${name} 不在自選股裡。`, muted: true };
+    }
+    const rows = [{ label: "股票", value: `${name} ${sid}`, note: "" },
+                  { label: "今天的訊號", value: `${todaySignalsOf(sid).length} 則`, note: "" }];
+    if (Number(row.shares) > 0) rows.push({ label: "持股紀錄", value: `${Number(row.shares).toLocaleString()} 股`, note: "會一起消失" });
+    return aiConfirmCard({
+      head: "移除自選股？", rows, mainLabel: "移除",
+      run: async () => { await removeStock(row.id, false); return { text: `已移除 ${name}。` }; },
+    });
   },
   assistantPriceTargetSet(slots) {
-    const row = slots.stock ? (watchlistRows || []).find(w => String(w.stock_id || "").trim() === slots.stock) : null;
-    if (row) openAlertSettings(row.id); else openAlertSettingsPicker();
-    const hint = slots.price ? `價位 ${fmtPrice(slots.price)}${slots.price_high ? ` 與 ${fmtPrice(slots.price_high)}` : ""}` : "價位";
-    return { text: `到價提醒在這一檔的基礎訊號面板最下面填${hint}；這一版還不能直接幫你填。` };
+    const sid = slots.stock;
+    if (!sid) return aiNeedStock();
+    const price = Number(slots.price);
+    if (!(price > 0)) return { text: "要在多少元時通知？打完整的句子，例如「天鈺跌到 180 通知我」。", muted: true };
+    const name = aiStockName(sid);
+    const q = aiQuoteOf(sid);
+    const cur = q && q.price > 0 ? q.price : null;
+    let dir = String(slots.direction || "any");
+    let inferred = "";
+    if (dir === "both" && !(Number(slots.price_high) > 0)) dir = "down";
+    if (dir === "any") {
+      if (!cur) {
+        return { head: `${name} ${sid}`, text: "沒有現價可以判斷方向，請說清楚：",
+                 chips: [{ label: `跌到 ${fmtPrice(price)} 通知`, act: "send", data: { text: `${name}跌到 ${price} 通知我` } },
+                         { label: `漲到 ${fmtPrice(price)} 通知`, act: "send", data: { text: `${name}漲到 ${price} 通知我` } }] };
+      }
+      dir = price < cur ? "down" : "up";
+      inferred = `${fmtPrice(price)} ${dir === "down" ? "低於" : "高於"}現價，當成${dir === "down" ? "跌到" : "漲到"}`;
+    }
+    const patch = {};
+    if (dir === "down") patch.target_price_low = price;
+    if (dir === "up") patch.target_price_high = price;
+    if (dir === "both") { patch.target_price_low = price; patch.target_price_high = Number(slots.price_high); }
+    const row = aiRowOf(sid);
+    const lo = patch.target_price_low ?? (row && row.target_price_low != null && row.target_price_low !== "" ? Number(row.target_price_low) : null);
+    const hi = patch.target_price_high ?? (row && row.target_price_high != null && row.target_price_high !== "" ? Number(row.target_price_high) : null);
+    if (lo != null && hi != null && hi <= lo) return { text: `上漲價位（${fmtPrice(hi)}）要大於下跌價位（${fmtPrice(lo)}）。`, muted: true };
+    const rows = [{ label: "股票", value: `${name} ${sid}`, note: cur ? `現價 ${fmtPrice(cur)}` : "" }];
+    const pct = v => cur ? `距 ${v < cur ? "−" : "+"}${fmtPct((v - cur) / cur * 100)}%` : "";
+    const old = (r, f) => r && r[f] != null && r[f] !== "" ? `原本 ${fmtPrice(r[f])}` : "";
+    if (patch.target_price_low != null) rows.push({ label: "跌到", value: fmtPrice(patch.target_price_low), note: [pct(patch.target_price_low), old(row, "target_price_low")].filter(Boolean).join(" · ") });
+    if (patch.target_price_high != null) rows.push({ label: "漲到", value: fmtPrice(patch.target_price_high), note: [pct(patch.target_price_high), old(row, "target_price_high")].filter(Boolean).join(" · ") });
+    if (!row && aiWatchFull()) return aiLimitCard("watchlist");
+    const desc = Object.entries(patch).map(([f, v]) => `${f === "target_price_low" ? "跌到" : "漲到"} ${fmtPrice(v)}`).join("、");
+    return aiConfirmCard({
+      head: row ? "設定到價提醒？" : "加入並設定到價提醒？",
+      sub: [row ? "" : `${name} 不在自選股，會先加入`, inferred].filter(Boolean).join("；"),
+      rows, mainLabel: "設定",
+      alt: row ? { label: "改一下", act: "open", data: { alert: row.id } } : null,
+      run: async () => {
+        const r = row || await aiAddStockById(sid);
+        if (!r) throw new Error("加入自選股後找不到那一列");
+        for (const [f, v] of Object.entries(patch)) { await updateAlert(r.id, f, v, false); r[f] = v; }
+        queuePushPromptAfterSignal();
+        renderCurrentTab();
+        return { text: `已設定：${name} ${desc} 時通知。`, actions: [aiOpenBtn(sid, "radar")] };
+      },
+    });
   },
-  openRuleEditorPrefilled() {
-    openRulesModal();
-    return { text: "進階訊號在這裡，按「新增訊號」設條件；這一版還不能幫你預填。" };
+  assistantBasicSignalSet(slots) {
+    const field = slots.basic_field;
+    const on = slots.on;
+    const sid = slots.stock;
+    const row = sid ? aiRowOf(sid) : null;
+    if (sid && !row) {
+      return { text: `${aiStockName(sid)} 不在自選股裡，先加入再設定。`,
+               chips: [{ label: `把${aiStockName(sid)}加進自選`, act: "send", data: { text: `把${aiStockName(sid)}加進自選` } }] };
+    }
+    const targets = row ? [row] : (watchlistRows || []);
+    if (!targets.length) return { text: "還沒有自選股。", muted: true };
+    const fields = field ? [field] : ALERT_FIELDS.slice();
+    if (on === undefined || on === null) {   // 問句：回現狀，附上改的籤
+      if (!field) return { text: "要開還是關哪一種？例如「台積電跌破支撐的通知關掉」。", muted: true };
+      const rows = targets.slice(0, 10).map(r => ({ label: aiStockName(String(r.stock_id).trim()), value: r[field] ? "開" : "關", note: "" }));
+      const who = row ? aiStockName(sid) : "全部股票";
+      return { head: `${aiFieldLabel(field)}通知`, rows,
+               chips: [{ label: `${who}打開`, act: "send", data: { text: `${who}的${aiFieldLabel(field)}通知打開` } },
+                       { label: `${who}關掉`, act: "send", data: { text: `${who}的${aiFieldLabel(field)}通知關掉` } }] };
+    }
+    if (row && field && !!row[field] === !!on) return { text: `${aiStockName(sid)} 的${aiFieldLabel(field)}通知已經是${on ? "開" : "關"}的。` };
+    const rows = [{ label: "對象", value: row ? `${aiStockName(sid)} ${sid}` : `全部 ${targets.length} 檔`, note: "" },
+                  { label: "訊號", value: field ? aiFieldLabel(field) : `全部 ${fields.length} 項`, note: "" },
+                  { label: "改成", value: on ? "開" : "關", note: row && field ? `目前 ${row[field] ? "開" : "關"}` : "" }];
+    return aiConfirmCard({
+      head: `${on ? "打開" : "關掉"}基礎訊號？`, rows, mainLabel: on ? "打開" : "關掉",
+      alt: { label: "改一下", act: "open", data: { alert: row ? row.id : ALERT_SCOPE_ALL } },
+      run: async () => {
+        const patch = {};
+        fields.forEach(f => { patch[f] = !!on; });
+        for (const r of targets) { await sbPatch("watchlist", { "id": `eq.${r.id}` }, patch, state.accessToken); Object.assign(r, patch); }
+        const shared = targets.filter(r => frLiveShareOf(String(r.stock_id).trim())).length;
+        if (shared) frReload().catch(() => {});
+        if (on) queuePushPromptAfterSignal();
+        renderCurrentTab();
+        return { text: `已${on ? "打開" : "關掉"}${field ? aiFieldLabel(field) : "全部基礎訊號"}（${targets.length} 檔${shared ? `，${shared} 檔已同步給好友` : ""}）。` };
+      },
+    });
+  },
+  openRuleEditorPrefilled(slots) {
+    const ct = slots.cond_type;
+    if (!ct || ct === "none") return { text: "要設什麼條件？例如「外資連買 3 天通知我」「漲幅超過 3% 提醒」。", actions: [{ label: "打開進階訊號 ›", act: "open", data: { rules: true } }] };
+    const cond = { type: ct, ...(slots.params_defaults || {}), ...(slots.params || {}) };
+    const desc = describeCondition(cond);
+    if (isPausedRuleType(ct)) return { text: `${desc}：這一層的資料來源暫停提供，建立了也不會成立。`, muted: true };
+    const sid = slots.stock || null;
+    const name = sid ? aiStockName(sid) : "";
+    const room = ruleRoomLeft();
+    if (room !== null && room <= 0) return aiLimitCard("alert_rules");
+    if (sid && !aiRowOf(sid) && aiWatchFull()) return aiLimitCard("watchlist");
+    const rows = [{ label: "條件", value: desc, note: "" },
+                  { label: "範圍", value: sid ? `${name} ${sid}` : "全部自選股", note: "" },
+                  { label: "進階訊號", value: `${(alertRules || []).length}／${planLimitOf("alert_rules") ?? "—"}`, note: "建立後 +1" }];
+    return aiConfirmCard({
+      head: sid && !aiRowOf(sid) ? "加入並建立進階訊號？" : "建立進階訊號？",
+      sub: sid && !aiRowOf(sid) ? `${name} 不在自選股，會先加入` : "",
+      rows, mainLabel: "建立",
+      alt: { label: "改一下", act: "open", data: { rules: true } },
+      run: async () => {
+        if (sid && !aiRowOf(sid)) await aiAddStockById(sid);
+        const { limitHit } = await insertRuleTemplates([{ name: desc.slice(0, 60), conditions: [cond] }], sid);
+        if (limitHit) return aiLimitCard("alert_rules");
+        await refreshRules().catch(() => {});
+        queuePushPromptAfterSignal();
+        return { text: `已建立進階訊號：${desc}（${sid ? name : "全部自選股"}）。`, actions: [{ label: "看進階訊號 ›", act: "open", data: { rules: true } }] };
+      },
+    });
   },
   assistantHoldingsSet(slots) {
-    switchTab("post");
-    return { text: `持股在盤後頁${slots.stock ? ` ${aiStockName(slots.stock)}` : ""}那張卡片的「持股」鈕裡填。已打開盤後頁。` };
+    const sid = slots.stock;
+    if (!sid) return aiNeedStock();
+    const name = aiStockName(sid);
+    const shares = slots.shares != null ? Number(slots.shares) : null;
+    const cost = slots.avg_cost != null ? Number(slots.avg_cost) : null;
+    if (shares == null && cost == null) return { text: "要記幾張、成本多少？例如「我有 2 張天鈺成本 180」。", muted: true };
+    if (shares != null && !(shares >= 0)) return { text: "股數要是 0 以上的數字。", muted: true };
+    if (cost != null && !(cost > 0)) return { text: "成本要大於 0。", muted: true };
+    const row = aiRowOf(sid);
+    if (!row && aiWatchFull()) return aiLimitCard("watchlist");
+    const clearing = shares === 0;
+    const rows = [{ label: "股票", value: `${name} ${sid}`, note: "" }];
+    if (shares != null) rows.push({ label: "股數", value: clearing ? "清掉" : `${shares.toLocaleString()} 股`, note: row && Number(row.shares) > 0 ? `原本 ${Number(row.shares).toLocaleString()}` : "" });
+    if (cost != null && !clearing) rows.push({ label: "平均成本", value: fmtPrice(cost), note: row && row.avg_cost != null && row.avg_cost !== "" ? `原本 ${fmtPrice(row.avg_cost)}` : "" });
+    return aiConfirmCard({
+      head: row ? "記錄持股？" : "加入並記錄持股？",
+      sub: row ? "" : `${name} 不在自選股，會先加入`,
+      rows, mainLabel: "儲存",
+      alt: row ? { label: "改一下", act: "open", data: { holdings: sid } } : null,
+      run: async () => {
+        const r = row || await aiAddStockById(sid);
+        if (!r) throw new Error("加入自選股後找不到那一列");
+        const patch = clearing ? { shares: null, avg_cost: null } : {};
+        if (!clearing && shares != null) patch.shares = shares;
+        if (!clearing && cost != null) patch.avg_cost = cost;
+        await sbPatch("watchlist", { "id": `eq.${r.id}` }, patch, state.accessToken);
+        Object.assign(r, patch);
+        renderCurrentTab();
+        return { text: clearing ? `已清掉 ${name} 的持股紀錄。` : `已記錄 ${name} 持股。`, actions: [{ label: "去盤後頁看損益 ›", act: "open", data: { tab: "post" } }] };
+      },
+    });
   },
 };
 </script>
