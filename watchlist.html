@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="361">
+  <meta name="app-version" content="362">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=361" rel="stylesheet">
+  <link href="watchlist.css?v=362" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19457,13 +19457,13 @@ let _aiNamesN = 0;
 // 與目錄的 handler.fn／args 逐項相同（test_assistant_tab 釘住）：反問卡點籤時只有 intent id，要靠這張表。
 const AI_INTENTS = {
   signals_today:    ["assistantSignalsToday", { tab: "radar" }],
-  signals_history:  ["openStockCard", { tab: "history" }],
+  signals_history:  ["assistantSignalsHistory", { tab: "history" }],
   quote:            ["assistantQuote", {}],
   kline:            ["openStockCard", { tab: "kline" }],
   levels:           ["assistantLevels", {}],
   events:           ["assistantEvents", {}],
-  score:            ["openScoreDetail", {}],
-  market_strength:  ["setHomeFilter", { mode: "market" }],
+  score:            ["assistantScore", {}],
+  market_strength:  ["assistantMarketStrength", { mode: "market" }],
   market_signals:   ["setHomeFilter", { mode: "signals" }],
   holdings:         ["assistantHoldings", {}],
   inbox:            ["assistantInbox", {}],
@@ -19712,11 +19712,28 @@ function aiAct(act, data) {
 // 「去那一頁」鍵：字卡、分頁、方案、基礎訊號面板、進階訊號、持股——都是既有的入口
 function aiOpen(d) {
   if (d.plan) { openPlanModal(); return; }
-  if (d.rules) { openRulesModal(); return; }
+  if (d.rules) { openRulesModal(); if (d.prefill) aiPrefillRuleEditor(d.prefill); return; }
+  if (d.events) { openEventsPanel(String(d.events)); return; }
+  if (d.score) { openScoreDetail(String(d.score)); return; }
+  if (d.filter) { switchTab("home"); setHomeFilter(String(d.filter)); return; }
   if (d.alert !== undefined && d.alert !== null) { openAlertSettings(d.alert); return; }
   if (d.holdings) { openHoldingsSheet(String(d.holdings)); return; }
   if (d.sid) openStockCard(String(d.sid), { tab: d.tab || "radar" });
   else if (d.tab) switchTab(String(d.tab));
+}
+
+// 進階訊號「改一下」：開編輯器並把聽到的條件填進去（editorConditions 就是編輯器的狀態），按儲存才建立
+function aiPrefillRuleEditor(p) {
+  setTimeout(() => {
+    try {
+      openRuleEditor(null);
+      const nameEl = document.getElementById("rule-name");
+      if (nameEl) nameEl.value = String(p.name || "").slice(0, 60);
+      const scopeEl = document.getElementById("rule-scope");
+      if (scopeEl) scopeEl.value = p.stock_id ? String(p.stock_id) : "";
+      if (p.cond && p.cond.type) { editorConditions = [JSON.parse(JSON.stringify(p.cond))]; renderRuleConditions(); }
+    } catch (e) { console.error("assistant rule prefill failed:", e); }
+  }, 150);
 }
 
 function aiOpenBtn(sid, tab, label) {
@@ -19871,16 +19888,93 @@ const ASSISTANT_ACTIONS = {
       ? { head: `${aiStockName(sid)} ${sid}`, sub: price ? `現價 ${fmtPrice(price)}` : "", rows, actions: [aiOpenBtn(sid, "radar")] }
       : { head: `${aiStockName(sid)} ${sid}`, text: "關卡資料還沒載入，或這檔不在自選股裡（關卡由監控每天開盤前算）。", actions: [aiOpenBtn(sid, "kline")] };
   },
-  assistantEvents(slots) {
-    if (slots.stock) { openEventsPanel(slots.stock); return { text: `已打開 ${aiStockName(slots.stock)} 的資料清單。` }; }
-    switchTab("home");
-    return { text: "今日資料與接下來 7 天在盤中頁下方。已打開盤中頁。" };
+  assistantSignalsHistory(slots) {
+    const sid = slots.stock;
+    if (!sid) return aiNeedStock();
+    const name = aiStockName(sid);
+    const hist = signalHistoryMap[sid] || {};
+    const dates = Object.keys(hist).sort().reverse().slice(0, 10);
+    if (!dates.length) {
+      loadSignalHistory(false).catch(() => {});   // 還沒抓：補一次，下一句就有
+      return { head: `${name} ${sid}`, text: "過去幾天的紀錄還在載入，稍後再問一次；或直接看字卡的歷史訊號。", actions: [aiOpenBtn(sid, "history", "看歷史訊號 ›")] };
+    }
+    const labelOf = k => SIGNAL_LABEL_MAP[k] || AUTO_SIGNAL_LABELS[k] || String(k || "");
+    const rows = dates.map(d => {
+      const sigs = (hist[d] && hist[d].signals) || [];
+      const names = [...new Set(sigs.map(s => labelOf(s.kind)))].slice(0, 2).join("、");
+      return { label: `${_mdOf(d)}（${_weekdayZh(d)}）`, value: sigs.length ? `${sigs.length} 則` : "—", note: names };
+    });
+    const total = dates.reduce((n, d) => n + (((hist[d] && hist[d].signals) || []).length), 0);
+    return { head: `${name} ${sid}`, sub: `近 ${dates.length} 個交易日 ${total} 則訊號`, rows, actions: [aiOpenBtn(sid, "history", "看歷史訊號 ›")] };
   },
-  openScoreDetail(slots) {
+  assistantEvents(slots) {
+    const sid = slots.stock || null;
+    const typeLabel = t => String(_EVENT_TYPE_LABEL[t] || t || "").replace(/^\S+\s/, "");
+    const today = taipeiDateKey(new Date());
+    if (sid) {
+      let evs = (stockEvents[sid] || []).slice();
+      if (!evs.length) {
+        loadStockEvents([sid]).catch(() => {});
+        return { head: `${aiStockName(sid)} ${sid}`, text: "資料還在載入，稍後再問一次；或直接開資料清單。", actions: [{ label: "開資料清單 ›", act: "open", data: { events: sid } }] };
+      }
+      if (slots.event_type) evs = evs.filter(e => e.event_type === slots.event_type);
+      if (slots.horizon === "upcoming") evs = evs.filter(e => String(e.event_date || "") > today);
+      evs.sort((a, b) => String(b.event_date || "").localeCompare(String(a.event_date || "")));
+      if (!evs.length) return { head: `${aiStockName(sid)} ${sid}`, text: `沒有${slots.event_type ? typeLabel(slots.event_type) : ""}${slots.horizon === "upcoming" ? "接下來的" : ""}資料。`, actions: [{ label: "開資料清單 ›", act: "open", data: { events: sid } }] };
+      const rows = evs.slice(0, 6).map(e => ({ label: typeLabel(e.event_type), value: String(e.title || "").slice(0, 28), note: String(e.event_date || "") }));
+      return { head: `${aiStockName(sid)} ${sid}`, sub: `${evs.length} 筆資料`, rows, actions: [{ label: "開資料清單 ›", act: "open", data: { events: sid } }] };
+    }
+    // 整份自選股：接下來的日程（除權息、法說…）或今天的資料
+    const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId);
+    let all = [];
+    for (const s of sids) for (const e of (stockEvents[s] || [])) all.push({ ...e, sid: s });
+    if (slots.event_type) all = all.filter(e => e.event_type === slots.event_type);
+    const upcoming = slots.horizon === "upcoming" || !all.some(e => taipeiDateKey(e.created_at || e.event_date) === today);
+    all = upcoming ? all.filter(e => String(e.event_date || "") > today).sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)))
+                   : all.filter(e => taipeiDateKey(e.created_at || e.event_date) === today);
+    if (!all.length) return { text: upcoming ? "接下來 7 天沒有自選股的日程。" : "今天還沒有新資料。", actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
+    const rows = all.slice(0, 8).map(e => ({ label: aiStockName(e.sid), value: `${typeLabel(e.event_type)}：${String(e.title || "").slice(0, 22)}`, note: String(e.event_date || "") }));
+    return { head: upcoming ? "接下來的日程" : "今天的資料", sub: `${all.length} 筆`, rows, actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
+  },
+  assistantScore(slots) {
     if (slots.open_report) { openDailyReportFromHistory(); return { text: "已打開今天的報告。" }; }
-    if (slots.stock) { openScoreDetail(slots.stock); return { text: `已打開 ${aiStockName(slots.stock)} 的評分明細。` }; }
-    switchTab("scores");
-    return { text: "已打開統計分頁。" };
+    if (!planAllows("stats_enabled")) return { text: "每日評分是付費方案的功能。", actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] };
+    if (!sharedReportData) {
+      loadSharedReportData().catch(() => {});
+      return { text: "報告還在載入，稍後再問一次。", actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] };
+    }
+    const sid = slots.stock;
+    if (sid) {
+      if (isEtfId(sid)) return { head: `${aiStockName(sid)} ${sid}`, text: "ETF 不適用基本面評分；報價、K 線、關卡與訊號照常。", actions: [aiOpenBtn(sid, "radar")] };
+      const s = sharedReportData.investment_scores?.[sid];
+      if (!s) return { head: `${aiStockName(sid)} ${sid}`, text: "今天的報告裡沒有這一檔的評分。", actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] };
+      const rows = [{ label: "總分", value: fmtScoreValue(s.total_score), note: fmtScoreDelta(s.score_change) },
+                    { label: "基本面", value: fmtScoreValue(s.fundamental_score_v2), note: fmtScoreDelta(s.fundamental_change) },
+                    { label: "技術量能", value: fmtScoreValue(s.technical_volume_score), note: fmtScoreDelta(s.technical_change) }];
+      return { head: `${aiStockName(sid)} ${sid}`, sub: `每日評分 ${sharedReportData.date || ""}`, rows, actions: [{ label: "評分明細 ›", act: "open", data: { score: sid } }] };
+    }
+    const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(s => isStockId(s) && sharedReportData.investment_scores?.[s]);
+    if (!sids.length) return { text: "自選股在今天的報告裡沒有評分。", actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] };
+    const rows = sids.map(s => ({ s, sc: sharedReportData.investment_scores[s] }))
+      .sort((a, b) => Math.abs(Number(b.sc.score_change) || 0) - Math.abs(Number(a.sc.score_change) || 0)).slice(0, 10)
+      .map(x => ({ label: aiStockName(x.s), value: fmtScoreValue(x.sc.total_score), note: fmtScoreDelta(x.sc.score_change) }));
+    return { head: "自選股評分", sub: `${sharedReportData.date || ""} · 變化大的在前`, rows, actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] };
+  },
+  assistantMarketStrength(slots) {
+    const p = (typeof marketPayload !== "undefined" && marketPayload) ? marketPayload : null;
+    if (!p) {
+      _loadMarketIfStale();
+      return { text: "市場強度還在載入，稍後再問一次。", actions: [{ label: "打開市場強度 ›", act: "open", data: { filter: "market" } }] };
+    }
+    const v = msView(p);
+    let inds = (v.industries || []).slice();
+    if (slots.sector) {
+      const hit = inds.filter(i => String(i.ind || "").includes(String(slots.sector)));
+      if (hit.length) inds = hit;
+    }
+    const rows = inds.slice(0, slots.sector ? 3 : 6).map((i, n) => ({ label: `${n + 1}. ${i.ind}`, value: `${Number(i.score)}`, note: `上漲 ${Number(i.up_pct)}%・${Number(i.n)} 檔` }));
+    return { head: "市場強度", sub: `族群強度分數（0–100）${p.at ? ` · ${fmtTime(p.at)}` : ""}`, rows,
+             actions: [{ label: "打開市場強度 ›", act: "open", data: { filter: "market" } }] };
   },
   setHomeFilter(slots, args) {
     switchTab("home"); setHomeFilter(args.mode === "signals" ? "signals" : "market");
@@ -20241,7 +20335,7 @@ const ASSISTANT_ACTIONS = {
       head: sid && !aiRowOf(sid) ? "加入並建立進階訊號？" : "建立進階訊號？",
       sub: sid && !aiRowOf(sid) ? `${name} 不在自選股，會先加入` : "",
       rows, mainLabel: "建立",
-      alt: { label: "改一下", act: "open", data: { rules: true } },
+      alt: { label: "改一下", act: "open", data: { rules: true, prefill: { name: desc.slice(0, 60), stock_id: sid, cond } } },
       run: async () => {
         if (sid && !aiRowOf(sid)) await aiAddStockById(sid);
         const { limitHit } = await insertRuleTemplates([{ name: desc.slice(0, 60), conditions: [cond] }], sid);
