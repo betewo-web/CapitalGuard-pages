@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="360">
+  <meta name="app-version" content="361">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=360" rel="stylesheet">
+  <link href="watchlist.css?v=361" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19474,13 +19474,15 @@ const AI_INTENTS = {
   rule_create:      ["openRuleEditorPrefilled", {}],
   rule_manage:      ["assistantRules", {}],
   holdings_set:     ["assistantHoldingsSet", {}],
-  share_stock:      ["switchTab", { tab: "friends" }],
+  share_stock:      ["assistantShare", {}],
   plan:             ["assistantPlan", {}],
   push_setup:       ["assistantPushSetup", {}],
   system_status:    ["assistantSystemStatus", {}],
   glossary:         ["assistantGlossary", {}],
   help:             ["assistantHelp", {}],
-  feedback:         ["fbOpen", {}],
+  feedback:         ["assistantFeedback", {}],
+  friend:           ["assistantFriend", {}],
+  ui_settings:      ["assistantUiSettings", {}],
   advice:           ["assistantRefuse", {}],
   out_of_scope:     ["assistantOutOfScope", {}],
 };
@@ -19696,6 +19698,10 @@ function aiAct(act, data) {
   if (act === "open") { aiOpen(data); return; }
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
+  // 這三個瀏覽器要「使用者的手勢」：按鍵本身就是那個手勢
+  if (act === "push") { togglePushSubscription(); return; }
+  if (act === "install") { installPwa("assistant"); return; }
+  if (act === "invite") { shareInvite(); return; }
   if (act === "pick") {    // 反問卡：使用者選了哪一類 → 用同一組槽位在本機執行，並回寫是哪一個
     aiOutcome(data.log_id, data.intent, null);
     aiRun(data.intent, data.slots || {}, { log_id: data.log_id, meta: "使用者選的" });
@@ -19794,7 +19800,7 @@ function aiHandleResponse(r, text) {
     aiPushCard({ head: r.say || "你想要的是哪一種？", chips, meta });
     return;
   }
-  aiRun(String(r.intent || ""), r.slots || {}, { log_id: r.log_id, say: r.say, meta, args: (r.action && r.action.args) || null });
+  aiRun(String(r.intent || ""), r.slots || {}, { log_id: r.log_id, say: r.say, meta, args: (r.action && r.action.args) || null, text });
 }
 
 // 執行：只走白名單。回傳卡片就畫、回傳 null 代表已經跳去別的頁（對話裡留一行）
@@ -19871,6 +19877,7 @@ const ASSISTANT_ACTIONS = {
     return { text: "今日資料與接下來 7 天在盤中頁下方。已打開盤中頁。" };
   },
   openScoreDetail(slots) {
+    if (slots.open_report) { openDailyReportFromHistory(); return { text: "已打開今天的報告。" }; }
     if (slots.stock) { openScoreDetail(slots.stock); return { text: `已打開 ${aiStockName(slots.stock)} 的評分明細。` }; }
     switchTab("scores");
     return { text: "已打開統計分頁。" };
@@ -19892,17 +19899,70 @@ const ASSISTANT_ACTIONS = {
     const label = { inbox: "通知", friends: "分享", post: "盤後", scores: "統計", watch: "設定", home: "盤中" }[tab] || tab;
     return { text: `已打開${label}。` };
   },
-  assistantPlan() {
+  assistantPlan(slots) {
     const p = planState.ready ? planState.plan : null;
+    const action = slots.action || "info";
+    if (action === "upgrade") { openPlanModal(null, slots.plan || null); return { text: "已打開方案面板；付款在那裡完成，助手不會替你付款。" }; }
+    if (action === "cancel") { cancelSubscription(); return { text: "取消訂閱的流程在方案面板裡，剛才已打開。" }; }
+    if (action === "trial") {
+      const t = planState.trial || null;
+      if (!t || !p || p.code !== "free") return { text: "免費體驗只有免費版還沒領過的帳號可以領。", actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] };
+      return aiConfirmCard({
+        head: "領取免費體驗？",
+        rows: [{ label: "方案", value: planNameOf(t.plan_code) || "", note: "" },
+               { label: "長度", value: t.trading_days ? `${t.trading_days} 個交易日` : "", note: "到期自動回免費版，不扣款" }],
+        mainLabel: "領取",
+        run: async () => { await claimTrial(); return { text: "體驗已開始，詳情在方案面板。", actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] }; },
+      });
+    }
     if (!p) { openPlanModal(); return { text: "已打開方案與用量。" }; }
     return { head: "方案與用量", sub: p.name || planTierLabel(),
              rows: [{ label: "自選股", value: aiWatchUsage(), note: "含好友分享" },
                     { label: "進階訊號", value: `${(alertRules || []).length}／${p.rule_limit ?? "—"}`, note: "" }],
              actions: [{ label: "看方案與升級 ›", act: "open", data: { plan: true } }] };
   },
-  assistantRules() {
+  assistantRules(slots) {
     const rules = alertRules || [];
-    if (!rules.length) return { text: "還沒有進階訊號。", actions: [{ label: "打開進階訊號 ›", act: "open", data: { rules: true } }] };
+    const action = slots.action || "list";
+    const rulesBtn = { label: "打開進階訊號 ›", act: "open", data: { rules: true } };
+    if (action === "auto") {   // 讓系統幫我選：與面板那顆鈕同一條（範本補滿剩下的額度）
+      const room = ruleRoomLeft();
+      const tpls = ruleTemplateSuggestions(room, null);
+      if (!tpls.length) return room !== null && room <= 0 ? aiLimitCard("alert_rules") : { text: "範本都設過了，其餘條件請到進階訊號裡自己組。", actions: [rulesBtn] };
+      return aiConfirmCard({
+        head: "讓系統幫你選？", rows: tpls.map(t => ({ label: t.name, value: "", note: "全部自選股" })), mainLabel: `建立 ${tpls.length} 條`,
+        run: async () => { const r = await insertRuleTemplates(tpls, null); await refreshRules().catch(() => {}); return r.limitHit ? aiLimitCard("alert_rules") : { text: `已建立 ${r.added} 條進階訊號。`, actions: [rulesBtn] }; },
+      });
+    }
+    if (action === "on" || action === "off" || action === "delete") {
+      const which = String(slots.which || "").trim();
+      const hits = which
+        ? rules.filter(r => String(r.name || "").includes(which) || (r.conditions || []).some(c => describeCondition(c).includes(which)))
+        : rules;
+      const verb = action === "on" ? "打開" : action === "off" ? "關掉" : "刪掉";
+      if (!rules.length) return { text: "還沒有進階訊號。", actions: [rulesBtn] };
+      if (!hits.length) return { head: `找不到「${which}」這一條`, rows: rules.slice(0, 8).map(r => ({ label: r.name, value: r.enabled ? "開" : "關", note: "" })), actions: [rulesBtn] };
+      if (hits.length > 1 && (which || action === "delete")) {
+        return { head: "你指的是哪一條？", chips: hits.slice(0, 8).map(r => ({ label: String(r.name || ""), act: "send", data: { text: `把「${r.name}」那條${verb}` } })) };
+      }
+      const targets = action === "delete" ? hits.slice(0, 1) : hits.filter(r => !!r.enabled !== (action === "on"));
+      if (!targets.length) return { text: `「${hits[0].name}」已經是${action === "on" ? "開" : "關"}的。` };
+      return aiConfirmCard({
+        head: `${verb}進階訊號？`, text: action === "delete" ? "刪掉不能復原。" : "",
+        rows: targets.map(r => ({ label: String(r.name || ""), value: r.enabled ? "開" : "關", note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股" })),
+        mainLabel: verb,
+        run: async () => {
+          for (const r of targets) {
+            if (action === "delete") await sbDelete("alert_rules", { id: `eq.${r.id}` }, state.accessToken);
+            else await sbPatch("alert_rules", { id: `eq.${r.id}` }, { enabled: action === "on" }, state.accessToken);
+          }
+          trackActivity(action === "delete" ? "rule_delete" : "rule_toggle", { enabled: action === "on" });
+          await refreshRules().catch(() => {});
+          return { text: `已${verb} ${targets.length} 條進階訊號。`, actions: [rulesBtn] };
+        },
+      });
+    }
+    if (!rules.length) return { text: "還沒有進階訊號。", actions: [rulesBtn] };
     const rows = rules.slice(0, 10).map(r => ({
       label: r.name || describeCondition((r.conditions || [])[0]), value: r.enabled ? "開" : "關",
       note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股" }));
@@ -19917,9 +19977,107 @@ const ASSISTANT_ACTIONS = {
              actions: [{ label: "打開通知 ›", act: "open", data: { tab: "inbox" } }] };
   },
   fbOpen() { fbOpen(null); return { text: "已打開意見回饋。" }; },
-  assistantPushSetup() {
-    switchTab("home");
-    return { text: "通知的開關在盤中頁最上面那一列；收不到通知時那裡會出現「啟用瀏覽器通知」。已打開盤中頁。" };
+  assistantPushSetup(slots) {
+    const perm = (typeof Notification !== "undefined" && Notification.permission) || "default";
+    const rows = [{ label: "瀏覽器權限", value: perm === "granted" ? "已允許" : perm === "denied" ? "被拒絕" : "尚未詢問", note: "" },
+                  { label: "推播訂閱", value: _pushSubscribed ? "已訂閱" : "未訂閱", note: "" }];
+    if (slots.on === false) {
+      if (!_pushSubscribed) return { head: "推播", rows, text: "目前就沒有訂閱推播。" };
+      return aiConfirmCard({
+        head: "關掉推播？", rows, text: "關掉之後盤中與盤後的訊號都收不到；之後可以再打開。", mainLabel: "關掉",
+        run: async () => { await togglePushSubscription(); return { text: _pushSubscribed ? "沒有關成，請到盤中頁最上面那一列再試。" : "已關掉推播。" }; },
+      });
+    }
+    if (_pushSubscribed) return { head: "推播", rows, text: "推播已經開著。還是收不到的話，看手機的通知設定有沒有允許這個 App。" };
+    if (perm === "denied") return { head: "推播", rows, text: "瀏覽器把通知擋掉了：到手機設定裡允許這個網站的通知，再回來按一次。" };
+    return { head: "推播", rows, text: "按下面這顆，瀏覽器會問你要不要允許通知。", actions: [{ label: "啟用通知", act: "push", data: {}, main: true }] };
+  },
+  assistantShare(slots, args, opts) {
+    if (!frEnabled) return { text: "分享功能還沒開給這個帳號。", muted: true };
+    const sid = slots.stock || null;
+    const name = sid ? aiStockName(sid) : "";
+    const action = slots.action || (sid ? "share" : "list");
+    const inc = (frShare && frShare.incoming) || [], out = (frShare && frShare.outgoing) || [];
+    const goBtn = { label: "去分享分頁 ›", act: "open", data: { tab: "friends" } };
+    const fail = r => { if (!r || typeof r !== "object" || r === FR_RPC_MISSING) throw new Error("分享功能暫時無法使用"); if (r.error) throw new Error(FR_ERRORS[r.error] || r.error); return r; };
+    if (action === "list") {
+      const rows = out.slice(0, 5).map(s => ({ label: aiStockName(String(s.stock_id)), value: "我分享的", note: s.live === false ? "已結束" : "進行中" }))
+        .concat(inc.slice(0, 5).map(s => ({ label: aiStockName(String(s.stock_id)), value: `${s.owner_name || "好友"} 分享的`, note: s.status === "accepted" ? "已接受" : s.status === "pending" ? "等你回應" : String(s.status || "") })));
+      return rows.length ? { head: "分享", rows, actions: [goBtn] } : { text: "還沒有任何分享。", actions: [goBtn] };
+    }
+    if (action === "stop") {
+      const s = out.find(x => String(x.stock_id) === sid && x.live !== false);
+      if (!s) return { text: `${name || "這一檔"} 沒有在分享中。`, actions: [goBtn] };
+      return aiConfirmCard({ head: "停止分享？", rows: [{ label: "股票", value: `${name} ${sid}`, note: "對方會收到結束" }], mainLabel: "停止分享",
+        run: async () => { fail(await frRpc("share_terminate", { p_share_id: s.share_id })); await frReloadShares().catch(() => {}); return { text: `已停止分享 ${name}。` }; } });
+    }
+    if (action === "accept" || action === "decline") {
+      const s = inc.find(x => x.status === "pending" && (!sid || String(x.stock_id) === sid));
+      if (!s) return { text: "沒有等你回應的分享。", actions: [goBtn] };
+      const ok = action === "accept";
+      return aiConfirmCard({ head: ok ? "接受分享？" : "不接受分享？",
+        rows: [{ label: "股票", value: aiStockName(String(s.stock_id)), note: "" }, { label: "來自", value: String(s.owner_name || "好友"), note: "" }],
+        mainLabel: ok ? "接受" : "不接受",
+        run: async () => { fail(await frRpc("share_respond", { p_share_id: s.share_id, p_accept: ok })); await syncStockLists({ social: true }); return { text: ok ? `已接受 ${aiStockName(String(s.stock_id))} 的分享。` : "已回覆不接受。" }; } });
+    }
+    if (action === "optout") { switchTab("friends"); return { text: "「不再接收」在分享分頁那一則上。" }; }
+    if (!sid) return aiNeedStock();
+    const friends = (frState && frState.friends) || [];
+    if (!friends.length) return { text: "還沒有好友，先邀請朋友。", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
+    const said = String((opts && opts.text) || "");
+    let hits = friends.filter(f => f.name && said.includes(String(f.name)));
+    if (!hits.length && slots.person) hits = friends.filter(f => String(f.name || "").toLowerCase().includes(String(slots.person).toLowerCase()));
+    if (hits.length !== 1) {
+      return { head: "要分享給誰？", chips: friends.slice(0, 8).map(f => ({ label: String(f.name || ""), act: "send", data: { text: `把${name}分享給${f.name}` } })) };
+    }
+    const f = hits[0];
+    return aiConfirmCard({
+      head: "分享股票？", rows: [{ label: "股票", value: `${name} ${sid}`, note: "" }, { label: "給", value: String(f.name || ""), note: "不設期限" }],
+      mainLabel: "分享",
+      run: async () => {
+        const r = await frRpc("share_create", { p_stock_id: sid, p_friends: [f.user_id], p_groups: [], p_expires_at: null });
+        if (r && r.error === "already_shared") return { text: `${name} 已經在分享中，到分享分頁那一則上增減對象。`, failed: true, actions: [goBtn] };
+        fail(r);
+        await frReloadShares().catch(() => {});
+        return { text: `已把 ${name} 分享給 ${f.name}。`, actions: [goBtn] };
+      },
+    });
+  },
+  assistantFriend(slots) {
+    if (!frEnabled) return { text: "好友功能還沒開給這個帳號。", muted: true };
+    const action = slots.action || (slots.handle ? "add" : "list");
+    const goBtn = { label: "去分享分頁 ›", act: "open", data: { tab: "friends" } };
+    const fail = r => { if (!r || typeof r !== "object" || r === FR_RPC_MISSING) throw new Error("好友功能暫時無法使用"); if (r.error) throw new Error(FR_ERRORS[r.error] || r.error); return r; };
+    if (action === "add") {
+      if (!slots.handle) return { text: "要加誰？給我對方的 ID，例如「加 ABC123 為好友」。", muted: true };
+      return aiConfirmCard({ head: "送出好友邀請？", rows: [{ label: "對方 ID", value: String(slots.handle), note: "" }], mainLabel: "送出",
+        run: async () => { fail(await frRpc("lab_friend_request_by_handle", { p_handle: slots.handle })); await frReload().catch(() => {}); return { text: `已送出邀請給 ${slots.handle}。`, actions: [goBtn] }; } });
+    }
+    if (action === "accept" || action === "decline") {
+      const reqs = (frState && frState.requests_in) || [];
+      if (!reqs.length) return { text: "沒有等你回應的好友邀請。", actions: [goBtn] };
+      const r0 = reqs[0];
+      const ok = action === "accept";
+      return aiConfirmCard({ head: ok ? "接受好友邀請？" : "拒絕好友邀請？", rows: [{ label: "來自", value: String(r0.name || r0.display_name || "好友"), note: "" }], mainLabel: ok ? "接受" : "拒絕",
+        run: async () => { fail(await frRpc("lab_friend_respond", { p_request_id: r0.request_id, p_accept: ok })); await frReload().catch(() => {}); return { text: ok ? "已成為好友。" : "已拒絕。" }; } });
+    }
+    if (action === "invite") return { text: "把邀請連結傳給朋友：", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
+    const friends = (frState && frState.friends) || [];
+    if (!friends.length) return { text: "還沒有好友。", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
+    return { head: `好友 ${friends.length} 位`, rows: friends.slice(0, 10).map(f => ({ label: String(f.name || ""), value: "", note: String(f.tag || "") })), actions: [goBtn] };
+  },
+  assistantUiSettings(slots) {
+    if (slots.font) { setAppFontSize(slots.font); return { text: `字體已改成${{ base: "標準", large: "大", xlarge: "最大" }[slots.font] || slots.font}。` }; }
+    if (slots.install) return { text: "按下面這顆，會跳出安裝到主畫面的提示。", actions: [{ label: "安裝到主畫面", act: "install", data: {}, main: true }] };
+    if (slots.disclaimer) { showDisclaimerGate(); return { text: "已打開免責聲明。" }; }
+    return { text: "可以改字體大小（標準／大／最大）、安裝到主畫面、看免責聲明；登出在設定頁最下面。" };
+  },
+  assistantFeedback(slots) {
+    fbOpen(null).then(() => {
+      if (!slots.text) return;
+      setTimeout(() => { const el = document.getElementById("fb-body"); if (el && !el.value) el.value = String(slots.text).slice(0, 1000); }, 250);
+    }).catch(() => {});
+    return { text: slots.text ? `已打開意見回饋並填好「${String(slots.text).slice(0, 40)}」，看過按送出。` : "已打開意見回饋。" };
   },
   assistantSystemStatus() {
     return { head: "資料狀態", rows: [{ label: "現在", value: homeStatusText(), note: "" },
@@ -19966,6 +20124,19 @@ const ASSISTANT_ACTIONS = {
   assistantPriceTargetSet(slots) {
     const sid = slots.stock;
     if (!sid) return aiNeedStock();
+    if (slots.clear) {   // 取消到價提醒：兩個價位都清掉
+      const row = aiRowOf(sid);
+      const name0 = aiStockName(sid);
+      if (!row) return { text: `${name0} 不在自選股裡。`, muted: true };
+      const has = ["target_price_low", "target_price_high"].filter(f => row[f] != null && row[f] !== "");
+      if (!has.length) return { text: `${name0} 沒有設到價提醒。` };
+      return aiConfirmCard({
+        head: "取消到價提醒？",
+        rows: has.map(f => ({ label: f === "target_price_low" ? "跌到" : "漲到", value: fmtPrice(row[f]), note: "會清掉" })),
+        mainLabel: "清掉",
+        run: async () => { for (const f of has) { await updateAlert(row.id, f, null, false); row[f] = null; } renderCurrentTab(); return { text: `已取消 ${name0} 的到價提醒。` }; },
+      });
+    }
     const price = Number(slots.price);
     if (!(price > 0)) return { text: "要在多少元時通知？打完整的句子，例如「天鈺跌到 180 通知我」。", muted: true };
     const name = aiStockName(sid);
