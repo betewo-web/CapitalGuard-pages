@@ -5597,6 +5597,8 @@ select.fr-input { width: 100%; }
 .ms-kd-n { font-size: 0.82rem; font-weight: 700; text-align: right;
 	font-variant-numeric: tabular-nums; }
 .ms-kd-spark { line-height: 0; min-width: 0; }
+/* 定案型的種類（量縮）：迷你走勢的位置改寫一句，走勢對它沒有意義 */
+.ms-kd-settled { line-height: 1.2; font-size: 0.62rem; color: var(--text-muted); white-space: nowrap; }
 .ms-pl-empty { padding: 0.9rem 0.8rem; font-size: 0.76rem; line-height: 1.6;
 	color: var(--text-muted); background: var(--surface);
 	border: 1px dashed var(--border); border-radius: 12px; }

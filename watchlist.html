@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="373">
+  <meta name="app-version" content="374">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=373" rel="stylesheet">
+  <link href="watchlist.css?v=374" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -407,7 +407,8 @@
              和強度同一份 payload（market_strength 那一列）的另一半，所以切過來不必重抓。
              三層共用一條 09:00–13:30 的時間軸：
              ① 訊號脈動：每分鐘 ↑上漲訊號／↓下跌訊號 的則數（雙向柱——數目給柱高、
-                方向給上下，顏色因此不必扛方向）
+                方向給上下，顏色因此不必扛方向）。量縮不在柱子裡：它 13:00 一次定案，
+                那是定案不是發生（payload.pulse.settled）
              ② 族群輪動：族群 × 15 分鐘的淨訊號矩陣（熱帶會從一列移到另一列＝資金輪動）
              ③ 種類：每種一條迷你走勢＋今日累計，點一種就只看那一種
              點族群那一列會跳回「市場強度」並展開那一類——族群的細節（走勢、成員）
@@ -9686,7 +9687,31 @@ function msPulseHtml(p) {
 // ① 訊號脈動：每分鐘的則數，上漲訊號往上、下跌訊號往下。
 // 用 inline SVG 而不是 ECharts：這是一排等寬的柱子，不需要座標軸、縮放或 tooltip，
 // 而這一頁已經有兩個 ECharts 實例了。
+// 「定案型」的種類（後端 SETTLED_KINDS，payload.pulse.settled；沒帶就當作只有量縮）：
+// 量縮 13:00 才定案，全市場的量縮會在那一分鐘一起成立（2026-10-16 實測 225 則），
+// 那是定案不是發生，後端不把它算進每分鐘柱圖與輪動矩陣。這裡只負責把這件事講出來。
+function msSettledKinds(pu) {
+  return Array.isArray(pu && pu.settled) ? pu.settled : ["volume_vs_ma:below"];
+}
+function msSettledNote(pu) {
+  const names = msSettledKinds(pu)
+    .map(k => (pu.kinds || []).find(x => x.k === k))
+    .filter(k => k && Number(k.n) > 0)
+    .map(k => `${escapeHtml(SIGNAL_ABBR[k.k] || k.k)} ${Number(k.n)} 檔`);
+  return names.length
+    ? `${names.join("、")}在 13:00 一次定案，只算進今日累計，不畫進柱圖與輪動矩陣。`
+    : "";
+}
+
 function msPulseBarsHtml(pu) {
+  if (msPulseKind && msSettledKinds(pu).includes(msPulseKind)) {
+    const k = (pu.kinds || []).find(x => x.k === msPulseKind) || {};
+    const name = escapeHtml(SIGNAL_ABBR[msPulseKind] || msPulseKind);
+    return `
+    <div class="ms-pl-head"><span>只看「${name}」</span><span class="ms-pl-peak">今天 ${Number(k.n || 0)} 檔</span></div>
+    <div class="ms-pl-empty">${name}是在 13:00 一次定案的，不是某一分鐘發生的事，所以沒有每分鐘的形狀。<br>
+      它只算進今日累計與種類的檔數；要看哪幾檔，問助手「今天量縮的股票有哪些」。</div>`;
+  }
   const up = (msPulseKind ? (pu.kinds.find(k => k.k === msPulseKind) || {}).series || [] : pu.up) || [];
   const down = msPulseKind ? [] : (pu.down || []);
   const n = Math.max(up.length, down.length);
@@ -9716,7 +9741,8 @@ function msPulseBarsHtml(pu) {
       <line x1="0" y1="${mid}" x2="${w}" y2="${mid}" class="ms-pl-axis"/>
       ${bars.join("")}
     </svg>
-    <div class="ms-pl-axis-lbl"><span>${n} 分鐘前</span><span>現在</span></div>`;
+    <div class="ms-pl-axis-lbl"><span>${n} 分鐘前</span><span>現在</span></div>
+    ${!msPulseKind && msSettledNote(pu) ? `<div class="ms-rot-note">${msSettledNote(pu)}</div>` : ""}`;
 }
 
 // ② 族群輪動矩陣：列＝族群、欄＝15 分鐘、格＝每百檔的淨訊號。
@@ -9762,6 +9788,7 @@ function msRotHtml(pu, openInd) {
 // 不是出現幾次——同一檔同一種一天只算一次（後端的 SignalLog 去重，與雷達列那顆
 // 兩字縮寫籤同一套規則）。全名與門檻在 AUTO_SIGNAL_LABELS，掛在每一顆的 title 上。
 function msKindsHtml(kinds) {
+  const settled = msSettledKinds((marketPayload || {}).pulse);
   return `
     <div class="ms-kinds">
       ${kinds.map(k => `
@@ -9770,11 +9797,14 @@ function msKindsHtml(kinds) {
                 title="${escapeHtml(AUTO_SIGNAL_LABELS[k.k] || SIGNAL_LABEL_MAP[k.k] || k.k)}：今天 ${Number(k.n)} 檔出現過">
           <span class="ms-kd-name">${escapeHtml(SIGNAL_ABBR[k.k] || k.k)}</span>
           <span class="ms-kd-n">${Number(k.n)}</span>
-          <span class="ms-kd-spark">${msSparkSvg(k.series || [], { w: 52, h: 18, min: 0 })}</span>
+          ${settled.includes(k.k)
+            ? `<span class="ms-kd-spark ms-kd-settled">13:00 定案</span>`
+            : `<span class="ms-kd-spark">${msSparkSvg(k.series || [], { w: 52, h: 18, min: 0 })}</span>`}
         </button>`).join("")}
     </div>
     <div class="ms-rot-note">數字＝今天有幾<b>檔</b>出現過這一種訊號（同一檔同一種一天只算一次），
-      不是出現幾次。長按一顆看全名與門檻；點一下上面的柱圖只畫那一種。</div>`;
+      不是出現幾次。長按一顆看全名與門檻；點一下上面的柱圖只畫那一種。
+      寫「13:00 定案」的那一種沒有每分鐘的形狀，不在柱圖裡。</div>`;
 }
 
 function msPickKind(kind) {
