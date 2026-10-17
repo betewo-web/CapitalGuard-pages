@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="364">
+  <meta name="app-version" content="365">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=364" rel="stylesheet">
+  <link href="watchlist.css?v=365" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19634,7 +19634,7 @@ function aiConfirmCard(spec) {
   const id = "ac" + (++_aiCardSeq);
   aiPending[id] = spec;
   const actions = [{ label: spec.mainLabel || "確定", act: "confirm", data: { id }, main: true }];
-  if (spec.alt) actions.push({ label: spec.alt.label, act: spec.alt.act, data: spec.alt.data });
+  if (spec.alt) actions.push({ label: spec.alt.label, act: spec.alt.act, data: Object.assign({ _collapse: id }, spec.alt.data) });
   actions.push({ label: "取消", act: "cancel", data: { id } });
   return { _id: id, head: spec.head, sub: spec.sub, rows: spec.rows, text: spec.text, actions };
 }
@@ -19651,6 +19651,7 @@ async function aiRunConfirm(id) {
   aiReplaceCard(id, result || { text: "完成。" });
   aiOutcome(spec.log_id, null, !!result && !result.failed);
   renderAssistant();
+  aiFlushNav();   // run() 裡排的跳頁，結果卡畫出來之後才跳
 }
 
 function aiCancelConfirm(id) {
@@ -19660,6 +19661,36 @@ function aiCancelConfirm(id) {
   aiReplaceCard(id, { text: "已取消。", muted: true });
   aiOutcome(spec.log_id, null, false);
   renderAssistant();
+}
+
+// 送了新的一句（或點了籤）：上一句留下、還沒按的確認卡作廢（第十五節 B1）——留著只會對舊資料執行
+function aiSkipPending() {
+  for (const id of Object.keys(aiPending)) {
+    const spec = aiPending[id];
+    if (spec.busy) continue;
+    delete aiPending[id];
+    aiReplaceCard(id, { text: "已略過（你送了新的一句）。", muted: true });
+    aiOutcome(spec.log_id, null, false);
+  }
+}
+
+// 「改一下」：卡收成一行、主鍵不再能按（第十五節 B2）；寫入在打開的面板裡完成，不會重複
+function aiCollapseConfirm(id) {
+  const spec = aiPending[id];
+  if (!spec) return;
+  delete aiPending[id];
+  aiReplaceCard(id, { text: "改在面板裡。", muted: true });
+  aiOutcome(spec.log_id, null, null);
+}
+
+// 先留卡再跳頁（第十五節 B5）：handler 裡所有跳頁都排進佇列，卡畫出來之後才跳，回來時那一行已經在
+let _aiNavQueue = [];
+function aiNav(fn) { _aiNavQueue.push(fn); }
+function aiFlushNav() {
+  const q = _aiNavQueue;
+  _aiNavQueue = [];
+  if (!q.length) return;
+  setTimeout(() => q.forEach(f => { try { f(); } catch (e) { console.error("assistant nav failed:", e); } }), 350);
 }
 
 function aiErrorCard(e) {
@@ -19714,7 +19745,7 @@ function aiBindOnce() {
 
 function aiAct(act, data) {
   if (act === "send") { assistantSend(String(data.text || "")); return; }
-  if (act === "open") { aiOpen(data); return; }
+  if (act === "open") { if (data._collapse) aiCollapseConfirm(String(data._collapse)); aiOpen(data); renderAssistant(); return; }
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
   if (act === "wrong") { aiMarkWrong(String(data.log_id || "")); return; }
@@ -19723,6 +19754,7 @@ function aiAct(act, data) {
   if (act === "install") { installPwa("assistant"); return; }
   if (act === "invite") { shareInvite(); return; }
   if (act === "pick") {    // 反問卡：使用者選了哪一類 → 用同一組槽位在本機執行，並回寫是哪一個
+    aiSkipPending();
     aiOutcome(data.log_id, data.intent, null);
     aiRun(data.intent, data.slots || {}, { log_id: data.log_id, meta: "使用者選的" }).then(() => renderAssistant());
   }
@@ -19778,6 +19810,7 @@ function assistantSubmit(ev) {
 async function assistantSend(raw) {
   const text = String(raw || "").trim().slice(0, AI_MAX_CHARS);
   if (!text || aiBusy) return;
+  aiSkipPending();
   aiLog.push({ kind: "user", text });
   if (!state.accessToken) { aiPushCard({ text: "登入後才能使用助手。", muted: true }); renderAssistant(); return; }
   if (!aiRouteUrl || !aiEnabled) { aiPushCard({ text: "助手尚未啟用。", muted: true }); renderAssistant(); return; }
@@ -19858,6 +19891,8 @@ async function aiRun(intent, slots, opts) {
   // 確認卡：executed 等按了主鍵／取消才回寫；其餘現在就算執行過
   if (card && card._id && aiPending[card._id]) aiPending[card._id].log_id = opts && opts.log_id;
   else aiOutcome(opts && opts.log_id, null, true);
+  renderAssistant();
+  aiFlushNav();   // handler 裡排的跳頁：卡先畫出來，再跳
 }
 
 // 沒說哪一檔：自選股做成籤，點一下就等於把股票名接上這一類的問法——不叫人重打
@@ -19893,7 +19928,7 @@ const ASSISTANT_ACTIONS = {
   },
   openStockCard(slots, args) {
     if (!slots.stock) return aiNeedStock();
-    openStockCard(slots.stock, { tab: args.tab || "radar" });
+    aiNav(() => openStockCard(slots.stock, { tab: args.tab || "radar" }));
     const label = args.tab === "kline" ? "K 線" : args.tab === "history" ? "歷史訊號" : "盤中雷達";
     return { text: `已打開 ${aiStockName(slots.stock)} 的個股字卡（${label}）。`, actions: [aiOpenBtn(slots.stock, args.tab || "radar", "再開一次 ›")] };
   },
@@ -19931,7 +19966,7 @@ const ASSISTANT_ACTIONS = {
     const hist = signalHistoryMap[sid] || {};
     const dates = Object.keys(hist).sort().reverse().slice(0, 10);
     if (!dates.length) {
-      openStockCard(sid, { tab: "history" });
+      aiNav(() => openStockCard(sid, { tab: "history" }));
       return { head: `${name} ${sid}`, text: "這裡拿不到紀錄，已直接打開字卡的歷史訊號。" };
     }
     const labelOf = k => SIGNAL_LABEL_MAP[k] || AUTO_SIGNAL_LABELS[k] || String(k || "");
@@ -19951,7 +19986,7 @@ const ASSISTANT_ACTIONS = {
       if (!stockEvents[sid]) await loadStockEvents([sid]).catch(() => {});   // 先抓再答
       let evs = (stockEvents[sid] || []).slice();
       if (!evs.length) {
-        openEventsPanel(sid);
+        aiNav(() => openEventsPanel(sid));
         return { head: `${aiStockName(sid)} ${sid}`, text: "目前沒有這一檔的資料，已打開資料清單。" };
       }
       if (slots.event_type) evs = evs.filter(e => e.event_type === slots.event_type);
@@ -19974,10 +20009,10 @@ const ASSISTANT_ACTIONS = {
     return { head: upcoming ? "接下來的日程" : "今天的資料", sub: `${all.length} 筆`, rows, actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
   },
   async assistantScore(slots) {
-    if (slots.open_report) { openDailyReportFromHistory(); return { text: "已打開今天的報告。" }; }
+    if (slots.open_report) { aiNav(() => openDailyReportFromHistory()); return { text: "已打開今天的報告。" }; }
     if (!planAllows("stats_enabled")) return { text: "每日評分是付費方案的功能。", actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] };
     if (!sharedReportData) await loadSharedReportData().catch(() => {});   // 先抓再答
-    if (!sharedReportData) { switchTab("scores"); return { text: "報告還拿不到，已打開統計分頁。" }; }
+    if (!sharedReportData) { aiNav(() => switchTab("scores")); return { text: "報告還拿不到，已打開統計分頁。" }; }
     const sid = slots.stock;
     if (sid) {
       if (isEtfId(sid)) return { head: `${aiStockName(sid)} ${sid}`, text: "ETF 不適用基本面評分；報價、K 線、關卡與訊號照常。", actions: [aiOpenBtn(sid, "radar")] };
@@ -19998,7 +20033,7 @@ const ASSISTANT_ACTIONS = {
   async assistantMarketStrength(slots) {
     let p = (typeof marketPayload !== "undefined" && marketPayload) ? marketPayload : null;
     if (!p) { try { await Promise.resolve(_loadMarketIfStale()); } catch { /* 下面直接開頁 */ } p = (typeof marketPayload !== "undefined" && marketPayload) ? marketPayload : null; }
-    if (!p) { switchTab("home"); setHomeFilter("market"); return { text: "市場強度資料還拿不到，已打開那一格。" }; }
+    if (!p) { aiNav(() => switchTab("home")); aiNav(() => setHomeFilter("market")); return { text: "市場強度資料還拿不到，已打開那一格。" }; }
     const v = msView(p);
     let inds = (v.industries || []).slice();
     if (slots.sector) {
@@ -20010,7 +20045,7 @@ const ASSISTANT_ACTIONS = {
              actions: [{ label: "打開市場強度 ›", act: "open", data: { filter: "market" } }] };
   },
   setHomeFilter(slots, args) {
-    switchTab("home"); setHomeFilter(args.mode === "signals" ? "signals" : "market");
+    aiNav(() => switchTab("home")); aiNav(() => setHomeFilter(args.mode === "signals" ? "signals" : "market"));
     return { text: args.mode === "signals" ? "已打開盤中頁的「市場訊號」。" : "已打開盤中頁的「市場強度」。" };
   },
   assistantHoldings(slots) {
@@ -20022,15 +20057,15 @@ const ASSISTANT_ACTIONS = {
   },
   switchTab(slots, args) {
     const tab = String(args.tab || "home");
-    switchTab(tab);
+    aiNav(() => switchTab(tab));
     const label = { inbox: "通知", friends: "分享", post: "盤後", scores: "統計", watch: "設定", home: "盤中" }[tab] || tab;
     return { text: `已打開${label}。` };
   },
   assistantPlan(slots) {
     const p = planState.ready ? planState.plan : null;
     const action = slots.action || "info";
-    if (action === "upgrade") { openPlanModal(null, slots.plan || null); return { text: "已打開方案面板；付款在那裡完成，助手不會替你付款。" }; }
-    if (action === "cancel") { cancelSubscription(); return { text: "取消訂閱的流程在方案面板裡，剛才已打開。" }; }
+    if (action === "upgrade") { aiNav(() => openPlanModal(null, slots.plan || null)); return { text: "已打開方案面板；付款在那裡完成，助手不會替你付款。" }; }
+    if (action === "cancel") { aiNav(() => cancelSubscription()); return { text: "取消訂閱的流程在方案面板裡，剛才已打開。" }; }
     if (action === "trial") {
       const t = planState.trial || null;
       if (!t || !p || p.code !== "free") return { text: "免費體驗只有免費版還沒領過的帳號可以領。", actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] };
@@ -20042,7 +20077,7 @@ const ASSISTANT_ACTIONS = {
         run: async () => { await claimTrial(); return { text: "體驗已開始，詳情在方案面板。", actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] }; },
       });
     }
-    if (!p) { openPlanModal(); return { text: "已打開方案與用量。" }; }
+    if (!p) { aiNav(() => openPlanModal()); return { text: "已打開方案與用量。" }; }
     return { head: "方案與用量", sub: p.name || planTierLabel(),
              rows: [{ label: "自選股", value: aiWatchUsage(), note: "含好友分享" },
                     { label: "進階訊號", value: `${(alertRules || []).length}／${p.rule_limit ?? "—"}`, note: "" }],
@@ -20147,7 +20182,7 @@ const ASSISTANT_ACTIONS = {
         mainLabel: ok ? "接受" : "不接受",
         run: async () => { fail(await frRpc("share_respond", { p_share_id: s.share_id, p_accept: ok })); await syncStockLists({ social: true }); return { text: ok ? `已接受 ${aiStockName(String(s.stock_id))} 的分享。` : "已回覆不接受。" }; } });
     }
-    if (action === "optout") { switchTab("friends"); return { text: "「不再接收」在分享分頁那一則上。" }; }
+    if (action === "optout") { aiNav(() => switchTab("friends")); return { text: "「不再接收」在分享分頁那一則上。" }; }
     if (!sid) return aiNeedStock();
     const friends = (frState && frState.friends) || [];
     if (!friends.length) return { text: "還沒有好友，先邀請朋友。", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
@@ -20176,7 +20211,7 @@ const ASSISTANT_ACTIONS = {
     const goBtn = { label: "去分享分頁 ›", act: "open", data: { tab: "friends" } };
     const fail = r => { if (!r || typeof r !== "object" || r === FR_RPC_MISSING) throw new Error("好友功能暫時無法使用"); if (r.error) throw new Error(FR_ERRORS[r.error] || r.error); return r; };
     if (action === "add") {
-      if (!slots.handle) { switchTab("friends"); return { text: "已打開分享分頁，在「加好友」那一格輸入對方的 ID 或掃條碼。" }; }
+      if (!slots.handle) { aiNav(() => switchTab("friends")); return { text: "已打開分享分頁，在「加好友」那一格輸入對方的 ID 或掃條碼。" }; }
       return aiConfirmCard({ head: "送出好友邀請？", rows: [{ label: "對方 ID", value: String(slots.handle), note: "" }], mainLabel: "送出",
         run: async () => { fail(await frRpc("lab_friend_request_by_handle", { p_handle: slots.handle })); await frReload().catch(() => {}); return { text: `已送出邀請給 ${slots.handle}。`, actions: [goBtn] }; } });
     }
@@ -20196,8 +20231,8 @@ const ASSISTANT_ACTIONS = {
   assistantUiSettings(slots) {
     if (slots.font) { setAppFontSize(slots.font); return { text: `字體已改成${{ base: "標準", large: "大", xlarge: "最大" }[slots.font] || slots.font}。` }; }
     if (slots.install) return { text: "按下面這顆，會跳出安裝到主畫面的提示。", actions: [{ label: "安裝到主畫面", act: "install", data: {}, main: true }] };
-    if (slots.disclaimer) { showDisclaimerGate(); return { text: "已打開免責聲明。" }; }
-    switchTab("watch");
+    if (slots.disclaimer) { aiNav(() => showDisclaimerGate()); return { text: "已打開免責聲明。" }; }
+    aiNav(() => switchTab("watch"));
     return { text: "已打開設定頁：字體大小、安裝、免責聲明、登出都在那裡。" };
   },
   assistantFeedback(slots) {
@@ -20219,7 +20254,7 @@ const ASSISTANT_ACTIONS = {
   // 「兩段合一張」：要寫的那一檔不在自選股時，確認卡直接寫「加入並…？」，主鍵一次做兩件事。
   assistantWatchAdd(slots) {
     const sid = slots.stock;
-    if (!sid) { focusAddStock(); return { text: "已打開設定頁的新增：打股票名稱或代號，按「新增」。" }; }
+    if (!sid) { aiNav(() => focusAddStock()); return { text: "已打開設定頁的新增：打股票名稱或代號，按「新增」。" }; }
     const name = aiStockName(sid);
     if (aiRowOf(sid)) return { text: `${name} 已經在自選股裡。`, actions: [aiOpenBtn(sid, "radar")] };
     if (aiWatchFull()) return aiLimitCard("watchlist");
@@ -20277,12 +20312,12 @@ const ASSISTANT_ACTIONS = {
         if (aiWatchFull()) return aiLimitCard("watchlist");
         return aiConfirmCard({ head: "加入並打開到價設定？", sub: `${name} 不在自選股，會先加入`,
           rows: [{ label: "股票", value: `${name} ${sid}`, note: cur ? `現價 ${fmtPrice(cur)}` : "" }], mainLabel: "加入並打開",
-          run: async () => { const r = await aiAddStockById(sid); if (r) openAlertSettings(r.id); return { text: `已加入 ${name}，到價設定在剛打開的面板最下面。` }; } });
+          run: async () => { const r = await aiAddStockById(sid); if (r) aiNav(() => openAlertSettings(r.id)); return { text: `已加入 ${name}，到價設定在剛打開的面板最下面。` }; } });
       }
       const lo0 = row0.target_price_low != null && row0.target_price_low !== "" ? Number(row0.target_price_low) : null;
       const hi0 = row0.target_price_high != null && row0.target_price_high !== "" ? Number(row0.target_price_high) : null;
       const alt = { label: "改一下", act: "open", data: { alert: row0.id } };
-      if (lo0 == null && hi0 == null) { openAlertSettings(row0.id); return { head: `${name} ${sid}`, text: "還沒有設到價提醒，已打開這一檔的自訂價位面板（最下面兩格）。" }; }
+      if (lo0 == null && hi0 == null) { aiNav(() => openAlertSettings(row0.id)); return { head: `${name} ${sid}`, text: "還沒有設到價提醒，已打開這一檔的自訂價位面板（最下面兩格）。" }; }
       const rows = [{ label: "股票", value: `${name} ${sid}`, note: cur ? `現價 ${fmtPrice(cur)}` : "" }];
       const pct0 = v => cur ? `距 ${v < cur ? "−" : "+"}${fmtPct((v - cur) / cur * 100)}%` : "";
       if (lo0 != null) rows.push({ label: "跌到", value: fmtPrice(lo0), note: pct0(lo0) });
@@ -20340,13 +20375,13 @@ const ASSISTANT_ACTIONS = {
       if (aiWatchFull()) return aiLimitCard("watchlist");
       return aiConfirmCard({ head: "加入並打開基礎訊號設定？", sub: `${aiStockName(sid)} 不在自選股，會先加入`,
         rows: [{ label: "股票", value: `${aiStockName(sid)} ${sid}`, note: "" }], mainLabel: "加入並打開",
-        run: async () => { const r = await aiAddStockById(sid); if (r) openAlertSettings(r.id); return { text: `已加入 ${aiStockName(sid)}，基礎訊號面板已打開。` }; } });
+        run: async () => { const r = await aiAddStockById(sid); if (r) aiNav(() => openAlertSettings(r.id)); return { text: `已加入 ${aiStockName(sid)}，基礎訊號面板已打開。` }; } });
     }
     const targets = row ? [row] : (watchlistRows || []);
-    if (!targets.length) { focusAddStock(); return { text: "還沒有自選股，已打開設定頁的新增。" }; }
+    if (!targets.length) { aiNav(() => focusAddStock()); return { text: "還沒有自選股，已打開設定頁的新增。" }; }
     const fields = field ? [field] : ALERT_FIELDS.slice();
     if (on === undefined || on === null) {   // 問句：回現狀，附上改的籤
-      if (!field) { openAlertSettings(row ? row.id : ALERT_SCOPE_ALL); return { text: `已打開${row ? ` ${aiStockName(sid)} 的` : "全部股票的"}基礎訊號面板。` }; }
+      if (!field) { aiNav(() => openAlertSettings(row ? row.id : ALERT_SCOPE_ALL)); return { text: `已打開${row ? ` ${aiStockName(sid)} 的` : "全部股票的"}基礎訊號面板。` }; }
       const rows = targets.slice(0, 10).map(r => ({ label: aiStockName(String(r.stock_id).trim()), value: r[field] ? "開" : "關", note: "" }));
       const who = row ? aiStockName(sid) : "全部股票";
       return { head: `${aiFieldLabel(field)}通知`, rows,
@@ -20375,8 +20410,8 @@ const ASSISTANT_ACTIONS = {
   openRuleEditorPrefilled(slots) {
     const ct = slots.cond_type;
     if (!ct || ct === "none") {
-      openRulesModal();
-      aiPrefillRuleEditor({ stock_id: slots.stock || null });
+      aiNav(() => openRulesModal());
+      aiNav(() => aiPrefillRuleEditor({ stock_id: slots.stock || null }));
       return { text: `已打開進階訊號的編輯器${slots.stock ? `（範圍 ${aiStockName(slots.stock)}）` : ""}，在裡面選條件。` };
     }
     const cond = { type: ct, ...(slots.params_defaults || {}), ...(slots.params || {}) };
@@ -20414,10 +20449,10 @@ const ASSISTANT_ACTIONS = {
     const row = aiRowOf(sid);
     if (!row && aiWatchFull()) return aiLimitCard("watchlist");
     if (shares == null && cost == null) {   // 沒有數字＝要去填：直接開那一檔的持股面板
-      if (row) { openHoldingsSheet(sid); return { text: `已打開 ${name} 的持股面板。` }; }
+      if (row) { aiNav(() => openHoldingsSheet(sid)); return { text: `已打開 ${name} 的持股面板。` }; }
       return aiConfirmCard({ head: "加入並打開持股？", sub: `${name} 不在自選股，會先加入`,
         rows: [{ label: "股票", value: `${name} ${sid}`, note: "" }], mainLabel: "加入並打開",
-        run: async () => { const r = await aiAddStockById(sid); if (r) openHoldingsSheet(sid); return { text: `已加入 ${name}，持股面板已打開。` }; } });
+        run: async () => { const r = await aiAddStockById(sid); if (r) aiNav(() => openHoldingsSheet(sid)); return { text: `已加入 ${name}，持股面板已打開。` }; } });
     }
     if (shares != null && !(shares >= 0)) return { text: "股數要是 0 以上的數字。", muted: true };
     if (cost != null && !(cost > 0)) return { text: "成本要大於 0。", muted: true };
