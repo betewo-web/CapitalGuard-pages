@@ -2098,6 +2098,7 @@ body.modal-blocking .modal-backdrop.show {
 	color: var(--text-0); font-size: 0.92rem; line-height: 1.2; cursor: pointer; }
 .ai-chip.is-hot { border-color: var(--sig-orange); background: rgba(255, 159, 67, 0.14); }
 .ai-intro ul { margin: 6px 0 0; padding-left: 1.1em; }
+.ai-intro ol { margin: 6px 0 0; padding-left: 1.4em; }
 .ai-intro li { margin: 3px 0; }
 .ai-note { font-size: 0.8rem; color: var(--text-muted); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .ai-typing { color: var(--text-muted); font-size: 1.1rem; padding: 2px 6px; letter-spacing: 2px; }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="368">
+  <meta name="app-version" content="369">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=368" rel="stylesheet">
+  <link href="watchlist.css?v=369" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19812,8 +19812,23 @@ function aiOpen(d) {
   if (d.filter) { switchTab("home"); setHomeFilter(String(d.filter)); return; }
   if (d.alert !== undefined && d.alert !== null) { openAlertSettings(d.alert); return; }
   if (d.holdings) { openHoldingsSheet(String(d.holdings)); return; }
+  if (d.tab === "friends" && (d.fseg || d.fadd)) {   // 分享分頁直接開到「加好友」的某一格（條碼／掃描／ID／搜尋）
+    switchTab("friends");
+    if (d.fseg) frSwitchSeg(String(d.fseg));
+    if (d.fadd) frSwitchAdd(String(d.fadd));
+    return;
+  }
   if (d.sid) openStockCard(String(d.sid), { tab: d.tab || "radar" });
   else if (d.tab) switchTab(String(d.tab));
+}
+
+// 我的好友 ID（分享分頁「加好友 → 顯示 ID」那一串）：好友狀態還沒載就先載；拿不到就空字串，卡上少一句
+async function aiMyFriendId() {
+  try {
+    if (!frState) await frReload();
+    await frDetectIdMode();
+    return String((frMyId() || {}).shown || "");
+  } catch (e) { console.error("assistant my id failed:", e); return ""; }
 }
 
 // 進階訊號「改一下」：開編輯器並把聽到的條件填進去（editorConditions 就是編輯器的狀態），按儲存才建立
@@ -19970,12 +19985,16 @@ function aiKindLabel(kind) {
   if (kind === "gap") return "跳空";
   return SIGNAL_LABEL_MAP[kind] || AUTO_SIGNAL_LABELS[kind] || SIGNAL_ABBR[kind] || String(kind || "");
 }
-// 一列通知命中的訊號 key：內建與自動偵測在 row.signal／event_key，進階訊號看那條規則的條件（與雷達同一條路）
-function aiRowKinds(row) {
-  if (String(row.source || "monitor") === "rule") return (ruleConditionsById(ruleIdFromEventKey(row)) || []).map(conditionKey).filter(Boolean);
-  const k = signalKindOf(row);
-  return k && k !== "none" ? [k] : [];
+// 問訊號、問漲跌的對象＝自選股＋好友分享給我的（Howard 2026-10-17 晚）：分享股的報價與雷達本來就和自選股一起抓
+function aiSignalSids() {
+  const seen = new Set();
+  return (watchlistRows || []).map(w => String(w.stock_id || "").trim()).concat(sharedInSids())
+    .filter(s => isStockId(s) && !seen.has(s) && seen.add(s));
 }
+// 今天的訊號走雷達自己的故事列（radarStoryOf：intraday_state.signals_today＋通知紀錄）——通知關著的訊號也算，
+// 與個股字卡看到的是同一份；每一筆的 key，進階訊號看它的條件
+function aiTodayEntries(sid) { try { return radarStoryOf(sid) || []; } catch (e) { console.error("assistant radar story failed:", e); return []; } }
+function aiEntryKeys(e) { return e.condKeys && e.condKeys.length ? e.condKeys : [String(e.key || "")]; }
 function aiPulseCount(pulse, wanted) {
   const hits = ((pulse && pulse.kinds) || []).filter(k => wanted.includes(k.k));
   return hits.length ? hits.reduce((n, k) => n + (Number(k.n) || 0), 0) : null;
@@ -19998,16 +20017,17 @@ const ASSISTANT_ACTIONS = {
     // 問的是某一種訊號（「今天誰突破壓力了」「自選股誰跳空」）就只看那一種；全市場那一種有幾檔也順手附上（脈動有的話）
     const wanted = slots.kind ? aiKindSet(slots.kind) : null;
     const kindTxt = wanted ? aiKindLabel(slots.kind) : "";
-    const sigsOf = s => wanted ? todaySignalsOf(s).filter(r => aiRowKinds(r).some(k => wanted.includes(k))) : todaySignalsOf(s);
+    const sigsOf = s => wanted ? aiTodayEntries(s).filter(e => aiEntryKeys(e).some(k => wanted.includes(k))) : aiTodayEntries(s);
     if (sid) {
-      const rows = sigsOf(sid).map(r => ({ label: _titleWithoutSid(String(r.title || ""), sid) || "訊號", value: "", note: fmtTime(r.sent_at) }));
+      const rows = sigsOf(sid).map(e => ({ label: String(e.title || aiKindLabel(e.key) || "訊號"), value: "", note: fmtTime(e.at) }));
       return { head: `${aiStockName(sid)} ${sid}`, sub: rows.length ? `今天 ${rows.length} 則${kindTxt}訊號` : `今天還沒有${kindTxt}訊號`, rows, actions: [aiOpenBtn(sid, "radar")] };
     }
-    // 整份自選股：每檔一列（今天幾則），有訊號的排前面；不跳頁，看完再決定要開哪一檔
-    const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId);
+    // 整份自選股＋好友分享的：每檔一列（今天幾則），有訊號的排前面；不跳頁，看完再決定要開哪一檔
+    const sids = aiSignalSids();
     if (!sids.length) return { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
+    const shared = new Set(sharedInSids());
     let rows = sids.map(s => ({ sid: s, n: sigsOf(s).length })).sort((a, b) => b.n - a.n).slice(0, 12)
-      .map(x => ({ label: aiStockName(x.sid), value: x.n ? `${x.n} 則` : "—", note: x.sid, act: "open", data: { sid: x.sid, tab: "radar" } }));
+      .map(x => ({ label: aiStockName(x.sid), value: x.n ? `${x.n} 則` : "—", note: shared.has(x.sid) ? "好友分享" : x.sid, act: "open", data: { sid: x.sid, tab: "radar" } }));
     const hot = rows.filter(r => r.value !== "—").length;
     if (wanted) {
       rows = rows.filter(r => r.value !== "—");
@@ -20154,14 +20174,15 @@ const ASSISTANT_ACTIONS = {
         const nk = near ? kinds.find(k => k.k === near) : null;
         if (nk) rows.push({ label: `全市場${aiKindLabel(near)}`, value: `${Number(nk.n)} 檔`, note: `脈動不統計${label}，這是最接近的一種`, act: "open", data: { filter: "signals" } });
       }
-      const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId);
+      const sids = aiSignalSids();
+      const shared = new Set(sharedInSids());
       const mine = [];
       for (const s of sids) {
-        const hit = todaySignalsOf(s).find(r => aiRowKinds(r).some(k => wanted.includes(k)));
-        if (hit) mine.push({ sid: s, at: hit.sent_at });
+        const hit = aiTodayEntries(s).find(e => aiEntryKeys(e).some(k => wanted.includes(k)));
+        if (hit) mine.push({ sid: s, at: hit.at });
       }
-      mine.slice(0, 10).forEach(h => rows.push({ label: aiStockName(h.sid), value: "自選股", note: fmtTime(h.at), act: "open", data: { sid: h.sid, tab: "radar" } }));
-      const sub = [mkt != null ? `全市場 ${mkt} 檔出現過` : `市場脈動不統計${label}`, sids.length ? `自選股 ${mine.length} 檔` : ""].filter(Boolean).join("；");
+      mine.slice(0, 10).forEach(h => rows.push({ label: aiStockName(h.sid), value: shared.has(h.sid) ? "好友分享" : "自選股", note: fmtTime(h.at), act: "open", data: { sid: h.sid, tab: "radar" } }));
+      const sub = [mkt != null ? `全市場 ${mkt} 檔出現過` : `市場脈動不統計${label}`, sids.length ? `自選股與好友分享的 ${mine.length} 檔` : ""].filter(Boolean).join("；");
       return { head: `今天${label}`, sub, rows, text: rows.length ? "" : "今天還沒有。", actions: [goBtn] };
     }
     const rows = kinds.slice(0, 8).map(k => ({ label: aiKindLabel(k.k), value: `${Number(k.n)} 檔`, note: SIGNAL_ABBR[k.k] || "", act: "open", data: { filter: "signals" } }));
@@ -20170,7 +20191,7 @@ const ASSISTANT_ACTIONS = {
   // 自選股今天的漲／平／跌（與首頁同一個基準：現價對前一日收盤，漲跌為零才是平）；「誰漲最多」只給那一檔。
   // 全市場只有上漲／下跌家數比例（市場強度的 breadth），沒有逐檔清單，所以清單一律是自選股（第十六節）
   assistantMovers(slots) {
-    const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId);
+    const sids = aiSignalSids();   // 自選股＋好友分享給我的（與首頁清單同一份）
     if (!sids.length) return { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
     const dir = String(slots.direction || "any");
     const items = sids.map(sid => ({ sid, q: aiQuoteOf(sid) }))
@@ -20355,15 +20376,32 @@ const ASSISTANT_ACTIONS = {
       },
     });
   },
-  assistantFriend(slots) {
+  async assistantFriend(slots) {
     if (!frEnabled) return { text: "好友功能還沒開給這個帳號。", muted: true };
     const action = slots.action || (slots.handle ? "add" : "list");
     const goBtn = { label: "去分享分頁 ›", act: "open", data: { tab: "friends" } };
     const fail = r => { if (!r || typeof r !== "object" || r === FR_RPC_MISSING) throw new Error("好友功能暫時無法使用"); if (r.error) throw new Error(FR_ERRORS[r.error] || r.error); return r; };
     if (action === "add") {
-      if (!slots.handle) { aiNav(() => switchTab("friends")); return { text: "已打開分享分頁，在「加好友」那一格輸入對方的 ID 或掃條碼。" }; }
+      if (!slots.handle) {
+        // 「我要怎麼加好友」先問是哪一種（Howard 2026-10-17 晚）：朋友還沒裝→邀請連結；已經在用→三條互加的路
+        return { head: "你的朋友裝了股市雷達嗎？", text: "點一個：",
+                 chips: [{ label: "還沒裝", act: "run", data: { intent: "friend", slots: { action: "invite" }, text: "朋友還沒裝股市雷達" } },
+                         { label: "已經在用了", act: "run", data: { intent: "friend", slots: { action: "howto" }, text: "朋友已經在用，怎麼加他" } }] };
+      }
       return aiConfirmCard({ head: "送出好友邀請？", rows: [{ label: "對方 ID", value: String(slots.handle), note: "" }], mainLabel: "送出",
         run: async () => { fail(await frRpc("lab_friend_request_by_handle", { p_handle: slots.handle })); await frReload().catch(() => {}); return { text: `已送出邀請給 ${slots.handle}。`, actions: [goBtn] }; } });
+    }
+    if (action === "howto") {   // 朋友已經在用：掃他／讓他掃／貼 ID，都在分享分頁的「加好友」；鍵直接開到那一格
+      const id = await aiMyFriendId();
+      const steps = [
+        "讓他掃你：按下面「顯示我的條碼」，請他打開 App 的「分享 → 加好友 → 掃描條碼」來掃",
+        "你掃他：請他顯示條碼，你到「分享 → 加好友 → 掃描條碼」掃",
+        `用 ID：請他把 ID 傳給你，貼到「分享 → 加好友 → 搜尋」；或把你的 ID 傳給他${id ? `（你的 ID：<b>${escapeHtml(id)}</b>）` : ""}`,
+      ];
+      return { head: "加已經在用的朋友",
+               bodyHtml: `<div class="ai-intro"><p>三條路，掃到或搜到就會送出好友邀請，對方接受就成了：</p><ol>${steps.map(s => `<li>${s}</li>`).join("")}</ol></div>`,
+               actions: [{ label: "顯示我的條碼", act: "open", data: { tab: "friends", fseg: "add", fadd: "qr" }, main: true },
+                         { label: "貼上他的 ID", act: "open", data: { tab: "friends", fseg: "add", fadd: "search" } }] };
     }
     if (action === "accept" || action === "decline") {
       const reqs = (frState && frState.requests_in) || [];
