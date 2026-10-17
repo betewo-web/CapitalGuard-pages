@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="366">
+  <meta name="app-version" content="367">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1129,7 +1129,7 @@ async function loadStats(force) {
 // 信心低的排前面——那些最該補例句或改 criteria；「其實該是」選了類別就寫回 assistant_log.label_intent，
 // 標過的句子不會被 30 天保留期清掉，assistant_eval.py --harvest 再匯成目錄例句。
 // 類別清單與 cloudflare/assistant-route/catalog.json 的 intents 同一份（test_assistant_tab 釘住）。
-const ASSISTANT_INTENT_LABELS = { signals_today: "今天的訊號", signals_history: "過去幾天的訊號", quote: "股價與漲跌", kline: "K 線圖", levels: "支撐與壓力", events: "事件與資料", score: "評分與統計", market_strength: "市場強度與族群", market_signals: "市場訊號", holdings: "持股與損益", inbox: "通知匣", watch_add: "加入自選股", watch_remove: "移除自選股", basic_signal_set: "基礎訊號開關", price_target_set: "到價提醒", rule_create: "新增進階訊號", rule_manage: "管理進階訊號", holdings_set: "設定持股", share_stock: "分享給好友", plan: "方案與額度", push_setup: "通知權限", system_status: "資料狀態", glossary: "名詞與算法", help: "功能說明", feedback: "意見回報", friend: "好友", ui_settings: "介面設定", advice: "買賣與預測（不提供）", out_of_scope: "不在服務範圍" };
+const ASSISTANT_INTENT_LABELS = { signals_today: "今天的訊號", signals_history: "過去幾天的訊號", quote: "股價與漲跌", kline: "K 線圖", levels: "支撐與壓力", events: "事件與資料", score: "評分與統計", market_strength: "市場強度與族群", market_signals: "市場訊號", movers: "自選股漲跌", holdings: "持股與損益", inbox: "通知匣", watch_add: "加入自選股", watch_remove: "移除自選股", basic_signal_set: "基礎訊號開關", price_target_set: "到價提醒", rule_create: "新增進階訊號", rule_manage: "管理進階訊號", holdings_set: "設定持股", share_stock: "分享給好友", plan: "方案與額度", push_setup: "通知權限", system_status: "資料狀態", glossary: "名詞與算法", help: "功能說明", feedback: "意見回報", friend: "好友", ui_settings: "介面設定", advice: "買賣與預測（不提供）", out_of_scope: "不在服務範圍" };
 const ASSISTANT_DECISION_LABELS = { execute: "直接做", confirm: "確認卡", clarify: "反問", refuse: "拒答", fallback: "固定句" };
 let _aiRows = [];
 
