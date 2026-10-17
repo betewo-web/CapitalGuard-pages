@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="367">
+  <meta name="app-version" content="368">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=367" rel="stylesheet">
+  <link href="watchlist.css?v=368" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -255,12 +255,11 @@
     <section id="view-home" class="app-view">
       <!-- 首頁的三個分頁（2026-09-22 Howard）：盤中（2026-09-27 從「總覽」改名，Howard：這一頁講的是今天盤中誰有事）／盤後／設定。
            三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
-           底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
-      <nav class="home-tabs" aria-label="首頁分頁">
+           底部導覽只有「股票」那一格（2026-10-17 從「首頁」改名），三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
+      <nav class="home-tabs" aria-label="股票分頁">
         <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
         <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
         <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
-        <button type="button" class="home-tab" data-tab="ai" onclick="switchTab('ai')"><i data-icon="ai"></i>助手</button>
       </nav>
 
       <!-- 「今日總覽」標題與日期 2026-09-22 拿掉（Howard）：日期與盤中／收盤都在下面那行狀態裡，
@@ -516,12 +515,11 @@
     <section id="view-post" class="app-view">
       <!-- 首頁的三個分頁（2026-09-22 Howard）：盤中（2026-09-27 從「總覽」改名，Howard：這一頁講的是今天盤中誰有事）／盤後／設定。
            三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
-           底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
-      <nav class="home-tabs" aria-label="首頁分頁">
+           底部導覽只有「股票」那一格（2026-10-17 從「首頁」改名），三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
+      <nav class="home-tabs" aria-label="股票分頁">
         <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
         <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
         <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
-        <button type="button" class="home-tab" data-tab="ai" onclick="switchTab('ai')"><i data-icon="ai"></i>助手</button>
       </nav>
 
       <!-- 標題「🌙 盤後」2026-09-22 拿掉（Howard）：上面的分頁列已經寫著「盤後」，不必再說一次 -->
@@ -547,12 +545,11 @@
     <section id="view-watch" class="app-view">
       <!-- 首頁的三個分頁（2026-09-22 Howard）：盤中（2026-09-27 從「總覽」改名，Howard：這一頁講的是今天盤中誰有事）／盤後／設定。
            三個各自是一個 view（switchTab 換），這一條在三頁都放一份，看起來就是同一個畫面在換分頁。
-           底部導覽只有「首頁」那一格，三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
-      <nav class="home-tabs" aria-label="首頁分頁">
+           底部導覽只有「股票」那一格（2026-10-17 從「首頁」改名），三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
+      <nav class="home-tabs" aria-label="股票分頁">
         <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
         <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
         <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
-        <button type="button" class="home-tab" data-tab="ai" onclick="switchTab('ai')"><i data-icon="ai"></i>助手</button>
       </nav>
 
       <!-- 新增股票：單行搜尋列（原本的整張卡片佔掉近三倍高度） -->
@@ -628,12 +625,10 @@
          這一頁不產生自由文字——答案卡用記憶體裡的資料套樣板、名詞與拒答是固定句（COMPLIANCE.md 第 6 條）。
          語音：手機鍵盤自己的麥克風在這個輸入框就能用，不另外畫麥克風鍵（第七節 C 案）。 -->
     <section id="view-ai" class="app-view">
-      <nav class="home-tabs" aria-label="首頁分頁">
-        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
-        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
-        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
-        <button type="button" class="home-tab" data-tab="ai" onclick="switchTab('ai')"><i data-icon="ai"></i>助手</button>
-      </nav>
+      <!-- 2026-10-17 晚起是底部導覽最左邊那一格（與統計／通知同一層），不再掛「股票」頁的分頁列 -->
+      <div class="view-head">
+        <h2 class="view-title"><i data-icon="ai"></i>助手</h2>
+      </div>
       <div class="ai-view">
         <div class="ai-log" id="ai-log" role="log" aria-live="polite"></div>
         <!-- 送出後鎖住直到回應（一句話一次）；Enter／鍵盤的「送出」都走 submit -->
@@ -819,8 +814,13 @@
 
 <!-- ── 底部導航（登入後顯示） ── -->
 <nav id="bottom-nav" class="bottom-nav" style="display:none" aria-label="主導航">
+  <!-- 助手是最左邊那一格（Howard 2026-10-17 晚）：原本是「股票」頁的第四分頁，入口太深 -->
+  <button class="bottom-nav-item" data-tab="ai" onclick="switchTab('ai')">
+    <span class="bn-icon" data-icon="ai"></span><span>助手</span>
+  </button>
+  <!-- 「首頁」2026-10-17 改名「股票」（Howard）：盤中／盤後／設定三個分頁都是股票的事 -->
   <button class="bottom-nav-item" data-tab="home" onclick="switchTab('home')">
-    <span class="bn-icon" data-icon="home"></span><span>首頁</span>
+    <span class="bn-icon" data-icon="home"></span><span>股票</span>
     <!-- 對話框的未讀總數（CHAT.md）：三個層次的最上層 -->
     <span class="bn-badge" id="home-badge"></span>
   </button>
@@ -2084,9 +2084,9 @@ const ICON_AI_SEND = _svg('<path d="M8 13.5V3"/><path d="M3.5 7.5 8 3l4.5 4.5"/>
 
 // ── PWA v2: App Shell 狀態 ──
 // 首頁是三個分頁（盤中／盤後／設定），三者都是獨立的 view，由頂端那條 .home-tabs 切換；
-// 底部導覽只有「首頁」一格，三頁都算它亮著（HOME_GROUP）
+// 底部導覽只有「股票」一格（2026-10-17 從「首頁」改名），三頁都算它亮著（HOME_GROUP）
 const APP_TABS = ["home", "scores", "inbox", "watch", "post", "friends", "ai"];
-const HOME_GROUP = ["home", "post", "watch", "ai"];   // ai＝助手（2026-10-16 第四分頁，ASSISTANT.md）
+const HOME_GROUP = ["home", "post", "watch"];   // 助手（ai）2026-10-16 曾是第四分頁，10-17 晚改成底部導覽最左邊那一格
 let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc，近 INBOX_HISTORY_DAYS 天）
 const INBOX_HISTORY_DAYS = 30;  // 通知只抓這麼多天：首頁近 10 個交易日的格子要數得到規則命中與自訂價位
@@ -7059,11 +7059,11 @@ function renderPushNudgePopup() {
   if (btn) btn.style.display = (install || inApp) ? "none" : "";
   body.innerHTML = install
     ? `<div class="rule-nudge-lead">iPhone 需先用 Safari 的「分享 → 加入主畫面」安裝，才能開啟推播通知。</div>
-       <div class="small text-muted">安裝後從主畫面開啟，再到首頁按「啟用通知」。</div>`
+       <div class="small text-muted">安裝後從主畫面開啟，再到「股票」頁按「啟用通知」。</div>`
     : inApp
     ? `<div class="rule-nudge-lead">${_inAppBrowser} 的內建瀏覽器不支援推播通知。</div>
        <div class="small text-muted">請點右上角的「⋮」或「⋯」→「以其他瀏覽器開啟」，
-       用 Chrome 登入後點「⋮ → 加到主畫面」裝起來，再按首頁的「啟用通知」。</div>`
+       用 Chrome 登入後點「⋮ → 加到主畫面」裝起來，再按「股票」頁的「啟用通知」。</div>`
     : `<div class="rule-nudge-lead">你尚未開啟推播通知。</div>
        <ul class="small ps-3 mb-2">
          <li>進階訊號的條件成立時，通知會直接送到這台裝置</li>
