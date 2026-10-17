@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="370">
+  <meta name="app-version" content="371">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=370" rel="stylesheet">
+  <link href="watchlist.css?v=371" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1385,17 +1385,15 @@
       <div class="modal-body p-3">
         <div class="askai-preview" id="askai-preview"></div>
         <p class="askai-note" id="askai-note" role="status" aria-live="polite">正在畫 K 線圖…</p>
-        <button type="button" class="btn btn-primary w-100 mb-2" id="askai-send" onclick="askAiSend()" disabled>傳到 ChatGPT</button>
-        <div class="d-flex gap-2">
-          <button type="button" class="btn btn-outline-light flex-fill" id="askai-save" onclick="askAiSave()" disabled>存圖片</button>
-          <a class="btn btn-outline-light flex-fill" id="askai-web" href="https://chatgpt.com/?q=%E8%82%A1%E7%A5%A8%E5%88%86%E6%9E%90" target="_blank" rel="noopener">打開 ChatGPT 網頁</a>
-        </div>
+        <!-- 只有一顆（Howard 2026-10-17 晚）：圖進剪貼簿、ChatGPT 打開，貼上與送出是用戶自己的兩下 -->
+        <button type="button" class="btn btn-primary w-100 askai-go" id="askai-go" onclick="askAiGo()" disabled>複製 K 線圖並開啟 ChatGPT，請自行貼上圖片</button>
         <div id="askai-plan" class="mt-2" style="display:none">
           <button type="button" class="btn btn-outline-light w-100" onclick="openPlanModal('kline_enabled')">看方案</button>
         </div>
         <ul class="askai-steps">
-          <li>分享面板打開後選 <b>ChatGPT</b>（App 或瀏覽器）。圖會附上、「股票分析」會先打好，到 ChatGPT 裡按送出。</li>
-          <li><b>還沒登入 ChatGPT</b>：它會先要你登入（或註冊），登入後再回來按一次。沒裝 App 的話先裝，或選瀏覽器打開 chatgpt.com 再貼上圖。</li>
+          <li>按下去：K 線圖進剪貼簿、ChatGPT 打開（有裝 App 會開 App，否則開網頁），「股票分析」會先打好。</li>
+          <li>到 ChatGPT 的輸入框<b>貼上</b>（手機長按 → 貼上，電腦 Ctrl+V），按送出。</li>
+          <li><b>還沒登入 ChatGPT</b>：它會先要你登入（或註冊），登入後回來再按一次。</li>
           <li>ChatGPT 的回答是 OpenAI 的服務，不是本服務提供的建議；圖上只有公開市場資料。</li>
         </ul>
       </div>
@@ -8936,15 +8934,14 @@ function homeTileHtml(r) {
     </div>`;
 }
 
-// ── 「問 AI」：把這一檔的 K 線圖送到使用者自己的 ChatGPT（Howard 2026-10-17 晚）────────────
-// 走手機的分享面板（Web Share Level 2，與訊號分享同一條路）：使用者在面板上選 ChatGPT（App 或網頁），
-// 圖會附上、「股票分析」會先打在輸入框，他自己按送出。三件做不到的事都寫在面板上：
-//   · 不能指定一定是 ChatGPT——面板是系統的，目標由使用者選；
-//   · 不知道他裝了沒、登入了沒——沒有任何 API 可以問，所以登入的引導一律先講；
-//   · 不能替他按送出。
-// 桌機與不支援帶檔案分享的瀏覽器：能複製就把圖放進剪貼簿、不能就存檔，再另開 chatgpt.com/?q=股票分析
-// （網址帶的提示詞只能帶文字，圖要自己貼）。ChatGPT 的回答是 OpenAI 的服務，不是本服務的建議；
-// 圖上照樣印免責那一行（與訊號分享同一個理由：這張圖會離開 App）。K 線被方案鎖住的帳號看到的是方案說明。
+// ── 「問 AI」：把這一檔的 K 線圖交給使用者自己的 ChatGPT（Howard 2026-10-17 晚）────────────
+// 一顆鍵做兩件事：K 線圖進剪貼簿、另開 chatgpt.com/?q=股票分析（有裝 App 的手機會被接去 App）；
+// 貼上與送出是使用者自己的兩下。Howard 定案只留這一條路（原本的分享面板與存圖兩顆拿掉）。
+// 做不到而寫在面板上的：不能把圖填進另一個網站的輸入框（同源政策，貼上一定是使用者的動作）、
+// 不知道他登入了沒（沒有 API 可問，所以登入的引導一律先講）、不能替他按送出、網址只能帶文字。
+// 剪貼簿不給放圖的瀏覽器：圖存下來，到 ChatGPT 用迴紋針附上。
+// ChatGPT 的回答是 OpenAI 的服務，不是本服務的建議；圖上照樣印免責那一行（這張圖會離開 App）。
+// K 線被方案鎖住的帳號看到的是方案說明。
 const ASK_AI_PROMPT = "股票分析";
 const ASK_AI_URL = "https://chatgpt.com/?q=" + encodeURIComponent(ASK_AI_PROMPT);
 const ASK_AI_IMG = { w: 1080, h: 720, head: 64, foot: 40, scale: 2, bg: "#0b0b13" };
@@ -8961,8 +8958,8 @@ function openAskAi(sid) {
   const name = getPreferredStockName(sid, universe[sid]?.n) || universe[sid]?.n || sid;
   document.getElementById("askai-title").textContent = `問 AI：${name} ${sid}`;
   const note = document.getElementById("askai-note"), preview = document.getElementById("askai-preview");
-  const send = document.getElementById("askai-send"), save = document.getElementById("askai-save"), plan = document.getElementById("askai-plan");
-  send.disabled = true; save.disabled = true; preview.innerHTML = "";
+  const go = document.getElementById("askai-go"), plan = document.getElementById("askai-plan");
+  go.disabled = true; preview.innerHTML = "";
   if (!planAllows("kline_enabled")) {     // 與字卡「看 K 線」同一道鎖
     note.innerHTML = `${ICON_CANDLE}K 線圖需要付費方案。`;
     plan.style.display = "";
@@ -8977,12 +8974,8 @@ function openAskAi(sid) {
     if (gen !== _askAi.gen) { URL.revokeObjectURL(img.url); return; }   // 面板已關或換了一檔：這張沒人要
     _askAi.file = img.file; _askAi.url = img.url;
     preview.innerHTML = `<img src="${img.url}" alt="${escapeHtml(name)} 的 K 線圖">`;
-    const direct = _askAiCanShare();
-    note.textContent = direct
-      ? "圖畫好了。按下面那顆會打開分享面板，請選 ChatGPT（App 或瀏覽器）。"
-      : "圖畫好了。這個瀏覽器不能直接把圖交給 App：按下面那顆會把圖複製（或存檔）並打開 ChatGPT 網頁，貼上就行。";
-    send.textContent = direct ? "傳到 ChatGPT" : "打開 ChatGPT 並複製圖片";
-    send.disabled = false; save.disabled = false;
+    note.textContent = "圖畫好了。按下面那顆：圖進剪貼簿、ChatGPT 打開，到它的輸入框貼上再送出。";
+    go.disabled = false;
   }).catch(e => {
     if (gen !== _askAi.gen) return;
     note.textContent = `K 線圖畫不出來：${String((e && e.message) || e).slice(0, 80)}`;
@@ -8992,10 +8985,6 @@ function openAskAi(sid) {
 function _askAiReset() {
   if (_askAi.url) URL.revokeObjectURL(_askAi.url);   // blob 不收會一直佔記憶體
   _askAi = { sid: "", file: null, url: "", gen: _askAi.gen + 1 };
-}
-
-function _askAiCanShare() {
-  return !!(_askAi.file && navigator.canShare && navigator.canShare({ files: [_askAi.file] }));
 }
 
 // K 線資料與字卡同一條路：共享檔的分片，沒有就 FinMind 現抓（fetchWatchlistFinMindStock）
@@ -9065,33 +9054,26 @@ function _askAiCompose(chartUrl, title, span) {
   });
 }
 
-async function askAiSend() {
+// 剪貼簿與開新視窗都要在這一次點擊裡「同步」發起：iOS Safari 在 await 之後的 clipboard.write 與
+// window.open 都會被當成不是使用者的動作而擋掉。圖在面板打開時就畫好了（_askAi.file），所以這裡不必等任何東西。
+function askAiGo() {
   if (!_askAi.file && !_askAi.url) return;
   const note = document.getElementById("askai-note");
-  if (_askAiCanShare()) {
-    try {   // share 要在手勢裡：前面不放任何 await
-      await navigator.share({ files: [_askAi.file], title: ASK_AI_PROMPT, text: ASK_AI_PROMPT });
-      trackActivity("ask_ai", { stock: _askAi.sid, via: "share" });
-      note.textContent = "傳出去了。到 ChatGPT 裡看圖片與「股票分析」都在，按送出；還沒登入的話它會先要你登入，登入後再按一次這裡就好。";
-      return;
-    } catch (err) {
-      if (err && err.name === "AbortError") return;     // 在分享面板按了取消，不是失敗
-    }
-  }
-  // 桌機／不支援：圖進剪貼簿（不行就存檔），另開 ChatGPT 網頁（網址先把「股票分析」打好）
-  let copied = false;
+  let copy;
   try {
-    if (_askAi.file && navigator.clipboard && window.ClipboardItem) {
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": _askAi.file })]);
-      copied = true;
-    }
-  } catch { /* 沒有剪貼簿權限：存檔 */ }
-  if (!copied) askAiSave();
+    copy = (_askAi.file && navigator.clipboard && window.ClipboardItem)
+      ? navigator.clipboard.write([new ClipboardItem({ "image/png": _askAi.file })])
+      : Promise.reject(new Error("這個瀏覽器不讓網頁放圖進剪貼簿"));
+  } catch (e) { copy = Promise.reject(e); }
   window.open(ASK_AI_URL, "_blank", "noopener");
-  trackActivity("ask_ai", { stock: _askAi.sid, via: copied ? "copy" : "download" });
-  note.textContent = copied
-    ? "K 線圖已複製、ChatGPT 已在新分頁打開：在輸入框貼上（Ctrl+V）圖就附上了。"
-    : "圖已存下來、ChatGPT 已在新分頁打開：把圖拖進輸入框，或按迴紋針附上。";
+  copy.then(() => {
+    trackActivity("ask_ai", { stock: _askAi.sid, via: "copy" });
+    note.textContent = "K 線圖已複製、ChatGPT 已打開：到它的輸入框貼上（手機長按 → 貼上，電腦 Ctrl+V），按送出。";
+  }).catch(() => {
+    askAiSave();   // 剪貼簿不給放圖：圖存下來，到 ChatGPT 用迴紋針附上
+    trackActivity("ask_ai", { stock: _askAi.sid, via: "download" });
+    note.textContent = "這個瀏覽器不讓網頁放圖進剪貼簿：圖已存下來，到 ChatGPT 按迴紋針附上，再按送出。";
+  });
 }
 
 function askAiSave() {

@@ -5150,6 +5150,7 @@ select.fr-input { width: 100%; }
 .home-tile-ask .ic { width: 15px; height: 15px; }
 .askai-preview img { display: block; width: 100%; border-radius: 10px; border: 1px solid var(--border); }
 .askai-note { color: var(--text-muted); font-size: 0.9rem; margin: 10px 0; }
+.askai-go { white-space: normal; line-height: 1.35; padding: 10px 12px; }
 .askai-steps { margin: 12px 0 0; padding-left: 1.2em; color: var(--text-muted); font-size: 0.84rem; line-height: 1.5; }
 .askai-steps li { margin: 4px 0; }
 
