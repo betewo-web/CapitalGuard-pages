@@ -2078,6 +2078,10 @@ body.modal-blocking .modal-backdrop.show {
 .ai-btn-ghost { background: transparent; color: var(--text-0); border-color: var(--border); }
 .ai-meta { margin-top: 10px; font-size: 0.74rem; color: var(--text-muted); display: flex; gap: 6px; align-items: center; }
 .ai-meta .ai-pct { padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); }
+/* 「不是我要的」：最便宜的回饋，靠右、淡、像連結；按過變成一行字 */
+.ai-wrong { margin-left: auto; background: none; border: none; padding: 2px 4px; color: var(--text-muted);
+	font-size: 0.74rem; text-decoration: underline dotted; cursor: pointer; }
+.ai-wrong.is-done { text-decoration: none; cursor: default; }
 .ai-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .ai-chip { padding: 9px 13px; border-radius: 999px; border: 1px solid rgba(139, 124, 255, 0.45); background: rgba(139, 124, 255, 0.12);
 	color: var(--text-0); font-size: 0.92rem; line-height: 1.2; cursor: pointer; }

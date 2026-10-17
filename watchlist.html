@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="363">
+  <meta name="app-version" content="364">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=363" rel="stylesheet">
+  <link href="watchlist.css?v=364" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19542,7 +19542,7 @@ function renderAssistant() {
   const log = document.getElementById("ai-log");
   if (!log) return;
   aiBindOnce();
-  const parts = aiLog.length ? aiLog.map(m => m.kind === "user" ? aiUserHtml(m.text) : m.html) : [aiIntroHtml(true)];
+  const parts = aiLog.length ? aiLog.map(m => m.kind === "user" ? aiUserHtml(m.text) : aiCardHtml(m.spec)) : [aiIntroHtml(true)];
   if (aiBusy) parts.push('<div class="ai-typing" aria-label="處理中">…</div>');
   log.innerHTML = parts.join("");
   const input = document.getElementById("ai-input");
@@ -19567,9 +19567,15 @@ function aiCardHtml(c) {
   const body = c.text ? `<p>${escapeHtml(c.text)}</p>` : (c.bodyHtml || "");
   const chips = c.chips && c.chips.length ? `<div class="ai-chips">${c.chips.map(aiChipHtml).join("")}</div>` : "";
   const actions = c.actions && c.actions.length ? `<div class="ai-actions">${c.actions.map(aiBtnHtml).join("")}</div>` : "";
-  // 分類資訊只給 admin（Howard 2026-10-16）；所有人的結果照樣進 assistant_log
-  const meta = aiIsAdmin && c.meta ? `<div class="ai-meta">分類 <span class="ai-pct">${escapeHtml(c.meta)}</span></div>` : "";
-  return `<div class="ai-card${c.muted ? " is-muted" : ""}" role="status">${head}${sub}<div class="ai-card-body">${rows}${body}${chips}</div>${actions}${meta}</div>`;
+  // 分類資訊只給 admin（Howard 2026-10-16）；所有人的結果照樣進 assistant_log。
+  // 「不是我要的」給所有人：有 log_id 的卡（＝Jev 分過類的）才有，按過變成「已記下」
+  const metaTxt = aiIsAdmin && c.meta ? `分類 <span class="ai-pct">${escapeHtml(c.meta)}</span>` : "";
+  const wrong = c.log_id
+    ? (_aiWrong.has(c.log_id) ? `<span class="ai-wrong is-done">已記下，謝謝</span>`
+       : `<button type="button" class="ai-wrong" data-ai-act="wrong" data-ai-data="${escapeHtml(JSON.stringify({ log_id: c.log_id }))}">不是我要的</button>`)
+    : "";
+  const meta = metaTxt || wrong ? `<div class="ai-meta">${metaTxt}${wrong}</div>` : "";
+  return `<div class="ai-card${c.muted ? " is-muted" : ""}">${head}${sub}<div class="ai-card-body">${rows}${body}${chips}</div>${actions}${meta}</div>`;
 }
 
 // 籤與鍵都不用 inline handler：動作與參數放 data-*（JSON 經 escapeHtml），由 #ai-log 一個 listener 分派
@@ -19593,8 +19599,10 @@ function aiIntroHtml(withChips) {
   });
 }
 
+// 對話裡存的是卡片的「規格」不是 HTML：畫面每次重畫時才組，所以「不是我要的」按過、確認卡變結果卡，
+// 都只要改規格再重畫
 function aiPushCard(c, id) {
-  aiLog.push({ kind: "card", html: aiCardHtml(c), id: id || null });
+  aiLog.push({ kind: "card", spec: c, id: id || null });
   if (aiLog.length > AI_LOG_MAX) aiLog.splice(0, aiLog.length - AI_LOG_MAX);
 }
 
@@ -19602,7 +19610,18 @@ function aiPushCard(c, id) {
 function aiReplaceCard(id, c) {
   const i = aiLog.findIndex(m => m.id === id);
   if (i < 0) { aiPushCard(c, id); return; }
-  aiLog[i] = { kind: "card", html: aiCardHtml(c), id };
+  aiLog[i] = { kind: "card", spec: c, id };
+}
+
+// 「不是我要的」（第十五節 B4）：使用者最便宜的回饋，寫進 assistant_log.picked_intent='wrong'，
+// admin 在儀表板標正確類別後由 assistant_eval.py --harvest 匯回目錄
+const _aiWrong = new Set();
+function aiMarkWrong(logId) {
+  if (!logId || _aiWrong.has(logId)) return;
+  _aiWrong.add(logId);
+  aiOutcome(logId, "wrong", null);
+  trackActivity("assistant_wrong", {});
+  renderAssistant();
 }
 
 // ── 確認卡（Phase 3，ASSISTANT.md 第十四節 B）：填好 → 確認 → 寫入 ─────────────
@@ -19698,6 +19717,7 @@ function aiAct(act, data) {
   if (act === "open") { aiOpen(data); return; }
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
+  if (act === "wrong") { aiMarkWrong(String(data.log_id || "")); return; }
   // 這三個瀏覽器要「使用者的手勢」：按鍵本身就是那個手勢
   if (act === "push") { togglePushSubscription(); return; }
   if (act === "install") { installPwa("assistant"); return; }
@@ -19798,7 +19818,7 @@ async function aiHandleResponse(r, text) {
   const top = r.candidates && r.candidates[0];
   const meta = top ? `${r.label || r.intent} ${Math.round((Number(top.p) || 0) * 100)}%` : String(r.label || r.intent || "");
   if (r.decision === "refuse" || r.decision === "fallback") {
-    aiPushCard({ text: r.say || AI_FALLBACK, muted: true, meta });
+    aiPushCard({ text: r.say || AI_FALLBACK, muted: true, meta, log_id: r.log_id });
     return;
   }
   if (r.decision === "clarify") {
@@ -19813,7 +19833,7 @@ async function aiHandleResponse(r, text) {
         data: { intent: c.intent, slots: r.slots || {}, log_id: r.log_id },
       }));
     }
-    aiPushCard({ head: r.say || "你想要的是哪一種？", chips, meta });
+    aiPushCard({ head: r.say || "你想要的是哪一種？", chips, meta, log_id: r.log_id });
     return;
   }
   await aiRun(String(r.intent || ""), r.slots || {}, { log_id: r.log_id, say: r.say, meta, args: (r.action && r.action.args) || null, text });
@@ -19834,7 +19854,7 @@ async function aiRun(intent, slots, opts) {
   try { card = await h(slots || {}, args, opts || {}); }
   catch (e) { console.error("assistant action failed:", fn, e); card = { text: "這個動作剛才沒有成功，請再試一次。", muted: true }; }
   finally { aiBusy = false; }
-  if (card) { card.meta = card.meta || (opts && opts.meta); aiPushCard(card, card._id); }
+  if (card) { card.meta = card.meta || (opts && opts.meta); card.log_id = card.log_id || (opts && opts.log_id) || null; aiPushCard(card, card._id); }
   // 確認卡：executed 等按了主鍵／取消才回寫；其餘現在就算執行過
   if (card && card._id && aiPending[card._id]) aiPending[card._id].log_id = opts && opts.log_id;
   else aiOutcome(opts && opts.log_id, null, true);

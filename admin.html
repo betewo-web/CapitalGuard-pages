@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="363">
+  <meta name="app-version" content="364">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -266,6 +266,8 @@
   <h2 class="sec">意見回饋 <small>使用者送來的意見與我們的回覆（FEEDBACK.md）</small></h2>
   <div class="grid">
     <div class="card span-12" id="c-feedback"></div>
+    <!-- 助手：最近的句子與標注（ASSISTANT.md 第十五節 A1）——golden data 的回收迴圈 -->
+    <div class="card span-12" id="c-assistant"></div>
   </div>
 
   <h2 class="sec">事件與系統 <small>盤後事件產出、資料表與管線狀態</small></h2>
@@ -410,6 +412,7 @@ const ACTION_LABELS = {
   inbox_delete_undo: "復原刪除的通知",
   feedback_open:     "開啟意見回饋",
   assistant:         "助手送出一句",
+  assistant_wrong:   "助手：不是我要的",
   feedback_send:     "送出意見回饋",
   reaction_give:     "給回饋貼圖",
   reaction_clear:    "收回回饋貼圖",
@@ -1103,6 +1106,7 @@ async function loadStats(force) {
     renderAll(data);
     _lastLoadAt = Date.now();
     loadFeedback().catch(() => {});   // 另一支 RPC，不該讓它的失敗弄掉整頁
+    loadAssistant().catch(() => {});  // 同理
   } catch (e) {
     if (e.code === "update_required" || e.status === 426) {
       showGate(`<div style="font-size:2rem">⬆️</div><h1>App 需要更新</h1><p>${escapeHtml(e.message)}</p><button class="btn primary" onclick="location.reload()">重新載入</button>`);
@@ -1121,6 +1125,64 @@ async function loadStats(force) {
 }
 
 // ── 意見回饋（FEEDBACK.md）────────────────────────────────────────────────
+// ── 助手：最近的句子與標注（ASSISTANT.md 第十五節 A1，migrate_assistant_admin.sql）──
+// 信心低的排前面——那些最該補例句或改 criteria；「其實該是」選了類別就寫回 assistant_log.label_intent，
+// 標過的句子不會被 30 天保留期清掉，assistant_eval.py --harvest 再匯成目錄例句。
+// 類別清單與 cloudflare/assistant-route/catalog.json 的 intents 同一份（test_assistant_tab 釘住）。
+const ASSISTANT_INTENT_LABELS = { signals_today: "今天的訊號", signals_history: "過去幾天的訊號", quote: "股價與漲跌", kline: "K 線圖", levels: "支撐與壓力", events: "事件與資料", score: "評分與統計", market_strength: "市場強度與族群", market_signals: "市場訊號", holdings: "持股與損益", inbox: "通知匣", watch_add: "加入自選股", watch_remove: "移除自選股", basic_signal_set: "基礎訊號開關", price_target_set: "到價提醒", rule_create: "新增進階訊號", rule_manage: "管理進階訊號", holdings_set: "設定持股", share_stock: "分享給好友", plan: "方案與額度", push_setup: "通知權限", system_status: "資料狀態", glossary: "名詞與算法", help: "功能說明", feedback: "意見回報", friend: "好友", ui_settings: "介面設定", advice: "買賣與預測（不提供）", out_of_scope: "不在服務範圍" };
+const ASSISTANT_DECISION_LABELS = { execute: "直接做", confirm: "確認卡", clarify: "反問", refuse: "拒答", fallback: "固定句" };
+let _aiRows = [];
+
+async function loadAssistant() {
+  const token = sessionToken();
+  if (!token) return;
+  const el = document.getElementById("c-assistant");
+  try {
+    const res = await sbRpc("assistant_recent", { p_limit: 100 }, token);
+    _aiRows = Array.isArray(res) ? res : [];
+    renderAssistantLog();
+  } catch (e) {
+    if (el) el.innerHTML = e.status === 404
+      ? `<div class="empty">尚未啟用：請先執行 migrate_assistant_admin.sql</div>`
+      : `<div class="empty">讀不到助手紀錄（${escapeHtml(e.message || e)}）</div>`;
+  }
+}
+
+function renderAssistantLog() {
+  const il = k => ASSISTANT_INTENT_LABELS[k] || k || "";
+  const opts = sel => `<option value="">—</option>` + Object.entries(ASSISTANT_INTENT_LABELS)
+    .map(([k, v]) => `<option value="${k}"${sel === k ? " selected" : ""}>${escapeHtml(v)}</option>`).join("");
+  const rows = _aiRows.map(r => {
+    const top = Array.isArray(r.candidates) ? r.candidates.slice(0, 3).map(c => `${il(c.intent)} ${Math.round((Number(c.p) || 0) * 100)}%`).join(" / ") : "";
+    const wrong = r.picked === "wrong";
+    const outcome = (r.executed === true ? "・已執行" : r.executed === false ? "・取消" : "")
+      + (wrong ? "・<b>不是我要的</b>" : r.picked ? `・選了 ${escapeHtml(il(r.picked))}` : "");
+    return `<tr${wrong ? ' class="ai-wrong-row"' : ""}>
+      <td>${escapeHtml(String(r.at || "").slice(5, 16).replace("T", " "))}</td>
+      <td style="white-space:pre-wrap;max-width:22rem">${escapeHtml(r.text || "")}</td>
+      <td>${escapeHtml(il(r.intent))}<br><small style="opacity:.7">${escapeHtml(top)}</small></td>
+      <td>${escapeHtml(ASSISTANT_DECISION_LABELS[r.decision] || r.decision || "")}${outcome}</td>
+      <td class="num">${r.confidence != null ? Math.round(Number(r.confidence) * 100) + "%" : "—"}</td>
+      <td><select style="font-size:.75rem" onchange="assistantLabel('${escapeHtml(String(r.id))}', this.value)">${opts(r.label || "")}</select></td>
+    </tr>`;
+  });
+  const wrongN = _aiRows.filter(r => r.picked === "wrong").length;
+  const labeled = _aiRows.filter(r => r.label).length;
+  tableCard("c-assistant", "助手：最近 100 句",
+    `信心低的排前面；「不是我要的」${fmtInt(wrongN)} 句、已標注 ${fmtInt(labeled)} 句。標了類別的句子不會被保留期清掉，assistant_eval.py --harvest 匯成目錄例句`,
+    ["時間", "句子", "Jev 分到（前三）", "決策", "信心", "其實該是"], rows, "還沒有人用過助手");
+}
+
+async function assistantLabel(id, intent) {
+  const token = sessionToken();
+  if (!token) return;
+  try {
+    await sbRpc("assistant_label", { p_log: id, p_intent: intent || "" }, token);
+    const row = _aiRows.find(r => String(r.id) === String(id));
+    if (row) row.label = intent || null;
+  } catch (e) { alert(`標注失敗：${e.message || e}`); }
+}
+
 // 與 admin_stats() 分開一支 RPC：那一支是 STABLE 的單一 SQL，而這一支會寫
 // （回傳的那幾列順手從 new 標成 read，使用者那邊就看得到「已讀」）。
 // 不期間篩選：回饋的量級是每月幾十則，整份抓回來比較不會漏掉舊的沒回。
