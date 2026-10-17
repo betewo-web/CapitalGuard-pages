@@ -2026,6 +2026,11 @@ body.modal-blocking .modal-backdrop.show {
 
 .home-tab [data-icon] { display: inline-flex; vertical-align: -2px; margin-right: 5px; }
 .home-tab [data-icon] .ic { width: 16px; height: 16px; }
+/* 四段在 360px 以下（或最大字級）擠不下圖示＋兩個字：只留字（第十五節 B6） */
+@media (max-width: 360px) {
+	.home-tab [data-icon] { display: none; }
+	.home-tab { padding-left: 2px; padding-right: 2px; }
+}
 
 /* 段與段之間的細線：相鄰兩段都沒被選中時才畫，選中的那一段自己有底色 */
 .home-tab + .home-tab::before {
@@ -2071,6 +2076,12 @@ body.modal-blocking .modal-backdrop.show {
 .ai-row b { color: var(--text-0); font-weight: 600; flex: 0 0 auto; white-space: nowrap; }
 .ai-row i { font-style: normal; color: var(--text-muted); font-size: 0.86rem; white-space: nowrap; flex: 0 0 auto; }
 .ai-row .ai-val { color: var(--text-0); font-variant-numeric: tabular-nums; flex: 1 1 auto; min-width: 0; text-align: right; word-break: break-word; }
+/* 列可以點（第十五節 B3）：列出來的那一檔／那一條本身就是入口；右邊一個 › 說它能點 */
+.ai-row.is-link { width: 100%; background: none; border: none; border-top: 1px solid var(--border); border-radius: 0;
+	font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.ai-row.is-link:first-child { border-top: none; }
+.ai-row.is-link::after { content: "›"; color: var(--text-muted); flex: 0 0 auto; }
+.ai-row.is-link:active { background: rgba(139, 124, 255, 0.1); }
 .ai-actions { display: flex; gap: 8px; margin-top: 12px; }
 .ai-btn { flex: 1; height: 44px; border-radius: 12px; font-size: 0.98rem; font-weight: 700; display: flex;
 	align-items: center; justify-content: center; border: 1px solid transparent; cursor: pointer; }

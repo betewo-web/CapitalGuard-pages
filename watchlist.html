@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="365">
+  <meta name="app-version" content="366">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=365" rel="stylesheet">
+  <link href="watchlist.css?v=366" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19443,7 +19443,6 @@ document.addEventListener("click", async e => {
 // ═══════════════════════════════════════════════════════════════
 const AI_MAX_CHARS = 200;
 const AI_LOG_MAX = 40;
-const AI_SUGGESTIONS = ["今天誰有訊號", "台積電支撐在哪", "什麼是逼近壓力", "我是什麼方案"];
 const AI_FALLBACK = "我沒聽懂這一句。可以試試：「台積電今天有訊號嗎」「鴻海支撐在哪」「什麼是逼近壓力」。";
 let aiLog = [];              // [{kind:"user", text} | {kind:"card", html}]
 let aiBusy = false;
@@ -19558,12 +19557,17 @@ function aiUserHtml(text) {
   return `<div class="ai-msg is-user">${escapeHtml(text)}</div>`;
 }
 
-// 卡片：{head, sub, rows:[{label, value, note, html}], text, bodyHtml, chips, actions, meta, muted}
+// 卡片：{head, sub, rows:[{label, value, note, html, act, data}], text, bodyHtml, chips, actions, meta, muted}
+// 列帶 act 就能點（第十五節 B3）：列出來的那一檔／那一條本身就是入口，與籤、鍵走同一個 listener
 function aiCardHtml(c) {
   const head = c.head ? `<div class="ai-card-head">${ICON_AI}${escapeHtml(c.head)}</div>` : "";
   const sub = c.sub ? `<div class="ai-card-sub">${escapeHtml(c.sub)}</div>` : "";
-  const rows = (c.rows || []).map(r =>
-    `<div class="ai-row"><b>${escapeHtml(r.label)}</b><span class="ai-val">${r.html ? r.value : escapeHtml(r.value ?? "")}</span><i>${escapeHtml(r.note ?? "")}</i></div>`).join("");
+  const rows = (c.rows || []).map(r => {
+    const inner = `<b>${escapeHtml(r.label)}</b><span class="ai-val">${r.html ? r.value : escapeHtml(r.value ?? "")}</span><i>${escapeHtml(r.note ?? "")}</i>`;
+    return r.act
+      ? `<button type="button" class="ai-row is-link" data-ai-act="${escapeHtml(r.act)}" data-ai-data="${escapeHtml(JSON.stringify(r.data || {}))}">${inner}</button>`
+      : `<div class="ai-row">${inner}</div>`;
+  }).join("");
   const body = c.text ? `<p>${escapeHtml(c.text)}</p>` : (c.bodyHtml || "");
   const chips = c.chips && c.chips.length ? `<div class="ai-chips">${c.chips.map(aiChipHtml).join("")}</div>` : "";
   const actions = c.actions && c.actions.length ? `<div class="ai-actions">${c.actions.map(aiBtnHtml).join("")}</div>` : "";
@@ -19595,8 +19599,22 @@ function aiIntroHtml(withChips) {
       <li>設 「跌到 900 提醒我」、「外資連買 3 天通知我」</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
       <div class="ai-note">只整理與解釋公開資料，不提供買賣建議。用鍵盤上的麥克風也可以說話。</div></div>`,
-    chips: withChips ? AI_SUGGESTIONS.map(t => ({ label: t, act: "send", data: { text: t } })) : [],
+    chips: withChips ? aiIntroChips() : [],
   });
+}
+
+// 說明卡的建議籤看狀態挑（第十五節 B7）：沒有自選股的人點「今天誰有訊號」只會得到空，先給他「加一檔」；
+// 推播沒開的人給「怎麼收到通知」。籤帶類別＋槽位、本機直接做（第十五節 A3）；名詞那一籤的固定句在目錄裡，仍經 Worker。
+function aiIntroChips() {
+  const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId);
+  const first = sids[0] || null;
+  const run = (label, intent, slots) => ({ label, act: "run", data: { intent, slots: slots || {}, text: label } });
+  return [
+    first ? run("今天誰有訊號", "signals_today") : run("把台積電加進自選", "watch_add", { stock: "2330" }),
+    first ? run(`${aiStockName(first)}支撐在哪`, "levels", { stock: first }) : run("哪個族群最強", "market_strength"),
+    { label: "什麼是逼近壓力", act: "send", data: { text: "什麼是逼近壓力" } },
+    _pushSubscribed ? run("我是什麼方案", "plan") : run("怎麼收到通知", "push_setup"),
+  ];
 }
 
 // 對話裡存的是卡片的「規格」不是 HTML：畫面每次重畫時才組，所以「不是我要的」按過、確認卡變結果卡，
@@ -19745,6 +19763,7 @@ function aiBindOnce() {
 
 function aiAct(act, data) {
   if (act === "send") { assistantSend(String(data.text || "")); return; }
+  if (act === "run") { aiRunChip(data); return; }   // 籤上已帶類別＋槽位：本機直接做，不再送 Worker 分類（第十五節 A3）
   if (act === "open") { if (data._collapse) aiCollapseConfirm(String(data._collapse)); aiOpen(data); renderAssistant(); return; }
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
@@ -19756,8 +19775,31 @@ function aiAct(act, data) {
   if (act === "pick") {    // 反問卡：使用者選了哪一類 → 用同一組槽位在本機執行，並回寫是哪一個
     aiSkipPending();
     aiOutcome(data.log_id, data.intent, null);
-    aiRun(data.intent, data.slots || {}, { log_id: data.log_id, meta: "使用者選的" }).then(() => renderAssistant());
+    aiRun(data.intent, data.slots || {}, { log_id: data.log_id, meta: "使用者選的", text: String(data.text || "") }).then(aiAfterRun);
   }
+}
+
+// 籤已經帶著類別與槽位（自選股籤、方向籤、開／關籤、好友籤、說明卡的建議）：對話裡留下籤上的字當使用者那一句，
+// 本機直接執行——籤是我們自己生的、類別早就知道，再送去分類只是多等 Jev 一趟、多用一次額度（第十五節 A3）。
+// 帶 log_id 的籤（反問「要查哪一檔」之後點的）把結果回寫到原句那一列；說明卡的建議籤沒有 log_id，也就不進 assistant_log。
+function aiRunChip(d) {
+  const intent = String(d.intent || "");
+  if (!AI_INTENTS[intent] || aiBusy) return;
+  aiSkipPending();
+  const text = String(d.text || "").slice(0, AI_MAX_CHARS);
+  aiLog.push({ kind: "user", text });
+  trackActivity("assistant", { intent, decision: "chip" });
+  aiRun(intent, d.slots || {}, { log_id: d.log_id || null, meta: "籤", text }).then(aiAfterRun);
+}
+
+function aiAfterRun() { renderAssistant(); aiRefocus(); }
+
+// 桌機（滑鼠）回應後把游標放回輸入列，連續打字不用再點；送出時輸入列鎖住、焦點會掉。
+// 手機不做：聚焦會彈鍵盤把剛出來的卡遮掉（第十五節 B9）
+function aiRefocus() {
+  if (!window.matchMedia || !window.matchMedia("(pointer: fine)").matches || currentTab !== "ai") return;
+  const input = document.getElementById("ai-input");
+  if (input && !input.disabled) { try { input.focus({ preventScroll: true }); } catch { /* 舊瀏覽器沒有 options */ } }
 }
 
 // 「去那一頁」鍵：字卡、分頁、方案、基礎訊號面板、進階訊號、持股——都是既有的入口
@@ -19808,7 +19850,8 @@ function assistantSubmit(ev) {
 }
 
 async function assistantSend(raw) {
-  const text = String(raw || "").trim().slice(0, AI_MAX_CHARS);
+  // NFKC：IME 打出來的全形數字與空白（「２３３０」「１８０」）先變半形，認股票與抽價位才看得到（第十五節 A10；Worker 同）
+  const text = String(raw || "").normalize("NFKC").trim().slice(0, AI_MAX_CHARS);
   if (!text || aiBusy) return;
   aiSkipPending();
   aiLog.push({ kind: "user", text });
@@ -19834,7 +19877,7 @@ async function assistantSend(raw) {
   aiBusy = false;
   if (status === 200 && r) await aiHandleResponse(r, text);
   else aiHandleError(status, r);
-  renderAssistant();
+  aiAfterRun();
 }
 
 function aiHandleError(status, r) {
@@ -19857,13 +19900,15 @@ async function aiHandleResponse(r, text) {
   if (r.decision === "clarify") {
     let chips;
     if (r.clarify_kind === "stock") {
-      // 要股票卻沒說是哪一檔：自選股當籤，點了＝把股票名接回原句重送
+      // 要股票卻沒說是哪一檔：自選股當籤，點了＝Worker 已分好的類別＋槽位加上那一檔，本機直接做（不再送一次）
+      const intent = String(r.intent || "");
       chips = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId).slice(0, 8)
-        .map(sid => ({ label: aiStockName(sid), act: "send", data: { text: `${aiStockName(sid)} ${text}` } }));
+        .map(sid => ({ label: aiStockName(sid), act: "run",
+                       data: { intent, slots: Object.assign({}, r.slots || {}, { stock: sid }), log_id: r.log_id, text: `${aiStockName(sid)} ${text}` } }));
     } else {
       chips = (r.candidates || []).map((c, i) => ({
         label: String(c.label || c.intent), hot: i === 0, act: "pick",
-        data: { intent: c.intent, slots: r.slots || {}, log_id: r.log_id },
+        data: { intent: c.intent, slots: r.slots || {}, log_id: r.log_id, text },
       }));
     }
     aiPushCard({ head: r.say || "你想要的是哪一種？", chips, meta, log_id: r.log_id });
@@ -19874,7 +19919,7 @@ async function aiHandleResponse(r, text) {
 
 // 執行：只走白名單。回傳卡片就畫、回傳 null 代表已經跳去別的頁（對話裡留一行）
 // handler 可以是同步或 async（要先載資料的那幾支）；等的時候輸入列鎖住、顯示「…」
-let _aiCurrentIntent = "";
+let _aiCurrent = { intent: "", slots: {}, log_id: null, text: "" };   // 正在跑的這一次：aiNeedStock 的籤要接回同一類、同一組槽位
 async function aiRun(intent, slots, opts) {
   const spec = AI_INTENTS[intent];
   const fn = spec ? spec[0] : "";
@@ -19882,7 +19927,7 @@ async function aiRun(intent, slots, opts) {
   if (!h) { aiPushCard({ text: "這個動作這一版還沒接上。", muted: true, meta: opts && opts.meta }); return; }
   const args = Object.assign({}, spec ? spec[1] : {}, (opts && opts.args) || {}, slots || {});
   let card = null;
-  _aiCurrentIntent = intent;
+  _aiCurrent = { intent, slots: slots || {}, log_id: (opts && opts.log_id) || null, text: String((opts && opts.text) || "") };
   aiBusy = true; renderAssistant();
   try { card = await h(slots || {}, args, opts || {}); }
   catch (e) { console.error("assistant action failed:", fn, e); card = { text: "這個動作剛才沒有成功，請再試一次。", muted: true }; }
@@ -19904,9 +19949,14 @@ const AI_STOCK_HINT = {
 };
 function aiNeedStock() {
   const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId).slice(0, 8);
-  const hint = AI_STOCK_HINT[_aiCurrentIntent] || "";
+  const cur = _aiCurrent;
+  const hint = AI_STOCK_HINT[cur.intent] || "";
+  // 籤帶這一類＋原本的槽位＋那一檔，本機直接做；對話裡那一句用使用者原句接股票名（沒有原句才用提示語）
+  const chip = sid => ({ label: aiStockName(sid), act: "run",
+    data: { intent: cur.intent, slots: Object.assign({}, cur.slots, { stock: sid }), log_id: cur.log_id,
+            text: cur.text ? `${aiStockName(sid)} ${cur.text}` : `${aiStockName(sid)}${hint}` } });
   return { head: "要查哪一檔？", text: sids.length ? "點一檔，或打股票名稱或代號。" : "打股票名稱或代號，例如「台積電」或「2330」。",
-           chips: sids.map(sid => ({ label: aiStockName(sid), act: "send", data: { text: `${aiStockName(sid)}${hint}` } })) };
+           chips: sids.map(chip) };
 }
 
 // ── 白名單：目錄 handler.fn → 這裡的函式。每一支都是薄殼，包既有的函式 ──────
@@ -19921,7 +19971,7 @@ const ASSISTANT_ACTIONS = {
     const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId);
     if (!sids.length) return { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
     const rows = sids.map(s => ({ sid: s, n: todaySignalsOf(s).length })).sort((a, b) => b.n - a.n).slice(0, 12)
-      .map(x => ({ label: aiStockName(x.sid), value: x.n ? `${x.n} 則` : "—", note: x.sid }));
+      .map(x => ({ label: aiStockName(x.sid), value: x.n ? `${x.n} 則` : "—", note: x.sid, act: "open", data: { sid: x.sid, tab: "radar" } }));
     const hot = rows.filter(r => r.value !== "—").length;
     return { head: "今天的訊號", sub: hot ? `${hot} 檔有訊號` : "今天還沒有訊號", rows,
              actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
@@ -19973,7 +20023,7 @@ const ASSISTANT_ACTIONS = {
     const rows = dates.map(d => {
       const sigs = (hist[d] && hist[d].signals) || [];
       const names = [...new Set(sigs.map(s => labelOf(s.kind)))].slice(0, 2).join("、");
-      return { label: `${_mdOf(d)}（${_weekdayZh(d)}）`, value: sigs.length ? `${sigs.length} 則` : "—", note: names };
+      return { label: `${_mdOf(d)}（${_weekdayZh(d)}）`, value: sigs.length ? `${sigs.length} 則` : "—", note: names, act: "open", data: { sid, tab: "history" } };
     });
     const total = dates.reduce((n, d) => n + (((hist[d] && hist[d].signals) || []).length), 0);
     return { head: `${name} ${sid}`, sub: `近 ${dates.length} 個交易日 ${total} 則訊號`, rows, actions: [aiOpenBtn(sid, "history", "看歷史訊號 ›")] };
@@ -19993,7 +20043,7 @@ const ASSISTANT_ACTIONS = {
       if (slots.horizon === "upcoming") evs = evs.filter(e => String(e.event_date || "") > today);
       evs.sort((a, b) => String(b.event_date || "").localeCompare(String(a.event_date || "")));
       if (!evs.length) return { head: `${aiStockName(sid)} ${sid}`, text: `沒有${slots.event_type ? typeLabel(slots.event_type) : ""}${slots.horizon === "upcoming" ? "接下來的" : ""}資料。`, actions: [{ label: "開資料清單 ›", act: "open", data: { events: sid } }] };
-      const rows = evs.slice(0, 6).map(e => ({ label: typeLabel(e.event_type), value: String(e.title || "").slice(0, 28), note: String(e.event_date || "") }));
+      const rows = evs.slice(0, 6).map(e => ({ label: typeLabel(e.event_type), value: String(e.title || "").slice(0, 28), note: String(e.event_date || ""), act: "open", data: { events: sid } }));
       return { head: `${aiStockName(sid)} ${sid}`, sub: `${evs.length} 筆資料`, rows, actions: [{ label: "開資料清單 ›", act: "open", data: { events: sid } }] };
     }
     // 整份自選股：接下來的日程（除權息、法說…）或今天的資料
@@ -20005,7 +20055,7 @@ const ASSISTANT_ACTIONS = {
     all = upcoming ? all.filter(e => String(e.event_date || "") > today).sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)))
                    : all.filter(e => taipeiDateKey(e.created_at || e.event_date) === today);
     if (!all.length) return { text: upcoming ? "接下來 7 天沒有自選股的日程。" : "今天還沒有新資料。", actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
-    const rows = all.slice(0, 8).map(e => ({ label: aiStockName(e.sid), value: `${typeLabel(e.event_type)}：${String(e.title || "").slice(0, 22)}`, note: String(e.event_date || "") }));
+    const rows = all.slice(0, 8).map(e => ({ label: aiStockName(e.sid), value: `${typeLabel(e.event_type)}：${String(e.title || "").slice(0, 22)}`, note: String(e.event_date || ""), act: "open", data: { events: e.sid } }));
     return { head: upcoming ? "接下來的日程" : "今天的資料", sub: `${all.length} 筆`, rows, actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
   },
   async assistantScore(slots) {
@@ -20027,7 +20077,7 @@ const ASSISTANT_ACTIONS = {
     if (!sids.length) return { text: "自選股在今天的報告裡沒有評分。", actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] };
     const rows = sids.map(s => ({ s, sc: sharedReportData.investment_scores[s] }))
       .sort((a, b) => Math.abs(Number(b.sc.score_change) || 0) - Math.abs(Number(a.sc.score_change) || 0)).slice(0, 10)
-      .map(x => ({ label: aiStockName(x.s), value: fmtScoreValue(x.sc.total_score), note: fmtScoreDelta(x.sc.score_change) }));
+      .map(x => ({ label: aiStockName(x.s), value: fmtScoreValue(x.sc.total_score), note: fmtScoreDelta(x.sc.score_change), act: "open", data: { score: x.s } }));
     return { head: "自選股評分", sub: `${sharedReportData.date || ""} · 變化大的在前`, rows, actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] };
   },
   async assistantMarketStrength(slots) {
@@ -20040,7 +20090,7 @@ const ASSISTANT_ACTIONS = {
       const hit = inds.filter(i => String(i.ind || "").includes(String(slots.sector)));
       if (hit.length) inds = hit;
     }
-    const rows = inds.slice(0, slots.sector ? 3 : 6).map((i, n) => ({ label: `${n + 1}. ${i.ind}`, value: `${Number(i.score)}`, note: `上漲 ${Number(i.up_pct)}%・${Number(i.n)} 檔` }));
+    const rows = inds.slice(0, slots.sector ? 3 : 6).map((i, n) => ({ label: `${n + 1}. ${i.ind}`, value: `${Number(i.score)}`, note: `上漲 ${Number(i.up_pct)}%・${Number(i.n)} 檔`, act: "open", data: { filter: "market" } }));
     return { head: "市場強度", sub: `族群強度分數（0–100）${p.at ? ` · ${fmtTime(p.at)}` : ""}`, rows,
              actions: [{ label: "打開市場強度 ›", act: "open", data: { filter: "market" } }] };
   },
@@ -20052,7 +20102,7 @@ const ASSISTANT_ACTIONS = {
     let entries = holdingEntries();
     if (slots.stock) entries = entries.filter(h => h.sid === slots.stock);
     if (!entries.length) return { text: "還沒有持股資料。盤後頁每張卡片的「持股」可以填。", actions: [{ label: "去盤後頁 ›", act: "open", data: { tab: "post" } }] };
-    const rows = entries.slice(0, 10).map(h => ({ label: h.name, value: `${Number(h.shares).toLocaleString()} 股`, note: h.cost != null ? `成本 ${fmtPrice(h.cost)}` : "" }));
+    const rows = entries.slice(0, 10).map(h => ({ label: h.name, value: `${Number(h.shares).toLocaleString()} 股`, note: h.cost != null ? `成本 ${fmtPrice(h.cost)}` : "", act: "open", data: { holdings: h.sid } }));
     return { head: "持股", rows, actions: [{ label: "去盤後頁看損益 ›", act: "open", data: { tab: "post" } }] };
   },
   switchTab(slots, args) {
@@ -20079,8 +20129,8 @@ const ASSISTANT_ACTIONS = {
     }
     if (!p) { aiNav(() => openPlanModal()); return { text: "已打開方案與用量。" }; }
     return { head: "方案與用量", sub: p.name || planTierLabel(),
-             rows: [{ label: "自選股", value: aiWatchUsage(), note: "含好友分享" },
-                    { label: "進階訊號", value: `${(alertRules || []).length}／${p.rule_limit ?? "—"}`, note: "" }],
+             rows: [{ label: "自選股", value: aiWatchUsage(), note: "含好友分享", act: "open", data: { tab: "watch" } },
+                    { label: "進階訊號", value: `${(alertRules || []).length}／${p.rule_limit ?? "—"}`, note: "", act: "open", data: { rules: true } }],
              actions: [{ label: "看方案與升級 ›", act: "open", data: { plan: true } }] };
   },
   assistantRules(slots) {
@@ -20098,14 +20148,17 @@ const ASSISTANT_ACTIONS = {
     }
     if (action === "on" || action === "off" || action === "delete") {
       const which = String(slots.which || "").trim();
-      const hits = which
-        ? rules.filter(r => String(r.name || "").includes(which) || (r.conditions || []).some(c => describeCondition(c).includes(which)))
-        : rules;
+      const hits = slots.rule_id != null   // 「你指的是哪一條」的籤帶 id 回來：同名的兩條也分得開
+        ? rules.filter(r => String(r.id) === String(slots.rule_id))
+        : which
+          ? rules.filter(r => String(r.name || "").includes(which) || (r.conditions || []).some(c => describeCondition(c).includes(which)))
+          : rules;
       const verb = action === "on" ? "打開" : action === "off" ? "關掉" : "刪掉";
       if (!rules.length) return { text: "還沒有進階訊號。", actions: [rulesBtn] };
-      if (!hits.length) return { head: `找不到「${which}」這一條`, rows: rules.slice(0, 8).map(r => ({ label: r.name, value: r.enabled ? "開" : "關", note: "" })), actions: [rulesBtn] };
+      if (!hits.length) return { head: `找不到「${which}」這一條`, rows: rules.slice(0, 8).map(r => ({ label: r.name, value: r.enabled ? "開" : "關", note: "", act: "open", data: { rules: true } })), actions: [rulesBtn] };
       if (hits.length > 1 && (which || action === "delete")) {
-        return { head: "你指的是哪一條？", chips: hits.slice(0, 8).map(r => ({ label: String(r.name || ""), act: "send", data: { text: `把「${r.name}」那條${verb}` } })) };
+        return { head: "你指的是哪一條？", chips: hits.slice(0, 8).map(r => ({ label: String(r.name || ""), act: "run",
+          data: { intent: "rule_manage", slots: { action, rule_id: r.id }, text: `把「${r.name}」那條${verb}` } })) };
       }
       const targets = action === "delete" ? hits.slice(0, 1) : hits.filter(r => !!r.enabled !== (action === "on"));
       if (!targets.length) return { text: `「${hits[0].name}」已經是${action === "on" ? "開" : "關"}的。` };
@@ -20127,14 +20180,17 @@ const ASSISTANT_ACTIONS = {
     if (!rules.length) return { text: "還沒有進階訊號。", actions: [rulesBtn] };
     const rows = rules.slice(0, 10).map(r => ({
       label: r.name || describeCondition((r.conditions || [])[0]), value: r.enabled ? "開" : "關",
-      note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股" }));
+      note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股", act: "open", data: { rules: true } }));
     return { head: `進階訊號 ${rules.length}／${planLimitOf("alert_rules") ?? "—"}`, rows,
              actions: [{ label: "打開進階訊號 ›", act: "open", data: { rules: true } }] };
   },
   assistantInbox() {
     const today = (inboxRows || []).filter(r => isToday(r.sent_at));
-    const rows = today.slice(0, 5).map(r => ({ label: aiStockName(String(r.stock_id || "").trim()) || "系統",
-      value: _titleWithoutSid(String(r.title || ""), String(r.stock_id || "").trim()), note: fmtTime(r.sent_at) }));
+    const rows = today.slice(0, 5).map(r => {
+      const sid = String(r.stock_id || "").trim();
+      return { label: aiStockName(sid) || "系統", value: _titleWithoutSid(String(r.title || ""), sid), note: fmtTime(r.sent_at),
+               act: "open", data: isStockId(sid) ? { sid, tab: "radar" } : { tab: "inbox" } };
+    });
     return { head: "通知", sub: today.length ? `今天 ${today.length} 則` : "今天還沒有通知", rows,
              actions: [{ label: "打開通知 ›", act: "open", data: { tab: "inbox" } }] };
   },
@@ -20163,8 +20219,8 @@ const ASSISTANT_ACTIONS = {
     const goBtn = { label: "去分享分頁 ›", act: "open", data: { tab: "friends" } };
     const fail = r => { if (!r || typeof r !== "object" || r === FR_RPC_MISSING) throw new Error("分享功能暫時無法使用"); if (r.error) throw new Error(FR_ERRORS[r.error] || r.error); return r; };
     if (action === "list") {
-      const rows = out.slice(0, 5).map(s => ({ label: aiStockName(String(s.stock_id)), value: "我分享的", note: s.live === false ? "已結束" : "進行中" }))
-        .concat(inc.slice(0, 5).map(s => ({ label: aiStockName(String(s.stock_id)), value: `${s.owner_name || "好友"} 分享的`, note: s.status === "accepted" ? "已接受" : s.status === "pending" ? "等你回應" : String(s.status || "") })));
+      const rows = out.slice(0, 5).map(s => ({ label: aiStockName(String(s.stock_id)), value: "我分享的", note: s.live === false ? "已結束" : "進行中", act: "open", data: { tab: "friends" } }))
+        .concat(inc.slice(0, 5).map(s => ({ label: aiStockName(String(s.stock_id)), value: `${s.owner_name || "好友"} 分享的`, note: s.status === "accepted" ? "已接受" : s.status === "pending" ? "等你回應" : String(s.status || ""), act: "open", data: { tab: "friends" } })));
       return rows.length ? { head: "分享", rows, actions: [goBtn] } : { text: "還沒有任何分享。", actions: [goBtn] };
     }
     if (action === "stop") {
@@ -20187,10 +20243,13 @@ const ASSISTANT_ACTIONS = {
     const friends = (frState && frState.friends) || [];
     if (!friends.length) return { text: "還沒有好友，先邀請朋友。", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
     const said = String((opts && opts.text) || "");
-    let hits = friends.filter(f => f.name && said.includes(String(f.name)));
+    let hits = slots.friend_id   // 「要分享給誰」的籤帶 user_id 回來：同名的兩位也分得開
+      ? friends.filter(f => String(f.user_id) === String(slots.friend_id))
+      : friends.filter(f => f.name && said.includes(String(f.name)));
     if (!hits.length && slots.person) hits = friends.filter(f => String(f.name || "").toLowerCase().includes(String(slots.person).toLowerCase()));
     if (hits.length !== 1) {
-      return { head: "要分享給誰？", chips: friends.slice(0, 8).map(f => ({ label: String(f.name || ""), act: "send", data: { text: `把${name}分享給${f.name}` } })) };
+      return { head: "要分享給誰？", chips: friends.slice(0, 8).map(f => ({ label: String(f.name || ""), act: "run",
+        data: { intent: "share_stock", slots: { stock: sid, action: "share", friend_id: f.user_id }, text: `把${name}分享給${f.name}` } })) };
     }
     const f = hits[0];
     return aiConfirmCard({
@@ -20226,7 +20285,7 @@ const ASSISTANT_ACTIONS = {
     if (action === "invite") return { text: "把邀請連結傳給朋友：", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
     const friends = (frState && frState.friends) || [];
     if (!friends.length) return { text: "還沒有好友。", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
-    return { head: `好友 ${friends.length} 位`, rows: friends.slice(0, 10).map(f => ({ label: String(f.name || ""), value: "", note: String(f.tag || "") })), actions: [goBtn] };
+    return { head: `好友 ${friends.length} 位`, rows: friends.slice(0, 10).map(f => ({ label: String(f.name || ""), value: "", note: String(f.tag || ""), act: "open", data: { tab: "friends" } })), actions: [goBtn] };
   },
   assistantUiSettings(slots) {
     if (slots.font) { setAppFontSize(slots.font); return { text: `字體已改成${{ base: "標準", large: "大", xlarge: "最大" }[slots.font] || slots.font}。` }; }
@@ -20320,8 +20379,8 @@ const ASSISTANT_ACTIONS = {
       if (lo0 == null && hi0 == null) { aiNav(() => openAlertSettings(row0.id)); return { head: `${name} ${sid}`, text: "還沒有設到價提醒，已打開這一檔的自訂價位面板（最下面兩格）。" }; }
       const rows = [{ label: "股票", value: `${name} ${sid}`, note: cur ? `現價 ${fmtPrice(cur)}` : "" }];
       const pct0 = v => cur ? `距 ${v < cur ? "−" : "+"}${fmtPct((v - cur) / cur * 100)}%` : "";
-      if (lo0 != null) rows.push({ label: "跌到", value: fmtPrice(lo0), note: pct0(lo0) });
-      if (hi0 != null) rows.push({ label: "漲到", value: fmtPrice(hi0), note: pct0(hi0) });
+      if (lo0 != null) rows.push({ label: "跌到", value: fmtPrice(lo0), note: pct0(lo0), act: "open", data: { alert: row0.id } });
+      if (hi0 != null) rows.push({ label: "漲到", value: fmtPrice(hi0), note: pct0(hi0), act: "open", data: { alert: row0.id } });
       return { head: "目前的到價提醒", rows, actions: [alt] };
     }
     let dir = String(slots.direction || "any");
@@ -20329,9 +20388,10 @@ const ASSISTANT_ACTIONS = {
     if (dir === "both" && !(Number(slots.price_high) > 0)) dir = "down";
     if (dir === "any") {
       if (!cur) {
+        const dirChip = (d, w) => ({ label: `${w} ${fmtPrice(price)} 通知`, act: "run",
+          data: { intent: "price_target_set", slots: { stock: sid, price, direction: d }, text: `${name}${w} ${price} 通知我` } });
         return { head: `${name} ${sid}`, text: `沒有現價可以判斷 ${fmtPrice(price)} 是跌到還是漲到，點一個：`,
-                 chips: [{ label: `跌到 ${fmtPrice(price)} 通知`, act: "send", data: { text: `${name}跌到 ${price} 通知我` } },
-                         { label: `漲到 ${fmtPrice(price)} 通知`, act: "send", data: { text: `${name}漲到 ${price} 通知我` } }] };
+                 chips: [dirChip("down", "跌到"), dirChip("up", "漲到")] };
       }
       dir = price < cur ? "down" : "up";
       inferred = `${fmtPrice(price)} ${dir === "down" ? "低於" : "高於"}現價，當成${dir === "down" ? "跌到" : "漲到"}`;
@@ -20382,11 +20442,11 @@ const ASSISTANT_ACTIONS = {
     const fields = field ? [field] : ALERT_FIELDS.slice();
     if (on === undefined || on === null) {   // 問句：回現狀，附上改的籤
       if (!field) { aiNav(() => openAlertSettings(row ? row.id : ALERT_SCOPE_ALL)); return { text: `已打開${row ? ` ${aiStockName(sid)} 的` : "全部股票的"}基礎訊號面板。` }; }
-      const rows = targets.slice(0, 10).map(r => ({ label: aiStockName(String(r.stock_id).trim()), value: r[field] ? "開" : "關", note: "" }));
+      const rows = targets.slice(0, 10).map(r => ({ label: aiStockName(String(r.stock_id).trim()), value: r[field] ? "開" : "關", note: "", act: "open", data: { alert: r.id } }));
       const who = row ? aiStockName(sid) : "全部股票";
-      return { head: `${aiFieldLabel(field)}通知`, rows,
-               chips: [{ label: `${who}打開`, act: "send", data: { text: `${who}的${aiFieldLabel(field)}通知打開` } },
-                       { label: `${who}關掉`, act: "send", data: { text: `${who}的${aiFieldLabel(field)}通知關掉` } }] };
+      const onOff = v => ({ label: `${who}${v ? "打開" : "關掉"}`, act: "run",
+        data: { intent: "basic_signal_set", slots: Object.assign({ basic_field: field, on: v }, row ? { stock: sid } : {}), text: `${who}的${aiFieldLabel(field)}通知${v ? "打開" : "關掉"}` } });
+      return { head: `${aiFieldLabel(field)}通知`, rows, chips: [onOff(true), onOff(false)] };
     }
     if (row && field && !!row[field] === !!on) return { text: `${aiStockName(sid)} 的${aiFieldLabel(field)}通知已經是${on ? "開" : "關"}的。` };
     const rows = [{ label: "對象", value: row ? `${aiStockName(sid)} ${sid}` : `全部 ${targets.length} 檔`, note: "" },
