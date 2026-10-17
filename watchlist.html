@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="375">
+  <meta name="app-version" content="376">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=375" rel="stylesheet">
+  <link href="watchlist.css?v=376" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -20242,15 +20242,72 @@ async function aiMarketPayload() {
   return p;
 }
 
+// ── 全市場資料層（ASSISTANT.md 第十八節）：助手回答任何一檔，不只自選股與好友分享的 ─────────
+// 系統自動準備好的兩份資料：
+//   · market_today（Supabase 一列，reporter 的市場強度每分鐘覆蓋）：每一種訊號今天哪幾檔（不截）、每一檔今天的方向（漲／平／跌）；
+//     只在被問到時讀一次、快取 60 秒——不像 market_strength 那樣被盤中頁輪詢
+//   · web/market_levels.json（GitHub Pages，reporter 每天 06:15 與 universe.json 一起部署）：全市場每一檔的支撐／壓力／均線／
+//     52 週高低／最後收盤；一個 session 抓一次
+// 收盤價與漲跌幅走 FinMind（fetchFinMindQuote，與字卡 K 線同一條路；PAUSE_UNLICENSED_SOURCES 時不打）。
+// 全部是衍生值或日線開放資料，沒有盤中報價原值。
+let _aiToday = { at: 0, payload: null };
+async function aiMarketToday() {
+  if (Date.now() - _aiToday.at < 60000) return _aiToday.payload;
+  if (!state.accessToken) return null;
+  try {
+    const rows = await sbGet("market_today", { select: "trade_date,payload", order: "trade_date.desc", limit: "1" }, state.accessToken);
+    _aiToday = { at: Date.now(), payload: (rows && rows[0] && rows[0].payload) || null };
+  } catch (e) { console.error("market_today failed:", e); _aiToday = { at: Date.now(), payload: _aiToday.payload }; }
+  return _aiToday.payload;
+}
+let _aiLevels = null;
+async function aiMarketLevels() {
+  if (_aiLevels) return _aiLevels;
+  try {
+    const r = await fetch("market_levels.json");
+    if (r.ok) _aiLevels = await r.json();
+  } catch (e) { console.error("market_levels failed:", e); }
+  return _aiLevels;
+}
+// 全市場索引是不是雷達那一天的（週末問到的是上一個交易日的，照樣算）
+function aiTodayIsCurrent(today) {
+  const s = String((today && today.session) || "");
+  return s.length === 8 && `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}` === radarSessionDate();
+}
+// 一檔今天在全市場索引裡命中的訊號：[{key, min}]，照時間
+function aiTodaySignalsOf(today, sid) {
+  const out = [];
+  for (const [kind, hits] of Object.entries((today && today.kinds) || {})) {
+    for (const h of hits || []) if (String(h[0]) === String(sid)) out.push({ key: kind, min: Number(h[1]) || 0 });
+  }
+  return out.sort((a, b) => a.min - b.min);
+}
+const aiMm = m => `${9 + Math.floor(Number(m) / 60)}:${String(Number(m) % 60).padStart(2, "0")}`;
+const AI_DIR_TXT = { 1: "漲", 0: "平", "-1": "跌" };
+// 不在自選股的那一檔：卡上多一顆「加進自選股」籤（走既有的確認卡）
+function aiAddChip(sid) {
+  return { label: "加進自選股", act: "run", data: { intent: "watch_add", slots: { stock: sid }, text: `把${aiStockName(sid)}加進自選股` } };
+}
+
 // ── 白名單：目錄 handler.fn → 這裡的函式。每一支都是薄殼，包既有的函式 ──────
 const ASSISTANT_ACTIONS = {
-  assistantSignalsToday(slots) {
+  async assistantSignalsToday(slots) {
     const sid = slots.stock;
     // 問的是某一種訊號（「今天誰突破壓力了」「自選股誰跳空」）就只看那一種；全市場那一種有幾檔也順手附上（脈動有的話）
     const wanted = slots.kind ? aiKindSet(slots.kind) : null;
     const kindTxt = wanted ? aiKindLabel(slots.kind) : "";
     const sigsOf = s => wanted ? aiTodayEntries(s).filter(e => aiEntryKeys(e).some(k => wanted.includes(k))) : aiTodayEntries(s);
     if (sid) {
+      if (!aiSignalSids().includes(sid)) {
+        // 不在自選股：雷達沒有它，改讀全市場索引（自動偵測 16 種，reporter 每分鐘覆蓋；第十八節）
+        const today = await aiMarketToday();
+        const day = aiSessionDayTxt();
+        if (!today || !aiTodayIsCurrent(today)) return { head: `${aiStockName(sid)} ${sid}`, text: `${day}的全市場索引還沒有（開盤後每分鐘更新）。`, actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: [aiAddChip(sid)] };
+        const hits = aiTodaySignalsOf(today, sid).filter(h => !wanted || wanted.includes(h.key));
+        const rows = hits.map(h => ({ label: aiKindLabel(h.key), value: "", note: aiMm(h.min) }));
+        return { head: `${aiStockName(sid)} ${sid}`, sub: rows.length ? `${day} ${rows.length} 則${kindTxt}訊號（全市場自動偵測）` : `${day}沒有自動偵測到的${kindTxt}訊號（全市場 16 種）`, rows,
+                 actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: [aiAddChip(sid)] };
+      }
       const rows = sigsOf(sid).map(e => ({ label: String(e.title || aiKindLabel(e.key) || "訊號"), value: "", note: fmtTime(e.at) }));
       return { head: `${aiStockName(sid)} ${sid}`, sub: rows.length ? `今天 ${rows.length} 則${kindTxt}訊號` : `今天還沒有${kindTxt}訊號`, rows, actions: [aiOpenBtn(sid, "radar")] };
     }
@@ -20279,11 +20336,29 @@ const ASSISTANT_ACTIONS = {
     const label = args.tab === "kline" ? "K 線" : args.tab === "history" ? "歷史訊號" : "盤中雷達";
     return { text: `已打開 ${aiStockName(slots.stock)} 的個股字卡（${label}）。`, actions: [aiOpenBtn(slots.stock, args.tab || "radar", "再開一次 ›")] };
   },
-  assistantQuote(slots) {
+  async assistantQuote(slots) {
     const sid = slots.stock;
     if (!sid) return aiNeedStock();
     const q = getQuote(sid) || getCloseQuote(sid);
-    if (!q) return { head: `${aiStockName(sid)} ${sid}`, text: "還沒有這一檔的報價（剛加入或不在自選股裡時要等下一輪）。", actions: [aiOpenBtn(sid, "radar")] };
+    if (!q) {
+      // 沒有盤中報價（不在自選股、或剛加入）：今天的方向走全市場索引、收盤與漲跌幅走 FinMind 日線、昨收走關卡檔（第十八節）
+      const mine = aiSignalSids().includes(sid);
+      const [today, fm, ml] = await Promise.all([
+        aiMarketToday(),
+        PAUSE_UNLICENSED_SOURCES ? Promise.resolve(null) : fetchFinMindQuote(sid).catch(() => null),
+        aiMarketLevels(),
+      ]);
+      const rows = [];
+      const d = today && aiTodayIsCurrent(today) ? today.dir?.[sid] : undefined;
+      if (AI_DIR_TXT[d] !== undefined) rows.push({ label: aiSessionDayTxt(), value: AI_DIR_TXT[d], note: "盤中方向（全市場）" });
+      if (fm && fm.price > 0) rows.push({ label: "收盤", value: fmtPrice(fm.price), note: fm.tradeDate ? `${String(fm.tradeDate).slice(5).replace("-", "/")} · FinMind` : "FinMind" });
+      if (fm && fm.changePct != null && Number.isFinite(Number(fm.changePct))) rows.push({ label: "漲跌幅", value: fmtChgHtml(fm.changePct), html: true, note: "" });
+      const lv = ml && ml.stocks && ml.stocks[sid];
+      if (!(fm && fm.price > 0) && lv && lv.c > 0) rows.push({ label: "最後收盤", value: fmtPrice(lv.c), note: ml.date ? String(ml.date).slice(5).replace("-", "/") : "" });
+      if (!rows.length) return { head: `${aiStockName(sid)} ${sid}`, text: mine ? "還沒有這一檔的報價（剛加入要等下一輪）。" : "拿不到這一檔的資料（全市場索引與日線都沒有）。", actions: [aiOpenBtn(sid, mine ? "radar" : "kline", mine ? "開個股字卡 ›" : "開 K 線 ›")] };
+      return { head: `${aiStockName(sid)} ${sid}`, sub: mine ? "還沒有盤中報價：先給日線" : "不在自選股：全市場資料", rows,
+               actions: [aiOpenBtn(sid, mine ? "radar" : "kline", mine ? "開個股字卡 ›" : "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] };
+    }
     const open = _isMarketOpenNow();
     const sub = open ? (liveQuotesAllowed() ? "盤中" : `盤中不自動更新（${planTierLabel()}）`) : "收盤";
     return {
@@ -20293,7 +20368,7 @@ const ASSISTANT_ACTIONS = {
       actions: [aiOpenBtn(sid, "radar")],
     };
   },
-  assistantLevels(slots) {
+  async assistantLevels(slots) {
     const sid = slots.stock;
     if (!sid) return aiNeedStock();
     const price = (getQuote(sid) || getCloseQuote(sid) || {}).price;
@@ -20301,9 +20376,21 @@ const ASSISTANT_ACTIONS = {
     const rows = [];
     if (lv.support != null) rows.push({ label: "支撐", value: fmtPrice(lv.support), note: `距 ${fmtPct(lv.supPct)}%` });
     if (lv.resistance != null) rows.push({ label: "壓力", value: fmtPrice(lv.resistance), note: `距 ${fmtPct(lv.resPct)}%` });
-    return rows.length
-      ? { head: `${aiStockName(sid)} ${sid}`, sub: price ? `現價 ${fmtPrice(price)}` : "", rows, actions: [aiOpenBtn(sid, "radar")] }
-      : { head: `${aiStockName(sid)} ${sid}`, text: "關卡資料還沒載入，或這檔不在自選股裡（關卡由監控每天開盤前算）。", actions: [aiOpenBtn(sid, "kline")] };
+    if (rows.length) return { head: `${aiStockName(sid)} ${sid}`, sub: price ? `現價 ${fmtPrice(price)}` : "", rows, actions: [aiOpenBtn(sid, "radar")] };
+    // 不在自選股（或關卡還沒載）：全市場關卡檔（日線算的，每天 06:15 更新；第十八節）
+    const ml = await aiMarketLevels();
+    const m = ml && ml.stocks && ml.stocks[sid];
+    if (!m) return { head: `${aiStockName(sid)} ${sid}`, text: "關卡資料還沒載入，這一檔也不在全市場關卡檔裡（日線不足 25 根的新股會這樣）。", actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")] };
+    const ref = price > 0 ? price : Number(m.c);
+    const near = _nearestFromLevels({ support: m.s, resistance: m.r }, ref);
+    if (near.support != null) rows.push({ label: "支撐", value: fmtPrice(near.support), note: `距 ${fmtPct(near.supPct)}%` });
+    if (near.resistance != null) rows.push({ label: "壓力", value: fmtPrice(near.resistance), note: `距 ${fmtPct(near.resPct)}%` });
+    const ma = m.ma || {};
+    if (ma.MA20 != null) rows.push({ label: "月線", value: fmtPrice(ma.MA20), note: ma.MA60 != null ? `季線 ${fmtPrice(ma.MA60)}` : "" });
+    if (m.h52 != null) rows.push({ label: "52 週", value: `${fmtPrice(m.l52)}～${fmtPrice(m.h52)}`, note: "" });
+    const mine = aiSignalSids().includes(sid);
+    return { head: `${aiStockName(sid)} ${sid}`, sub: `${mine ? "" : "不在自選股："}日線算的關卡${ml.date ? `（${String(ml.date).slice(5).replace("-", "/")} 收 ${fmtPrice(m.c)}）` : ""}`, rows,
+             actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] };
   },
   async assistantSignalsHistory(slots) {
     const sid = slots.stock;
@@ -20420,18 +20507,23 @@ const ASSISTANT_ACTIONS = {
         const hit = aiTodayEntries(s).find(e => aiEntryKeys(e).some(k => wanted.includes(k)));
         if (hit) mine.push({ sid: s, at: hit.at, what: String(hit.title || aiKindLabel(hit.key) || label) });
       }
-      const mm = m => `${9 + Math.floor(Number(m) / 60)}:${String(Number(m) % 60).padStart(2, "0")}`;
-      const market = pulseKinds.flatMap(k => (k.hits || []).map(h => ({ sid: String(h[0] || ""), min: Number(h[1]) || 0, what: aiKindLabel(k.k) })))
-        .filter(h => isStockId(h.sid) && !mineSet.has(h.sid)).sort((a, b) => b.min - a.min);
+      // 全市場的名單：market_today（整份，第十八節）優先；沒有就退回脈動 payload 裡的最後 60 筆
+      const today = await aiMarketToday();
+      const fullKinds = today && aiTodayIsCurrent(today) ? (today.kinds || {}) : null;
+      const kindKeys = pulseKinds.length ? pulseKinds.map(k => k.k) : (fullKinds ? wanted.filter(k => fullKinds[k]) : []);
+      const hitsOf = k => (fullKinds && fullKinds[k]) || ((kinds.find(x => x.k === k) || {}).hits) || [];
+      const marketHits = kindKeys.flatMap(k => hitsOf(k).map(h => ({ sid: String(h[0] || ""), min: Number(h[1]) || 0, what: aiKindLabel(k) })));
+      const market = marketHits.filter(h => isStockId(h.sid) && !mineSet.has(h.sid)).sort((a, b) => b.min - a.min);
+      const mktN = mkt != null ? mkt : (fullKinds && marketHits.length ? new Set(marketHits.map(h => h.sid)).size : null);
       const seen = new Set();
       const list = mine.map(h => ({ sid: h.sid, what: h.what, note: `${fmtTime(h.at)} · ${shared.has(h.sid) ? "好友分享" : "自選股"}`, tab: "radar" }))
-        .concat(market.map(h => ({ sid: h.sid, what: h.what, note: `${mm(h.min)} · 全市場`, tab: "kline" })))
+        .concat(market.map(h => ({ sid: h.sid, what: h.what, note: `${aiMm(h.min)} · 全市場`, tab: "kline" })))
         .filter(h => !seen.has(h.sid) && seen.add(h.sid));
       const rows = list.slice(0, 12).map(h => ({ label: aiStockName(h.sid), value: h.what, note: h.note, act: "open", data: { sid: h.sid, tab: h.tab } }));
       const more = list.length - rows.length;
       const day = aiSessionDayTxt();
-      const noMarketList = mkt != null && !pulseKinds.some(k => (k.hits || []).length);   // 脈動還沒帶名單（monitor 重啟前的 payload）
-      const sub = [nearNote ? `${nearNote}（全市場 ${mkt} 檔）` : mkt != null ? `全市場 ${mkt} 檔${since ? `（${since}）` : ""}` : `市場脈動不統計${label}`,
+      const noMarketList = mktN != null && !marketHits.length;   // 索引與脈動都還沒帶名單（monitor 重啟前）
+      const sub = [nearNote ? `${nearNote}（全市場 ${mktN} 檔）` : mktN != null ? `全市場 ${mktN} 檔${since ? `（${since}）` : ""}` : `市場脈動不統計${label}`,
                    sids.length ? `自選股與好友分享的 ${mine.length} 檔` : ""].filter(Boolean).join("；");
       const tail = noMarketList ? "全市場的名單從下一個交易日起才有。" : "";
       const text = rows.length ? `${more > 0 ? `還有 ${more} 檔沒列出來。` : ""}${tail}` : `${day}自選股與好友分享的裡沒有${label}的。${tail}`;
@@ -20444,9 +20536,12 @@ const ASSISTANT_ACTIONS = {
   },
   // 自選股今天的漲／平／跌（與首頁同一個基準：現價對前一日收盤，漲跌為零才是平）；「誰漲最多」只給那一檔。
   // 全市場只有上漲／下跌家數比例（市場強度的 breadth），沒有逐檔清單，所以清單一律是自選股（第十六節）
-  assistantMovers(slots) {
+  async assistantMovers(slots) {
     const sids = aiSignalSids();   // 自選股＋好友分享給我的（與首頁清單同一份）
     if (!sids.length) return { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
+    const today = await aiMarketToday();   // 全市場的漲／平／跌檔數（索引的方向，第十八節）
+    const dirs = today && aiTodayIsCurrent(today) ? Object.values(today.dir || {}) : [];
+    const mk = dirs.length ? { up: dirs.filter(v => v === 1).length, down: dirs.filter(v => v === -1).length, flat: dirs.filter(v => v === 0).length } : null;
     const dir = String(slots.direction || "any");
     const items = sids.map(sid => ({ sid, q: aiQuoteOf(sid) }))
       .filter(x => x.q && x.q.changePct !== null && x.q.changePct !== undefined && Number.isFinite(Number(x.q.changePct)))
@@ -20460,7 +20555,7 @@ const ASSISTANT_ACTIONS = {
     const b = (typeof marketPayload !== "undefined" && marketPayload && marketPayload.breadth) || null;
     const missing = sids.length - items.length;
     const sub = [`自選股 漲 ${n.up}・平 ${n.flat}・跌 ${n.down}${missing > 0 ? `（${missing} 檔沒有報價）` : ""}`,
-                 b ? `全市場上漲 ${Number(b.up_pct || 0)}%、下跌 ${Number(b.down_pct || 0)}%` : ""].filter(Boolean).join("；");
+                 mk ? `全市場 漲 ${mk.up}・平 ${mk.flat}・跌 ${mk.down}` : b ? `全市場上漲 ${Number(b.up_pct || 0)}%、下跌 ${Number(b.down_pct || 0)}%` : ""].filter(Boolean).join("；");
     const rows = list.slice(0, 12).map(i => ({ label: aiStockName(i.sid), value: fmtChgHtml(i.pct), html: true, note: fmtPrice(i.price), act: "open", data: { sid: i.sid, tab: "radar" } }));
     return { head, sub, rows, text: rows.length ? "" : `今天沒有${DIR_TXT[dir] || ""}的。`, actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
   },
