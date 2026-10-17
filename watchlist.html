@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="374">
+  <meta name="app-version" content="375">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=374" rel="stylesheet">
+  <link href="watchlist.css?v=375" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -20400,41 +20400,44 @@ const ASSISTANT_ACTIONS = {
     if (!kinds.length && !slots.kind) { aiNav(() => switchTab("home")); aiNav(() => setHomeFilter("signals")); return { text: "今天還沒有市場訊號統計（開盤後每分鐘累積），已打開那一格。" }; }
     const since = aiPulseSince(pulse);
     if (slots.kind) {
-      const wanted = aiKindSet(slots.kind);
+      // 每一列就是一檔的字卡：名稱／哪一種訊號／幾點・來源（Howard 2026-10-18：回的要是個股字卡，不再給「打開市場訊號」那顆鍵）。
+      // 自選股與好友分享的走雷達的故事列（點開停在盤中雷達），全市場的走脈動的 hits（點開停在 K 線——它們不在自選股裡）。
       const label = aiKindLabel(slots.kind);
-      const rows = [];
-      const mkt = aiPulseCount(pulse, wanted);
-      if (mkt != null) rows.push({ label: "全市場", value: `${mkt} 檔`, note: since || "訊號脈動", act: "open", data: { filter: "signals" } });
-      else {
+      const wanted = aiKindSet(slots.kind);
+      let pulseKinds = kinds.filter(k => wanted.includes(k.k));
+      let nearNote = "";
+      if (!pulseKinds.length && AI_KIND_NEAREST[slots.kind]) {   // 漲停／跌停不在脈動裡：全市場那一段改用最接近的一種
         const near = AI_KIND_NEAREST[slots.kind];
-        const nk = near ? kinds.find(k => k.k === near) : null;
-        if (nk) rows.push({ label: `全市場${aiKindLabel(near)}`, value: `${Number(nk.n)} 檔`, note: `脈動不統計${label}，這是最接近的一種`, act: "open", data: { filter: "signals" } });
+        pulseKinds = kinds.filter(k => k.k === near);
+        if (pulseKinds.length) nearNote = `市場脈動不統計${label}，最接近的是${aiKindLabel(near)}`;
       }
-      // 名單：自選股與好友分享的（雷達的故事列）排前面，再接全市場的（脈動的 hits，最新的在前）；同一檔只列一次。
-      // 全市場那幾檔不在自選股裡、雷達是空的，點開字卡直接停在 K 線（Howard 2026-10-17 晚：要回的是個股字卡，不是一格畫面）
+      const mkt = pulseKinds.length ? pulseKinds.reduce((n, k) => n + (Number(k.n) || 0), 0) : null;
       const sids = aiSignalSids();
       const shared = new Set(sharedInSids());
       const mineSet = new Set(sids);
       const mine = [];
       for (const s of sids) {
         const hit = aiTodayEntries(s).find(e => aiEntryKeys(e).some(k => wanted.includes(k)));
-        if (hit) mine.push({ sid: s, at: hit.at });
+        if (hit) mine.push({ sid: s, at: hit.at, what: String(hit.title || aiKindLabel(hit.key) || label) });
       }
       const mm = m => `${9 + Math.floor(Number(m) / 60)}:${String(Number(m) % 60).padStart(2, "0")}`;
-      const market = kinds.filter(k => wanted.includes(k.k)).flatMap(k => (k.hits || []).map(h => ({ sid: String(h[0] || ""), min: Number(h[1]) || 0 })))
+      const market = pulseKinds.flatMap(k => (k.hits || []).map(h => ({ sid: String(h[0] || ""), min: Number(h[1]) || 0, what: aiKindLabel(k.k) })))
         .filter(h => isStockId(h.sid) && !mineSet.has(h.sid)).sort((a, b) => b.min - a.min);
       const seen = new Set();
-      const list = mine.map(h => ({ sid: h.sid, note: fmtTime(h.at), value: shared.has(h.sid) ? "好友分享" : "自選股", tab: "radar" }))
-        .concat(market.map(h => ({ sid: h.sid, note: mm(h.min), value: "全市場", tab: "kline" })))
+      const list = mine.map(h => ({ sid: h.sid, what: h.what, note: `${fmtTime(h.at)} · ${shared.has(h.sid) ? "好友分享" : "自選股"}`, tab: "radar" }))
+        .concat(market.map(h => ({ sid: h.sid, what: h.what, note: `${mm(h.min)} · 全市場`, tab: "kline" })))
         .filter(h => !seen.has(h.sid) && seen.add(h.sid));
-      list.slice(0, 12).forEach(h => rows.push({ label: aiStockName(h.sid), value: h.value, note: h.note, act: "open", data: { sid: h.sid, tab: h.tab } }));
-      const more = list.length - Math.min(list.length, 12);
+      const rows = list.slice(0, 12).map(h => ({ label: aiStockName(h.sid), value: h.what, note: h.note, act: "open", data: { sid: h.sid, tab: h.tab } }));
+      const more = list.length - rows.length;
       const day = aiSessionDayTxt();
-      const sub = [mkt != null ? `全市場 ${mkt} 檔${since ? `（${since}）` : ""}` : `市場脈動不統計${label}`, sids.length ? `自選股與好友分享的 ${mine.length} 檔` : ""].filter(Boolean).join("；");
+      const noMarketList = mkt != null && !pulseKinds.some(k => (k.hits || []).length);   // 脈動還沒帶名單（monitor 重啟前的 payload）
+      const sub = [nearNote ? `${nearNote}（全市場 ${mkt} 檔）` : mkt != null ? `全市場 ${mkt} 檔${since ? `（${since}）` : ""}` : `市場脈動不統計${label}`,
+                   sids.length ? `自選股與好友分享的 ${mine.length} 檔` : ""].filter(Boolean).join("；");
+      const tail = noMarketList ? "全市場的名單從下一個交易日起才有。" : "";
+      const text = rows.length ? `${more > 0 ? `還有 ${more} 檔沒列出來。` : ""}${tail}` : `${day}自選股與好友分享的裡沒有${label}的。${tail}`;
       const diag = aiSignalDiag(sids, wanted, kinds);
       if (!mine.length) trackActivity("assistant_diag", { kind: String(slots.kind), diag });   // 自選股一檔都沒列：把手機的狀態記下來，遠端看得到
-      return { head: `${day}${label}的股票`, sub, rows, text: rows.length ? (more > 0 ? `還有 ${more} 檔沒列出來。` : "") : `${day}沒有。`, actions: [goBtn],
-               diag: aiIsAdmin ? diag : "" };
+      return { head: `${day}${label}的股票`, sub, rows, text, diag: aiIsAdmin ? diag : "" };
     }
     const rows = kinds.slice(0, 8).map(k => ({ label: aiKindLabel(k.k), value: `${Number(k.n)} 檔`, note: SIGNAL_ABBR[k.k] || "", act: "open", data: { filter: "signals" } }));
     return { head: "今天的市場訊號", sub: [`上漲訊號 ${Number(pulse.total_up || 0)}・下跌訊號 ${Number(pulse.total_down || 0)} 則`, since].filter(Boolean).join("｜"), rows, actions: [goBtn] };
