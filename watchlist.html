@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="385">
+  <meta name="app-version" content="386">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=385" rel="stylesheet">
+  <link href="watchlist.css?v=386" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -8985,7 +8985,7 @@ const ASK_AI_TARGETS = [
   { key: "claude",     name: "Claude",     owner: "Anthropic",     url: "https://claude.ai/new",         paste: true },
 ];
 const ASK_AI_IMG = { w: 1080, h: 720, head: 64, foot: 40, scale: 2, bg: "#0b0b13" };
-let _askAi = { sid: "", file: null, url: "", target: "", via: "", gen: 0 };
+let _askAi = { sid: "", file: null, url: "", target: "", via: "", kind: "kline", gen: 0 };
 
 function askAiTarget(key) { return ASK_AI_TARGETS.find(t => t.key === key) || ASK_AI_TARGETS[0]; }
 
@@ -9023,6 +9023,37 @@ function askAiChoose(key) {
   if (box) box.hidden = false;
   if (open) open.focus();
   trackActivity("ask_ai_pick", { stock: _askAi.sid, ai: t.key });
+}
+
+// 助手那邊按「問 ChatGPT」：把**使用者的那一句**複製起來（文字剪貼簿到處都能用），
+// 再跳同一個獨立視窗。確認那一下只開 AI（askAiGo 的 kind === "text" 那一段）。
+function askAiHandoffPick(d) {
+  const t = askAiTarget(String(d.ai || ""));
+  const q = String(d.text || "");
+  _askAi.kind = "text"; _askAi.target = t.key; _askAi.via = "";
+  const open = document.getElementById("askai-open");
+  if (open) open.textContent = `確認，開啟 ${t.name}`;
+  const lines = (saved, how) => {
+    const l1 = document.getElementById("askai-saved");
+    const l2 = document.getElementById("askai-paste-tip");
+    const l3 = document.getElementById("askai-paste-sub");
+    if (l1) l1.textContent = saved;
+    if (l2) l2.textContent = how;
+    if (l3) l3.textContent = `按「確認」會打開 ${t.name}（有裝 App 會開 App）。`
+      + `本服務不會替你把問題送出去，也看不到它的回答；還沒登入 ${t.name} 的話，它會先要你登入。`;
+  };
+  let copy;
+  try {
+    copy = (navigator.clipboard && navigator.clipboard.writeText)
+      ? navigator.clipboard.writeText(q) : Promise.reject(new Error("這個瀏覽器不讓網頁複製文字"));
+  } catch (e) { copy = Promise.reject(e); }
+  lines("你的問題已自動複製", "請自行在輸入窗長按，並且貼上問題");
+  copy.then(() => { _askAi.via = "copy"; })
+      .catch(() => { _askAi.via = ""; lines("這個瀏覽器不讓網頁複製文字", `請自己把問題打進 ${t.name} 的輸入框`); });
+  const box = document.getElementById("askai-paste-box");
+  if (box) box.hidden = false;
+  if (open) open.focus();
+  trackActivity("ask_ai_pick", { ai: t.key, kind: "text" });
 }
 
 // 把圖準備好，並把視窗上那三行寫成「現在真的是什麼狀況」：
@@ -9089,7 +9120,7 @@ function openAskAi(sid) {
 
 function _askAiReset() {
   if (_askAi.url) URL.revokeObjectURL(_askAi.url);   // blob 不收會一直佔記憶體
-  _askAi = { sid: "", file: null, url: "", target: "", via: "", gen: _askAi.gen + 1 };
+  _askAi = { sid: "", file: null, url: "", target: "", via: "", kind: "kline", gen: _askAi.gen + 1 };
   askAiStep("go");   // 下次打開一定從第一步開始
   askAiPasteClose();
 }
@@ -9165,10 +9196,19 @@ function _askAiCompose(chartUrl, title, span) {
 // window.open 必須在這一次點擊裡同步發起（iOS 會擋非同步等待之後的，所以這支不能有 async）。
 // 網址只開首頁：不替使用者先打任何字（Howard 2026-10-18）。
 function askAiGo() {
-  if (!_askAi.file && !_askAi.url) return;
   const t = askAiTarget(_askAi.target);
-  const note = document.getElementById("askai-note");
   askAiPasteClose();
+  if (_askAi.kind === "text") {   // 助手交接：問題已經在剪貼簿，這一下只負責開那個 AI
+    window.open(t.url, "_blank", "noopener");
+    trackActivity("ask_ai_text", { ai: t.key, via: _askAi.via || "none" });
+    aiPushCard({ muted: true, text: _askAi.via === "copy"
+      ? `已打開 ${t.name}：到它的輸入框長按貼上你的問題（電腦 Ctrl+V），按送出。`
+      : `已打開 ${t.name}：這個瀏覽器不讓網頁複製文字，請自己把問題打進去。` });
+    renderAssistant();
+    return;
+  }
+  if (!_askAi.file && !_askAi.url) return;
+  const note = document.getElementById("askai-note");
   window.open(t.url, "_blank", "noopener");
   trackActivity("ask_ai", { stock: _askAi.sid, via: _askAi.via || "copy", ai: t.key });
   note.textContent = _askAi.via === "download"
@@ -20028,6 +20068,19 @@ function aiFlushNav() {
   setTimeout(() => q.forEach(f => { try { f(); } catch (e) { console.error("assistant nav failed:", e); } }), 350);
 }
 
+// 助手答不出來的時候給的出路（Howard 2026-10-18）：把**使用者打的那一句**交給他自己的 AI。
+// 我們不代送、也看不到回答——問題進剪貼簿，他自己到那個 AI 的輸入框貼上（與 K 線圖那條路同一套視窗）。
+// 沒有原句（例如籤點進來的）就只回固定句。
+function aiHandoffCard(text, say) {
+  const q = String(text || "").trim().slice(0, AI_MAX_CHARS);
+  const base = String(say || AI_FALLBACK);
+  if (!q) return { text: base, muted: true };
+  return {
+    text: `${base} 這一句可以交給你自己的 AI：問題會先複製起來，你到它的輸入框貼上再送出；本服務不會替你送出，也看不到它的回答。`,
+    chips: ASK_AI_TARGETS.map(t => ({ label: `問 ${t.name}`, act: "ai", data: { ai: t.key, text: q } })),
+  };
+}
+
 function aiErrorCard(e) {
   const msg = String((e && e.message) || e || "");
   if (isLimitError(e, "watchlist")) return aiLimitCard("watchlist");
@@ -20151,6 +20204,7 @@ function aiAct(act, data) {
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
   if (act === "wrong") { aiMarkWrong(String(data.log_id || "")); return; }
+  if (act === "ai") { askAiHandoffPick(data); return; }   // 交給使用者自己的 AI：這一下就把問題複製起來
   // 這三個瀏覽器要「使用者的手勢」：按鍵本身就是那個手勢
   if (act === "push") { togglePushSubscription(); return; }
   if (act === "install") { installPwa("assistant"); return; }
@@ -20292,7 +20346,12 @@ async function aiHandleResponse(r, text) {
   const top = r.candidates && r.candidates[0];
   const meta = top ? `${r.label || r.intent} ${Math.round((Number(top.p) || 0) * 100)}%` : String(r.label || r.intent || "");
   if (r.decision === "refuse" || r.decision === "fallback") {
-    aiPushCard({ text: r.say || AI_FALLBACK, muted: true, meta, log_id: r.log_id });
+    // 範圍外／聽不懂：不只回一句「不支援」，把這一句交給使用者自己的 AI（Howard 2026-10-18）。
+    // 分類器自己壞掉（r.code）不給這條路——那一句八成是我們做得到的，再試一次就好。
+    // 買賣建議（refuse）也不給：那不是「不支援」，是這個服務依法不做的事（COMPLIANCE.md 第 6 條）。
+    const card = r.decision === "fallback" && !r.code
+      ? aiHandoffCard(text, r.say) : { text: r.say || AI_FALLBACK, muted: true };
+    aiPushCard(Object.assign(card, { meta, log_id: r.log_id }));
     return;
   }
   if (r.decision === "clarify") {
