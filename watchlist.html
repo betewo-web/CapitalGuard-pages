@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="382">
+  <meta name="app-version" content="383">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=382" rel="stylesheet">
+  <link href="watchlist.css?v=383" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1374,8 +1374,9 @@
   </div>
 </div>
 
-<!-- ── 「問 AI」（首頁每一列最右邊那顆，Howard 2026-10-17 晚）：K 線圖交給使用者自己的 ChatGPT。
-     面板一定先講三件事：選 ChatGPT、還沒登入它會先要你登入、回答是 OpenAI 的不是本服務的。 -->
+<!-- ── 「問 AI」（首頁每一列最右邊那顆，Howard 2026-10-17 晚）：K 線圖交給使用者自己的 AI。
+     2026-10-18 起四個目的地（ChatGPT／Gemini／Perplexity／Claude），按下去先選、再確認才開。
+     面板一定先講三件事：貼上是你自己的動作、還沒登入它會先要你登入、回答是那家 AI 的不是本服務的。 -->
 <div class="modal fade sheet-modal" id="askAiModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content kline-modal-content">
@@ -1386,16 +1387,30 @@
       <div class="modal-body p-3">
         <div class="askai-preview" id="askai-preview"></div>
         <p class="askai-note" id="askai-note" role="status" aria-live="polite">正在畫 K 線圖…</p>
-        <!-- 只有一顆（Howard 2026-10-17 晚）：圖進剪貼簿、ChatGPT 打開，貼上與送出是用戶自己的兩下 -->
-        <button type="button" class="btn btn-primary w-100 askai-go" id="askai-go" onclick="askAiGo()" disabled>複製 K 線圖並開啟 ChatGPT，請自行貼上圖片</button>
+        <!-- 三步（Howard 2026-10-18）：① 複製 K 線圖並開啟 AI → ② 要用哪一個 AI → ③ 貼上的提醒，確認才開。
+             三步在同一個視窗裡換頁，不疊第二個 modal（這個 App 的 modal 疊序踩過坑）。
+             寫剪貼簿與開新視窗都在第三步那一次點擊裡同步發起（iOS 會擋 await 之後的）。 -->
+        <button type="button" class="btn btn-primary w-100 askai-go" id="askai-go" onclick="askAiStep('pick')" disabled>複製 K 線圖並開啟 AI</button>
+        <div class="askai-step" id="askai-pick" style="display:none">
+          <p class="askai-step-head">要用哪一個 AI？</p>
+          <div class="askai-targets" id="askai-targets"></div>
+          <button type="button" class="btn btn-link w-100 askai-back" onclick="askAiStep('go')">取消</button>
+        </div>
+        <div class="askai-step" id="askai-paste" style="display:none">
+          <p class="askai-paste-tip">請自行在輸入窗長按，並且貼上圖片</p>
+          <p class="askai-step-sub" id="askai-paste-sub"></p>
+          <button type="button" class="btn btn-primary w-100 askai-go" id="askai-open" onclick="askAiGo()">複製並開啟</button>
+          <button type="button" class="btn btn-link w-100 askai-back" onclick="askAiStep('pick')">換一個 AI</button>
+        </div>
         <div id="askai-plan" class="mt-2" style="display:none">
           <button type="button" class="btn btn-outline-light w-100" onclick="openPlanModal('kline_enabled')">看方案</button>
         </div>
         <ul class="askai-steps">
-          <li>按下去：K 線圖進剪貼簿、ChatGPT 打開（有裝 App 會開 App，否則開網頁），「股票分析」會先打好。</li>
-          <li>到 ChatGPT 的輸入框<b>貼上</b>（手機長按 → 貼上，電腦 Ctrl+V），按送出。</li>
-          <li><b>還沒登入 ChatGPT</b>：它會先要你登入（或註冊），登入後回來再按一次。</li>
-          <li>ChatGPT 的回答是 OpenAI 的服務，不是本服務提供的建議；圖上只有公開市場資料。</li>
+          <li>按下去先選 AI（ChatGPT、Gemini、Perplexity、Claude），再確認一次才會打開。</li>
+          <li>K 線圖進剪貼簿、你選的那個 AI 打開（有裝 App 會開 App，否則開網頁）。</li>
+          <li>到它的輸入框<b>貼上</b>（手機長按 → 貼上，電腦 Ctrl+V），按送出。</li>
+          <li><b>還沒登入那個 AI</b>：它會先要你登入（或註冊），登入後回來再按一次。</li>
+          <li>回答是那家 AI 的服務，不是本服務提供的建議；圖上只有公開市場資料。</li>
         </ul>
       </div>
     </div>
@@ -8911,7 +8926,7 @@ function homeTileHtml(r) {
   // 好友分享來的那幾列也有——圖是公開資料，不是分享者的設定。只放 ✦ 圖示（助手分頁同一顆）：
   // 加「問AI」兩個字在 390px 會把股名擠成「台…」（v292 那一課，preview/build_home_tiles 量過）
   const ask = `<button type="button" class="home-tile-more home-tile-ask"
-        title="問 AI：把 ${escapeHtml(r.name)} 的 K 線圖傳到你的 ChatGPT" aria-label="${escapeHtml(r.name)} 問 AI"
+        title="問 AI：把 ${escapeHtml(r.name)} 的 K 線圖交給你選的 AI" aria-label="${escapeHtml(r.name)} 問 AI"
         onclick="event.stopPropagation();openAskAi('${jsAttr(r.sid)}')">${ICON_AI}</button>`;
   // 往左滑露出「移除」（Howard 2026-10-10）。這一頁沒有自己的清單——每一列都是別處那一份
   // 資料的投影，所以移除刪的也是那一份，不是「只從雷達上拿掉」：
@@ -8942,18 +8957,59 @@ function homeTileHtml(r) {
     </div>`;
 }
 
-// ── 「問 AI」：把這一檔的 K 線圖交給使用者自己的 ChatGPT（Howard 2026-10-17 晚）────────────
-// 一顆鍵做兩件事：K 線圖進剪貼簿、另開 chatgpt.com/?q=股票分析（有裝 App 的手機會被接去 App）；
-// 貼上與送出是使用者自己的兩下。Howard 定案只留這一條路（原本的分享面板與存圖兩顆拿掉）。
+// ── 「問 AI」：把這一檔的 K 線圖交給使用者自己的 AI（Howard 2026-10-17 晚；2026-10-18 改三步）────
+// 流程：① 面板上那顆「複製 K 線圖並開啟 AI」→ ② 要用哪一個 AI（ChatGPT／Gemini／Perplexity／Claude）
+// → ③ 清楚寫著「請自行在輸入窗長按，並且貼上圖片」，確認才開。三步在同一個視窗裡換頁（askAiStep），
+// 不疊第二個 modal。寫剪貼簿與開新視窗都在第三步那一次點擊裡同步發起（iOS 會擋 await 之後的）。
 // 做不到而寫在面板上的：不能把圖填進另一個網站的輸入框（同源政策，貼上一定是使用者的動作）、
 // 不知道他登入了沒（沒有 API 可問，所以登入的引導一律先講）、不能替他按送出、網址只能帶文字。
-// 剪貼簿不給放圖的瀏覽器：圖存下來，到 ChatGPT 用迴紋針附上。
-// ChatGPT 的回答是 OpenAI 的服務，不是本服務的建議；圖上照樣印免責那一行（這張圖會離開 App）。
+// 剪貼簿不給放圖的瀏覽器：圖存下來，到那個 AI 用附加檔案附上。
+// 回答是那家 AI 的服務，不是本服務的建議；圖上照樣印免責那一行（這張圖會離開 App）。
 // K 線被方案鎖住的帳號看到的是方案說明。
 const ASK_AI_PROMPT = "股票分析";
-const ASK_AI_URL = "https://chatgpt.com/?q=" + encodeURIComponent(ASK_AI_PROMPT);
+// q＝網址能不能把「股票分析」先打好。Gemini 的網頁版不吃查詢字串，那一個只開首頁、面板上明講要自己打。
+// 手機上有裝那家 App 的會被系統接去 App（與原本開 ChatGPT 同一個行為）。
+const ASK_AI_TARGETS = [
+  { key: "chatgpt",    name: "ChatGPT",    owner: "OpenAI",     url: "https://chatgpt.com/",          q: "q" },
+  { key: "gemini",     name: "Gemini",     owner: "Google",     url: "https://gemini.google.com/app", q: "" },
+  { key: "perplexity", name: "Perplexity", owner: "Perplexity AI", url: "https://www.perplexity.ai/", q: "q" },
+  { key: "claude",     name: "Claude",     owner: "Anthropic",  url: "https://claude.ai/new",         q: "q" },
+];
 const ASK_AI_IMG = { w: 1080, h: 720, head: 64, foot: 40, scale: 2, bg: "#0b0b13" };
-let _askAi = { sid: "", file: null, url: "", gen: 0 };
+let _askAi = { sid: "", file: null, url: "", target: "", gen: 0 };
+
+function askAiTarget(key) { return ASK_AI_TARGETS.find(t => t.key === key) || ASK_AI_TARGETS[0]; }
+function askAiUrl(t) { return t.q ? `${t.url}?${t.q}=${encodeURIComponent(ASK_AI_PROMPT)}` : t.url; }
+
+// 三步換頁：go（那顆鍵）→ pick（選 AI）→ paste（貼上提醒＋確認）
+function askAiStep(step) {
+  const ids = { go: "askai-go", pick: "askai-pick", paste: "askai-paste" };
+  for (const k of Object.keys(ids)) {
+    const el = document.getElementById(ids[k]);
+    if (el) el.style.display = k === step ? "" : "none";
+  }
+  if (step === "pick") {
+    const box = document.getElementById("askai-targets");
+    if (box) box.innerHTML = ASK_AI_TARGETS.map(t => `<button type="button" class="btn btn-outline-light askai-target"`
+      + ` onclick="askAiChoose('${jsAttr(t.key)}')"><b>${escapeHtml(t.name)}</b><i>${escapeHtml(t.owner)}</i></button>`).join("");
+  }
+}
+
+// 選好了：第三步把那個 AI 的名字寫進去（要打開誰、會先打好字嗎、沒登入會怎樣）
+function askAiChoose(key) {
+  const t = askAiTarget(key);
+  _askAi.target = t.key;
+  const open = document.getElementById("askai-open");
+  if (open) open.textContent = `複製並開啟 ${t.name}`;
+  const sub = document.getElementById("askai-paste-sub");
+  if (sub) {
+    sub.textContent = `按下去：K 線圖進剪貼簿、${t.name} 打開（有裝 App 會開 App）。`
+      + (t.q ? `「${ASK_AI_PROMPT}」會先打好，` : `${t.name} 的網頁沒辦法先打好字，自己打一句，`)
+      + `貼上圖片再按送出。還沒登入 ${t.name} 的話，它會先要你登入。`;
+  }
+  trackActivity("ask_ai_pick", { stock: _askAi.sid, ai: t.key });
+  askAiStep("paste");
+}
 
 function openAskAi(sid) {
   sid = String(sid || "").trim();
@@ -8982,7 +9038,7 @@ function openAskAi(sid) {
     if (gen !== _askAi.gen) { URL.revokeObjectURL(img.url); return; }   // 面板已關或換了一檔：這張沒人要
     _askAi.file = img.file; _askAi.url = img.url;
     preview.innerHTML = `<img src="${img.url}" alt="${escapeHtml(name)} 的 K 線圖">`;
-    note.textContent = "圖畫好了。按下面那顆：圖進剪貼簿、ChatGPT 打開，到它的輸入框貼上再送出。";
+    note.textContent = "圖畫好了。按下面那顆選 AI，確認之後圖進剪貼簿、那個 AI 打開，到它的輸入框貼上再送出。";
     go.disabled = false;
   }).catch(e => {
     if (gen !== _askAi.gen) return;
@@ -8992,7 +9048,8 @@ function openAskAi(sid) {
 
 function _askAiReset() {
   if (_askAi.url) URL.revokeObjectURL(_askAi.url);   // blob 不收會一直佔記憶體
-  _askAi = { sid: "", file: null, url: "", gen: _askAi.gen + 1 };
+  _askAi = { sid: "", file: null, url: "", target: "", gen: _askAi.gen + 1 };
+  askAiStep("go");   // 下次打開一定從第一步開始
 }
 
 // K 線資料與字卡同一條路：共享檔的分片，沒有就 FinMind 現抓（fetchWatchlistFinMindStock）
@@ -9066,6 +9123,7 @@ function _askAiCompose(chartUrl, title, span) {
 // window.open 都會被當成不是使用者的動作而擋掉。圖在面板打開時就畫好了（_askAi.file），所以這裡不必等任何東西。
 function askAiGo() {
   if (!_askAi.file && !_askAi.url) return;
+  const t = askAiTarget(_askAi.target);
   const note = document.getElementById("askai-note");
   let copy;
   try {
@@ -9073,14 +9131,14 @@ function askAiGo() {
       ? navigator.clipboard.write([new ClipboardItem({ "image/png": _askAi.file })])
       : Promise.reject(new Error("這個瀏覽器不讓網頁放圖進剪貼簿"));
   } catch (e) { copy = Promise.reject(e); }
-  window.open(ASK_AI_URL, "_blank", "noopener");
+  window.open(askAiUrl(t), "_blank", "noopener");
   copy.then(() => {
-    trackActivity("ask_ai", { stock: _askAi.sid, via: "copy" });
-    note.textContent = "K 線圖已複製、ChatGPT 已打開：到它的輸入框貼上（手機長按 → 貼上，電腦 Ctrl+V），按送出。";
+    trackActivity("ask_ai", { stock: _askAi.sid, via: "copy", ai: t.key });
+    note.textContent = `K 線圖已複製、${t.name} 已打開：到它的輸入框貼上（手機長按 → 貼上，電腦 Ctrl+V），按送出。`;
   }).catch(() => {
-    askAiSave();   // 剪貼簿不給放圖：圖存下來，到 ChatGPT 用迴紋針附上
-    trackActivity("ask_ai", { stock: _askAi.sid, via: "download" });
-    note.textContent = "這個瀏覽器不讓網頁放圖進剪貼簿：圖已存下來，到 ChatGPT 按迴紋針附上，再按送出。";
+    askAiSave();   // 剪貼簿不給放圖：圖存下來，到那個 AI 用附加檔案附上
+    trackActivity("ask_ai", { stock: _askAi.sid, via: "download", ai: t.key });
+    note.textContent = `這個瀏覽器不讓網頁放圖進剪貼簿：圖已存下來，到 ${t.name} 用附加檔案把它附上，再按送出。`;
   });
 }
 

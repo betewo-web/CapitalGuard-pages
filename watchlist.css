@@ -5153,6 +5153,18 @@ select.fr-input { width: 100%; }
 .askai-go { white-space: normal; line-height: 1.35; padding: 10px 12px; }
 .askai-steps { margin: 12px 0 0; padding-left: 1.2em; color: var(--text-muted); font-size: 0.84rem; line-height: 1.5; }
 .askai-steps li { margin: 4px 0; }
+/* 問 AI 的第二、三步（2026-10-18）：選 AI 的四格、貼上提醒那一塊。
+   提醒不用顏色做強調（顏色只給漲跌與品牌）：粗體＋框起來，意義在文字。 */
+.askai-step { margin-top: 10px; }
+.askai-step-head { font-weight: 700; margin: 0 0 8px; font-size: 0.95rem; }
+.askai-step-sub { color: var(--text-muted); font-size: 0.84rem; line-height: 1.55; margin: 10px 0; }
+.askai-targets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.askai-target { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 6px; }
+.askai-target b { font-size: 0.95rem; }
+.askai-target i { font-style: normal; font-size: 0.72rem; color: var(--text-muted); }
+.askai-paste-tip { font-size: 1.02rem; font-weight: 700; line-height: 1.5; margin: 0;
+	padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); }
+.askai-back { color: var(--text-muted); font-size: 0.84rem; margin-top: 6px; text-decoration: none; }
 
 /* 「設定／分享」視窗的兩顆大按鈕：一行標題＋一行說明，整塊可點 */
 .sa-btn {
