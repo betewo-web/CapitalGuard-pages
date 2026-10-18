@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="381">
+  <meta name="app-version" content="382">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=381" rel="stylesheet">
+  <link href="watchlist.css?v=382" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19951,6 +19951,20 @@ function aiErrorCard(e) {
 // 進階訊號三階同為 6 條（migrate_billing_tiers.sql），所以 nextPlanFor("alert_rules")
 // 通常是 null——那時候句子不可以承諾「升級就有更多條」，只能指路去關掉或刪掉。
 
+// 開機只載 ruleNudge.rules（id／stock_id／conditions，沒有名字也沒有開關）；alertRules 是
+// 「打開進階訊號面板」才載的，所以沒開過面板的 session 裡它是空的——助手會把 6 條說成
+// 「還沒有進階訊號」，方案卡寫 0／6，額度滿了的出路鍵也會退化成「打開進階訊號」而不是
+// 「刪掉一條」（Howard 2026-10-18 在手機上碰到的）。問到進階訊號的那幾類，先補載一次。
+const AI_RULE_INTENTS = new Set(["rule_create", "rule_manage", "plan", "basic_signal_set"]);
+let _aiRulesLoaded = false;
+async function aiEnsureRules() {
+  if (_aiRulesLoaded || !state.userId) return;
+  // 面板開過（已經有這一份）或開機那次真的查到 0 條：不用再抓
+  if ((alertRules || []).length || (Array.isArray(ruleNudge.rules) && !ruleNudge.rules.length)) { _aiRulesLoaded = true; return; }
+  await refreshRules().catch(() => {});
+  _aiRulesLoaded = (alertRules || []).length > 0;   // 這次沒載到（離線、表不在）就下一句再試
+}
+
 // 進階訊號還剩幾條（null＝方案狀態還沒載到，不知道）。面板那一套數 ruleNudge.rules、
 // 助手手上是 alertRules，取小的那個：哪一份先滿都算滿。
 function aiRuleRoom() {
@@ -20221,6 +20235,7 @@ async function aiRun(intent, slots, opts) {
   let card = null;
   _aiCurrent = { intent, slots: slots || {}, log_id: (opts && opts.log_id) || null, text: String((opts && opts.text) || "") };
   aiBusy = true; renderAssistant();
+  if (AI_RULE_INTENTS.has(intent)) await aiEnsureRules();   // 進階訊號的那幾類：先確定手上那一份是真的
   try { card = await h(slots || {}, args, opts || {}); }
   catch (e) { console.error("assistant action failed:", fn, e); card = { text: "這個動作剛才沒有成功，請再試一次。", muted: true }; }
   finally { aiBusy = false; }
@@ -21174,8 +21189,7 @@ const ASSISTANT_ACTIONS = {
     if (isPausedRuleType(ct)) return { text: `${desc}：這一層的資料來源暫停提供，建立了也不會成立。`, muted: true };
     const sid = slots.stock || null;
     const name = sid ? aiStockName(sid) : "";
-    const room = ruleRoomLeft();
-    if (room !== null && room <= 0) return aiLimitCard("alert_rules");
+    if (aiRuleFull()) return aiLimitCard("alert_rules");   // 與卡上寫的「還能設幾條」同一個定義
     if (sid && !aiRowOf(sid) && aiWatchFull()) return aiLimitCard("watchlist");
     const rows = [{ label: "條件", value: desc, note: "" },
                   { label: "範圍", value: sid ? `${name} ${sid}` : "全部自選股", note: "" },
