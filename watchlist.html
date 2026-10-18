@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="386">
+  <meta name="app-version" content="387">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=386" rel="stylesheet">
+  <link href="watchlist.css?v=387" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -20081,6 +20081,18 @@ function aiHandoffCard(text, say) {
   };
 }
 
+// 法人籌碼那一層（連續買超、買超張數、由賣轉買、融資…）整層暫停提供
+//（config.PAUSE_UNLICENSED_SOURCES／DATA_SOURCES.md，授權限制）。問到這一層的句子，
+// 不管 Jev 分到哪一類、不管他是要名單還是要設通知，答案都一樣：講清楚為什麼查不到，
+// 再把那一句交給他自己的 AI（Howard 2026-10-18：無法回答的就引導給 AI）。
+const AI_CHIPS_INTENTS = new Set(["rule_create", "market_signals", "signals_today", "signals_history", "events"]);
+function aiPausedSourceCard(condType, text, extra) {
+  const name = (RULE_CATALOG_BY_TYPE[String(condType || "")] || {}).name || "這一類";
+  const card = aiHandoffCard(text,
+    `${name}要用的法人籌碼資料目前暫停提供（資料來源的授權限制），所以這一題我這裡查不到${extra || ""}。`);
+  return Object.assign(card, { head: "這一層資料暫停提供" });
+}
+
 function aiErrorCard(e) {
   const msg = String((e && e.message) || e || "");
   if (isLimitError(e, "watchlist")) return aiLimitCard("watchlist");
@@ -20346,12 +20358,17 @@ async function aiHandleResponse(r, text) {
   const top = r.candidates && r.candidates[0];
   const meta = top ? `${r.label || r.intent} ${Math.round((Number(top.p) || 0) * 100)}%` : String(r.label || r.intent || "");
   if (r.decision === "refuse" || r.decision === "fallback") {
-    // 範圍外／聽不懂：不只回一句「不支援」，把這一句交給使用者自己的 AI（Howard 2026-10-18）。
-    // 分類器自己壞掉（r.code）不給這條路——那一句八成是我們做得到的，再試一次就好。
-    // 買賣建議（refuse）也不給：那不是「不支援」，是這個服務依法不做的事（COMPLIANCE.md 第 6 條）。
-    const card = r.decision === "fallback" && !r.code
-      ? aiHandoffCard(text, r.say) : { text: r.say || AI_FALLBACK, muted: true };
+    // 答不出來的（範圍外、聽不懂、買賣建議）：固定句照舊，後面接「交給你自己的 AI」的籤。
+    // 買賣建議那一句**我們還是不答**——卡上仍然是「本服務不提供買賣建議」，只是多給一條他自己的路；
+    // 問題走剪貼簿、由他自己貼上，我們不代送也看不到回答（Howard 2026-10-18：答不出來的就引導給 AI）。
+    // 只有分類器自己壞掉（r.code）不給這條路——那一句八成是我們做得到的，再試一次就好。
+    const card = !r.code ? aiHandoffCard(text, r.say) : { text: r.say || AI_FALLBACK, muted: true };
     aiPushCard(Object.assign(card, { meta, log_id: r.log_id }));
+    return;
+  }
+  // 籌碼層暫停：在反問之前就攔下來——反問的每一個候選都會得到同一個答案
+  if (isPausedRuleType(String(r.cond_type || "")) && AI_CHIPS_INTENTS.has(String(r.intent || ""))) {
+    aiPushCard(Object.assign(aiPausedSourceCard(r.cond_type, text), { meta, log_id: r.log_id }));
     return;
   }
   if (r.decision === "clarify") {
@@ -21154,8 +21171,11 @@ const ASSISTANT_ACTIONS = {
   },
   assistantGlossary(slots, args, opts) { return { text: opts.say || "請直接問那個名詞，例如「什麼是支撐」。", muted: !opts.say }; },
   assistantHelp() { return { bodyHtml: aiIntroHtml(false).replace(/^<div class="ai-card[^>]*>|<\/div>$/g, ""), rawCard: true }; },
-  assistantRefuse(slots, args, opts) { return { text: opts.say || "這個服務只整理與解釋公開資料，不提供買賣或進出場建議。", muted: true }; },
-  assistantOutOfScope(slots, args, opts) { return { text: opts.say || AI_FALLBACK, muted: true }; },
+  // 拒答與範圍外：固定句照舊，後面接「交給你自己的 AI」的籤（第十七節）
+  assistantRefuse(slots, args, opts) {
+    return aiHandoffCard(_aiCurrent.text, opts.say || "這個服務只整理與解釋公開資料，不提供買賣或進出場建議。");
+  },
+  assistantOutOfScope(slots, args, opts) { return aiHandoffCard(_aiCurrent.text, opts.say || AI_FALLBACK); },
   // ── 寫入類（Phase 3，第十四節 B）：填好 → 確認卡 → 既有的寫入函式 ─────────────
   // 「兩段合一張」：要寫的那一檔不在自選股時，確認卡直接寫「加入並…？」，主鍵一次做兩件事。
   assistantWatchAdd(slots) {
@@ -21337,7 +21357,7 @@ const ASSISTANT_ACTIONS = {
     }
     const cond = { type: ct, ...(slots.params_defaults || {}), ...(slots.params || {}) };
     const desc = describeCondition(cond);
-    if (isPausedRuleType(ct)) return { text: `${desc}：這一層的資料來源暫停提供，建立了也不會成立。`, muted: true };
+    if (isPausedRuleType(ct)) return aiPausedSourceCard(ct, _aiCurrent.text, "，這一條進階訊號建立了也不會成立");
     const sid = slots.stock || null;
     const name = sid ? aiStockName(sid) : "";
     if (aiRuleFull()) return aiLimitCard("alert_rules");   // 與卡上寫的「還能設幾條」同一個定義
