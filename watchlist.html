@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="378">
+  <meta name="app-version" content="379">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=378" rel="stylesheet">
+  <link href="watchlist.css?v=379" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5990,6 +5990,8 @@ const SIGNAL_ICON_ART = {
   "ma_cross:down":      { inner: _icoMaCross(false) },
   "price_vs_ma:up":     { inner: _icoPriceVsMa(true) },
   "price_vs_ma:down":   { inner: _icoPriceVsMa(false) },
+  "price_vs_ma60:up":   { inner: _icoPriceVsMa(true) },
+  "price_vs_ma60:down": { inner: _icoPriceVsMa(false) },
   rsi_above:            { inner: _icoRsi(true) },
   rsi_below:            { inner: _icoRsi(false) },
   "macd_cross:up":      { inner: _icoMacd(true) },
@@ -7312,6 +7314,7 @@ const SIGNAL_ABBR = {
   "volume_vs_ma:above": "放量", "volume_vs_ma:below": "量縮",
   "ma_cross:up": "金叉", "ma_cross:down": "死叉",
   "price_vs_ma:up": "站月", "price_vs_ma:down": "破月",
+  "price_vs_ma60:up": "站季", "price_vs_ma60:down": "破季",
   rsi_above: "RSI高", rsi_below: "RSI低",
   "macd_cross:up": "MACD↑", "macd_cross:down": "MACD↓",
 };
@@ -7324,6 +7327,7 @@ const AUTO_SIGNAL_LABELS = {
   "volume_vs_ma:above": "量能高於 20 日均量 2 倍", "volume_vs_ma:below": "量能低於 20 日均量一半",
   "ma_cross:up": "MA5 黃金交叉 MA20", "ma_cross:down": "MA5 死亡交叉 MA20",
   "price_vs_ma:up": "站上月線", "price_vs_ma:down": "跌破月線",
+  "price_vs_ma60:up": "站上季線", "price_vs_ma60:down": "跌破季線",
   rsi_above: "RSI 高於 70", rsi_below: "RSI 低於 30",
   "macd_cross:up": "MACD 黃金交叉", "macd_cross:down": "MACD 死亡交叉",
 };
@@ -7335,15 +7339,18 @@ function conditionKey(cond) {
   const type = String(cond?.type || "");
   const v = SIGNAL_VARIANT_PARAM[type];
   if (!v) return type;
-  return `${type}:${String(cond?.[v[0]] || v[1]).toLowerCase()}`;
+  // 月線以外的週期寫進型別名（季線＝price_vs_ma60:up；後端 condition_key 同一條規則），月線那一對維持舊 key
+  const per = type === "price_vs_ma" ? (Number(cond?.period) || 20) : 20;
+  return `${per === 20 ? type : type + per}:${String(cond?.[v[0]] || v[1]).toLowerCase()}`;
 }
 // 均線口語字：站月／破季；週期不在表裡就叫「線」
 const MA_ABBR_CHAR = { 5: "週", 10: "十", 20: "月", 60: "季", 120: "半", 240: "年" };
 function signalAbbr(key, cond) {
   const k = String(key || "");
-  if (k.startsWith("price_vs_ma:")) {
-    const ch = MA_ABBR_CHAR[Number(cond?.period ?? 20)] || "線";
-    return (k.endsWith(":down") ? "破" : "站") + ch;
+  const m = k.match(/^price_vs_ma(\d*):(up|down)$/);   // 週期：條件裡的，不然就是 key 裡的（price_vs_ma60），都沒有＝月線
+  if (m) {
+    const ch = MA_ABBR_CHAR[Number(cond?.period ?? (m[1] || 20))] || "線";
+    return (m[2] === "down" ? "破" : "站") + ch;
   }
   return SIGNAL_ABBR[k] || "";
 }
@@ -10918,7 +10925,8 @@ const RTL_LEVEL_LABEL = {
   limit_up: "漲停", limit_down: "跌停", target_high: "目標", target_low: "目標",
   break_prior_high: "前高", break_prior_low: "前低", break_52w_high: "年高", break_52w_low: "年低",
   gap_up: "昨高", gap_down: "昨低",
-  "price_vs_ma:up": "月", "price_vs_ma:down": "月", "ma_cross:up": "月", "ma_cross:down": "月",
+  "price_vs_ma:up": "月", "price_vs_ma:down": "月", "price_vs_ma60:up": "季", "price_vs_ma60:down": "季",
+  "ma_cross:up": "月", "ma_cross:down": "月",
 };
 
 // 台北時間距 09:00 的分鐘數（開盤前為負、收盤後 > 270）
@@ -19673,6 +19681,7 @@ const AI_INTENTS = {
   quote:            ["assistantQuote", {}],
   kline:            ["openStockCard", { tab: "kline" }],
   levels:           ["assistantLevels", {}],
+  ma_position:      ["assistantMaPosition", {}],
   events:           ["assistantEvents", {}],
   score:            ["assistantScore", {}],
   market_strength:  ["assistantMarketStrength", { mode: "market" }],
@@ -19810,7 +19819,7 @@ function aiIntroHtml(withChips) {
   return aiCardHtml({
     head: "助手",
     bodyHtml: `<div class="ai-intro"><p>我可以查、設定、解釋這個 App 裡的東西，例如：</p><ul>
-      <li>查 「台積電今天有訊號嗎」、「鴻海支撐在哪」</li>
+      <li>查 「台積電今天有訊號嗎」、「鴻海支撐在哪」、「聯發科站上月線了嗎」</li>
       <li>加 「把聯發科加進自選」</li>
       <li>設 「跌到 900 提醒我」、「外資連買 3 天通知我」</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
@@ -20174,7 +20183,7 @@ async function aiRun(intent, slots, opts) {
 // 沒說哪一檔：自選股做成籤，點一下就等於把股票名接上這一類的問法——不叫人重打
 // （Howard 2026-10-17：意圖與對象已知就直接呈現畫面；缺一格就用一點就好的籤）
 const AI_STOCK_HINT = {
-  quote: "現在多少錢", levels: "支撐在哪", signals_today: "今天有訊號嗎", signals_history: "這週有哪些訊號",
+  quote: "現在多少錢", levels: "支撐在哪", ma_position: "站上月線了嗎", signals_today: "今天有訊號嗎", signals_history: "這週有哪些訊號",
   events: "有什麼資料", score: "評分多少", holdings: "的持股", kline: "的 K 線", price_target_set: "的到價提醒",
   basic_signal_set: "的基礎訊號", holdings_set: "的持股設定", watch_remove: "移除", share_stock: "分享給好友",
 };
@@ -20191,7 +20200,7 @@ function aiNeedStock() {
 }
 
 // ── 訊號種類（目錄 slot_resolvers.signal_kind，與雷達同一組 key）─────────────────
-// 「跳空」沒說方向就兩種都算。漲停／跌停是自選股的內建訊號、不在全市場脈動裡（脈動是 16 種自動偵測），
+// 「跳空」沒說方向就兩種都算。漲停／跌停是自選股的內建訊號、不在全市場脈動裡（脈動是 AUTO_CATALOG 那 20 種自動偵測），
 // 問到就答自選股的命中，脈動那邊給最接近的一種（漲逾／跌逾 5%）。第十六節：Howard 第一天問的就是這幾句。
 const AI_KIND_GROUP = { gap: ["gap_up", "gap_down"] };
 const AI_KIND_NEAREST = { limit_up: "change_pct_above", limit_down: "change_pct_below" };
@@ -20199,6 +20208,32 @@ function aiKindSet(kind) { return AI_KIND_GROUP[kind] || [String(kind)]; }
 function aiKindLabel(kind) {
   if (kind === "gap") return "跳空";
   return SIGNAL_LABEL_MAP[kind] || AUTO_SIGNAL_LABELS[kind] || SIGNAL_ABBR[kind] || String(kind || "");
+}
+// ── 均線位置（ma_position；「聯發科是否站上月線、季線」，Howard 2026-10-18）────────────────
+// 均線值讀全市場關卡檔（日線到上一個交易日：MA5／20／60／120／240）、價格用盤中報價（沒有就最後收盤）；
+// 「今天站上／跌破」走雷達故事列（自選股）或全市場索引（任何一檔）——key 是 price_vs_ma:up（月線）／price_vs_ma60:up（季線）
+const AI_MA_NAME = { 5: "週線", 10: "十日線", 20: "月線", 60: "季線", 120: "半年線", 240: "年線" };
+const AI_MA_DEFAULT = [20, 60];
+const AI_AUTO_KIND_COUNT = Object.keys(AUTO_SIGNAL_LABELS).length;   // 自動偵測的種類數（AUTO_CATALOG；20 種）
+function aiMaPeriodOfKey(key) {
+  const m = String(key || "").match(/^price_vs_ma(\d*):(up|down)$/);
+  return m ? { period: Number(m[1] || 20), up: m[2] === "up" } : null;
+}
+// 今天穿越均線的那幾筆 {period, up, at}：自選股看故事列、其餘看索引（兩邊都有就都收，同一條線只留第一筆）
+function aiMaCrossesToday(sid, today) {
+  const out = [];
+  for (const e of aiTodayEntries(sid)) {
+    const p = aiMaPeriodOfKey(e.key);
+    if (p) out.push({ period: p.period, up: p.up, at: fmtTime(e.at) });
+  }
+  if (today && aiTodayIsCurrent(today)) {
+    for (const h of aiTodaySignalsOf(today, sid)) {
+      const p = aiMaPeriodOfKey(h.key);
+      if (p) out.push({ period: p.period, up: p.up, at: aiMm(h.min) });
+    }
+  }
+  const seen = new Set();
+  return out.filter(x => !seen.has(x.period) && seen.add(x.period));
 }
 // 問訊號、問漲跌的對象＝自選股＋好友分享給我的（Howard 2026-10-17 晚）：分享股的報價與雷達本來就和自選股一起抓
 function aiSignalSids() {
@@ -20336,13 +20371,13 @@ const ASSISTANT_ACTIONS = {
     const sigsOf = s => wanted ? aiTodayEntries(s).filter(e => aiEntryKeys(e).some(k => wanted.includes(k))) : aiTodayEntries(s);
     if (sid) {
       if (!aiSignalSids().includes(sid)) {
-        // 不在自選股：雷達沒有它，改讀全市場索引（自動偵測 16 種，reporter 每分鐘覆蓋；第十八節）
+        // 不在自選股：雷達沒有它，改讀全市場索引（自動偵測 20 種，reporter 每分鐘覆蓋；第十八節）
         const today = await aiMarketToday();
         const day = aiSessionDayTxt();
         if (!today || !aiTodayIsCurrent(today)) return { head: `${aiStockName(sid)} ${sid}`, text: `${day}的全市場索引還沒有（開盤後每分鐘更新）。`, actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: [aiAddChip(sid)] };
         const hits = aiTodaySignalsOf(today, sid).filter(h => !wanted || wanted.includes(h.key));
         const rows = hits.map(h => ({ label: aiKindLabel(h.key), value: "", note: aiMm(h.min) }));
-        return { head: `${aiStockName(sid)} ${sid}`, sub: rows.length ? `${day} ${rows.length} 則${kindTxt}訊號（全市場自動偵測）` : `${day}沒有自動偵測到的${kindTxt}訊號（全市場 16 種）`, rows,
+        return { head: `${aiStockName(sid)} ${sid}`, sub: rows.length ? `${day} ${rows.length} 則${kindTxt}訊號（全市場自動偵測）` : `${day}沒有自動偵測到的${kindTxt}訊號（全市場 ${AI_AUTO_KIND_COUNT} 種）`, rows,
                  actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: [aiAddChip(sid)] };
       }
       const rows = sigsOf(sid).map(e => ({ label: String(e.title || aiKindLabel(e.key) || "訊號"), value: "", note: fmtTime(e.at) }));
@@ -20434,6 +20469,48 @@ const ASSISTANT_ACTIONS = {
     return { head: `${aiStockName(sid)} ${sid}`, sub: `${mine ? "" : "不在自選股："}日線算的關卡${ml.date ? `（${String(ml.date).slice(5).replace("-", "/")} 收 ${fmtPrice(m.c)}）` : ""}`, rows,
              actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] };
   },
+  async assistantMaPosition(slots) {
+    // 「聯發科是否站上月線、季線」（Howard 2026-10-18）：任何一檔都答——均線值讀全市場關卡檔（日線到上一個交易日），
+    // 價格用盤中報價（自選股／好友分享的），沒有就關卡檔的最後收盤；今天穿越了的寫時刻（故事列或全市場索引）
+    const sid = slots.stock;
+    if (!sid) return aiNeedStock();
+    const name = aiStockName(sid);
+    const asked = (Array.isArray(slots.periods) ? slots.periods : []).map(Number).filter(p => AI_MA_NAME[p]);
+    const periods = asked.length ? asked : AI_MA_DEFAULT;
+    const mine = aiSignalSids().includes(sid);
+    const q = getQuote(sid) || getCloseQuote(sid);
+    const [ml, today] = await Promise.all([aiMarketLevels(), aiMarketToday()]);
+    const m = ml && ml.stocks && ml.stocks[sid];
+    const ma = (m && m.ma) || {};
+    const live = q && q.price > 0 ? Number(q.price) : null;
+    const price = live != null ? live : (m && m.c > 0 ? Number(m.c) : null);
+    const maDay = ml && ml.date ? String(ml.date).slice(5).replace("-", "/") : "";
+    const crosses = aiMaCrossesToday(sid, today);
+    const rows = [], parts = [];
+    for (const p of periods) {
+      const label = AI_MA_NAME[p];
+      const v = Number(ma[`MA${p}`]);
+      const cross = crosses.find(c => c.period === p);
+      const crossTxt = cross ? `${cross.at} ${cross.up ? "站上" : "跌破"}` : "";
+      if (!(v > 0)) { rows.push({ label, value: "—", note: crossTxt || (m ? "日線不夠長，算不出這條線" : "沒有資料") }); continue; }
+      if (!(price > 0)) { rows.push({ label, value: fmtPrice(v), note: crossTxt }); continue; }
+      const diff = (price - v) / v * 100;
+      const near = Math.abs(diff) < 0.05;
+      const where = near ? "貼在線上" : diff > 0 ? `在上方 ${fmtPct(diff)}%` : `在下方 ${fmtPct(diff)}%`;
+      rows.push({ label, value: fmtPrice(v), note: crossTxt ? `${where}・${crossTxt}` : where });
+      parts.push(`${label}${near ? "附近" : diff > 0 ? "之上" : "之下"}`);
+    }
+    if (!m && !rows.some(r => r.value !== "—")) {
+      return { head: `${name} ${sid}`, text: "拿不到這一檔的均線（全市場關卡檔裡沒有它；日線不足 25 根的新股會這樣）。",
+               actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] };
+    }
+    const priceTxt = price == null ? "" : live != null
+      ? `${_isMarketOpenNow() ? "盤中價" : "收盤價"} ${fmtPrice(price)}${q.tradeDate ? `（${String(q.tradeDate).slice(5).replace("-", "/")}）` : ""}`
+      : `最後收盤 ${fmtPrice(price)}${maDay ? `（${maDay}）` : ""}`;
+    const sub = [mine ? "" : "不在自選股", maDay ? `均線以 ${maDay} 的日線算` : ""].filter(Boolean).join("：");
+    return { head: `${name} ${sid}`, sub, rows, text: priceTxt ? `${priceTxt}，在${parts.join("、")}。`.replace("，在。", "。") : "",
+             actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] };
+  },
   async assistantSignalsHistory(slots) {
     const sid = slots.stock;
     if (!sid) return aiNeedStock();
@@ -20519,7 +20596,7 @@ const ASSISTANT_ACTIONS = {
     return { head: "市場強度", sub: `族群強度分數（0–100）${p.at ? ` · ${fmtTime(p.at)}` : ""}`, rows,
              actions: [{ label: "打開市場強度 ›", act: "open", data: { filter: "market" } }] };
   },
-  // 全市場訊號脈動（monitor/market_pulse.py）：16 種自動偵測訊號今天各有幾檔出現過。
+  // 全市場訊號脈動（monitor/market_pulse.py）：20 種自動偵測訊號今天各有幾檔出現過。
   // 問某一種（漲停、跳空…）就答那一種：全市場幾檔＋自選股哪幾檔；沒指定就列今天最多的幾種（第十六節）
   async assistantMarketSignals(slots, args, opts) {
     const p = await aiMarketPayload();
