@@ -5166,6 +5166,8 @@ select.fr-input { width: 100%; }
 	padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); }
 .askai-back { color: var(--text-muted); font-size: 0.84rem; margin-top: 6px; text-decoration: none; }
 .askai-target em { font-style: normal; font-size: 0.68rem; color: var(--text-muted); }
+/* 獨立視窗第一行：圖已經準備好了（狀態），第二行才是要他做的事（指示） */
+.askai-saved { font-size: 0.86rem; color: var(--text-muted); margin: 0 0 8px; }
 /* 第三步的獨立視窗：疊在「問 AI」面板上面。不用 Bootstrap 的 modal 疊 modal
    （Bootstrap 5 自己說不支援），走付款結果那一招：自己的 fixed 全屏＋高 z-index。 */
 .askai-dialog { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center;
