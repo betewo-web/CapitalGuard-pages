@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="387">
+  <meta name="app-version" content="388">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=387" rel="stylesheet">
+  <link href="watchlist.css?v=388" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1404,6 +1404,7 @@
           <li>選好的那一下 K 線圖就自動準備好（進剪貼簿或存到裝置），確認之後那個 AI 才打開（有裝 App 會開 App）。</li>
           <li>到它的輸入框<b>貼上</b>（手機長按 → 貼上，電腦 Ctrl+V），自己打你要問的，按送出。</li>
           <li><b>不會自動輸入任何文字</b>：問題由你自己打（Howard 2026-10-18）。</li>
+          <li>那個 AI 的輸入框可能還留著你上一次打的字（它自己存的草稿，我們清不掉）——<b>先清掉再貼</b>。</li>
           <li><b>Perplexity 的輸入框不吃貼上</b>：選它的話圖會存到裝置，用迴紋針（＋）附上。</li>
           <li><b>還沒登入那個 AI</b>：它會先要你登入（或註冊），登入後回來再按一次。</li>
           <li>回答是那家 AI 的服務，不是本服務提供的建議；圖上只有公開市場資料。</li>
@@ -8978,6 +8979,9 @@ function homeTileHtml(r) {
 // paste＝那個 AI 的輸入框吃不吃「貼上圖片」。Perplexity 不吃（Howard 實測），
 // 所以那一個改走存檔＋迴紋針附上，選單上也先講。
 // 手機上有裝那家 App 的會被系統接去 App（與原本開 ChatGPT 同一個行為）。
+// 那個 AI 的輸入框會留著它自己的草稿（v384 以前我們用 ?q= 幫他填過「股票分析」，ChatGPT 存起來了；
+// 他上一次貼進去沒送出的字也一樣）。同源政策下我們清不掉別的網站的輸入框，只能提醒一句。
+const ASK_AI_DRAFT_HINT = "輸入框如果還留著上一次的字，先清掉再貼。";
 const ASK_AI_TARGETS = [
   { key: "chatgpt",    name: "ChatGPT",    owner: "OpenAI",        url: "https://chatgpt.com/",          paste: true },
   { key: "gemini",     name: "Gemini",     owner: "Google",        url: "https://gemini.google.com/app", paste: true },
@@ -9039,7 +9043,7 @@ function askAiHandoffPick(d) {
     const l3 = document.getElementById("askai-paste-sub");
     if (l1) l1.textContent = saved;
     if (l2) l2.textContent = how;
-    if (l3) l3.textContent = `按「確認」會打開 ${t.name}（有裝 App 會開 App）。`
+    if (l3) l3.textContent = `按「確認」會打開 ${t.name}（有裝 App 會開 App）。${ASK_AI_DRAFT_HINT}`
       + `本服務不會替你把問題送出去，也看不到它的回答；還沒登入 ${t.name} 的話，它會先要你登入。`;
   };
   let copy;
@@ -9066,7 +9070,8 @@ function askAiStage(t) {
     if (l1) l1.textContent = where;
     if (l2) l2.textContent = how;
     if (l3) l3.textContent = `按「確認」會打開 ${t.name}（有裝 App 會開 App）。`
-      + `不會自動輸入任何文字，問題自己打。還沒登入 ${t.name} 的話，它會先要你登入。`;
+      + `不會自動輸入任何文字，問題自己打；${ASK_AI_DRAFT_HINT}`
+      + `還沒登入 ${t.name} 的話，它會先要你登入。`;
   };
   const PASTE = "請自行在輸入窗長按，並且貼上圖片";
   const ATTACH = `請自行在 ${t.name} 的輸入框按迴紋針（＋），把剛存下來的圖片附上`;
