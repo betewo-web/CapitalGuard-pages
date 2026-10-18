@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="380">
+  <meta name="app-version" content="381">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=380" rel="stylesheet">
+  <link href="watchlist.css?v=381" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19959,6 +19959,8 @@ function aiRuleRoom() {
   return Math.max(0, Math.min(lim - (alertRules || []).length, ruleRoomLeft()));
 }
 function aiRuleFull() { const room = aiRuleRoom(); return room !== null && room <= 0; }
+// 規則在卡上的名字：沒取名的（舊資料、別處建的）就把第一個條件寫成人話，籤才不會是空白
+function ruleLabelOf(r) { return String(r.name || "").trim() || describeCondition((r.conditions || [])[0]); }
 
 // 「方案」那顆鍵：有更貴而且額度更大的方案就直接指到那一階（limitPromptHtml 的升級鍵同一套參數）
 function aiPlanBtn(kind) {
@@ -19967,11 +19969,14 @@ function aiPlanBtn(kind) {
     ? { label: "升級方案 ›", act: "open", data: { plan: true, focus: kind, planCode: next.code } }
     : { label: "看方案 ›", act: "open", data: { plan: true, focus: kind } };
 }
-// 「改設定」那顆鍵：進階訊號開面板（在那裡關掉或刪掉），自選股回設定頁
+// 「改設定」那顆鍵。進階訊號滿了選這顆＝**直接開刪除流程**（Howard 2026-10-18）：
+// 走既有的 rule_manage delete——問「要刪掉哪一條？」→ 籤帶 rule_id →「刪掉不能復原」確認卡 →
+// 刪掉後回報現在還能設幾條。一條都沒有的時候（方案給 0 條）刪不了，就退回開面板。
 function aiManageBtn(kind) {
-  return kind === "watchlist"
-    ? { label: "管理自選股 ›", act: "open", data: { tab: "watch" } }
-    : { label: "改訊號設定 ›", act: "open", data: { rules: true } };
+  if (kind === "watchlist") return { label: "管理自選股 ›", act: "open", data: { tab: "watch" } };
+  return (alertRules || []).length
+    ? { label: "刪掉一條 ›", act: "run", data: { intent: "rule_manage", slots: { action: "delete" }, text: "刪掉一條進階訊號" } }
+    : { label: "打開進階訊號 ›", act: "open", data: { rules: true } };
 }
 // bare＝卡上已經寫了是哪一種額度（頭銜那一行），副標就不要再重複「進階訊號」四個字
 function aiLimitLabel(kind, bare) {
@@ -19984,7 +19989,7 @@ function aiLimitLabel(kind, bare) {
 function aiLimitWayOut(kind) {
   const what = kind === "watchlist" ? "自選股" : "進階訊號";
   const unit = kind === "watchlist" ? "檔" : "條";
-  const free = kind === "watchlist" ? "移除用不到的" : "在進階訊號裡關掉或刪掉用不到的";
+  const free = kind === "watchlist" ? "移除用不到的" : "刪掉一條用不到的";   // 卡上那顆「刪掉一條」就是這件事
   const next = nextPlanFor(kind);
   const more = next ? next[PLAN_LIMIT_FIELD[kind]] : null;
   return next && more != null
@@ -19993,8 +19998,10 @@ function aiLimitWayOut(kind) {
 }
 function aiLimitCard(kind) {
   trackActivity("limit_hint", { kind, next: (nextPlanFor(kind) || {}).code || "", where: "assistant" });
-  return { text: `${aiLimitLabel(kind)}。${aiLimitWayOut(kind)}`, failed: true,
-           actions: [aiPlanBtn(kind), aiManageBtn(kind)] };
+  // 鍵的順序照「哪一條路真的有用」：自選股升級真的能加額度 → 方案在前；
+  // 進階訊號三階同額 → 刪掉一條在前。
+  const acts = nextPlanFor(kind) ? [aiPlanBtn(kind), aiManageBtn(kind)] : [aiManageBtn(kind), aiPlanBtn(kind)];
+  return { text: `${aiLimitLabel(kind)}。${aiLimitWayOut(kind)}`, failed: true, actions: acts };
 }
 
 // ── 寫入類共用 ──────────────────────────────────────────────────
@@ -20802,14 +20809,19 @@ const ASSISTANT_ACTIONS = {
       if (!rules.length) return { text: "還沒有進階訊號。", actions: [rulesBtn] };
       if (!hits.length) return { head: `找不到「${which}」這一條`, rows: rules.slice(0, 8).map(r => ({ label: r.name, value: r.enabled ? "開" : "關", note: "", act: "open", data: { rules: true } })), actions: [rulesBtn] };
       if (hits.length > 1 && (which || action === "delete")) {
-        return { head: "你指的是哪一條？", chips: hits.slice(0, 8).map(r => ({ label: String(r.name || ""), act: "run",
-          data: { intent: "rule_manage", slots: { action, rule_id: r.id }, text: `把「${r.name}」那條${verb}` } })) };
+        return { head: action === "delete" ? "要刪掉哪一條？" : "你指的是哪一條？",
+          sub: action === "delete" && aiRuleFull() ? `${aiLimitLabel("alert_rules", true)}，刪掉一條就空出一格` : "",
+          chips: hits.slice(0, 8).map(r => {
+            const name = ruleLabelOf(r);
+            return { label: name, act: "run",
+                     data: { intent: "rule_manage", slots: { action, rule_id: r.id }, text: `把「${name}」那條${verb}` } };
+          }) };
       }
       const targets = action === "delete" ? hits.slice(0, 1) : hits.filter(r => !!r.enabled !== (action === "on"));
       if (!targets.length) return { text: `「${hits[0].name}」已經是${action === "on" ? "開" : "關"}的。` };
       return aiConfirmCard({
         head: `${verb}進階訊號？`, text: action === "delete" ? "刪掉不能復原。" : "",
-        rows: targets.map(r => ({ label: String(r.name || ""), value: r.enabled ? "開" : "關", note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股" })),
+        rows: targets.map(r => ({ label: ruleLabelOf(r), value: r.enabled ? "開" : "關", note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股" })),
         mainLabel: verb,
         run: async () => {
           for (const r of targets) {
@@ -20818,7 +20830,9 @@ const ASSISTANT_ACTIONS = {
           }
           trackActivity(action === "delete" ? "rule_delete" : "rule_toggle", { enabled: action === "on" });
           await refreshRules().catch(() => {});
-          return { text: `已${verb} ${targets.length} 條進階訊號。`, actions: [rulesBtn] };
+          const left = aiRuleRoom();   // 刪掉就空出格子：把現在還能設幾條講出來（第二十節的收尾）
+          const room2 = action === "delete" && left !== null ? `現在還能設 ${left} 條。` : "";
+          return { text: `已${verb} ${targets.length} 條進階訊號。${room2}`, actions: [rulesBtn] };
         },
       });
     }
@@ -20827,7 +20841,7 @@ const ASSISTANT_ACTIONS = {
     const full = room !== null && room <= 0;
     if (!rules.length) return full ? aiLimitCard("alert_rules") : { text: "還沒有進階訊號。", actions: [rulesBtn] };
     const rows = rules.slice(0, 10).map(r => ({
-      label: r.name || describeCondition((r.conditions || [])[0]), value: r.enabled ? "開" : "關",
+      label: ruleLabelOf(r), value: r.enabled ? "開" : "關",
       note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股", act: "open", data: { rules: true } }));
     return { head: `進階訊號 ${rules.length}／${planLimitOf("alert_rules") ?? "—"}`,
              sub: room === null ? "" : full ? aiLimitLabel("alert_rules", true) : `還能設 ${room} 條`,
@@ -21106,7 +21120,7 @@ const ASSISTANT_ACTIONS = {
                sub: "每一檔可以個別開關；均線、法人、跳空這類條件自己組的是進階訊號"
                     + (room === null ? "" : full ? `（進階訊號已達上限 ${lim} 條）` : `（進階訊號還能設 ${room} 條）`),
                rows, text: full ? aiLimitWayOut("alert_rules") : "",
-               actions: full ? [advBtn, aiPlanBtn("alert_rules")] : [basicBtn, advBtn] };
+               actions: full ? [aiManageBtn("alert_rules"), aiPlanBtn("alert_rules")] : [basicBtn, advBtn] };
     }
     const field = slots.basic_field;
     const on = slots.on;
