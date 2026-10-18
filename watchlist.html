@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="379">
+  <meta name="app-version" content="380">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=379" rel="stylesheet">
+  <link href="watchlist.css?v=380" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -19945,11 +19945,56 @@ function aiErrorCard(e) {
   return { text: `沒有成功：${msg.slice(0, 120)}`, muted: true, failed: true };
 }
 
-function aiLimitCard(kind) {
-  const what = kind === "watchlist" ? "自選股" : "進階訊號";
+// ── 額度滿了的出路（Howard 2026-10-18，第二十節）──────────────────
+// 問到訊號設定、而額度已經滿了：卡上一定要同時有「方案」與「改訊號設定」兩條路。
+// 只寫「6／6」的話，使用者既不知道可以去看方案，也不知道可以關掉舊的空出格子。
+// 進階訊號三階同為 6 條（migrate_billing_tiers.sql），所以 nextPlanFor("alert_rules")
+// 通常是 null——那時候句子不可以承諾「升級就有更多條」，只能指路去關掉或刪掉。
+
+// 進階訊號還剩幾條（null＝方案狀態還沒載到，不知道）。面板那一套數 ruleNudge.rules、
+// 助手手上是 alertRules，取小的那個：哪一份先滿都算滿。
+function aiRuleRoom() {
+  const lim = planLimitOf("alert_rules");
+  if (lim == null) return null;
+  return Math.max(0, Math.min(lim - (alertRules || []).length, ruleRoomLeft()));
+}
+function aiRuleFull() { const room = aiRuleRoom(); return room !== null && room <= 0; }
+
+// 「方案」那顆鍵：有更貴而且額度更大的方案就直接指到那一階（limitPromptHtml 的升級鍵同一套參數）
+function aiPlanBtn(kind) {
+  const next = nextPlanFor(kind);
+  return next
+    ? { label: "升級方案 ›", act: "open", data: { plan: true, focus: kind, planCode: next.code } }
+    : { label: "看方案 ›", act: "open", data: { plan: true, focus: kind } };
+}
+// 「改設定」那顆鍵：進階訊號開面板（在那裡關掉或刪掉），自選股回設定頁
+function aiManageBtn(kind) {
+  return kind === "watchlist"
+    ? { label: "管理自選股 ›", act: "open", data: { tab: "watch" } }
+    : { label: "改訊號設定 ›", act: "open", data: { rules: true } };
+}
+// bare＝卡上已經寫了是哪一種額度（頭銜那一行），副標就不要再重複「進階訊號」四個字
+function aiLimitLabel(kind, bare) {
+  const what = bare ? "" : kind === "watchlist" ? "自選股" : "進階訊號";
+  const unit = kind === "watchlist" ? "檔" : "條";
   const lim = planLimitOf(kind);
-  return { text: `${what}已達方案上限${lim != null ? `（${lim}）` : ""}。`, failed: true,
-           actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] };
+  return `${what}已達方案上限${lim != null ? `（${lim} ${unit}）` : ""}`;
+}
+// 出路那一句。不含「已達上限」四個字：副標已經寫了，內文不重複講
+function aiLimitWayOut(kind) {
+  const what = kind === "watchlist" ? "自選股" : "進階訊號";
+  const unit = kind === "watchlist" ? "檔" : "條";
+  const free = kind === "watchlist" ? "移除用不到的" : "在進階訊號裡關掉或刪掉用不到的";
+  const next = nextPlanFor(kind);
+  const more = next ? next[PLAN_LIMIT_FIELD[kind]] : null;
+  return next && more != null
+    ? `${next.name} NT$${next.price_twd}／月可放 ${more} ${unit}；也可以${free}，空出格子。`
+    : `各方案的${what}額度都一樣，${free}就能空出格子。`;
+}
+function aiLimitCard(kind) {
+  trackActivity("limit_hint", { kind, next: (nextPlanFor(kind) || {}).code || "", where: "assistant" });
+  return { text: `${aiLimitLabel(kind)}。${aiLimitWayOut(kind)}`, failed: true,
+           actions: [aiPlanBtn(kind), aiManageBtn(kind)] };
 }
 
 // ── 寫入類共用 ──────────────────────────────────────────────────
@@ -20029,7 +20074,7 @@ function aiRefocus() {
 
 // 「去那一頁」鍵：字卡、分頁、方案、基礎訊號面板、進階訊號、持股——都是既有的入口
 function aiOpen(d) {
-  if (d.plan) { openPlanModal(); return; }
+  if (d.plan) { openPlanModal(d.focus || null, d.planCode || null); return; }   // focus／planCode＝額度滿了那張卡要指到哪一階（第二十節）
   if (d.rules) { openRulesModal(); if (d.prefill) aiPrefillRuleEditor(d.prefill); return; }
   if (d.events) { openEventsPanel(String(d.events)); return; }
   if (d.score) { openScoreDetail(String(d.score)); return; }
@@ -20723,10 +20768,15 @@ const ASSISTANT_ACTIONS = {
       });
     }
     if (!p) { aiNav(() => openPlanModal()); return { text: "已打開方案與用量。" }; }
+    const room = aiRuleRoom();
+    const full = room !== null && room <= 0;
+    const planBtn = { label: "看方案與升級 ›", act: "open", data: { plan: true } };
     return { head: "方案與用量", sub: p.name || planTierLabel(),
              rows: [{ label: "自選股", value: aiWatchUsage(), note: "含好友分享", act: "open", data: { tab: "watch" } },
-                    { label: "進階訊號", value: `${(alertRules || []).length}／${p.rule_limit ?? "—"}`, note: "", act: "open", data: { rules: true } }],
-             actions: [{ label: "看方案與升級 ›", act: "open", data: { plan: true } }] };
+                    { label: "進階訊號", value: `${(alertRules || []).length}／${p.rule_limit ?? "—"}`,
+                      note: room === null ? "" : full ? "已達上限" : `還能設 ${room} 條`, act: "open", data: { rules: true } }],
+             text: full ? aiLimitWayOut("alert_rules") : "",
+             actions: full ? [planBtn, aiManageBtn("alert_rules")] : [planBtn] };
   },
   assistantRules(slots) {
     const rules = alertRules || [];
@@ -20772,12 +20822,17 @@ const ASSISTANT_ACTIONS = {
         },
       });
     }
-    if (!rules.length) return { text: "還沒有進階訊號。", actions: [rulesBtn] };
+    // 「我有哪些進階訊號」「還能設幾條」：副標寫還剩幾條，滿了就寫上限＋出路（第二十節）
+    const room = aiRuleRoom();
+    const full = room !== null && room <= 0;
+    if (!rules.length) return full ? aiLimitCard("alert_rules") : { text: "還沒有進階訊號。", actions: [rulesBtn] };
     const rows = rules.slice(0, 10).map(r => ({
       label: r.name || describeCondition((r.conditions || [])[0]), value: r.enabled ? "開" : "關",
       note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股", act: "open", data: { rules: true } }));
-    return { head: `進階訊號 ${rules.length}／${planLimitOf("alert_rules") ?? "—"}`, rows,
-             actions: [{ label: "打開進階訊號 ›", act: "open", data: { rules: true } }] };
+    return { head: `進階訊號 ${rules.length}／${planLimitOf("alert_rules") ?? "—"}`,
+             sub: room === null ? "" : full ? aiLimitLabel("alert_rules", true) : `還能設 ${room} 條`,
+             rows, text: full ? aiLimitWayOut("alert_rules") : "",
+             actions: full ? [aiManageBtn("alert_rules"), aiPlanBtn("alert_rules")] : [rulesBtn] };
   },
   assistantInbox() {
     const today = (inboxRows || []).filter(r => isToday(r.sent_at));
@@ -21042,8 +21097,16 @@ const ASSISTANT_ACTIONS = {
     if (slots.list) {   // 「有哪些訊號可以設定」：列出基礎訊號（每一種開了幾檔）＋進階訊號入口（第十六節，Howard 實際問的）
       const all = watchlistRows || [];
       const rows = ALERT_FIELDS.map(f => ({ label: aiFieldLabel(f), value: all.length ? `${all.filter(r => !!r[f]).length}／${all.length} 檔開` : "還沒有自選股", note: "", act: "open", data: { alert: ALERT_SCOPE_ALL } }));
-      return { head: `基礎訊號 ${ALERT_FIELDS.length} 種`, sub: "每一檔可以個別開關；均線、法人、跳空這類條件自己組的是進階訊號", rows,
-               actions: [{ label: "基礎訊號面板 ›", act: "open", data: { alert: ALERT_SCOPE_ALL } }, { label: "進階訊號 ›", act: "open", data: { rules: true } }] };
+      const lim = planLimitOf("alert_rules");
+      const room = aiRuleRoom();
+      const full = room !== null && room <= 0;
+      const advBtn = { label: `進階訊號${lim != null ? ` ${(alertRules || []).length}／${lim}` : ""} ›`, act: "open", data: { rules: true } };
+      const basicBtn = { label: "基礎訊號面板 ›", act: "open", data: { alert: ALERT_SCOPE_ALL } };
+      return { head: `基礎訊號 ${ALERT_FIELDS.length} 種`,
+               sub: "每一檔可以個別開關；均線、法人、跳空這類條件自己組的是進階訊號"
+                    + (room === null ? "" : full ? `（進階訊號已達上限 ${lim} 條）` : `（進階訊號還能設 ${room} 條）`),
+               rows, text: full ? aiLimitWayOut("alert_rules") : "",
+               actions: full ? [advBtn, aiPlanBtn("alert_rules")] : [basicBtn, advBtn] };
     }
     const field = slots.basic_field;
     const on = slots.on;
