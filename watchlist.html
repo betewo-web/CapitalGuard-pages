@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="383">
+  <meta name="app-version" content="384">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=383" rel="stylesheet">
+  <link href="watchlist.css?v=384" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1396,12 +1396,6 @@
           <div class="askai-targets" id="askai-targets"></div>
           <button type="button" class="btn btn-link w-100 askai-back" onclick="askAiStep('go')">取消</button>
         </div>
-        <div class="askai-step" id="askai-paste" style="display:none">
-          <p class="askai-paste-tip">請自行在輸入窗長按，並且貼上圖片</p>
-          <p class="askai-step-sub" id="askai-paste-sub"></p>
-          <button type="button" class="btn btn-primary w-100 askai-go" id="askai-open" onclick="askAiGo()">複製並開啟</button>
-          <button type="button" class="btn btn-link w-100 askai-back" onclick="askAiStep('pick')">換一個 AI</button>
-        </div>
         <div id="askai-plan" class="mt-2" style="display:none">
           <button type="button" class="btn btn-outline-light w-100" onclick="openPlanModal('kline_enabled')">看方案</button>
         </div>
@@ -1409,11 +1403,23 @@
           <li>按下去先選 AI（ChatGPT、Gemini、Perplexity、Claude），再確認一次才會打開。</li>
           <li>K 線圖進剪貼簿、你選的那個 AI 打開（有裝 App 會開 App，否則開網頁）。</li>
           <li>到它的輸入框<b>貼上</b>（手機長按 → 貼上，電腦 Ctrl+V），按送出。</li>
+          <li><b>Perplexity 的輸入框不吃貼上</b>：選它的話圖會存到裝置，用迴紋針（＋）附上。</li>
           <li><b>還沒登入那個 AI</b>：它會先要你登入（或註冊），登入後回來再按一次。</li>
           <li>回答是那家 AI 的服務，不是本服務提供的建議；圖上只有公開市場資料。</li>
         </ul>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- 第三步是獨立視窗（Howard 2026-10-18 晚）：疊在「問 AI」面板上面（z-index 2000，與付款結果同一招），
+     使用者按下的那一下就是複製圖＋開 AI 的那一次點擊（iOS 要的使用者動作）。 -->
+<div class="askai-dialog" id="askai-paste-box" hidden>
+  <div class="askai-dialog-card" role="dialog" aria-modal="true" aria-labelledby="askai-paste-tip">
+    <p class="askai-paste-tip" id="askai-paste-tip">請自行在輸入窗長按，並且貼上圖片</p>
+    <p class="askai-step-sub" id="askai-paste-sub"></p>
+    <button type="button" class="btn btn-primary w-100 askai-go" id="askai-open" onclick="askAiGo()">確認，開啟</button>
+    <button type="button" class="btn btn-link w-100 askai-back" onclick="askAiPasteClose()">取消，換一個 AI</button>
   </div>
 </div>
 
@@ -8969,11 +8975,13 @@ function homeTileHtml(r) {
 const ASK_AI_PROMPT = "股票分析";
 // q＝網址能不能把「股票分析」先打好。Gemini 的網頁版不吃查詢字串，那一個只開首頁、面板上明講要自己打。
 // 手機上有裝那家 App 的會被系統接去 App（與原本開 ChatGPT 同一個行為）。
+// paste＝那個 AI 的輸入框吃不吃「貼上圖片」。Perplexity 不吃（Howard 2026-10-18 實測），
+// 所以那一個改走存檔＋迴紋針附上，選單上也先講。
 const ASK_AI_TARGETS = [
-  { key: "chatgpt",    name: "ChatGPT",    owner: "OpenAI",     url: "https://chatgpt.com/",          q: "q" },
-  { key: "gemini",     name: "Gemini",     owner: "Google",     url: "https://gemini.google.com/app", q: "" },
-  { key: "perplexity", name: "Perplexity", owner: "Perplexity AI", url: "https://www.perplexity.ai/", q: "q" },
-  { key: "claude",     name: "Claude",     owner: "Anthropic",  url: "https://claude.ai/new",         q: "q" },
+  { key: "chatgpt",    name: "ChatGPT",    owner: "OpenAI",        url: "https://chatgpt.com/",          q: "q", paste: true },
+  { key: "gemini",     name: "Gemini",     owner: "Google",        url: "https://gemini.google.com/app", q: "",  paste: true },
+  { key: "perplexity", name: "Perplexity", owner: "Perplexity AI", url: "https://www.perplexity.ai/",    q: "q", paste: false },
+  { key: "claude",     name: "Claude",     owner: "Anthropic",     url: "https://claude.ai/new",         q: "q", paste: true },
 ];
 const ASK_AI_IMG = { w: 1080, h: 720, head: 64, foot: 40, scale: 2, bg: "#0b0b13" };
 let _askAi = { sid: "", file: null, url: "", target: "", gen: 0 };
@@ -8981,9 +8989,9 @@ let _askAi = { sid: "", file: null, url: "", target: "", gen: 0 };
 function askAiTarget(key) { return ASK_AI_TARGETS.find(t => t.key === key) || ASK_AI_TARGETS[0]; }
 function askAiUrl(t) { return t.q ? `${t.url}?${t.q}=${encodeURIComponent(ASK_AI_PROMPT)}` : t.url; }
 
-// 三步換頁：go（那顆鍵）→ pick（選 AI）→ paste（貼上提醒＋確認）
+// 面板裡的兩步換頁：go（那顆鍵）→ pick（選 AI）。第三步是獨立視窗（askai-paste-box）。
 function askAiStep(step) {
-  const ids = { go: "askai-go", pick: "askai-pick", paste: "askai-paste" };
+  const ids = { go: "askai-go", pick: "askai-pick" };
   for (const k of Object.keys(ids)) {
     const el = document.getElementById(ids[k]);
     if (el) el.style.display = k === step ? "" : "none";
@@ -8991,24 +8999,37 @@ function askAiStep(step) {
   if (step === "pick") {
     const box = document.getElementById("askai-targets");
     if (box) box.innerHTML = ASK_AI_TARGETS.map(t => `<button type="button" class="btn btn-outline-light askai-target"`
-      + ` onclick="askAiChoose('${jsAttr(t.key)}')"><b>${escapeHtml(t.name)}</b><i>${escapeHtml(t.owner)}</i></button>`).join("");
+      + ` onclick="askAiChoose('${jsAttr(t.key)}')"><b>${escapeHtml(t.name)}</b><i>${escapeHtml(t.owner)}</i>`
+      + `${t.paste ? "" : "<em>要用附加檔案</em>"}</button>`).join("");
   }
 }
 
-// 選好了：第三步把那個 AI 的名字寫進去（要打開誰、會先打好字嗎、沒登入會怎樣）
+function askAiPasteClose() {
+  const box = document.getElementById("askai-paste-box");
+  if (box) box.hidden = true;
+}
+
+// 選好了：跳出第三步那個獨立視窗，字依那個 AI 而不同（吃不吃貼上、會不會先打好字）
 function askAiChoose(key) {
   const t = askAiTarget(key);
   _askAi.target = t.key;
+  const tip = document.getElementById("askai-paste-tip");
+  if (tip) tip.textContent = t.paste
+    ? "請自行在輸入窗長按，並且貼上圖片"
+    : `請自行在 ${t.name} 的輸入框按迴紋針（＋），把剛存下來的圖片附上`;
   const open = document.getElementById("askai-open");
-  if (open) open.textContent = `複製並開啟 ${t.name}`;
+  if (open) open.textContent = `確認，開啟 ${t.name}`;
   const sub = document.getElementById("askai-paste-sub");
   if (sub) {
-    sub.textContent = `按下去：K 線圖進剪貼簿、${t.name} 打開（有裝 App 會開 App）。`
-      + (t.q ? `「${ASK_AI_PROMPT}」會先打好，` : `${t.name} 的網頁沒辦法先打好字，自己打一句，`)
-      + `貼上圖片再按送出。還沒登入 ${t.name} 的話，它會先要你登入。`;
+    sub.textContent = (t.paste ? `按下去：K 線圖進剪貼簿、${t.name} 打開（有裝 App 會開 App）。`
+                               : `按下去：K 線圖存到你的裝置、${t.name} 打開（${t.name} 的輸入框不吃貼上）。`)
+      + (t.q ? `「${ASK_AI_PROMPT}」會先打好。` : `${t.name} 的網頁沒辦法先打好字，自己打一句。`)
+      + `還沒登入 ${t.name} 的話，它會先要你登入。`;
   }
+  const box = document.getElementById("askai-paste-box");
+  if (box) box.hidden = false;
+  if (open) open.focus();
   trackActivity("ask_ai_pick", { stock: _askAi.sid, ai: t.key });
-  askAiStep("paste");
 }
 
 function openAskAi(sid) {
@@ -9050,6 +9071,7 @@ function _askAiReset() {
   if (_askAi.url) URL.revokeObjectURL(_askAi.url);   // blob 不收會一直佔記憶體
   _askAi = { sid: "", file: null, url: "", target: "", gen: _askAi.gen + 1 };
   askAiStep("go");   // 下次打開一定從第一步開始
+  askAiPasteClose();
 }
 
 // K 線資料與字卡同一條路：共享檔的分片，沒有就 FinMind 現抓（fetchWatchlistFinMindStock）
@@ -9125,6 +9147,16 @@ function askAiGo() {
   if (!_askAi.file && !_askAi.url) return;
   const t = askAiTarget(_askAi.target);
   const note = document.getElementById("askai-note");
+  askAiPasteClose();
+  // 輸入框不吃貼上的（Perplexity）：開網頁＋把圖存到裝置，請他用迴紋針附上。
+  // 兩件事一樣在這一次點擊裡同步做完（iOS 會擋非同步等待之後的，所以這支不能有 async）。
+  if (!t.paste) {
+    window.open(askAiUrl(t), "_blank", "noopener");
+    askAiSave();
+    trackActivity("ask_ai", { stock: _askAi.sid, via: "download", ai: t.key });
+    note.textContent = `圖已存到你的裝置、${t.name} 已打開：在它的輸入框按迴紋針（＋）把圖附上，再按送出。`;
+    return;
+  }
   let copy;
   try {
     copy = (_askAi.file && navigator.clipboard && window.ClipboardItem)

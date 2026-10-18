@@ -5165,6 +5165,14 @@ select.fr-input { width: 100%; }
 .askai-paste-tip { font-size: 1.02rem; font-weight: 700; line-height: 1.5; margin: 0;
 	padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); }
 .askai-back { color: var(--text-muted); font-size: 0.84rem; margin-top: 6px; text-decoration: none; }
+.askai-target em { font-style: normal; font-size: 0.68rem; color: var(--text-muted); }
+/* 第三步的獨立視窗：疊在「問 AI」面板上面。不用 Bootstrap 的 modal 疊 modal
+   （Bootstrap 5 自己說不支援），走付款結果那一招：自己的 fixed 全屏＋高 z-index。 */
+.askai-dialog { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center;
+	padding: 1.2rem; background: rgba(3, 6, 14, 0.72); backdrop-filter: blur(3px); }
+.askai-dialog[hidden] { display: none; }
+.askai-dialog-card { width: min(420px, 100%); background: rgba(12, 18, 36, 0.98); border: 1px solid var(--border);
+	border-radius: 14px; padding: 1.1rem; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); }
 
 /* 「設定／分享」視窗的兩顆大按鈕：一行標題＋一行說明，整塊可點 */
 .sa-btn {
