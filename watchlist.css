@@ -2052,6 +2052,13 @@ body.modal-blocking .modal-backdrop.show {
 	box-shadow: 0 2px 8px rgba(139, 124, 255, 0.35);
 }
 
+/* 「股票」頁暫時只呈現「盤中 → 個股」那一塊（2026-10-19 Howard）：這一條分頁列與
+   個股／市場強度／市場訊號那一排都不顯示。旗標是 watchlist.html 的 HOME_SIMPLE_ONLY，
+   開機時掛上 <html class="home-simple-only">；markup 與這兩組樣式全部留著，旗標關掉就回來。
+   寫在 CSS 而不是逐個元素寫 style：分頁列在三個 view 裡各有一份。 */
+html.home-simple-only .home-tabs,
+html.home-simple-only #home-filter { display: none !important; }
+
 /* ── 助手分頁（ASSISTANT.md 第七節，2026-10-16）──────────────────────────
    對話在上、輸入列貼著底部導覽。五種卡片一種決策一張：答案（資料列＋空心鍵）、確認（金色主鍵）、
    反問（籤）、固定句（灰底沒標題）、說明（首次進來）。色彩照 color-vocabulary：紫＝品牌（選中分頁、

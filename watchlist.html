@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="388">
+  <meta name="app-version" content="389">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=388" rel="stylesheet">
+  <link href="watchlist.css?v=389" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2140,6 +2140,22 @@ const ICON_AI_SEND = _svg('<path d="M8 13.5V3"/><path d="M3.5 7.5 8 3l4.5 4.5"/>
 // 底部導覽只有「股票」一格（2026-10-17 從「首頁」改名），三頁都算它亮著（HOME_GROUP）
 const APP_TABS = ["home", "scores", "inbox", "watch", "post", "friends", "ai"];
 const HOME_GROUP = ["home", "post", "watch"];   // 助手（ai）2026-10-16 曾是第四分頁，10-17 晚改成底部導覽最左邊那一格
+// 「股票」頁暫時只呈現「盤中 → 個股」那一塊（2026-10-19 Howard）：
+//   · 盤中／盤後／設定那一條分頁列（.home-tabs，三個 view 各一份）不顯示
+//   · 個股／市場強度／市場訊號那一排（#home-filter）不顯示，個股清單直接攤在頁面上
+//   · 市場強度與市場訊號兩區因此永遠不開（_marketViewOpen 一直是 false，連那一份 payload 都不去拉）
+// **暫時**：三頁的 markup、那兩區、各自的渲染與測試全部留著，這個旗標改回 false 就整組回來。
+// 隱藏寫在 CSS（開機時掛上 <html class="home-simple-only">，見 watchlist.css）而不是逐個元素
+// 寫 style——分頁列在三個 view 裡各有一份，而且主畫面要等登入完才顯示，不會先閃一下再收起來。
+// 連帶三件事：
+//   ① homeFilter 一律當「個股」，本機記著的那一格不覆蓋（旗標關掉就回到他原本選的）
+//   ② 開 App 時 hash 停在 #post／#watch 的人回到盤中頁——那兩頁現在沒有分頁列可以離開
+//      （通知指定的分頁照舊，見 bootTab）
+//   ③ 盤後與設定兩頁沒有拆掉：「＋ 新增自選股」仍然會過去，回來按底部導覽的「股票」
+// 用 let 不是 const：那兩格的煙霧測試（preview/smoke_market_strength.py）要先把它關掉，
+// 才跑得到那一格的內容——它釘的是那兩格本身，不是這裡的關法。程式裡沒有別處寫它。
+let HOME_SIMPLE_ONLY = true;
+if (HOME_SIMPLE_ONLY) document.documentElement.classList.add("home-simple-only");
 let currentTab = null;
 let inboxRows = [];             // alert_history rows（sent_at desc，近 INBOX_HISTORY_DAYS 天）
 const INBOX_HISTORY_DAYS = 30;  // 通知只抓這麼多天：首頁近 10 個交易日的格子要數得到規則命中與自訂價位
@@ -2202,6 +2218,7 @@ const HOME_FILTER_EMPTY = {
 let postNewsExpanded = false;
 
 let homeFilter = (() => {
+  if (HOME_SIMPLE_ONLY) return "mine";   // 那一排不顯示（上面的旗標）：market／signals 進不來
   try {
     const v = localStorage.getItem(HOME_FILTER_KEY);
     if (HOME_FILTERS.includes(v)) return v;
@@ -4965,7 +4982,10 @@ async function showMain() {
   const notifTab = APP_TABS.includes(urlTab) ? urlTab
                  : (pendingTabFocus && Date.now() - _pendingTabFocusAt <= 60000) ? pendingTabFocus
                  : null;
-  const bootTab = notifTab || (APP_TABS.includes(hashTab) ? hashTab : "home");
+  const wantTab = notifTab || (APP_TABS.includes(hashTab) ? hashTab : "home");
+  // 分頁列不顯示時（HOME_SIMPLE_ONLY）上次停在盤後／設定的人回到盤中頁：那兩頁現在
+  // 只進得去（「＋ 新增自選股」）、沒有分頁列出得來。通知指定的分頁照舊（notifTab 優先）。
+  const bootTab = (HOME_SIMPLE_ONLY && !notifTab && HOME_GROUP.includes(wantTab)) ? "home" : wantTab;
   pendingTabFocus = null;
   if (urlTab) {
     const rest = new URLSearchParams(location.search);
@@ -9539,6 +9559,9 @@ function syncAppFontSize() {
 // 首頁「盤中」那一排切換要看哪一種（自選／市場／好友分享）。埋點名稱沿用 home_holdings_filter：
 // 改了名，admin 儀表板上以前的資料就對不到標籤。內容從 {on} 換成 {mode}——選了哪一種。
 function setHomeFilter(mode) {
+  // 那一排不顯示時（HOME_SIMPLE_ONLY）這支不動作：切過去就沒有任何按鈕切得回來。
+  // 網址、助手的鍵、別處的捷徑都叫得到它，所以擋在這裡，不是只擋畫面上那三顆。
+  if (HOME_SIMPLE_ONLY) return;
   homeFilter = HOME_FILTERS.includes(mode) ? mode : "mine";
   try { localStorage.setItem(HOME_FILTER_KEY, homeFilter); } catch {}
   trackActivity("home_holdings_filter", { mode: homeFilter });
@@ -19917,9 +19940,23 @@ function aiUserHtml(text) {
   return `<div class="ai-msg is-user">${escapeHtml(text)}</div>`;
 }
 
+// 市場強度／市場訊號那兩格暫時不顯示（HOME_SIMPLE_ONLY）：指過去的鍵與可點的列會變成
+// 按了沒反應的死路，在這裡一次濾掉——助手的資料回答本身照舊（卡上的數字讀的是
+// market_strength 那一份 payload，不是那兩格的畫面）。
+function aiStripMarketNav(c) {
+  const isNav = d => !!d && (d.filter === "market" || d.filter === "signals");
+  if (!c) return c;
+  const out = Object.assign({}, c);
+  if (c.rows) out.rows = c.rows.map(r => isNav(r.data) ? Object.assign({}, r, { act: null, data: null }) : r);
+  if (c.actions) out.actions = c.actions.filter(a => !isNav(a.data));
+  if (c.chips) out.chips = c.chips.filter(ch => !isNav(ch.data));
+  return out;
+}
+
 // 卡片：{head, sub, rows:[{label, value, note, html, act, data}], text, bodyHtml, chips, actions, meta, muted}
 // 列帶 act 就能點（第十五節 B3）：列出來的那一檔／那一條本身就是入口，與籤、鍵走同一個 listener
 function aiCardHtml(c) {
+  if (HOME_SIMPLE_ONLY) c = aiStripMarketNav(c);
   const head = c.head ? `<div class="ai-card-head">${ICON_AI}${escapeHtml(c.head)}</div>` : "";
   const sub = c.sub ? `<div class="ai-card-sub">${escapeHtml(c.sub)}</div>` : "";
   const rows = (c.rows || []).map(r => {
@@ -20825,7 +20862,11 @@ const ASSISTANT_ACTIONS = {
   },
   async assistantMarketStrength(slots) {
     const p = await aiMarketPayload();
-    if (!p) { aiNav(() => switchTab("home")); aiNav(() => setHomeFilter("market")); return { text: "市場強度資料還拿不到，已打開那一格。" }; }
+    if (!p) {
+      // 那一格暫時不顯示時（HOME_SIMPLE_ONLY）不跳頁、也不能說「已打開」
+      if (!HOME_SIMPLE_ONLY) { aiNav(() => switchTab("home")); aiNav(() => setHomeFilter("market")); }
+      return { text: HOME_SIMPLE_ONLY ? "市場強度資料還拿不到。" : "市場強度資料還拿不到，已打開那一格。" };
+    }
     const v = msView(p);
     let inds = (v.industries || []).slice();
     if (slots.sector) {
@@ -20843,7 +20884,12 @@ const ASSISTANT_ACTIONS = {
     const pulse = (p && p.pulse) || {};
     const kinds = pulse.kinds || [];
     const goBtn = { label: "打開市場訊號 ›", act: "open", data: { filter: "signals" } };
-    if (!kinds.length && !slots.kind) { aiNav(() => switchTab("home")); aiNav(() => setHomeFilter("signals")); return { text: "今天還沒有市場訊號統計（開盤後每分鐘累積），已打開那一格。" }; }
+    if (!kinds.length && !slots.kind) {
+      // 同上：那一格暫時不顯示（HOME_SIMPLE_ONLY）
+      if (!HOME_SIMPLE_ONLY) { aiNav(() => switchTab("home")); aiNav(() => setHomeFilter("signals")); }
+      return { text: HOME_SIMPLE_ONLY ? "今天還沒有市場訊號統計（開盤後每分鐘累積）。"
+                                      : "今天還沒有市場訊號統計（開盤後每分鐘累積），已打開那一格。" };
+    }
     const since = aiPulseSince(pulse);
     if (slots.kind) {
       // 每一列就是一檔的字卡：名稱／哪一種訊號／幾點・來源（Howard 2026-10-18：回的要是個股字卡，不再給「打開市場訊號」那顆鍵）。
