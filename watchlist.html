@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="377">
+  <meta name="app-version" content="378">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=377" rel="stylesheet">
+  <link href="watchlist.css?v=378" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -20283,6 +20283,27 @@ function aiTodaySignalsOf(today, sid) {
   return out.sort((a, b) => a.min - b.min);
 }
 const aiMm = m => `${9 + Math.floor(Number(m) / 60)}:${String(Number(m) % 60).padStart(2, "0")}`;
+// 名單裡每一筆的幅度（索引的第三格；雷達故事列從訊號文字裡讀）：跳空幾 %、漲幅幾 %、量能幾倍。
+// 「跳空上漲 3% 以上」就靠它篩；寫在列上時用不帶門檻的短名（AUTO_SIGNAL_LABELS 的「向上跳空 1%」是門檻不是幅度）
+const AI_KIND_BASE = { gap_up: "向上跳空", gap_down: "向下跳空", change_pct_above: "漲幅", change_pct_below: "跌幅",
+                       "volume_vs_ma:above": "量能", "volume_vs_ma:below": "量縮", break_prior_high: "突破 20 日高",
+                       break_prior_low: "跌破 20 日低", break_52w_high: "創 52 週新高", break_52w_low: "創 52 週新低" };
+const AI_RATIO_KINDS = new Set(["volume_vs_ma:above", "volume_vs_ma:below"]);
+function aiMagText(kind, mag) {
+  if (mag == null || !Number.isFinite(Number(mag)) || !AI_KIND_BASE[kind]) return aiKindLabel(kind);
+  const v = Number(mag);
+  return AI_RATIO_KINDS.has(kind) ? `${AI_KIND_BASE[kind]} ${v.toFixed(1)} 倍` : `${AI_KIND_BASE[kind]} ${v.toFixed(2)}%`;
+}
+function aiEntryMag(e) {   // 雷達故事列：「向上跳空 1.34%（門檻 1%）」「漲幅 +5.19%」「量能達 20 日均量 2.3 倍」
+  const t = String((e && e.text) || "");
+  const m = AI_RATIO_KINDS.has(String(e && e.key)) ? t.match(/([0-9]+(?:\.[0-9]+)?)\s*倍/) : t.match(/([0-9]+(?:\.[0-9]+)?)\s*%/);
+  return m ? Math.abs(Number(m[1])) : null;
+}
+function aiPassesThreshold(kind, mag, minPct, minRatio) {
+  const need = AI_RATIO_KINDS.has(kind) ? minRatio : minPct;
+  if (!need) return true;
+  return mag != null && Number(mag) >= need;
+}
 // 問「○○的股票有哪些」沒說是全市場還是自選股就先問（Howard 2026-10-18）：句子裡有這些字才不問；籤帶 scope 回來
 const AI_SCOPE_MARKET_RE = /全市場|大盤|整個市場|市場上|所有股票|全部股票|台股|上市|上櫃/;
 const AI_SCOPE_MINE_RE = /自選|我的|持股|分享|好友/;
@@ -20526,18 +20547,26 @@ const ASSISTANT_ACTIONS = {
       const sids = aiSignalSids();
       const shared = new Set(sharedInSids());
       const mineSet = new Set(sids);
+      // 門檻（「3% 以上」「兩倍以上」）：名單裡有幅度的才篩得了；沒有幅度的那幾筆（舊名單）另外說
+      const minPct = Number(slots.min_pct) || 0, minRatio = Number(slots.min_ratio) || 0;
+      const thresholdTxt = minPct ? ` ${minPct}% 以上` : minRatio ? ` ${minRatio} 倍以上` : "";
       const mine = [];
       for (const s of sids) {
         const hit = aiTodayEntries(s).find(e => aiEntryKeys(e).some(k => wanted.includes(k)));
-        if (hit) mine.push({ sid: s, at: hit.at, what: String(hit.title || aiKindLabel(hit.key) || label) });
+        if (!hit) continue;
+        const mag = aiEntryMag(hit);
+        if (!aiPassesThreshold(hit.key, mag, minPct, minRatio)) continue;
+        mine.push({ sid: s, at: hit.at, what: mag != null && AI_KIND_BASE[hit.key] ? aiMagText(hit.key, mag) : String(hit.title || aiKindLabel(hit.key) || label) });
       }
       // 全市場的名單：market_today（整份，第十八節）優先；沒有就退回脈動 payload 裡的最後 60 筆
       const today = await aiMarketToday();
       const fullKinds = today && aiTodayIsCurrent(today) ? (today.kinds || {}) : null;
       const kindKeys = pulseKinds.length ? pulseKinds.map(k => k.k) : (fullKinds ? wanted.filter(k => fullKinds[k]) : []);
       const hitsOf = k => (fullKinds && fullKinds[k]) || ((kinds.find(x => x.k === k) || {}).hits) || [];
-      const marketHits = kindKeys.flatMap(k => hitsOf(k).map(h => ({ sid: String(h[0] || ""), min: Number(h[1]) || 0, what: aiKindLabel(k) })));
-      const mktN = mkt != null ? mkt : (fullKinds && marketHits.length ? new Set(marketHits.map(h => h.sid)).size : null);
+      const allHits = kindKeys.flatMap(k => hitsOf(k).map(h => ({ sid: String(h[0] || ""), min: Number(h[1]) || 0, mag: h[2] == null ? null : Number(h[2]), kind: k })));
+      const noMag = (minPct || minRatio) ? allHits.filter(h => h.mag == null).length : 0;
+      const marketHits = allHits.filter(h => aiPassesThreshold(h.kind, h.mag, minPct, minRatio)).map(h => ({ ...h, what: aiMagText(h.kind, h.mag) }));
+      const mktN = mkt != null ? mkt : (fullKinds && allHits.length ? new Set(allHits.map(h => h.sid)).size : null);
       // 問的是全市場：名單照時間（新的在前），自選股／好友分享的那幾檔標出來、點開停在盤中雷達；其餘停在 K 線。
       // 雷達裡有、索引裡沒有的（例如漲停這種內建訊號）接在後面
       const src = sid => (mineSet.has(sid) ? (shared.has(sid) ? "好友分享" : "自選股") : "全市場");
@@ -20549,14 +20578,15 @@ const ASSISTANT_ACTIONS = {
       const rows = list.slice(0, 12).map(h => ({ label: aiStockName(h.sid), value: h.what, note: h.note, act: "open", data: { sid: h.sid, tab: h.tab } }));
       const more = list.length - rows.length;
       const day = aiSessionDayTxt();
-      const noMarketList = mktN != null && !marketHits.length;   // 索引與脈動都還沒帶名單（monitor 重啟前）
-      const sub = [nearNote ? `${nearNote}（全市場 ${mktN} 檔）` : mktN != null ? `全市場 ${mktN} 檔${since ? `（${since}）` : ""}` : `市場脈動不統計${label}`,
+      const noMarketList = mktN != null && !allHits.length;   // 索引與脈動都還沒帶名單（monitor 重啟前）
+      const passed = thresholdTxt ? `，${thresholdTxt.trim()} ${new Set(marketHits.map(h => h.sid)).size} 檔` : "";
+      const sub = [nearNote ? `${nearNote}（全市場 ${mktN} 檔${passed}）` : mktN != null ? `全市場 ${mktN} 檔${passed}${since ? `（${since}）` : ""}` : `市場脈動不統計${label}`,
                    sids.length ? `自選股與好友分享的 ${mine.length} 檔` : ""].filter(Boolean).join("；");
-      const tail = noMarketList ? "全市場的名單從下一個交易日起才有。" : "";
-      const text = rows.length ? `${more > 0 ? `還有 ${more} 檔沒列出來。` : ""}${tail}` : `${day}自選股與好友分享的裡沒有${label}的。${tail}`;
+      const tail = (noMarketList ? "全市場的名單從下一個交易日起才有。" : "") + (noMag ? `另有 ${noMag} 檔的名單沒有幅度（舊資料），沒列。` : "");
+      const text = rows.length ? `${more > 0 ? `還有 ${more} 檔沒列出來。` : ""}${tail}` : `${day}沒有${label}${thresholdTxt}的。${tail}`;
       const diag = aiSignalDiag(sids, wanted, kinds);
       if (!mine.length) trackActivity("assistant_diag", { kind: String(slots.kind), diag });   // 自選股一檔都沒列：把手機的狀態記下來，遠端看得到
-      return { head: `${day}${label}的股票`, sub, rows, text, diag: aiIsAdmin ? diag : "" };
+      return { head: `${day}${label}${thresholdTxt}的股票`, sub, rows, text, diag: aiIsAdmin ? diag : "" };
     }
     const rows = kinds.slice(0, 8).map(k => ({ label: aiKindLabel(k.k), value: `${Number(k.n)} 檔`, note: SIGNAL_ABBR[k.k] || "", act: "open", data: { filter: "signals" } }));
     return { head: "今天的市場訊號", sub: [`上漲訊號 ${Number(pulse.total_up || 0)}・下跌訊號 ${Number(pulse.total_down || 0)} 則`, since].filter(Boolean).join("｜"), rows, actions: [goBtn] };
