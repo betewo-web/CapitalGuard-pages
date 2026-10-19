@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="394">
+  <meta name="app-version" content="395">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=394" rel="stylesheet">
+  <link href="watchlist.css?v=395" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1421,6 +1421,12 @@
     <p class="askai-saved"><span class="askai-saved-ic" aria-hidden="true">✓</span><b id="askai-saved-text">K 線圖已自動儲存</b></p>
     <p class="askai-paste-tip" id="askai-paste-tip">請自行在輸入窗長按，並且貼上圖片</p>
     <p class="askai-step-sub" id="askai-paste-sub"></p>
+    <!-- 句子裡有個股時才出現（Howard 2026-10-19）：要不要順便把 K 線圖給它分析。
+         圖走存檔＋迴紋針、問題走剪貼簿——剪貼簿一次只貼得出一種，兩個通道才不會互相蓋掉。 -->
+    <div id="askai-chart" style="display:none">
+      <p class="askai-chart-ask" id="askai-chart-ask"></p>
+      <button type="button" class="btn btn-primary w-100 askai-go" id="askai-chart-go" onclick="askAiGoWithChart()" disabled>K 線圖準備中…</button>
+    </div>
     <button type="button" class="btn btn-primary w-100 askai-go" id="askai-open" onclick="askAiGo()">確認，開啟</button>
     <button type="button" class="btn btn-link w-100 askai-back" onclick="askAiPasteClose()">取消，換一個 AI</button>
   </div>
@@ -9031,6 +9037,8 @@ function askAiStep(step) {
 function askAiPasteClose() {
   const box = document.getElementById("askai-paste-box");
   if (box) box.hidden = true;
+  const chart = document.getElementById("askai-chart");
+  if (chart) chart.style.display = "none";
 }
 
 // 選好了：**在這一下**就把圖準備好（吃貼上的進剪貼簿、不吃的存到裝置），再跳出第三步那個獨立視窗。
@@ -9074,10 +9082,56 @@ function askAiHandoffPick(d) {
   lines("你的問題已自動複製", "請自行在輸入窗長按，並且貼上問題");
   copy.then(() => { _askAi.via = "copy"; })
       .catch(() => { _askAi.via = ""; lines("這個瀏覽器不讓網頁複製文字", `請自己把問題打進 ${t.name} 的輸入框`); });
+  askAiOfferChart(String(d.sid || ""), t);
   const box = document.getElementById("askai-paste-box");
   if (box) box.hidden = false;
   if (open) open.focus();
-  trackActivity("ask_ai_pick", { ai: t.key, kind: "text" });
+  trackActivity("ask_ai_pick", { ai: t.key, kind: "text", chart: isStockId(String(d.sid || "")) });
+}
+
+// 句子裡有個股時多問一句「要不要一起帶 K 線圖」。圖在這個當下就開始畫，
+// 按下去時已經準備好——存檔與 window.open 才能在同一次點擊裡同步做完（iOS）。
+// K 線是付費方案的功能，鎖住的帳號不給這個選項（與字卡同一道鎖）。
+function askAiOfferChart(sid, t) {
+  const box = document.getElementById("askai-chart");
+  const go = document.getElementById("askai-chart-go");
+  const ask = document.getElementById("askai-chart-ask");
+  if (!box || !go || !ask) return;
+  _askAi.sid = ""; _askAi.file = null; _askAi.url = "";
+  const open = document.getElementById("askai-open");
+  if (!isStockId(sid) || !planAllows("kline_enabled")) {
+    box.style.display = "none";
+    if (open) { open.className = "btn btn-primary w-100 askai-go"; open.textContent = `確認，開啟 ${t.name}`; }
+    return;
+  }
+  // 帶圖那顆才是主鍵；「只問問題」退成次要鍵（兩顆都亮金色看不出要選哪個）
+  if (open) { open.className = "btn btn-outline-light w-100 askai-go"; open.textContent = `只問問題，開啟 ${t.name}`; }
+  _askAi.sid = sid;
+  const name = aiStockName(sid);
+  ask.textContent = `要不要一起帶「${name} ${sid}」的日 K 線圖給它分析？圖會存到你的裝置，用迴紋針（＋）附上。`;
+  box.style.display = "";
+  go.disabled = true; go.textContent = "K 線圖準備中…";
+  const gen = ++_askAi.gen;
+  buildAskAiImage(sid).then(img => {
+    if (gen !== _askAi.gen || _askAi.sid !== sid) { URL.revokeObjectURL(img.url); return; }
+    _askAi.file = img.file; _askAi.url = img.url;
+    go.disabled = false; go.textContent = `帶 K 線圖一起問 ${t.name}`;
+  }).catch(() => {
+    if (gen !== _askAi.gen) return;
+    go.textContent = "K 線圖畫不出來";
+  });
+}
+
+// 「帶 K 線圖一起問」：圖存到裝置、問題已經在剪貼簿，開那個 AI。三件事都在這一次點擊裡。
+function askAiGoWithChart() {
+  if (!_askAi.url) return;
+  const t = askAiTarget(_askAi.target);
+  askAiPasteClose();
+  window.open(t.url, "_blank", "noopener");
+  askAiSave();
+  trackActivity("ask_ai_text", { ai: t.key, via: _askAi.via || "none", chart: true });
+  aiPushCard({ muted: true, text: `已打開 ${t.name}：到它的輸入框長按貼上你的問題，再用迴紋針（＋）把剛存下的 K 線圖附上，按送出。` });
+  renderAssistant();
 }
 
 // 把圖準備好，並把視窗上那三行寫成「現在真的是什麼狀況」：
@@ -20119,13 +20173,16 @@ function aiFlushNav() {
 // 交接卡：固定句＋四顆籤就好，**不再多一段說明**（Howard 2026-10-19：直接顯示外部 AI 按鈕即可）。
 // 「問題會複製起來、我們不代送也看不到回答」那幾句移到按下籤之後的那個視窗上講——
 // 在任何東西離開這個 App 之前還是會看到，只是不佔這張卡的版面。
-function aiHandoffCard(text, say) {
+function aiHandoffCard(text, say, sid) {
   const q = String(text || "").trim().slice(0, AI_MAX_CHARS);
   const base = String(say || AI_FALLBACK);
   if (!q) return { text: base, muted: true };
+  // 句子裡有個股就把代號帶進籤：按下去的視窗會多問一句「要不要一起帶 K 線圖」（Howard 2026-10-19）
+  const s = isStockId(String(sid || "")) ? String(sid) : "";
   return {
     text: base,
-    chips: ASK_AI_TARGETS.map(t => ({ label: `問 ${t.name}`, act: "ai", data: { ai: t.key, text: q } })),
+    chips: ASK_AI_TARGETS.map(t => ({ label: `問 ${t.name}`, act: "ai",
+                                      data: Object.assign({ ai: t.key, text: q }, s ? { sid: s } : {}) })),
   };
 }
 
@@ -20147,7 +20204,9 @@ function aiPausedSourceCard(condType, text, extra) {
 function aiNoData(card) {
   const q = String((_aiCurrent && _aiCurrent.text) || "").trim().slice(0, AI_MAX_CHARS);
   if (!q || !ASK_AI_TARGETS.length) return card;
-  const chips = ASK_AI_TARGETS.map(t => ({ label: `問 ${t.name}`, act: "ai", data: { ai: t.key, text: q } }));
+  const sid = String(((_aiCurrent && _aiCurrent.slots) || {}).stock || "");
+  const chips = ASK_AI_TARGETS.map(t => ({ label: `問 ${t.name}`, act: "ai",
+    data: Object.assign({ ai: t.key, text: q }, isStockId(sid) ? { sid } : {}) }));
   return Object.assign({}, card, { chips: (card.chips || []).concat(chips) });   // 只加籤，不加說明文字
 }
 
@@ -20420,7 +20479,7 @@ async function aiHandleResponse(r, text) {
     // 買賣建議那一句**我們還是不答**——卡上仍然是「本服務不提供買賣建議」，只是多給一條他自己的路；
     // 問題走剪貼簿、由他自己貼上，我們不代送也看不到回答（Howard 2026-10-18：答不出來的就引導給 AI）。
     // 只有分類器自己壞掉（r.code）不給這條路——那一句八成是我們做得到的，再試一次就好。
-    const card = !r.code ? aiHandoffCard(text, r.say) : { text: r.say || AI_FALLBACK, muted: true };
+    const card = !r.code ? aiHandoffCard(text, r.say, (r.slots || {}).stock) : { text: r.say || AI_FALLBACK, muted: true };
     aiPushCard(Object.assign(card, { meta, log_id: r.log_id }));
     return;
   }
@@ -21254,9 +21313,9 @@ const ASSISTANT_ACTIONS = {
   assistantHelp() { return { bodyHtml: aiIntroHtml(false).replace(/^<div class="ai-card[^>]*>|<\/div>$/g, ""), rawCard: true }; },
   // 拒答與範圍外：固定句照舊，後面接「交給你自己的 AI」的籤（第十七節）
   assistantRefuse(slots, args, opts) {
-    return aiHandoffCard(_aiCurrent.text, opts.say || "這個服務只整理與解釋公開資料，不提供買賣或進出場建議。");
+    return aiHandoffCard(_aiCurrent.text, opts.say || "這個服務只整理與解釋公開資料，不提供買賣或進出場建議。", slots.stock);
   },
-  assistantOutOfScope(slots, args, opts) { return aiHandoffCard(_aiCurrent.text, opts.say || AI_FALLBACK); },
+  assistantOutOfScope(slots, args, opts) { return aiHandoffCard(_aiCurrent.text, opts.say || AI_FALLBACK, slots.stock); },
   // ── 寫入類（Phase 3，第十四節 B）：填好 → 確認卡 → 既有的寫入函式 ─────────────
   // 「兩段合一張」：要寫的那一檔不在自選股時，確認卡直接寫「加入並…？」，主鍵一次做兩件事。
   assistantWatchAdd(slots) {

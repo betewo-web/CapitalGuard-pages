@@ -5179,6 +5179,8 @@ select.fr-input { width: 100%; }
 .askai-saved { display: flex; align-items: center; gap: 8px; margin: 0 0 10px;
 	font-size: 1.12rem; line-height: 1.4; color: var(--text-0); }
 .askai-saved b { font-weight: 700; }
+/* 交接視窗裡的「要不要一起帶 K 線圖」（2026-10-19）：問句淡、主鍵照常 */
+.askai-chart-ask { font-size: 0.86rem; color: var(--text-1); line-height: 1.55; margin: 12px 0 8px; }
 .askai-saved-ic { flex: 0 0 auto; width: 1.6rem; height: 1.6rem; border-radius: 50%;
 	display: flex; align-items: center; justify-content: center; font-size: 0.95rem; font-weight: 800;
 	background: var(--accent); color: #fff; }
