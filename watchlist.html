@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="396">
+  <meta name="app-version" content="397">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=396" rel="stylesheet">
+  <link href="watchlist.css?v=397" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9009,14 +9009,23 @@ function homeTileHtml(r) {
 // 那個 AI 的輸入框會留著它自己的草稿（v384 以前我們用 ?q= 幫他填過「股票分析」，ChatGPT 存起來了；
 // 他上一次貼進去沒送出的字也一樣）。同源政策下我們清不掉別的網站的輸入框，只能提醒一句。
 const ASK_AI_DRAFT_HINT = "輸入框如果還留著上一次的字，先清掉再貼。";
+// q＝網址帶得動使用者的問題（?q=…）。帶得動就不必貼字，順便蓋掉那家 AI 自己存的舊草稿——
+// 「打開前先清掉舊字」做不到（同源政策），但用新對話＋帶字可以得到一樣的結果（Howard 2026-10-19）。
+// paste＝輸入框吃不吃「貼上圖片」（Perplexity 不吃，要用迴紋針附檔）。
 const ASK_AI_TARGETS = [
-  { key: "chatgpt",    name: "ChatGPT",    owner: "OpenAI",        url: "https://chatgpt.com/",          paste: true },
-  { key: "gemini",     name: "Gemini",     owner: "Google",        url: "https://gemini.google.com/app", paste: true },
-  { key: "perplexity", name: "Perplexity", owner: "Perplexity AI", url: "https://www.perplexity.ai/",    paste: false },
-  { key: "claude",     name: "Claude",     owner: "Anthropic",     url: "https://claude.ai/new",         paste: true },
+  { key: "chatgpt",    name: "ChatGPT",    owner: "OpenAI",        url: "https://chatgpt.com/",          q: "q", paste: true },
+  { key: "gemini",     name: "Gemini",     owner: "Google",        url: "https://gemini.google.com/app", q: "",  paste: true },
+  { key: "perplexity", name: "Perplexity", owner: "Perplexity AI", url: "https://www.perplexity.ai/",    q: "q", paste: false },
+  { key: "claude",     name: "Claude",     owner: "Anthropic",     url: "https://claude.ai/new",         q: "q", paste: true },
 ];
+
+// 要開的網址：帶得動就把使用者的問題放進去（最多 200 字，AI_MAX_CHARS 擋過了）
+function askAiUrl(t, text) {
+  const q = String(text || "").trim();
+  return t.q && q ? `${t.url}?${t.q}=${encodeURIComponent(q)}` : t.url;
+}
 const ASK_AI_IMG = { w: 1080, h: 720, head: 64, foot: 40, scale: 2, bg: "#0b0b13" };
-let _askAi = { sid: "", file: null, url: "", target: "", via: "", kind: "kline", gen: 0 };
+let _askAi = { sid: "", file: null, url: "", target: "", via: "", kind: "kline", q: "", gen: 0 };
 
 function askAiTarget(key) { return ASK_AI_TARGETS.find(t => t.key === key) || ASK_AI_TARGETS[0]; }
 
@@ -9066,23 +9075,30 @@ function askAiHandoffPick(d) {
   _askAi.kind = "text"; _askAi.target = t.key; _askAi.via = "";
   const open = document.getElementById("askai-open");
   if (open) open.textContent = `確認，開啟 ${t.name}`;
-  const lines = (saved, how) => {
+  _askAi.q = q;
+  const lines = (saved, how, tail) => {
     const l1 = document.getElementById("askai-saved-text");
     const l2 = document.getElementById("askai-paste-tip");
     const l3 = document.getElementById("askai-paste-sub");
     if (l1) l1.textContent = saved;
     if (l2) l2.textContent = how;
-    if (l3) l3.textContent = `按「確認」會打開 ${t.name}（有裝 App 會開 App）。${ASK_AI_DRAFT_HINT}`
+    if (l3) l3.textContent = `按下面的鍵會打開 ${t.name}（有裝 App 會開 App）。${tail || ""}`
       + `本服務不會替你把問題送出去，也看不到它的回答；還沒登入 ${t.name} 的話，它會先要你登入。`;
   };
-  let copy;
-  try {
-    copy = (navigator.clipboard && navigator.clipboard.writeText)
-      ? navigator.clipboard.writeText(q) : Promise.reject(new Error("這個瀏覽器不讓網頁複製文字"));
-  } catch (e) { copy = Promise.reject(e); }
-  lines("你的問題已自動複製", "請自行在輸入窗長按，並且貼上問題");
-  copy.then(() => { _askAi.via = "copy"; })
-      .catch(() => { _askAi.via = ""; lines("這個瀏覽器不讓網頁複製文字", `請自己把問題打進 ${t.name} 的輸入框`); });
+  if (t.q) {
+    // 網址帶得動：問題直接進新對話，連貼都不用貼（舊草稿也被蓋掉了）
+    _askAi.via = "url";
+    lines(`你的問題會直接帶進 ${t.name}`, "不用貼上任何文字，按下面的鍵就好");
+  } else {
+    let copy;
+    try {
+      copy = (navigator.clipboard && navigator.clipboard.writeText)
+        ? navigator.clipboard.writeText(q) : Promise.reject(new Error("這個瀏覽器不讓網頁複製文字"));
+    } catch (e) { copy = Promise.reject(e); }
+    lines("你的問題已自動複製", "請自行在輸入窗長按，並且貼上問題", ASK_AI_DRAFT_HINT);
+    copy.then(() => { _askAi.via = "copy"; })
+        .catch(() => { _askAi.via = ""; lines("這個瀏覽器不讓網頁複製文字", `請自己把問題打進 ${t.name} 的輸入框`); });
+  }
   askAiOfferChart(String(d.sid || ""), t);
   const box = document.getElementById("askai-paste-box");
   if (box) box.hidden = false;
@@ -9109,14 +9125,18 @@ function askAiOfferChart(sid, t) {
   if (open) { open.className = "btn w-100 askai-go askai-alt"; open.textContent = `只問問題，開啟 ${t.name}`; }
   _askAi.sid = sid;
   const name = aiStockName(sid);
-  ask.textContent = `要不要一起帶「${name} ${sid}」的日 K 線圖給它分析？圖會存到你的裝置，用迴紋針（＋）附上。`;
+  // 圖沒辦法替他貼（同源政策）：能做到的極限是「問題走網址、剪貼簿空出來給圖」，只剩一個長按貼上
+  ask.textContent = t.paste
+    ? `想讓 ${t.name} 看「${name} ${sid}」的日 K 線圖？圖會進剪貼簿，${t.q ? "問題直接帶進去" : "問題也在剪貼簿"}——`
+      + "在它的輸入框長按貼上圖片就好。"
+    : `想讓 ${t.name} 看「${name} ${sid}」的日 K 線圖？${t.name} 的輸入框不吃貼上，圖會存到你的裝置，用迴紋針（＋）附上。`;
   box.style.display = "";
   go.disabled = true; go.textContent = "K 線圖準備中…";
   const gen = ++_askAi.gen;
   buildAskAiImage(sid).then(img => {
     if (gen !== _askAi.gen || _askAi.sid !== sid) { URL.revokeObjectURL(img.url); return; }
     _askAi.file = img.file; _askAi.url = img.url;
-    go.disabled = false; go.textContent = `帶 K 線圖一起問 ${t.name}`;
+    go.disabled = false; go.textContent = `讓 ${t.name} 看 K 線圖`;
   }).catch(() => {
     if (gen !== _askAi.gen) return;
     go.textContent = "K 線圖畫不出來";
@@ -9128,10 +9148,21 @@ function askAiGoWithChart() {
   if (!_askAi.url) return;
   const t = askAiTarget(_askAi.target);
   askAiPasteClose();
-  window.open(t.url, "_blank", "noopener");
-  askAiSave();
-  trackActivity("ask_ai_text", { ai: t.key, via: _askAi.via || "none", chart: true });
-  aiPushCard({ muted: true, text: `已打開 ${t.name}：到它的輸入框長按貼上你的問題，再用迴紋針（＋）把剛存下的 K 線圖附上，按送出。` });
+  // 剪貼簿這次給圖（問題走網址）：使用者只剩一個動作——長按貼上圖片。
+  // 「替他貼」做不到：網頁不能動另一個網站的輸入框（與不能清空舊草稿同一條限制）。
+  let how = "";
+  if (t.paste && _askAi.file && navigator.clipboard && window.ClipboardItem) {
+    try {
+      navigator.clipboard.write([new ClipboardItem({ "image/png": _askAi.file })]).catch(() => askAiSave());
+      how = "長按貼上 K 線圖";
+    } catch (e) { askAiSave(); how = "用迴紋針（＋）把剛存下的 K 線圖附上"; }
+  } else {
+    askAiSave();
+    how = "用迴紋針（＋）把剛存下的 K 線圖附上";
+  }
+  window.open(askAiUrl(t, _askAi.q), "_blank", "noopener");
+  trackActivity("ask_ai_text", { ai: t.key, via: t.q ? "url" : _askAi.via || "none", chart: true });
+  aiPushCard({ muted: true, text: `已打開 ${t.name}：${t.q ? "問題已經帶進去了" : "問題在剪貼簿"}，${how}，按送出。` });
   renderAssistant();
 }
 
@@ -9200,7 +9231,7 @@ function openAskAi(sid) {
 
 function _askAiReset() {
   if (_askAi.url) URL.revokeObjectURL(_askAi.url);   // blob 不收會一直佔記憶體
-  _askAi = { sid: "", file: null, url: "", target: "", via: "", kind: "kline", gen: _askAi.gen + 1 };
+  _askAi = { sid: "", file: null, url: "", target: "", via: "", kind: "kline", q: "", gen: _askAi.gen + 1 };
   askAiStep("go");   // 下次打開一定從第一步開始
   askAiPasteClose();
 }
@@ -9278,12 +9309,14 @@ function _askAiCompose(chartUrl, title, span) {
 function askAiGo() {
   const t = askAiTarget(_askAi.target);
   askAiPasteClose();
-  if (_askAi.kind === "text") {   // 助手交接：問題已經在剪貼簿，這一下只負責開那個 AI
-    window.open(t.url, "_blank", "noopener");
-    trackActivity("ask_ai_text", { ai: t.key, via: _askAi.via || "none" });
-    aiPushCard({ muted: true, text: _askAi.via === "copy"
-      ? `已打開 ${t.name}：到它的輸入框長按貼上你的問題（電腦 Ctrl+V），按送出。`
-      : `已打開 ${t.name}：這個瀏覽器不讓網頁複製文字，請自己把問題打進去。` });
+  if (_askAi.kind === "text") {   // 助手交接：問題走網址（帶得動的話），否則走剪貼簿
+    window.open(askAiUrl(t, _askAi.q), "_blank", "noopener");
+    trackActivity("ask_ai_text", { ai: t.key, via: t.q ? "url" : _askAi.via || "none" });
+    aiPushCard({ muted: true, text: t.q
+      ? `已打開 ${t.name}，你的問題已經帶進去了（不用貼）。`
+      : _askAi.via === "copy"
+        ? `已打開 ${t.name}：到它的輸入框長按貼上你的問題（電腦 Ctrl+V），按送出。`
+        : `已打開 ${t.name}：這個瀏覽器不讓網頁複製文字，請自己把問題打進去。` });
     renderAssistant();
     return;
   }
