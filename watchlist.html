@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="397">
+  <meta name="app-version" content="398">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=397" rel="stylesheet">
+  <link href="watchlist.css?v=398" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9127,8 +9127,8 @@ function askAiOfferChart(sid, t) {
   const name = aiStockName(sid);
   // 圖沒辦法替他貼（同源政策）：能做到的極限是「問題走網址、剪貼簿空出來給圖」，只剩一個長按貼上
   ask.textContent = t.paste
-    ? `想讓 ${t.name} 看「${name} ${sid}」的日 K 線圖？圖會進剪貼簿，${t.q ? "問題直接帶進去" : "問題也在剪貼簿"}——`
-      + "在它的輸入框長按貼上圖片就好。"
+    ? `想讓 ${t.name} 看「${name} ${sid}」的日 K 線圖？圖會進剪貼簿，${t.name} 開一個空的對話——`
+      + `在輸入框長按貼上圖片就好，不會塞任何文字進去。${ASK_AI_DRAFT_HINT}`
     : `想讓 ${t.name} 看「${name} ${sid}」的日 K 線圖？${t.name} 的輸入框不吃貼上，圖會存到你的裝置，用迴紋針（＋）附上。`;
   box.style.display = "";
   go.disabled = true; go.textContent = "K 線圖準備中…";
@@ -9160,9 +9160,11 @@ function askAiGoWithChart() {
     askAiSave();
     how = "用迴紋針（＋）把剛存下的 K 線圖附上";
   }
-  window.open(askAiUrl(t, _askAi.q), "_blank", "noopener");
-  trackActivity("ask_ai_text", { ai: t.key, via: t.q ? "url" : _askAi.via || "none", chart: true });
-  aiPushCard({ muted: true, text: `已打開 ${t.name}：${t.q ? "問題已經帶進去了" : "問題在剪貼簿"}，${how}，按送出。` });
+  // 這條路**不帶任何文字**（Howard 2026-10-19）：按鍵叫「讓 ○○ 看 K 線圖」，就只給它圖。
+  // 問題要一起問的人走另一顆「只問問題」。
+  window.open(t.url, "_blank", "noopener");
+  trackActivity("ask_ai_text", { ai: t.key, via: "chart", chart: true });
+  aiPushCard({ muted: true, text: `已打開 ${t.name}（空白對話，沒有帶任何文字）：${how}，按送出。` });
   renderAssistant();
 }
 
