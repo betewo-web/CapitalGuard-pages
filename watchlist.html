@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="389">
+  <meta name="app-version" content="390">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=389" rel="stylesheet">
+  <link href="watchlist.css?v=390" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -20113,12 +20113,13 @@ function aiFlushNav() {
 // 助手答不出來的時候給的出路（Howard 2026-10-18）：把**使用者打的那一句**交給他自己的 AI。
 // 我們不代送、也看不到回答——問題進剪貼簿，他自己到那個 AI 的輸入框貼上（與 K 線圖那條路同一套視窗）。
 // 沒有原句（例如籤點進來的）就只回固定句。
+const AI_HANDOFF_LINE = "這一句可以交給你自己的 AI：問題會先複製起來，你到它的輸入框貼上再送出；本服務不會替你送出，也看不到它的回答。";
 function aiHandoffCard(text, say) {
   const q = String(text || "").trim().slice(0, AI_MAX_CHARS);
   const base = String(say || AI_FALLBACK);
   if (!q) return { text: base, muted: true };
   return {
-    text: `${base} 這一句可以交給你自己的 AI：問題會先複製起來，你到它的輸入框貼上再送出；本服務不會替你送出，也看不到它的回答。`,
+    text: `${base} ${AI_HANDOFF_LINE}`,
     chips: ASK_AI_TARGETS.map(t => ({ label: `問 ${t.name}`, act: "ai", data: { ai: t.key, text: q } })),
   };
 }
@@ -20133,6 +20134,19 @@ function aiPausedSourceCard(condType, text, extra) {
   const card = aiHandoffCard(text,
     `${name}要用的法人籌碼資料目前暫停提供（資料來源的授權限制），所以這一題我這裡查不到${extra || ""}。`);
   return Object.assign(card, { head: "這一層資料暫停提供" });
+}
+
+// 「我們拿不到／做不到」的卡：把原本那句留著，後面接交給使用者自己的 AI 的四個籤。
+// **「查過了，結果是沒有」不算死路**（今天沒有訊號、還沒有自選股、還沒有進階訊號…那是答案，
+// 交給別的 AI 只會多一步）。分類器那一層的出路在 aiHandoffCard，這裡是 handler 自己走到底的那些。
+function aiNoData(card) {
+  const q = String((_aiCurrent && _aiCurrent.text) || "").trim().slice(0, AI_MAX_CHARS);
+  if (!q || !ASK_AI_TARGETS.length) return card;
+  const chips = ASK_AI_TARGETS.map(t => ({ label: `問 ${t.name}`, act: "ai", data: { ai: t.key, text: q } }));
+  return Object.assign({}, card, {
+    text: `${String(card.text || "").trim()} ${AI_HANDOFF_LINE}`.trim(),
+    chips: (card.chips || []).concat(chips),
+  });
 }
 
 function aiErrorCard(e) {
@@ -20548,10 +20562,15 @@ function aiPulseSince(pulse) {
   if (!Number.isFinite(start) || start <= 0) return "";
   return `自 ${9 + Math.floor(start / 60)}:${String(start % 60).padStart(2, "0")} 起累積`;
 }
+// 市場強度那一份：助手不能靠「使用者剛好開過盤中→市場那一格」——_loadMarketIfStale() 第一行就是
+// 「那一格沒開著就不抓」，而且射後不理（不 await）。所以助手問到大盤、族群、市場訊號時一直拿到空的
+//（Howard 2026-10-19「大盤狀況如何」→「市場強度資料還拿不到」）。這裡自己抓、而且等它回來。
+// 與 aiEnsureRules 同一個教訓：助手是唯一不用先走到那一頁就能回答那一頁的事的入口。
 async function aiMarketPayload() {
-  let p = (typeof marketPayload !== "undefined" && marketPayload) ? marketPayload : null;
-  if (!p) { try { await Promise.resolve(_loadMarketIfStale()); } catch { /* 沒有就沒有，下面各自處理 */ } p = (typeof marketPayload !== "undefined" && marketPayload) ? marketPayload : null; }
-  return p;
+  const cur = () => (typeof marketPayload !== "undefined" && marketPayload) ? marketPayload : null;
+  if (cur()) return cur();
+  try { await loadMarketStrength(); } catch { /* 沒有就沒有，呼叫端各自處理 */ }
+  return cur();
 }
 
 // ── 全市場資料層（ASSISTANT.md 第十八節）：助手回答任何一檔，不只自選股與好友分享的 ─────────
@@ -20651,7 +20670,7 @@ const ASSISTANT_ACTIONS = {
         // 不在自選股：雷達沒有它，改讀全市場索引（自動偵測 20 種，reporter 每分鐘覆蓋；第十八節）
         const today = await aiMarketToday();
         const day = aiSessionDayTxt();
-        if (!today || !aiTodayIsCurrent(today)) return { head: `${aiStockName(sid)} ${sid}`, text: `${day}的全市場索引還沒有（開盤後每分鐘更新）。`, actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: [aiAddChip(sid)] };
+        if (!today || !aiTodayIsCurrent(today)) return aiNoData({ head: `${aiStockName(sid)} ${sid}`, text: `${day}的全市場索引還沒有（開盤後每分鐘更新）。`, actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: [aiAddChip(sid)] });
         const hits = aiTodaySignalsOf(today, sid).filter(h => !wanted || wanted.includes(h.key));
         const rows = hits.map(h => ({ label: aiKindLabel(h.key), value: "", note: aiMm(h.min) }));
         return { head: `${aiStockName(sid)} ${sid}`, sub: rows.length ? `${day} ${rows.length} 則${kindTxt}訊號（全市場自動偵測）` : `${day}沒有自動偵測到的${kindTxt}訊號（全市場 ${AI_AUTO_KIND_COUNT} 種）`, rows,
@@ -20709,7 +20728,7 @@ const ASSISTANT_ACTIONS = {
       if (fm && fm.changePct != null && Number.isFinite(Number(fm.changePct))) rows.push({ label: "漲跌幅", value: fmtChgHtml(fm.changePct), html: true, note: "" });
       const lv = ml && ml.stocks && ml.stocks[sid];
       if (!(fm && fm.price > 0) && lv && lv.c > 0) rows.push({ label: "最後收盤", value: fmtPrice(lv.c), note: ml.date ? String(ml.date).slice(5).replace("-", "/") : "" });
-      if (!rows.length) return { head: `${aiStockName(sid)} ${sid}`, text: mine ? "還沒有這一檔的報價（剛加入要等下一輪）。" : "拿不到這一檔的資料（全市場索引與日線都沒有）。", actions: [aiOpenBtn(sid, mine ? "radar" : "kline", mine ? "開個股字卡 ›" : "開 K 線 ›")] };
+      if (!rows.length) return aiNoData({ head: `${aiStockName(sid)} ${sid}`, text: mine ? "還沒有這一檔的報價（剛加入要等下一輪）。" : "拿不到這一檔的資料（全市場索引與日線都沒有）。", actions: [aiOpenBtn(sid, mine ? "radar" : "kline", mine ? "開個股字卡 ›" : "開 K 線 ›")] });
       return { head: `${aiStockName(sid)} ${sid}`, sub: mine ? "還沒有盤中報價：先給日線" : "不在自選股：全市場資料", rows,
                actions: [aiOpenBtn(sid, mine ? "radar" : "kline", mine ? "開個股字卡 ›" : "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] };
     }
@@ -20778,8 +20797,8 @@ const ASSISTANT_ACTIONS = {
       parts.push(`${label}${near ? "附近" : diff > 0 ? "之上" : "之下"}`);
     }
     if (!m && !rows.some(r => r.value !== "—")) {
-      return { head: `${name} ${sid}`, text: "拿不到這一檔的均線（全市場關卡檔裡沒有它；日線不足 25 根的新股會這樣）。",
-               actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] };
+      return aiNoData({ head: `${name} ${sid}`, text: "拿不到這一檔的均線（全市場關卡檔裡沒有它；日線不足 25 根的新股會這樣）。",
+               actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] });
     }
     const priceTxt = price == null ? "" : live != null
       ? `${_isMarketOpenNow() ? "盤中價" : "收盤價"} ${fmtPrice(price)}${q.tradeDate ? `（${String(q.tradeDate).slice(5).replace("-", "/")}）` : ""}`
@@ -20797,7 +20816,7 @@ const ASSISTANT_ACTIONS = {
     const dates = Object.keys(hist).sort().reverse().slice(0, 10);
     if (!dates.length) {
       aiNav(() => openStockCard(sid, { tab: "history" }));
-      return { head: `${name} ${sid}`, text: "這裡拿不到紀錄，已直接打開字卡的歷史訊號。" };
+      return aiNoData({ head: `${name} ${sid}`, text: "這裡拿不到紀錄，已直接打開字卡的歷史訊號。" });
     }
     const labelOf = k => SIGNAL_LABEL_MAP[k] || AUTO_SIGNAL_LABELS[k] || String(k || "");
     const rows = dates.map(d => {
@@ -20817,7 +20836,7 @@ const ASSISTANT_ACTIONS = {
       let evs = (stockEvents[sid] || []).slice();
       if (!evs.length) {
         aiNav(() => openEventsPanel(sid));
-        return { head: `${aiStockName(sid)} ${sid}`, text: "目前沒有這一檔的資料，已打開資料清單。" };
+        return aiNoData({ head: `${aiStockName(sid)} ${sid}`, text: "目前沒有這一檔的資料，已打開資料清單。" });
       }
       if (slots.event_type) evs = evs.filter(e => e.event_type === slots.event_type);
       if (slots.horizon === "upcoming") evs = evs.filter(e => String(e.event_date || "") > today);
@@ -20842,19 +20861,19 @@ const ASSISTANT_ACTIONS = {
     if (slots.open_report) { aiNav(() => openDailyReportFromHistory()); return { text: "已打開今天的報告。" }; }
     if (!planAllows("stats_enabled")) return { text: "每日評分是付費方案的功能。", actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] };
     if (!sharedReportData) await loadSharedReportData().catch(() => {});   // 先抓再答
-    if (!sharedReportData) { aiNav(() => switchTab("scores")); return { text: "報告還拿不到，已打開統計分頁。" }; }
+    if (!sharedReportData) { aiNav(() => switchTab("scores")); return aiNoData({ text: "報告還拿不到，已打開統計分頁。" }); }
     const sid = slots.stock;
     if (sid) {
-      if (isEtfId(sid)) return { head: `${aiStockName(sid)} ${sid}`, text: "ETF 不適用基本面評分；報價、K 線、關卡與訊號照常。", actions: [aiOpenBtn(sid, "radar")] };
+      if (isEtfId(sid)) return aiNoData({ head: `${aiStockName(sid)} ${sid}`, text: "ETF 不適用基本面評分；報價、K 線、關卡與訊號照常。", actions: [aiOpenBtn(sid, "radar")] });
       const s = sharedReportData.investment_scores?.[sid];
-      if (!s) return { head: `${aiStockName(sid)} ${sid}`, text: "今天的報告裡沒有這一檔的評分。", actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] };
+      if (!s) return aiNoData({ head: `${aiStockName(sid)} ${sid}`, text: "今天的報告裡沒有這一檔的評分。", actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] });
       const rows = [{ label: "總分", value: fmtScoreValue(s.total_score), note: fmtScoreDelta(s.score_change) },
                     { label: "基本面", value: fmtScoreValue(s.fundamental_score_v2), note: fmtScoreDelta(s.fundamental_change) },
                     { label: "技術量能", value: fmtScoreValue(s.technical_volume_score), note: fmtScoreDelta(s.technical_change) }];
       return { head: `${aiStockName(sid)} ${sid}`, sub: `每日評分 ${sharedReportData.date || ""}`, rows, actions: [{ label: "評分明細 ›", act: "open", data: { score: sid } }] };
     }
     const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(s => isStockId(s) && sharedReportData.investment_scores?.[s]);
-    if (!sids.length) return { text: "自選股在今天的報告裡沒有評分。", actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] };
+    if (!sids.length) return aiNoData({ text: "自選股在今天的報告裡沒有評分。", actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] });
     const rows = sids.map(s => ({ s, sc: sharedReportData.investment_scores[s] }))
       .sort((a, b) => Math.abs(Number(b.sc.score_change) || 0) - Math.abs(Number(a.sc.score_change) || 0)).slice(0, 10)
       .map(x => ({ label: aiStockName(x.s), value: fmtScoreValue(x.sc.total_score), note: fmtScoreDelta(x.sc.score_change), act: "open", data: { score: x.s } }));
@@ -20865,7 +20884,7 @@ const ASSISTANT_ACTIONS = {
     if (!p) {
       // 那一格暫時不顯示時（HOME_SIMPLE_ONLY）不跳頁、也不能說「已打開」
       if (!HOME_SIMPLE_ONLY) { aiNav(() => switchTab("home")); aiNav(() => setHomeFilter("market")); }
-      return { text: HOME_SIMPLE_ONLY ? "市場強度資料還拿不到。" : "市場強度資料還拿不到，已打開那一格。" };
+      return aiNoData({ text: HOME_SIMPLE_ONLY ? "市場強度資料還拿不到。" : "市場強度資料還拿不到，已打開那一格。" });
     }
     const v = msView(p);
     let inds = (v.industries || []).slice();
@@ -20887,8 +20906,8 @@ const ASSISTANT_ACTIONS = {
     if (!kinds.length && !slots.kind) {
       // 同上：那一格暫時不顯示（HOME_SIMPLE_ONLY）
       if (!HOME_SIMPLE_ONLY) { aiNav(() => switchTab("home")); aiNav(() => setHomeFilter("signals")); }
-      return { text: HOME_SIMPLE_ONLY ? "今天還沒有市場訊號統計（開盤後每分鐘累積）。"
-                                      : "今天還沒有市場訊號統計（開盤後每分鐘累積），已打開那一格。" };
+      return aiNoData({ text: HOME_SIMPLE_ONLY ? "今天還沒有市場訊號統計（開盤後每分鐘累積）。"
+                                               : "今天還沒有市場訊號統計（開盤後每分鐘累積），已打開那一格。" });
     }
     const since = aiPulseSince(pulse);
     if (slots.kind) {
