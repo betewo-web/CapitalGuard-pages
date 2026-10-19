@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="392">
+  <meta name="app-version" content="393">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=392" rel="stylesheet">
+  <link href="watchlist.css?v=393" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1418,7 +1418,7 @@
      使用者按下的那一下就是複製圖＋開 AI 的那一次點擊（iOS 要的使用者動作）。 -->
 <div class="askai-dialog" id="askai-paste-box" hidden>
   <div class="askai-dialog-card" role="dialog" aria-modal="true" aria-labelledby="askai-paste-tip">
-    <p class="askai-saved" id="askai-saved">K 線圖已自動儲存</p>
+    <p class="askai-saved"><span class="askai-saved-ic" aria-hidden="true">✓</span><b id="askai-saved-text">K 線圖已自動儲存</b></p>
     <p class="askai-paste-tip" id="askai-paste-tip">請自行在輸入窗長按，並且貼上圖片</p>
     <p class="askai-step-sub" id="askai-paste-sub"></p>
     <button type="button" class="btn btn-primary w-100 askai-go" id="askai-open" onclick="askAiGo()">確認，開啟</button>
@@ -9058,7 +9058,7 @@ function askAiHandoffPick(d) {
   const open = document.getElementById("askai-open");
   if (open) open.textContent = `確認，開啟 ${t.name}`;
   const lines = (saved, how) => {
-    const l1 = document.getElementById("askai-saved");
+    const l1 = document.getElementById("askai-saved-text");
     const l2 = document.getElementById("askai-paste-tip");
     const l3 = document.getElementById("askai-paste-sub");
     if (l1) l1.textContent = saved;
@@ -9084,7 +9084,7 @@ function askAiHandoffPick(d) {
 // 圖在哪裡（剪貼簿／裝置）、要怎麼把它放進去（長按貼上／迴紋針附上）、按確認會發生什麼。
 function askAiStage(t) {
   const lines = (where, how) => {
-    const l1 = document.getElementById("askai-saved");
+    const l1 = document.getElementById("askai-saved-text");
     const l2 = document.getElementById("askai-paste-tip");
     const l3 = document.getElementById("askai-paste-sub");
     if (l1) l1.textContent = where;
@@ -20113,13 +20113,15 @@ function aiFlushNav() {
 // 助手答不出來的時候給的出路（Howard 2026-10-18）：把**使用者打的那一句**交給他自己的 AI。
 // 我們不代送、也看不到回答——問題進剪貼簿，他自己到那個 AI 的輸入框貼上（與 K 線圖那條路同一套視窗）。
 // 沒有原句（例如籤點進來的）就只回固定句。
-const AI_HANDOFF_LINE = "這一句可以交給你自己的 AI：問題會先複製起來，你到它的輸入框貼上再送出；本服務不會替你送出，也看不到它的回答。";
+// 交接卡：固定句＋四顆籤就好，**不再多一段說明**（Howard 2026-10-19：直接顯示外部 AI 按鈕即可）。
+// 「問題會複製起來、我們不代送也看不到回答」那幾句移到按下籤之後的那個視窗上講——
+// 在任何東西離開這個 App 之前還是會看到，只是不佔這張卡的版面。
 function aiHandoffCard(text, say) {
   const q = String(text || "").trim().slice(0, AI_MAX_CHARS);
   const base = String(say || AI_FALLBACK);
   if (!q) return { text: base, muted: true };
   return {
-    text: `${base} ${AI_HANDOFF_LINE}`,
+    text: base,
     chips: ASK_AI_TARGETS.map(t => ({ label: `問 ${t.name}`, act: "ai", data: { ai: t.key, text: q } })),
   };
 }
@@ -20143,10 +20145,7 @@ function aiNoData(card) {
   const q = String((_aiCurrent && _aiCurrent.text) || "").trim().slice(0, AI_MAX_CHARS);
   if (!q || !ASK_AI_TARGETS.length) return card;
   const chips = ASK_AI_TARGETS.map(t => ({ label: `問 ${t.name}`, act: "ai", data: { ai: t.key, text: q } }));
-  return Object.assign({}, card, {
-    text: `${String(card.text || "").trim()} ${AI_HANDOFF_LINE}`.trim(),
-    chips: (card.chips || []).concat(chips),
-  });
+  return Object.assign({}, card, { chips: (card.chips || []).concat(chips) });   // 只加籤，不加說明文字
 }
 
 function aiErrorCard(e) {
