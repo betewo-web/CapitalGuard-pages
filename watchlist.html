@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="391">
+  <meta name="app-version" content="392">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=391" rel="stylesheet">
+  <link href="watchlist.css?v=392" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -20894,9 +20894,15 @@ const ASSISTANT_ACTIONS = {
       if (hit.length) inds = hit;
       else miss = String(slots.sector);   // 問了某個族群卻對不上：講出來，不要默默列全部
     }
-    const rows = inds.slice(0, slots.sector ? 3 : 6).map((i, n) => ({ label: `${n + 1}. ${i.ind}`, value: `${Number(i.score)}`, note: `上漲 ${Number(i.up_pct)}%・${Number(i.n)} 檔`, act: "open", data: { filter: "market" } }));
+    // 要幾列：問「所有族群」就整份（Howard 2026-10-19：只列 6 個不是他要的），
+    // 指定族群 3 列，其餘預設 10 列＋一個「看全部」的籤（不叫人重打一句）
+    const limit = slots.all ? 30 : slots.sector ? 3 : 10;
+    const rows = inds.slice(0, limit).map((i, n) => ({ label: `${n + 1}. ${i.ind}`, value: `${Number(i.score)}`, note: `上漲 ${Number(i.up_pct)}%・${Number(i.n)} 檔`, act: "open", data: { filter: "market" } }));
+    const more = inds.length - rows.length;
     return { head: miss ? `市場強度（找不到「${miss}」這個族群）` : "市場強度",
-             sub: `族群強度分數（0–100）${p.at ? ` · ${fmtTime(p.at)}` : ""}`, rows,
+             sub: `族群強度分數（0–100）・${rows.length}／${inds.length} 個族群${p.at ? ` · ${fmtTime(p.at)}` : ""}`, rows,
+             chips: more > 0 ? [{ label: `看全部 ${inds.length} 個族群`, act: "run",
+                                  data: { intent: "market_strength", slots: { all: true }, text: "所有族群的排名" } }] : [],
              actions: [{ label: "打開市場強度 ›", act: "open", data: { filter: "market" } }] };
   },
   // 全市場訊號脈動（monitor/market_pulse.py）：20 種自動偵測訊號今天各有幾檔出現過。
