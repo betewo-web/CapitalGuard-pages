@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="399">
+  <meta name="app-version" content="401">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=399" rel="stylesheet">
+  <link href="watchlist.css?v=401" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1429,7 +1429,9 @@
       <div class="askai-or" id="askai-or"><span>or</span></div>
     </div>
     <button type="button" class="btn btn-primary w-100 askai-go" id="askai-open" onclick="askAiGo()">確認，開啟</button>
-    <button type="button" class="btn btn-link w-100 askai-back" onclick="askAiPasteClose()">取消，換一個 AI</button>
+    <!-- 按下去之後：視窗不關，換成「現在請貼上圖片」的提醒（Howard 2026-10-19） -->
+    <button type="button" class="btn btn-primary w-100 askai-go" id="askai-done" onclick="askAiPasteClose()" style="display:none">知道了</button>
+    <button type="button" class="btn btn-link w-100 askai-back" id="askai-cancel" onclick="askAiPasteClose()">取消，換一個 AI</button>
   </div>
 </div>
 
@@ -9049,6 +9051,12 @@ function askAiPasteClose() {
   if (box) box.hidden = true;
   const chart = document.getElementById("askai-chart");
   if (chart) chart.style.display = "none";
+  const open = document.getElementById("askai-open");
+  if (open) open.style.display = "";
+  const cancel = document.getElementById("askai-cancel");
+  if (cancel) cancel.style.display = "";
+  const done = document.getElementById("askai-done");
+  if (done) done.style.display = "none";
 }
 
 // 選好了：**在這一下**就把圖準備好（吃貼上的進剪貼簿、不吃的存到裝置），再跳出第三步那個獨立視窗。
@@ -9133,7 +9141,7 @@ function askAiOfferChart(sid, t) {
   box.style.display = "";
   go.disabled = true; go.textContent = "K 線圖準備中…";
   const gen = ++_askAi.gen;
-  buildAskAiImage(sid).then(img => {
+  askAiImageFor(sid).then(img => {
     if (gen !== _askAi.gen || _askAi.sid !== sid) { URL.revokeObjectURL(img.url); return; }
     _askAi.file = img.file; _askAi.url = img.url;
     go.disabled = false; go.textContent = `讓 ${t.name} 看 K 線圖`;
@@ -9147,7 +9155,6 @@ function askAiOfferChart(sid, t) {
 function askAiGoWithChart() {
   if (!_askAi.url) return;
   const t = askAiTarget(_askAi.target);
-  askAiPasteClose();
   // 剪貼簿這次給圖（問題走網址）：使用者只剩一個動作——長按貼上圖片。
   // 「替他貼」做不到：網頁不能動另一個網站的輸入框（與不能清空舊草稿同一條限制）。
   let how = "";
@@ -9164,8 +9171,31 @@ function askAiGoWithChart() {
   // 替他貼圖做不到——網頁不能動另一個網站的輸入框，那是同源政策。
   window.open(askAiUrl(t, _askAi.q), "_blank", "noopener");
   trackActivity("ask_ai_text", { ai: t.key, via: t.q ? "url" : _askAi.via || "none", chart: true });
+  // 視窗不關：換成「現在請你做這件事」的提醒（Howard 2026-10-19）。
+  // 開了新分頁／跳去 App 之後，對話裡那一行他看不到，留在視窗上回來才讀得到。
+  askAiDoneState(t.paste ? `請在 ${t.name} 的輸入框長按，貼上 K 線圖`
+                         : `請在 ${t.name} 的輸入框按迴紋針（＋），附上剛存下的 K 線圖`,
+                 `${t.q ? "你的問題已經帶進去了" : "問題也在剪貼簿裡"}，貼上圖片後按送出就可以。`);
   aiPushCard({ muted: true, text: `已打開 ${t.name}：${t.q ? "問題已經帶進去了" : "問題在剪貼簿"}，${how}，按送出。` });
   renderAssistant();
+}
+
+// 按下去之後的視窗狀態：上面寫已經做好什麼、中間用大字寫「現在請你貼上」、只留一顆「知道了」
+function askAiDoneState(how, detail) {
+  const l1 = document.getElementById("askai-saved-text");
+  const l2 = document.getElementById("askai-paste-tip");
+  const l3 = document.getElementById("askai-paste-sub");
+  if (l1) l1.textContent = "K 線圖已複製";
+  if (l2) l2.textContent = how;
+  if (l3) l3.textContent = detail;
+  const chart = document.getElementById("askai-chart");
+  if (chart) chart.style.display = "none";
+  const open = document.getElementById("askai-open");
+  if (open) open.style.display = "none";
+  const cancel = document.getElementById("askai-cancel");
+  if (cancel) cancel.style.display = "none";
+  const done = document.getElementById("askai-done");
+  if (done) { done.style.display = ""; done.focus(); }
 }
 
 // 把圖準備好，並把視窗上那三行寫成「現在真的是什麼狀況」：
@@ -9219,7 +9249,7 @@ function openAskAi(sid) {
   note.textContent = "正在畫 K 線圖…";
   bootstrap.Modal.getOrCreateInstance(el).show();
   const gen = _askAi.gen;
-  buildAskAiImage(sid).then(img => {
+  askAiImageFor(sid).then(img => {
     if (gen !== _askAi.gen) { URL.revokeObjectURL(img.url); return; }   // 面板已關或換了一檔：這張沒人要
     _askAi.file = img.file; _askAi.url = img.url;
     preview.innerHTML = `<img src="${img.url}" alt="${escapeHtml(name)} 的 K 線圖">`;
@@ -9253,6 +9283,29 @@ async function askAiStockData(sid) {
     stock = live;
   }
   return stock;
+}
+
+// 畫好的 K 線圖留著重用（Howard 2026-10-19：不要每次都重新產生）。
+// 同一檔＋同一份日線（報告日期）就是同一張圖；重畫要跑一次 ECharts＋canvas，手機上大約一秒。
+// 存的是 File（位元組），不是 blob 網址——網址用完會被 revoke，File 可以隨時再長一個出來。
+// 最多留 3 張（一張 PNG 約 200 KB）：使用者通常只在兩三檔之間來回。
+const ASK_AI_IMG_CACHE_MAX = 3;
+const _askAiImgCache = new Map();
+
+function askAiImgKey(sid) {
+  return `${sid}|${(typeof sharedReportData !== "undefined" && sharedReportData && sharedReportData.date) || ""}`;
+}
+
+async function askAiImageFor(sid) {
+  const key = askAiImgKey(sid);
+  const hit = _askAiImgCache.get(key);
+  if (hit) return { file: hit, url: URL.createObjectURL(hit), cached: true };
+  const img = await buildAskAiImage(sid);
+  if (img.file) {
+    _askAiImgCache.set(key, img.file);
+    while (_askAiImgCache.size > ASK_AI_IMG_CACHE_MAX) _askAiImgCache.delete(_askAiImgCache.keys().next().value);
+  }
+  return { file: img.file, url: img.url, cached: false };
 }
 
 // 離線畫一張：隱藏容器 → ECharts（與字卡同一個 buildKLineOption）→ PNG → 上面接標題、下面接免責
