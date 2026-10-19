@@ -5181,6 +5181,13 @@ select.fr-input { width: 100%; }
 .askai-saved b { font-weight: 700; }
 /* 交接視窗裡的「要不要一起帶 K 線圖」（2026-10-19）：問句淡、主鍵照常 */
 .askai-chart-ask { font-size: 0.86rem; color: var(--text-1); line-height: 1.55; margin: 12px 0 8px; }
+/* 兩顆鍵之間的「or」：左右各一條細線，中間一個小字（2026-10-19 Howard） */
+.askai-or { display: flex; align-items: center; gap: 10px; margin: 12px 0;
+	color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.askai-or::before, .askai-or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+/* 另一條路用品牌紫實心：與藍色主鍵一眼分得出來，不是「次要的灰」 */
+.askai-alt { background: var(--accent); border: none; color: #fff; }
+.askai-alt:hover, .askai-alt:focus { background: #7b6bf0; color: #fff; }
 .askai-saved-ic { flex: 0 0 auto; width: 1.6rem; height: 1.6rem; border-radius: 50%;
 	display: flex; align-items: center; justify-content: center; font-size: 0.95rem; font-weight: 800;
 	background: var(--accent); color: #fff; }
