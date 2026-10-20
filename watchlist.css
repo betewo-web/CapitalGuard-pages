@@ -4270,6 +4270,8 @@ button.user-chip:hover { border-color: rgba(139, 124, 255, 0.45); color: var(--t
 }
 
 .plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
+/* 單一方案（免費）模式：只有一張卡，三欄格會讓它縮成三分之一寬（2026-10-20） */
+.plan-grid.plan-grid-one { grid-template-columns: 1fr; }
 @media (max-width: 640px) {
 	.plan-grid { grid-template-columns: 1fr; }
 }

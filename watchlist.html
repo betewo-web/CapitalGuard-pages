@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="403">
+  <meta name="app-version" content="404">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=403" rel="stylesheet">
+  <link href="watchlist.css?v=404" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1299,7 +1299,9 @@
           <div id="fr-share-limit-text"></div>
           <div class="fr-in-actions">
             <button type="button" class="btn btn-sm btn-outline-light" id="fr-btn-limit-watch">管理自選股</button>
-            <button type="button" class="btn btn-sm btn-outline-light" id="fr-btn-limit-plan">升級方案</button>
+            <!-- 2026-10-20 單一方案（免費）之後沒有「升級」這條路了：鈕還在（看得到額度與用量），
+                 但不再寫成升級。要再賣的時候改回「升級方案」。 -->
+            <button type="button" class="btn btn-sm btn-outline-light" id="fr-btn-limit-plan">方案與用量</button>
           </div>
         </div>
 
@@ -2018,6 +2020,19 @@ let brokerHoldingsAt = null; // 最近一次同步時間（synced_at 最大值�
 // basic 是 2026-09 舊制 NT$49（is_public=false，不在方案頁列出），
 // 但仍有生效中的訂閱，徽章與付款紀錄要認得它。
 const PLAN_CODES = ["free", "pro", "premium"];
+// ── 單一方案（免費）模式：2026-10-20 Howard ───────────────────────────────
+// 「把目前的專業版變成預設加入時的唯一方案、改名基礎版；把付費機制暫時關閉、無須顯示；
+//   免費版與旗艦版的方案顯示關閉，用戶看不到也點選不到。從現在開始，用戶安裝使用 App
+//   是免費的，直到改變策略為止。」
+// 真正的強制力在 DB（migrate_single_plan.sql）：plans 只有 `pro`（基礎版）is_public=true
+// 且價格 0；沒有訂閱的人由 plan_of() 推導成它（app_config.default_plan='pro'），
+// 所以「預設加入就是這一個方案」不靠前端。方案清單本來就只抓 is_public=eq.true，
+// create-order 只接「公開且 price_twd > 0」的方案 → 任何代碼都建不出訂單。
+// 這個旗標只管畫面：方案比較的三張卡、價格、升級鈕、免費體驗、付款方式整組收起來，
+// 面板只留「目前方案與用量」。要再賣的時候 DB 與這裡一起翻回來（BILLING.md「單一方案（免費）」）。
+const SINGLE_PLAN_MODE = true;
+// 面板頂端那一句（也是鎖住付款入口時的說法）：不提發票、不提暫停，就是「現在免費」
+const SINGLE_PLAN_NOTE = '目前 App 的功能全部免費開放，沒有付費方案，<b class="plan-safe">不會扣款</b>。';
 // 線上付款的前端總開關。**2026-10-11 起 false：電子發票還在申請，核准之前不收線上刷卡**
 // （收了錢開不出發票）。對外不提發票，一律講「免費體驗中」（2026-10-12 起，
 // 見下面 BILLING_PAUSE_REASON）。真正的鎖在後端 app_config.billing_checkout='closed'——create-order
@@ -2048,7 +2063,7 @@ const LINE_ADD_FRIEND_URL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
 const LIFF_ID = "2010668840-DXPfjNlx";
 const PLAN_COMING_SOON_NOTE = "AI 資料白話仍在開發，目前不包含在任何方案裡；完成後會先公告。";
 // 付款紀錄裡非公開方案的名字
-const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "目標偵測雷達（專業版）", premium: "廣域追蹤雷達（旗艦版）" };
+const PLAN_NAME_FALLBACK = { free: "標準雷達（免費版）", pro: "基礎版", premium: "廣域追蹤雷達（旗艦版）" };
 let planState = {
   ready: false,          // false = plans 表不存在或載入失敗 → 前端不做任何限制
   plan: null,            // plans 列（code / name / watch_limit / rule_limit / ai_*）
@@ -3455,6 +3470,9 @@ function fmtPlanDate(iso) {
 }
 
 function planPriceLabel(p) {
+  // 單一方案（免費）模式：現在沒有任何人在付錢——旗艦版那幾位是管理員指派的，
+  // 他們的 plans 列仍寫著 199，在「功能全部免費開放」旁邊標 NT$199／月只會自相矛盾。
+  if (SINGLE_PLAN_MODE) return "免費";
   return p.price_twd > 0 ? `NT$${p.price_twd} <span class="plan-per">/月</span>` : "免費";
 }
 
@@ -3473,10 +3491,23 @@ function cheapestPlanNameWith(feature) {
   return p ? p.name : "付費方案";
 }
 
-// 畫面上不寫「免費版」三個字，一律寫 plans 裡的全名（標準雷達（免費版））：
-// 只寫階級看不出它是哪一台雷達，同一個面板裡一半寫全名、一半寫階級更難懂（Howard 2026-09-28）
+// 「沒有訂閱的時候會落到哪一個方案」的名字：到期、取消續訂、扣款失敗那幾句都指向它。
+// 以前那一定是免費版（所以函式叫 freePlanName）；2026-10-20 起預設方案由 DB 決定
+// （app_config.default_plan，單一方案模式＝基礎版），寫死 free 會在到期提示裡
+// 講出一個使用者根本看不到的方案名。
+// 畫面上不寫「免費版」三個字，一律寫 plans 裡的全名：只寫階級看不出它是哪一台雷達，
+// 同一個面板裡一半寫全名、一半寫階級更難懂（Howard 2026-09-28）。
 function freePlanName() {
+  if (SINGLE_PLAN_MODE) return defaultPlanName();
   return planNameOf("free") || "免費版";
+}
+
+// 預設方案（單一方案模式下＝唯一的公開方案）的名字。planState.plans 只有 is_public=true 的列，
+// 所以剛好一筆時那就是它；載不到就退回備援名稱。
+function defaultPlanName() {
+  const pub = planState.plans || [];
+  if (pub.length === 1) return pub[0].name;
+  return planNameOf("pro") || "基礎版";
 }
 
 // 「不自動更新（免費版）」括號裡那三個字（Howard 2026-10-06）：免費版盤中不輪詢報價，
@@ -3582,6 +3613,21 @@ function subscriptionStatusHtml() {
   // （官方規格：某期失敗，下一期照排程；PAYMENT_AUDIT.md F04）
   const agreementOpen = !!(s && s.provider === "ecpay" && s.provider_ref && !s.cancel_requested_at);
   const cancelBtn = `<button type="button" class="btn btn-xs btn-outline-danger ms-2" onclick="cancelSubscription()">取消續訂</button>`;
+  // ── 單一方案（免費）模式（2026-10-20）──
+  // 下面六種狀態（扣款失敗、免費版、已取消、體驗中、管理員指派、每月續訂）裡，有五種
+  // 在「沒有付費方案」的世界裡都是在講不存在的事——尤其體驗中那一句會說到期之後退回免費版，
+  // 而現在到期之後落到的就是同一個基礎版。這裡只講兩件真的要說的事：
+  //   1. 現在是哪一個方案、而且不收錢
+  //   2. 綠界約定還活著就一定要留著取消續訂（不能因為改規格讓人退不掉；執行當下沒有這種人）
+  // 管理員指派的（旗艦版那幾位）照舊寫出有效日期：到期落到基礎版是真的會發生的事。
+  if (SINGLE_PLAN_MODE) {
+    const bits = [`${escapeHtml(p.name)}使用中，${SINGLE_PLAN_NOTE}`];
+    if (s && s.provider === "manual" && s.status === "active" && new Date(s.current_period_end) > new Date()) {
+      bits.push(`這個方案由管理員指派${s.note ? `（${escapeHtml(s.note)}）` : ""}，有效至 <b>${fmtPlanDate(s.current_period_end)}</b>，之後回到${escapeHtml(defaultPlanName())}。`);
+    }
+    if (agreementOpen) bits.push(`先前的定期定額約定仍在綠界，不想再被扣款請取消續訂。${cancelBtn}`);
+    return `<div class="plan-status">${bits.join(" ")}</div>`;
+  }
   // 扣款失敗要先判：plan_of() 這時已推導成 free，放在 free 之後永遠走不到
   if (s && s.status === "past_due") {
     return `<div class="plan-status plan-status-warn">${ICON_WARN}上期扣款失敗，已暫回${escapeHtml(freePlanName())}。綠界下期仍會嘗試扣款；不想再扣請取消續訂${BILLING_CHECKOUT_ENABLED ? "，想繼續用請更新付款方式後重新訂閱" : "（線上刷卡付款暫停開放中，暫時無法重新訂閱）"}。${agreementOpen ? cancelBtn : ""}</div>`;
@@ -3628,10 +3674,12 @@ function renderPlanModal(focus) {
   let focusHint = {
     ai:          `${ICON_AI}AI 資料白話仍在開發，目前不包含在任何方案裡。`,
     ai_limit:    `${ICON_AI}今日 AI 使用次數已達上限，明天會重置。`,
-    // 額度是自選＋好友分享共用的，所以這裡也要寫拆解（與 limitPromptHtml 同一個理由）
-    watchlist:   slots
-      ? `${ICON_STAR}自選股已達目前方案上限：自選股 ${slots.own} 檔＋好友分享 ${slots.shared} 檔＝${slots.used}／${slots.limit} 檔（兩者共用同一份額度），升級即可加入更多。`
-      : `${ICON_STAR}自選股已達目前方案上限，升級即可加入更多。`,
+    // 額度是自選＋好友分享共用的，所以這裡也要寫拆解（與 limitPromptHtml 同一個理由）。
+    // 出路那一句要看有沒有方案真的給得更多（同 alert_rules 那一條，2026-10-20 單一方案後
+    // 一個都沒有）：沒有的話不可以承諾「升級即可加入更多」。
+    watchlist:   `${ICON_STAR}自選股已達目前方案上限`
+      + (slots ? `：自選股 ${slots.own} 檔＋好友分享 ${slots.shared} 檔＝${slots.used}／${slots.limit} 檔（兩者共用同一份額度）` : "")
+      + (nextPlanFor("watchlist") ? "，升級即可加入更多。" : "。移除用不到的自選股、或不再接收某幾檔好友分享，就能空出格子。"),
     // 三階同額度時不說「升級即可新增更多」（2026-10-08）：沒有方案給得更多，
     // 出路是把用不到的那幾條刪掉或改寫。
     alert_rules: nextPlanFor("alert_rules")
@@ -3737,19 +3785,39 @@ function renderPlanModal(focus) {
   // 公開方案裡沒有含 AI 的＝旗艦版收起來了：說一句它去哪了，別讓人以為功能消失
   const comingSoon = planState.plans.some(x => x.ai_enabled) ? "" : `<div class="plan-coming-soon">${PLAN_COMING_SOON_NOTE}</div>`;
 
+  // ── 單一方案（免費）模式（2026-10-20）：沒有「比較」這回事，但「這個方案包含什麼」
+  // 還是要看得到——功能列本來就只讀 plans 的欄位（planFeatureRows），單獨列一張卡就好：
+  // 沒有別的方案、沒有升級鈕、也沒有「線上付款暫停」那段公告（沒有付費入口要暫停）。
+  const compare = SINGLE_PLAN_MODE ? `
+    <div class="plan-sec-title">這個方案包含</div>
+    <div class="plan-grid plan-grid-one">
+      <div class="plan-card plan-card-${escapeHtml(p.code)} is-current">
+        <div class="plan-card-name">${escapeHtml(p.name)}</div>
+        <div class="plan-price">${planPriceLabel(p)}</div>
+        <ul class="plan-feats">${planFeatureRows(p)}</ul>
+      </div>
+    </div>` : `
+    <div class="plan-sec-title">方案比較</div>
+    ${pausedNote}
+    <div class="plan-grid">${cards}</div>`;
+  // 付款紀錄：單一方案模式下沒有人會新增紀錄，整節收起來；真的有舊紀錄的人照樣看得到
+  const paymentsSec = SINGLE_PLAN_MODE && !(planPayments && planPayments.length) ? "" : `
+    <div class="plan-sec-title">付款紀錄</div>
+    ${payments}`;
+  const footNote = SINGLE_PLAN_MODE
+    ? "超出方案額度的自選股與進階訊號會保留資料、暫停通知；要保留哪些可以在自選股頁與進階訊號面板自己選。"
+    : "月費不退款；取消續訂後功能保留至當期結束。超出方案的自選股與規則會保留資料、暫停通知，升級後即恢復；要保留哪些可以在自選股頁與進階訊號面板自己選。";
+
   body.innerHTML = `
     ${focusHint ? `<div class="plan-focus-hint">${focusHint}</div>` : ""}
     ${current}
     ${trialOfferHtml(focus === "trial")}
-    <div class="plan-sec-title">方案比較</div>
-    ${pausedNote}
-    <div class="plan-grid">${cards}</div>
+    ${compare}
     ${comingSoon}
-    <div class="plan-sec-title">付款紀錄</div>
-    ${payments}
+    ${paymentsSec}
     <div id="plan-msg" class="plan-msg"></div>
     <div class="plan-invite">覺得好用？<button type="button" class="btn btn-xs btn-outline-info" onclick="shareInvite()">邀請朋友一起用</button><span>朋友加 LINE 好友就能免費開始。</span></div>
-    <div class="plan-foot-note">月費不退款；取消續訂後功能保留至當期結束。超出方案的自選股與規則會保留資料、暫停通知，升級後即恢復；要保留哪些可以在自選股頁與進階訊號面板自己選。<span class="plan-ver">App v${appVersion()}</span></div>`;
+    <div class="plan-foot-note">${footNote}<span class="plan-ver">App v${appVersion()}</span></div>`;
   // 上限提示／深連結帶進來的那張卡：捲到看得見的地方（面板上半部是目前方案與用量）
   const focusEl = target && document.getElementById("plan-card-focus");
   if (focusEl) setTimeout(() => focusEl.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
@@ -3849,6 +3917,19 @@ async function _settlePaidReturn() {
 }
 
 function checkoutClosedMessage() {
+  // 單一方案（免費）模式：畫面上本來就沒有付款入口，這裡只會被舊畫面或深連結叫到。
+  // 講的也不該是「暫停收款」，而是「現在不收費」。
+  if (SINGLE_PLAN_MODE) {
+    showBillingResult({
+      tone: "info", title: "目前不需要付費",
+      lines: [
+        "App 的功能全部免費開放，沒有付費方案，也沒有任何扣款。",
+        "方案與用量面板看得到目前的額度與用量。",
+      ],
+      onClose: () => renderPlanModal(),
+    });
+    return;
+  }
   showBillingResult({
     tone: "info", title: "線上付款暫停開放",
     lines: [
@@ -3865,7 +3946,7 @@ function checkoutClosedMessage() {
 // 同意勾選（7 日解除權例外的前提）未預設勾選；沒勾，「前往綠界付款」按鈕就是灰的。
 // 伺服器端也會擋（consent_required），這裡只是不讓人白跑一趟建單。
 function startCheckout(code) {
-  if (!BILLING_CHECKOUT_ENABLED) { checkoutClosedMessage(); return; }
+  if (SINGLE_PLAN_MODE || !BILLING_CHECKOUT_ENABLED) { checkoutClosedMessage(); return; }
   const plan = planState.plans.find(x => x.code === code);
   if (!plan) return;
   trackActivity("checkout_confirm_open", { plan: code });
@@ -8982,7 +9063,7 @@ function homeTileHtml(r) {
             onclick="event.stopPropagation();openRemoveStockConfirm('${jsAttr(r.rowId)}')">${ICON_TRASH}<span>移除</span></button>`;
   return `<div class="sw-wrap home-tile-wrap">
       <div class="home-tile sw-face${r.todayCount ? " is-hot" : ""}${r.locked ? " is-locked" : ""}" title="${
-      r.locked ? "超出目前方案的自選股上限，不再產生通知；升級後恢復" : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
+      r.locked ? ("超出目前方案的自選股上限，不再產生通知；" + overLimitRecoveryText("watchlist")) : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
       <div class="home-tile-head">
         <span class="home-tile-name">${escapeHtml(r.name)}</span>${r.shared
           ? `<span class="home-tile-shared" title="好友分享給我">${ICON_SHARE}${escapeHtml(r.shared.from_name || "好友")}</span>`
@@ -10640,6 +10721,10 @@ function clearKLineLocked() {
 // trial_status() 說能不能領；claim_trial() 領。到期由 plan_of() 自動回 free，前端不做任何倒數邏輯，
 // 只把「最後一天」與「還剩幾個交易日」算出來給人看（週一至週五，與後端 trading_days_left 同一套）。
 function trialOfferAvailable() {
+  // 單一方案（免費）模式：整個 App 已經免費，「免費體驗」沒有東西可以體驗
+  // （到期也只是回到同一個基礎版）。DB 那邊也關了（trial_offer_until 已過 →
+  // trial_status() 回 offer_ended），這裡擋住是不想讓畫面依賴 DB 的設定值。
+  if (SINGLE_PLAN_MODE) return false;
   return !!(planState.ready && planState.trial && planState.trial.available === true);
 }
 
@@ -13257,7 +13342,7 @@ function renderWatchlist(rows) {
     }
     const active = isWatchRowActive(row);
     if (!active) {
-      tags.push(`<span class="wl-signal-badge wl-tag-locked" title="超出目前方案的自選股上限，不再產生通知；升級後恢復">🔒 超出方案</span>`);
+      tags.push(`<span class="wl-signal-badge wl-tag-locked" title="超出目前方案的自選股上限，不再產生通知；${escapeHtml(overLimitRecoveryText('watchlist'))}">🔒 超出方案</span>`);
     }
 
     const item = document.createElement("article");
@@ -13375,7 +13460,7 @@ function renderPost() {
     // 盤後頁刻意不用膠囊徽章（test_pwa_tabs 釘住：這一頁的籤會被當成按鈕），
     // 鎖寫成純文字，字一樣是「🔒 超出方案」——與設定頁那一列同一句話
     const lockTag = r.locked
-      ? `<span class="post-lock" title="超出目前方案的自選股上限，不再產生通知；升級後恢復">🔒 超出方案</span>`
+      ? `<span class="post-lock" title="超出目前方案的自選股上限，不再產生通知；${escapeHtml(overLimitRecoveryText('watchlist'))}">🔒 超出方案</span>`
       : "";
     return `<article class="post-row${r.locked ? " is-locked" : ""}">
       <div class="post-row-head">
@@ -19471,7 +19556,9 @@ function frRenderShareLimit() {
   document.getElementById("fr-share-limit-text").textContent =
     `「自選+分享」已達上限：自選股 ${u.watch || 0} 檔＋好友分享給你 ${u.shared_in || 0} 檔`
     + `＝${u.used}／${u.limit} 檔（兩者共用同一份額度）。分享自己的自選股不佔用量，可以照常送出；`
-    + "要再加自選股或接受好友的分享，請先移除一檔自選股或一則分享，或升級方案。";
+    // 有方案給得更多才說「或升級方案」（2026-10-20 單一方案之後沒有，說了就是假話）
+    + "要再加自選股或接受好友的分享，請先移除一檔自選股或一則分享"
+    + (nextPlanFor("watchlist") ? "，或升級方案。" : "。");
 }
 
 // 關掉「新增分享」視窗。then 等它真的關完才跑：接著要開另一個視窗（方案面板）時，
@@ -20377,9 +20464,14 @@ function aiLimitWayOut(kind) {
   const free = kind === "watchlist" ? "移除用不到的" : "刪掉一條用不到的";   // 卡上那顆「刪掉一條」就是這件事
   const next = nextPlanFor(kind);
   const more = next ? next[PLAN_LIMIT_FIELD[kind]] : null;
+  const lim = planLimitOf(kind);
   return next && more != null
     ? `${next.name} NT$${next.price_twd}／月可放 ${more} ${unit}；也可以${free}，空出格子。`
-    : `各方案的${what}額度都一樣，${free}就能空出格子。`;
+    // 沒有別的方案給得更多（2026-10-20 單一方案之後所有額度都是這樣）：
+    // 只能指路去空出格子，不可以暗示有更大的方案可以換
+    : SINGLE_PLAN_MODE
+      ? `${what}額度${lim != null ? `是 ${lim} ${unit}` : ""}，${free}就能空出格子。`
+      : `各方案的${what}額度都一樣，${free}就能空出格子。`;
 }
 function aiLimitCard(kind) {
   trackActivity("limit_hint", { kind, next: (nextPlanFor(kind) || {}).code || "", where: "assistant" });
@@ -21181,10 +21273,17 @@ const ASSISTANT_ACTIONS = {
   assistantPlan(slots) {
     const p = planState.ready ? planState.plan : null;
     const action = slots.action || "info";
-    if (action === "upgrade") { aiNav(() => openPlanModal(null, slots.plan || null)); return { text: "已打開方案面板；付款在那裡完成，助手不會替你付款。" }; }
+    if (action === "upgrade") {
+      aiNav(() => openPlanModal(null, slots.plan || null));
+      // 單一方案（免費）模式：沒有可以升級的對象，也沒有付款這回事
+      return { text: SINGLE_PLAN_MODE
+        ? "已打開方案與用量。目前 App 的功能全部免費開放，沒有付費方案，也不會有任何扣款。"
+        : "已打開方案面板；付款在那裡完成，助手不會替你付款。" };
+    }
     if (action === "cancel") { aiNav(() => cancelSubscription()); return { text: "取消訂閱的流程在方案面板裡，剛才已打開。" }; }
     if (action === "trial") {
       const t = planState.trial || null;
+      if (SINGLE_PLAN_MODE) return { text: "不用領體驗了：App 的功能全部免費開放，沒有期限，也不會有任何扣款。", actions: [{ label: "看方案與用量 ›", act: "open", data: { plan: true } }] };
       if (!t || !p || p.code !== "free") return { text: "免費體驗只有免費版還沒領過的帳號可以領。", actions: [{ label: "看方案 ›", act: "open", data: { plan: true } }] };
       return aiConfirmCard({
         head: "領取免費體驗？",
@@ -21197,7 +21296,7 @@ const ASSISTANT_ACTIONS = {
     if (!p) { aiNav(() => openPlanModal()); return { text: "已打開方案與用量。" }; }
     const room = aiRuleRoom();
     const full = room !== null && room <= 0;
-    const planBtn = { label: "看方案與升級 ›", act: "open", data: { plan: true } };
+    const planBtn = { label: SINGLE_PLAN_MODE ? "看方案與用量 ›" : "看方案與升級 ›", act: "open", data: { plan: true } };
     return { head: "方案與用量", sub: p.name || planTierLabel(),
              rows: [{ label: "自選股", value: aiWatchUsage(), note: "含好友分享", act: "open", data: { tab: "watch" } },
                     { label: "進階訊號", value: `${(alertRules || []).length}／${p.rule_limit ?? "—"}`,
