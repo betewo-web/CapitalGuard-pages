@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="405">
+  <meta name="app-version" content="406">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=405" rel="stylesheet">
+  <link href="watchlist.css?v=406" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -21506,7 +21506,24 @@ const ASSISTANT_ACTIONS = {
                                        { label: "每日報告", value: sharedReportData?.date ? String(sharedReportData.date) : "尚未載入", note: "" }] };
   },
   assistantGlossary(slots, args, opts) { return { text: opts.say || "請直接問那個名詞，例如「什麼是支撐」。", muted: !opts.say }; },
-  assistantHelp() { return { bodyHtml: aiIntroHtml(false).replace(/^<div class="ai-card[^>]*>|<\/div>$/g, ""), rawCard: true }; },
+  // 「這個 App 的主要功能是什麼」要答 **App**，不是只答「我會什麼」（Howard 2026-10-20：這題答錯了）。
+  // 一列一個功能、點得進去；助手自己的角色放最後一句，建議籤照舊。
+  assistantHelp() {
+    const rows = [
+      { label: "盤中雷達", value: "自選股的即時訊號", note: "突破壓力、跌破支撐、爆量、漲跌停…", act: "open", data: { tab: "home" } },
+      { label: "每日評分", value: "基本面＋技術面", note: "每天收盤後一份，含排行與策略選股", act: "open", data: { tab: "scores" } },
+      { label: "K 線與關卡", value: "支撐壓力、均線", note: "個股字卡裡的 K 線那一頁", act: "open", data: { tab: "home" } },
+      { label: "事件與資料", value: "除權息、月營收…", note: "自選股有新資料就整理給你", act: "open", data: { tab: "home" } },
+      { label: "基礎訊號", value: "11 種、每檔可開關", note: "成立就推播到手機", act: "open", data: { alert: ALERT_SCOPE_ALL } },
+      { label: "進階訊號", value: "自己組條件", note: "均線、法人、跳空、RSI…", act: "open", data: { rules: true } },
+      { label: "到價提醒", value: "跌到／漲到就通知", note: "每一檔各自設", act: "open", data: { alert: ALERT_SCOPE_ALL } },
+    ];
+    if (frEnabled) rows.push({ label: "分享", value: "好友看同一檔", note: "他設的訊號你也收得到", act: "open", data: { tab: "friends" } });
+    rows.push({ label: "方案", value: planState.ready && planState.plan ? planState.plan.name : "免費／專業／旗艦", note: "自選股額度與功能差別", act: "open", data: { plan: true } });
+    return { head: "股市雷達能做什麼", sub: "點一列就過去那裡", rows,
+             text: "助手這一格可以查、設定、解釋上面這些——例如「台積電今天有訊號嗎」「跌到 900 提醒我」「什麼是逼近壓力」。只整理與解釋公開資料，不提供買賣建議。",
+             chips: aiIntroChips() };
+  },
   // 拒答與範圍外：固定句照舊，後面接「交給你自己的 AI」的籤（第十七節）
   assistantRefuse(slots, args, opts) {
     return aiHandoffCard(_aiCurrent.text, opts.say || "這個服務只整理與解釋公開資料，不提供買賣或進出場建議。", slots.stock);
