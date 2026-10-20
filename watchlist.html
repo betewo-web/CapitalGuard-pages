@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="406">
+  <meta name="app-version" content="407">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=406" rel="stylesheet">
+  <link href="watchlist.css?v=407" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -20230,13 +20230,19 @@ function aiBtnHtml(a) {
   return `<button type="button" class="ai-btn ${a.main ? "ai-btn-main" : "ai-btn-ghost"}" data-ai-act="${escapeHtml(a.act)}" data-ai-data="${escapeHtml(JSON.stringify(a.data || {}))}">${escapeHtml(a.label)}</button>`;
 }
 
+// 助手文案裡舉的條件例子跟著暫停旗標走（Howard 2026-10-20：「外資連買 3 天通知我」
+// 其實建不起來——籌碼層暫停，monitor 也一律當不成立）。旗標一關文案自己會長回來。
+const AI_CHIPS_PAUSED = PAUSED_RULE_TIERS.includes("chips");
+const AI_COND_EXAMPLES = AI_CHIPS_PAUSED ? "均線、跳空、量能、RSI" : "均線、法人、跳空、RSI";
+const AI_RULE_EXAMPLE = AI_CHIPS_PAUSED ? "跌破月線通知我" : "外資連買 3 天通知我";
+
 function aiIntroHtml(withChips) {
   return aiCardHtml({
     head: "助手",
     bodyHtml: `<div class="ai-intro"><p>我可以查、設定、解釋這個 App 裡的東西，例如：</p><ul>
       <li>查 「台積電今天有訊號嗎」、「鴻海支撐在哪」、「聯發科站上月線了嗎」</li>
       <li>加 「把聯發科加進自選」</li>
-      <li>設 「跌到 900 提醒我」、「外資連買 3 天通知我」</li>
+      <li>設 「跌到 900 提醒我」、「${AI_RULE_EXAMPLE}」</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
       <div class="ai-note">只整理與解釋公開資料，不提供買賣建議。用鍵盤上的麥克風也可以說話。</div></div>`,
     chips: withChips ? aiIntroChips() : [],
@@ -21515,7 +21521,7 @@ const ASSISTANT_ACTIONS = {
       { label: "K 線與關卡", value: "支撐壓力、均線", note: "個股字卡裡的 K 線那一頁", act: "open", data: { tab: "home" } },
       { label: "事件與資料", value: "除權息、月營收…", note: "自選股有新資料就整理給你", act: "open", data: { tab: "home" } },
       { label: "基礎訊號", value: "11 種、每檔可開關", note: "成立就推播到手機", act: "open", data: { alert: ALERT_SCOPE_ALL } },
-      { label: "進階訊號", value: "自己組條件", note: "均線、法人、跳空、RSI…", act: "open", data: { rules: true } },
+      { label: "進階訊號", value: "自己組條件", note: `${AI_COND_EXAMPLES}…`, act: "open", data: { rules: true } },
       { label: "到價提醒", value: "跌到／漲到就通知", note: "每一檔各自設", act: "open", data: { alert: ALERT_SCOPE_ALL } },
     ];
     if (frEnabled) rows.push({ label: "分享", value: "好友看同一檔", note: "他設的訊號你也收得到", act: "open", data: { tab: "friends" } });
@@ -21656,7 +21662,7 @@ const ASSISTANT_ACTIONS = {
       const advBtn = { label: `進階訊號${lim != null ? ` ${(alertRules || []).length}／${lim}` : ""} ›`, act: "open", data: { rules: true } };
       const basicBtn = { label: "基礎訊號面板 ›", act: "open", data: { alert: ALERT_SCOPE_ALL } };
       return { head: `基礎訊號 ${ALERT_FIELDS.length} 種`,
-               sub: "每一檔可以個別開關；均線、法人、跳空這類條件自己組的是進階訊號"
+               sub: `每一檔可以個別開關；${AI_COND_EXAMPLES}這類條件自己組的是進階訊號`
                     + (room === null ? "" : full ? `（進階訊號已達上限 ${lim} 條）` : `（進階訊號還能設 ${room} 條）`),
                rows, text: full ? aiLimitWayOut("alert_rules") : "",
                actions: full ? [aiManageBtn("alert_rules"), aiPlanBtn("alert_rules")] : [basicBtn, advBtn] };
