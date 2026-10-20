@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="402">
+  <meta name="app-version" content="403">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=402" rel="stylesheet">
+  <link href="watchlist.css?v=403" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9158,15 +9158,12 @@ function askAiGoWithChart() {
   const t = askAiTarget(_askAi.target);
   // 剪貼簿這次給圖（問題走網址）：使用者只剩一個動作——長按貼上圖片。
   // 「替他貼」做不到：網頁不能動另一個網站的輸入框（與不能清空舊草稿同一條限制）。
-  let how = "";
   if (t.paste && _askAi.file && navigator.clipboard && window.ClipboardItem) {
     try {
       navigator.clipboard.write([new ClipboardItem({ "image/png": _askAi.file })]).catch(() => askAiSave());
-      how = "長按貼上 K 線圖";
-    } catch (e) { askAiSave(); how = "用迴紋針（＋）把剛存下的 K 線圖附上"; }
+    } catch (e) { askAiSave(); }
   } else {
-    askAiSave();
-    how = "用迴紋針（＋）把剛存下的 K 線圖附上";
+    askAiSave();   // 不吃貼上的（Perplexity）或這個瀏覽器不給放圖：存檔，用迴紋針附上
   }
   // 圖進剪貼簿、問題進網址（Howard 2026-10-19 定案：兩個都要，使用者只剩「長按貼上圖片」一個動作）。
   // 替他貼圖做不到——網頁不能動另一個網站的輸入框，那是同源政策。
@@ -9177,16 +9174,16 @@ function askAiGoWithChart() {
                          : `等一下在 ${t.name} 的輸入框按迴紋針（＋），附上剛存下的 K 線圖`,
                  `${t.q ? "你的問題會直接帶進去" : "問題也在剪貼簿裡"}，貼上圖片後按送出就可以。`,
                  `好，開啟 ${t.name}`,
-                 () => askAiOpenAfterChart(t, how));
+                 () => askAiOpenAfterChart(t));
 }
 
 // 第二下：真的打開那個 AI
-function askAiOpenAfterChart(t, how) {
+function askAiOpenAfterChart(t) {
   askAiPasteClose();
   window.open(askAiUrl(t, _askAi.q), "_blank", "noopener");
   trackActivity("ask_ai_text", { ai: t.key, via: t.q ? "url" : _askAi.via || "none", chart: true });
-  aiPushCard({ muted: true, text: `已打開 ${t.name}：${t.q ? "問題已經帶進去了" : "問題在剪貼簿"}，${how}，按送出。` });
-  renderAssistant();
+  // 不往對話裡塞「已打開…請貼上…」那張卡（Howard 2026-10-20）：視窗上已經講完，
+  // 對話裡再講一次只是噪音——而且使用者那時人在 AI 那邊，根本看不到。
 }
 
 // 按下去之後的視窗狀態：上面寫已經做好什麼、中間用大字寫要做的事、只留一顆鍵（預設是「知道了」）
@@ -9384,13 +9381,7 @@ function askAiGo() {
   if (_askAi.kind === "text") {   // 助手交接：問題走網址（帶得動的話），否則走剪貼簿
     window.open(askAiUrl(t, _askAi.q), "_blank", "noopener");
     trackActivity("ask_ai_text", { ai: t.key, via: t.q ? "url" : _askAi.via || "none" });
-    aiPushCard({ muted: true, text: t.q
-      ? `已打開 ${t.name}，你的問題已經帶進去了（不用貼）。`
-      : _askAi.via === "copy"
-        ? `已打開 ${t.name}：到它的輸入框長按貼上你的問題（電腦 Ctrl+V），按送出。`
-        : `已打開 ${t.name}：這個瀏覽器不讓網頁複製文字，請自己把問題打進去。` });
-    renderAssistant();
-    return;
+    return;   // 對話裡不留卡（同上）
   }
   if (!_askAi.file && !_askAi.url) return;
   const note = document.getElementById("askai-note");
