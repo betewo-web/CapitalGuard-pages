@@ -1823,15 +1823,18 @@ body.modal-blocking .modal-backdrop.show {
 .inbox-item.read:hover > .sig-ico { opacity: 0.85; }
 .inbox-item.read:hover .ib-title { color: var(--text-0); }
 
-/* 從手機通知點進來、被捲到畫面中央的那一則：亮一下再淡掉，讓人知道是哪則 */
+/* 從手機通知點進來、被捲到畫面中央的那一則：亮一下再淡掉，讓人知道是哪則。
+   光圈一定要畫在列的「裡面」（inset）：2026-10-09 起每一列外面包著 .sw-wrap（往左滑刪除），
+   它是 overflow:hidden，畫在外面的光圈整圈被裁掉——跳過去了卻看不出是哪一則（Howard 2026-10-21）。
+   底色也一起亮一下：最新的那一則本來就在最上面、不會捲動，光圈是唯一的提示。 */
 .inbox-item.is-target {
 	/* 4s 與 watchlist.html 的 INBOX_TARGET_FLASH_MS 同值；列表重畫時以負的 animation-delay 接續進度 */
 	animation: inbox-target-flash 4s ease-out;
 }
 @keyframes inbox-target-flash {
-	0%   { box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.85); border-color: rgba(139, 124, 255, 0.9); }
-	70%  { box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.45); border-color: rgba(139, 124, 255, 0.6); }
-	100% { box-shadow: 0 0 0 0 rgba(139, 124, 255, 0); }
+	0%   { box-shadow: inset 0 0 0 3px rgba(139, 124, 255, 0.85); border-color: rgba(139, 124, 255, 0.9); background-color: rgba(139, 124, 255, 0.16); }
+	70%  { box-shadow: inset 0 0 0 3px rgba(139, 124, 255, 0.45); border-color: rgba(139, 124, 255, 0.6); background-color: rgba(139, 124, 255, 0.08); }
+	100% { box-shadow: inset 0 0 0 0 rgba(139, 124, 255, 0); }
 }
 
 /* SVG 是 flex item：width 屬性不是最小寬度，標題或內文一長就會被擠扁成一條。
