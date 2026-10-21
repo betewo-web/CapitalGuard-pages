@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="412">
+  <meta name="app-version" content="413">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=412" rel="stylesheet">
+  <link href="watchlist.css?v=413" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1676,7 +1676,7 @@
           <span class="text-info fw-bold" id="kline-code"></span>
           <span class="fw-semibold d-none" id="kline-name"></span>
           <span class="badge bg-secondary" id="kline-industry" style="font-size:0.8rem;"></span>
-          <span class="ms-auto" style="font-size:0.95rem;">現價 <strong id="kline-price"></strong></span>
+          <span class="ms-auto" style="font-size:0.95rem;">收盤 <strong id="kline-price"></strong></span>
           <span id="kline-ma" class="kline-ma-chip">MA —</span>
         </div>
         <div class="d-flex align-items-center flex-wrap gap-2 mb-2 kline-toolbar-row">
@@ -8389,7 +8389,7 @@ function renderInbox() {
         ${signalIconSvg(r, 34)}
         <div class="ib-main">
           <div class="ib-title">${dot}${title}</div>
-          <div class="ib-body">${escapeHtml(r.body || "")}</div>
+          <div class="ib-body">${escapeHtml(stripLiveQuote(r.body || ""))}</div>
         </div>
         <div class="ib-side">
           <span class="ib-time">${fmtTime(r.sent_at, dayLabelOf(r.sent_at) !== "今天")}</span>
@@ -8597,7 +8597,7 @@ function openInboxDetail(rowId) {
 
   const source = String(row.source || "monitor");
   document.getElementById("alert-history-detail-title").textContent = _titleWithoutSid(row.title, row.stock_id) || "通知詳情";
-  document.getElementById("alert-history-detail-body").textContent = row.body || "（無內容）";
+  document.getElementById("alert-history-detail-body").textContent = stripLiveQuote(row.body || "") || "（無內容）";
   document.getElementById("alert-history-detail-time").textContent = fmtTime(row.sent_at, true);
   document.getElementById("alert-history-detail-source").textContent = INBOX_SOURCE_LABEL[source] || source;
 
@@ -11230,9 +11230,27 @@ function ruleConditionsById(ruleId) {
 
 const RADAR_POST_SOURCES = ["post_market", "postmarket"];
 
-// 通知內文裡的數字：內建訊號與規則的推播文字固定寫「現價 1095.00」、「壓力 1090.00」、
-// 「目標 1100.00」（monitor/realtime.detect_alerts、rules.build_message）。alert_history 沒有
-// 價位欄位，時間軸的縱向位置只能從這裡拿；撈不到就回 null，呼叫端退回現價。
+// 2026-10-21 起訊號與通知的文字不帶盤中價（交易所的即時資訊要簽約才能轉給使用者，DATA_SOURCES.md
+// 第十二節；新句子在 monitor/realtime.detect_alerts 與 monitor/rules）。之前寫進 alert_history／
+// signal_history 的舊文字還帶著「現價 1095.00」「漲幅 +6.00%」，畫面上一律先換成新寫法再顯示：
+// 故事列、通知匣、分享圖片都走這一支。關卡、設定價格、門檻是日線或使用者自己的數字，留著。
+const _NUM = "[0-9][0-9,]*(?:\\.[0-9]+)?";
+function stripLiveQuote(text) {
+  let t = String(text || "");
+  t = t.replace(new RegExp(`現價\\s*${_NUM}\\s*[，｜|]?\\s*`, "g"), "");
+  t = t.replace(/（差\s*[0-9.]+%(?:，(強度\s*[0-9.]+))?）/g, (m, s) => (s ? `，${s}` : ""));
+  t = t.replace(new RegExp(`(漲停板|跌停板)\\s*${_NUM}`, "g"), "成交在$1");
+  t = t.replace(/漲幅\s*[+-]?[0-9.]+%（門檻\s*([0-9.]+)%）/g, "漲幅達 $1% 以上");
+  t = t.replace(/跌幅\s*[+-]?[0-9.]+%（門檻\s*-?([0-9.]+)%）/g, "跌幅達 $1% 以上");
+  t = t.replace(new RegExp(`(向[上下]跳空)\\s*[0-9.]+%（門檻\\s*([0-9.]+)%），開盤\\s*${_NUM}\\s*`, "g"), "$1 $2% 以上，開盤");
+  t = t.replace(/(RSI\(\d+\))\s*[0-9.]+，/g, "$1 ");
+  t = t.replace(/（MA\d+\s*[0-9.]+(?:\s*\/\s*MA\d+\s*[0-9.]+)?）/g, "");
+  t = t.replace(/（DIF\s*-?[0-9.]+\s*\/\s*MACD\s*-?[0-9.]+）/g, "");
+  return t.replace(/(^|\n)[，｜]\s*/g, "$1").trim();
+}
+
+// 通知內文裡的關卡數字：「壓力 1090.00」「設定價格 1100.00」「突破 20 日高 212.00」
+// （monitor/realtime.detect_alerts、rules）。alert_history 沒有價位欄位，時間軸的縱向位置只能從這裡拿。
 function _numberAfter(text, label) {
   const m = new RegExp(label + "\\s*([0-9][0-9,]*(?:\\.[0-9]+)?)").exec(String(text || ""));
   if (!m) return null;
@@ -11272,7 +11290,7 @@ function radarStoryOf(sid, date = null) {
   for (const e of (logged || [])) {
     if (taipeiDateKey(e.at) !== date) continue;
     const key = e.kind;
-    entry({ key, at: e.at, price: e.price, level: e.level, text: e.text,
+    entry({ key, at: e.at, price: null, level: e.level, text: e.text,
             src: e.src, sev: e.sev || inferSeverity({ signal: key }), abbr: signalAbbr(key),
             title: SIGNAL_LABEL_MAP[key] || AUTO_SIGNAL_LABELS[key] || key, condKeys: [key] });
   }
@@ -11283,7 +11301,7 @@ function radarStoryOf(sid, date = null) {
     if (!RADAR_TODAY_SOURCES.includes(source)) continue;
     const sev = inferSeverity(r);
     const title = _titleWithoutStock(r.title, sid, stockName);
-    const price = _numberAfter(r.body, "現價");
+    const price = null;   // 盤中成交價不再畫（DATA_SOURCES.md 第十二節）：縱向位置只用關卡
     if (source === "rule") {
       const conds = ruleConditionsById(ruleIdFromEventKey(r));
       const keys = (conds || []).map(conditionKey).filter(Boolean);
@@ -11311,7 +11329,7 @@ function radarStoryOf(sid, date = null) {
   const activeAt = iq ? (iq.signal_at || iq.updated_at) : null;
   if (activeKind && SIGNAL_ABBR[activeKind] && activeAt && taipeiDateKey(activeAt) === date
       && !out.some(e => e.key === activeKind)) {
-    entry({ key: activeKind, at: activeAt, price: iq.price, level: iq.level,
+    entry({ key: activeKind, at: activeAt, price: null, level: iq.level,
             text: _signalLevelLabel(activeKind, iq.level), src: "builtin", sev: inferSeverity(iq),
             abbr: signalAbbr(activeKind), title: SIGNAL_LABEL_MAP[activeKind] || activeKind,
             condKeys: [activeKind] });
@@ -11602,7 +11620,11 @@ function renderRadarTimeline(sid) {
   const iq = past ? null : (intradayQuoteMap[sid] || null);
   // 過去的日子：縱軸定位、昨收線與壓力／支撐都用那天存下的（不拿今天的關卡畫上週）
   const hist = past ? (signalHistoryMap?.[sid]?.[date] || null) : null;
-  const ref = past ? { price: hist?.close ?? null, prevClose: hist?.prevClose ?? null, levels: hist?.levels ?? null } : iq;
+  const ref = past ? { price: null, prevClose: hist?.prevClose ?? null, levels: hist?.levels ?? null } : iq;
+  // 收盤價：只用開放資料日 K（15:30 日線補完才有當天那一根）。盤中不畫任何成交價
+  // （DATA_SOURCES.md 第十二節）；那天的日 K 還沒到就先不畫，到了再重畫一次
+  const closeV = ohlcCloseOf(sid, date);
+  if (closeV === undefined) ensureOhlcCloses(sid).then(fresh => { if (fresh) refreshRadarTimelineIfOpen(); }).catch(() => {});
   const story = radarStoryOf(sid, date);
   const intraday = story.filter(e => e.src !== "post");
   const holding = holdingBySid().get(sid);
@@ -11654,14 +11676,14 @@ function renderRadarTimeline(sid) {
   // 開盤那一段，手一放就被拉回去了）。換股票／換日期時 _rtlScrollKey 不同＝回到最右邊。
   const prevScroll = _rtlReadScroll(`${sid}|${date}`);
   document.getElementById("rtl-chart-wrap").innerHTML =
-    radarTimelineChartHtml(sid, intraday, ref, { past, covered, pending, locked: lockedRow });
+    radarTimelineChartHtml(sid, intraday, ref, { past, covered, pending, locked: lockedRow, close: closeV });
   _rtlApplyScroll(prevScroll);
   const headEl = document.getElementById("rtl-story-head");
   if (headEl) headEl.textContent = past ? `${_mdOf(date)} 盤中發生了什麼` : "盤中發生了什麼";
   // 分享鈕要能把這張圖重畫成一張圖片：它要的東西跟時間軸一模一樣（哪一檔、哪一天、
   // 那天的參考價位）。在這裡原封不動存一份，而不是等按下去再重算一次——重算就是
   // 第二份真相，而分享出去的圖片沒人會回來核對（unknown-treated-as-known 那一類）。
-  _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending, locked: lockedRow };
+  _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending, locked: lockedRow, close: closeV };
   const storyOpts = { past, covered };
   storyOpts.rx = rxRadarRowsByEid(story, sid, date);   // 回饋貼圖：分享來的那幾顆掛一排貼圖（REACTIONS.md）
   // 分享者那一側：我收到的回饋掛回那一顆訊號底下（唯讀）。rxMarks 由下面那支在背景補
@@ -11687,21 +11709,18 @@ function renderRadarTimeline(sid) {
 // opts.export：回傳 { width, height, inner } 而不是 HTML——分享圖片要的那一張
 //              （整個橫軸畫成一張不會捲的圖）；opts.highlight 是要圈起來的那一則在 entries 裡的序號。
 function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
-  const liveQ = opts.past ? null : getQuote(sid);
-  const priceRaw = Number(iq?.price ?? (opts.past ? NaN : liveQ?.price));
-  const cur = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : null;
-  // 這個價是不是「雷達正在顯示的那個交易日」的：剛加入、監控還沒寫出當日那列時，
-  // 手上只有日線收盤（報告檔或 FinMind），把它畫成一條叫「現價」的線就是在說謊——
-  // 2026-10-02 光聖 6442 盤中漲停 1625，雷達上那條「現價」寫的是昨收 1480。
-  // 基準刻意用 radarSessionDate() 而不是「今天」：收盤後與週末看到的是上一個交易日的
-  // 故事，那一天的最後成交價在那一頁就是「現價」，不該因為日曆翻頁就改叫昨收。
-  const curDate = opts.past ? "" : String((iq?.price > 0 ? iq.tradeDate : liveQ?.tradeDate) || "");
-  const curIsSession = !!curDate && curDate === radarSessionDate();
-  // 縱向位置：訊號當時的成交價（穿過線／停在線前的畫面自然出現）；沒有就用它講的關卡、再沒有就現價
+  // 2026-10-21 起這張圖不畫任何盤中成交價（交易所的即時資訊要簽約才能轉給使用者，DATA_SOURCES.md
+  // 第十二節）：沒有「現價」線，標記也不放在觸發當下的成交價上。唯一的價格線是那天的收盤，
+  // 而且只用開放資料日 K（opts.close，15:30 日線補完才有）；盤中那條線就是空的。
+  const closeRaw = Number(opts.close);
+  const cur = Number.isFinite(closeRaw) && closeRaw > 0 ? closeRaw : null;
+  // 縱向位置：訊號自己講的關卡（日線算的：壓力、支撐、前高、設定價格）。講不出關卡的
+  // （量能、RSI、MACD、漲跌幅）放在最下面那一條「其他訊號」，不假裝它有價位
   const marks = entries.map(e => {
-    const p = Number(e.price), l = Number(e.level);
-    return { e, v: (Number.isFinite(p) && p > 0) ? p : (Number.isFinite(l) && l > 0) ? l : cur };
+    const l = Number(e.level);
+    return { e, v: (e.key !== "volume_spike" && Number.isFinite(l) && l > 0) ? l : null };
   });
+  const hasLane = marks.some(m => m.v == null);
   // 參考橫線候選：訊號自己的關卡 → 現價 → 昨收 → 現價最近的壓力／支撐 → 月線。
   // 同一個價位只畫一次，同一個名字也只畫一次（RTL_REF_PRIO 的順序＝誰先進來、誰留下）。
   const refs = [];
@@ -11716,11 +11735,11 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     refs.push({ label, value: v, cls, prio: RTL_REF_PRIO[cls] ?? 9 });
   };
   for (const e of entries) if (RTL_LEVEL_LABEL[e.key]) addRef(RTL_LEVEL_LABEL[e.key], e.level, "sig");
-  // 現價（過去的日子＝那天的收盤）一定畫一條：關卡全在很遠的地方時（聯發科 2026-09-22，
-  // 支撐在 3,852、壓力一條都沒有），圖上會連一條靠近價格的線都沒有，看不出訊號離現在多遠
-  addRef(opts.past ? "收盤" : (curIsSession ? "現價" : "昨收"), cur, "cur");
+  // 收盤（開放資料日 K）有就畫一條；昨收是前一天的收盤（日線倉庫），盤中也畫
+  addRef("收盤", cur, "cur");
   if (iq?.prevClose) addRef("昨收", iq.prevClose, "prev");
-  const lv = opts.past ? _nearestFromLevels(iq?.levels, cur) : nearestLevels(sid, cur);
+  const anchor = cur || Number(iq?.prevClose) || null;   // 挑最近的壓力／支撐用：收盤，沒有就昨收
+  const lv = opts.past ? _nearestFromLevels(iq?.levels, anchor) : nearestLevels(sid, anchor);
   addRef("壓", lv.resistance, "lvl");
   addRef("撐", lv.support, "lvl");
   const score = opts.past ? null : sharedReportData?.investment_scores?.[sid];
@@ -11729,7 +11748,7 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   // 縱軸範圍以訊號位置與現價為主。參考線可以把它拉開，但有限度：拉太開就會把訊號
   // 全擠成最上面一排（聯發科：昨收在 3% 外，一拉開四顆訊號就黏在天花板上）
   const core = marks.map(m => m.v).filter(v => Number.isFinite(v) && v > 0);
-  if (cur) core.push(cur);
+  if (anchor) core.push(anchor);
   let lo = core.length ? Math.min(...core) : 0, hi = core.length ? Math.max(...core) : 0;
   const mid = (lo + hi) / 2 || 1;
   if (hi - lo < mid * 0.015) { lo = mid * 0.9925; hi = mid * 1.0075; }
@@ -11742,7 +11761,9 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   // 上下留白要留得下「標記本身」：圖示半高在上，圖示半高＋縮寫那一行在下。留不夠的話
   // 最上面或最下面那顆會被 clampY 夾住，而夾多少就是價格講錯多少（2026-10-05：十則訊號
   // 的壓力測試裡最低那顆被夾了 0.7 元）。留白是「最後範圍」的比例，所以先解出最後範圍。
-  const _plotH = RTL_PLOT.y1 - RTL_PLOT.y0;
+  // 有「其他訊號」那一條時，價位區往上縮一條的高度，那一條在最下面、不屬於縱軸
+  const yP1 = hasLane ? RTL_PLOT.y1 - RTL_LANE_H : RTL_PLOT.y1;
+  const _plotH = yP1 - RTL_PLOT.y0;
   const padTopF = (RTL_ICON / 2 + 2) / _plotH;
   const padBotF = (RTL_ICON / 2 + RTL_FONT.abbr + 6) / _plotH;
   const span = (hi - lo) / (1 - padTopF - padBotF) || mid * 0.02;
@@ -11752,7 +11773,7 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   // 用 transform 放在非整數像素，手機會把它光柵化得糊糊的，外圈陰影又跟圖示圓角對不齊，
   // 看起來像粗糙的截圖（Howard 2026-09-18 兩次反映）。向量座標裡畫就沒有這些事。
   const { x0, y0, y1 } = RTL_PLOT;
-  const yOf = v => y0 + (1 - (v - lo) / (hi - lo)) * (y1 - y0);
+  const yOf = v => y0 + (1 - (v - lo) / (hi - lo)) * (yP1 - y0);
 
   // 參考線的自動排版（2026-09-22 Howard：台達電、台積電好幾條疊在一起看不清楚）：
   //   1. 距離小於 RTL_LINE_MERGE 的兩條就是同一條線（台達電「前高 1,885」與「撐 1,880」
@@ -11769,7 +11790,7 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   lines.sort((a, b) => a.y - b.y);
   let lastLabelY = -Infinity;
   for (const r of lines) { r.ly = Math.max(r.y, lastLabelY + RTL_LABEL_GAP); lastLabelY = r.ly; }
-  const spill = lines.length ? lines[lines.length - 1].ly - (y1 + 6) : 0;
+  const spill = lines.length ? lines[lines.length - 1].ly - (yP1 + 6) : 0;
   if (spill > 0) for (const r of lines) r.ly = Math.max(y0 - 4, r.ly - spill);
   // 右邊留給標籤的寬度跟著最長的那一個走：標籤短的時候圖就可以寬一點
   const labelOf = r => `${r.label} ${fmtPrice(r.value)}`;
@@ -11808,13 +11829,20 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
   const markW = Math.max(icon, maxEm * fs + 8) + 2;   // 一顆標記實際佔的寬（圖示或縮寫，取寬的）
   const rowH = icon + fs + 8;
   const top = y0 + icon / 2, bottom = y1 - icon / 2 - fs - 4;
-  const clampY = v => Math.max(top, Math.min(bottom, v));
+  // 價位區的標記不能被擠進「其他訊號」那一條；那一條的標記固定在最下面
+  const bottomP = hasLane ? yP1 - icon / 2 - fs - 4 : bottom;
+  const clampY = v => Math.max(top, Math.min(bottomP, v));
   const placed = [];
   const hits = (x, y) => placed.some(q => Math.abs(q.x - x) < markW - 0.5 && Math.abs(q.y - y) < rowH);
   let marksSvg = "";
   marks.forEach((m, i) => {
     const x = xOf(i);
-    const base = clampY(Number.isFinite(m.v) && m.v > 0 ? yOf(m.v) : midY);
+    if (m.v == null) {          // 「其他訊號」那一條：沒有價位，不參與縱向避讓
+      placed.push({ x, y: bottom });
+      marksSvg += rtlMarkerSvg(m.e, x, bottom, i, icon, fs);
+      return;
+    }
+    const base = clampY(yOf(m.v));
     let y = base;
     // 撞到就一層一層往外找：上半部的往下讓、下半部的往上讓（免得全部擠到同一邊）
     for (let k = 1; k <= 5 && hits(x, y); k++) {
@@ -11828,7 +11856,10 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     marksSvg += rtlMarkerSvg(m.e, x, y, i, icon, fs);
   });
   // 線畫在會捲的那張圖裡（橫線本來就跨滿整個寬度，捲到哪一段都看得到）
-  const linesSvg = lines.map(r =>
+  const laneSvg = hasLane
+    ? `<line class="rtl-lane-sep" x1="${x0}" y1="${(yP1 + 4).toFixed(1)}" x2="${x1}" y2="${(yP1 + 4).toFixed(1)}"/>`
+    : "";
+  const linesSvg = laneSvg + lines.map(r =>
     `<line class="rtl-line rtl-line-${r.cls}" x1="${x0}" y1="${r.y.toFixed(1)}" x2="${x1}" y2="${r.y.toFixed(1)}"/>`).join("");
   // 價格標籤畫在釘住的那一欄：自己一張 SVG，座標原點在那一欄的左上角，y 與線同一套
   const gutterSvg = lines.map(r => {
@@ -11836,7 +11867,9 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
       ? `<line class="rtl-lead rtl-line-${r.cls}" x1="0" y1="${r.y.toFixed(1)}" x2="6" y2="${r.ly.toFixed(1)}"/>`
       : "";
     return lead + `<text class="rtl-line-label rtl-line-${r.cls}" x="8" y="${(r.ly + RTL_FONT.label * 0.35).toFixed(1)}">${escapeHtml(labelOf(r))}</text>`;
-  }).join("");
+  }).join("") + (hasLane
+    ? `<text class="rtl-lane-label" x="8" y="${(bottom + RTL_FONT.label * 0.35).toFixed(1)}">其他訊號</text>`
+    : "");
   // 刻度＝每顆標記的時間。同一分鐘的只寫一次（開盤那批常常五顆都是 09:00，寫五次只是雜訊），
   // 擠不下的也不寫——每一則的時間在下面的故事列裡都有
   const axisY = y1 + RTL_AXIS_GAP;
@@ -11930,12 +11963,13 @@ const RTL_ICON = 34;        // 標記圖示邊長（訊號少的日子）
 const RTL_ICON_MIN = 24;    // 訊號多到一格塞不下時，圖示最小縮到這麼大
 const RTL_NOW_GAP = 32;     // 最後一顆標記與右緣那條「現在」虛線之間至少留這麼寬
 const RTL_MAX_LINES = 5;    // 最多幾條參考橫線
+const RTL_LANE_H = 58;      // 「其他訊號」那一條（量能、RSI、MACD、漲跌幅：講不出價位的）的高度
 const RTL_LINE_MERGE = 13;  // 兩條線靠得比這個近就當成同一條，只留優先序高的
 const RTL_LABEL_GAP = 15;   // 兩個標籤至少差這麼多，否則往下錯開＋接線
 // 字級：與 watchlist.css 的 .rtl-* 同一組數字（CSS 負責上色與粗細，這裡只用來估寬度）。
 // 縮寫是唯一會被程式改大小的（跟著圖示縮），所以標在 <text> 上而不是 CSS。
 const RTL_FONT = { label: 12.5, tick: 12, abbr: 12.5, abbrMin: 9.5, now: 12.5 };
-// 參考線的優先序：訊號自己講的關卡 > 現價 > 昨收 > 最近的壓力／支撐 > 月線
+// 參考線的優先序：訊號自己講的關卡 > 收盤（開放資料日 K） > 昨收 > 最近的壓力／支撐 > 月線
 const RTL_REF_PRIO = { sig: 0, cur: 1, prev: 2, lvl: 3, ma: 4 };
 
 // 第 i 顆（共 n 顆）標記的橫向位置（%）：等距、只有一顆就置中。
@@ -12004,7 +12038,7 @@ function radarStoryListHtml(story, opts = {}) {
     // 回饋貼圖（REACTIONS.md）：分享來的那一顆底下接一排貼圖，占整個寬度（不塞在 .rtl-text 那一欄裡，
     // 左邊時間與圖示的位置也用上）；說明文字裡「來自 ○○ 的分享」那一行就不重複寫了（Howard 2026-10-09 晚）
     const rx = opts.rx && opts.rx[rtlEntryId(e)];
-    const text = rx ? rxWithoutNote(e.text) : e.text;
+    const text = stripLiveQuote(rx ? rxWithoutNote(e.text) : e.text);
     // 對話框的入口只有盤中雷達最上面那一條（Howard 2026-10-10 第二輪：每一則訊號都放一顆太多了）
     const eid = rtlEntryId(e);
     // 分享者那一側：這一顆收到的回饋（opts.rxin，唯讀的一行）
@@ -12123,7 +12157,7 @@ function _sigShareWrap(text, maxW, fs, maxLines) {
 function signalShareSvg(ctx, e) {
   const { pad, gap, foot, minW, descLines } = SIGNAL_SHARE;
   const chart = radarTimelineChartHtml(ctx.sid, ctx.intraday, ctx.ref, {
-    past: ctx.past, covered: ctx.covered, pending: ctx.pending, locked: ctx.locked, export: true,
+    past: ctx.past, covered: ctx.covered, pending: ctx.pending, locked: ctx.locked, close: ctx.close, export: true,
     highlight: ctx.intraday.findIndex(x => rtlEntryId(x) === rtlEntryId(e)),
   });
   const textX = pad + 58;                                 // 圖示 34 ＋ 左右間距
@@ -12135,7 +12169,7 @@ function signalShareSvg(ctx, e) {
   // 底部那一行是「免責 … 官網網址」，兩端對齊：放不下就把整張圖加寬，不要讓它們疊在一起
   const footW = rtlTextWidth(SIGNAL_SHARE_FOOT, 11.5) + 16 + rtlTextWidth(SIGNAL_SHARE_SITE, 11.5);
   const W = Math.max(minW, chart.width + pad * 2, textX + titleW + pad + 12, footW + pad * 2);
-  const lines = _sigShareWrap(e.text, W - textX - pad, 13, descLines);
+  const lines = _sigShareWrap(stripLiveQuote(e.text), W - textX - pad, 13, descLines);
   const cardY = 64, cardH = 56 + lines.length * 18;
   const chartY = cardY + cardH + gap;
   const H = chartY + chart.height + foot;
@@ -14314,7 +14348,7 @@ async function loadKLineIntoCard(sid) {
       data.stock_data[sidKey] = liveStock;
       sharedReportData = data;
 
-      document.getElementById("kline-price").textContent = _klinePriceText(sidKey, liveStock.levels);
+      document.getElementById("kline-price").textContent = _klinePriceText(sidKey, liveStock.levels, liveStock);
       renderKLineMaChip(liveStock.levels?.ma || {});
       document.getElementById("kline-industry").textContent = normalizeIndustry(liveStock.industry || displayIndustry || "");
       currentChipsView = "foreign";
@@ -14326,7 +14360,7 @@ async function loadKLineIntoCard(sid) {
     document.getElementById("kline-name").textContent = stock.name || universe[sidKey]?.n || sidKey;
     document.getElementById("kline-industry").textContent = normalizeIndustry(stock.industry || universe[sidKey]?.i || "");
     const levels = stock.levels || {};
-    document.getElementById("kline-price").textContent = _klinePriceText(sidKey, levels);
+    document.getElementById("kline-price").textContent = _klinePriceText(sidKey, levels, stock);
 
     const ma = levels.ma || {};
     renderKLineMaChip(ma);
@@ -14358,10 +14392,18 @@ function fallbackKLineLevels(sid) {
   return { support: lv?.support || [], resistance: lv?.resistance || [], ma };
 }
 
-// 標題列的「現價」：有盤中報價就用它（報告檔的 levels.current 是昨收，盤中會差一截）
-function _klinePriceText(sid, levels) {
-  const q = getQuote(sid);
-  if (q && Number.isFinite(q.price)) return fmtPrice(q.price);
+// 標題列的「收盤」：K 線最後一根的收盤＋日期（日線倉庫＝開放資料；報告分片與 ohlc/<股號>.json 都是）。
+// 2026-10-21 起不顯示盤中報價（DATA_SOURCES.md 第十二節）：盤中看到的是前一個交易日的收盤，
+// 15:30 日線補完之後才換成當天的
+function _klinePriceText(sid, levels, stock = null) {
+  const dates = stock?.daily?.dates || [];
+  const bars = stock?.daily?.ohlcv || [];
+  const last = bars.length ? Number(bars[bars.length - 1][3]) : NaN;
+  if (Number.isFinite(last) && last > 0) {
+    const d = String(dates[dates.length - 1] || "");
+    const md = /^\d{4}-\d{2}-\d{2}$/.test(d) ? `（${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}）` : "";
+    return `${fmtPrice(last)}${md}`;
+  }
   const cur = Number(levels?.current);
   return Number.isFinite(cur) && cur > 0 ? fmtPrice(cur) : "—";
 }
@@ -14855,20 +14897,57 @@ function _ohlcBarsToRaw(bars) {
   });
 }
 
+// 一檔的日 K 檔（{sid, d, b}）：IndexedDB 有今天該有的那一份就不下載。K 線卡片與時間軸的收盤共用
+async function fetchOhlcJson(sid) {
+  let cached = await _reportCacheGet("ohlc:" + sid);
+  if (!_ohlcCacheFresh(cached)) {
+    const url = await reportSignedUrl("latest", "ohlc", sid);
+    if (!url) return null;
+    const resp = await fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(20000) : undefined });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    if (!json || !Array.isArray(json.b) || !json.b.length) return null;
+    cached = { json, fetchedDay: taipeiDateKey(new Date()), fetchedMin: _taipeiMinutesNow() };
+    _reportCachePut("ohlc:" + sid, cached).catch(() => {});
+  }
+  _ohlcCloses[sid] = _ohlcCloseMap(cached.json.b, cached.fetchedDay, cached.fetchedMin);
+  return cached.json;
+}
+
+// 時間軸的「收盤」線：{ "YYYY-MM-DD": 收盤 }。只有開放資料日 K 的（DATA_SOURCES.md 第十二節）
+const _ohlcCloses = {};
+const _ohlcClosesTried = {};
+function _ohlcCloseMap(bars, fetchedDay, fetchedMin) {
+  const m = {};
+  for (const b of bars || []) {
+    const n = Number(b[0]);
+    m[`${Math.floor(n / 10000)}-${String(Math.floor(n / 100) % 100).padStart(2, "0")}-${String(n % 100).padStart(2, "0")}`] = Number(b[4]);
+  }
+  return { m, fetchedDay, fetchedMin };
+}
+// undefined＝還沒載（或載的那份已經舊了，該補抓）；null＝載過、那天沒有收盤（盤中、休市、新股）
+function ohlcCloseOf(sid, date) {
+  const c = _ohlcCloses[sid];
+  if (!c) return undefined;
+  if (c.m[date] > 0) return c.m[date];
+  const stale = c.fetchedDay !== taipeiDateKey(new Date())
+    || (c.fetchedMin < OHLC_READY_MINUTES && _taipeiMinutesNow() >= OHLC_READY_MINUTES);
+  return stale ? undefined : null;
+}
+// 每檔每天只試一次（加上 15:45 之後一次）：失敗不要讓每 5 秒的重畫變成每 5 秒一個請求。回傳有沒有新資料
+async function ensureOhlcCloses(sid) {
+  const key = `${taipeiDateKey(new Date())}|${_taipeiMinutesNow() >= OHLC_READY_MINUTES ? "pm" : "am"}`;
+  if (_ohlcClosesTried[sid] === key) return false;
+  _ohlcClosesTried[sid] = key;
+  const json = await fetchOhlcJson(sid);
+  return !!json;
+}
+
 async function fetchWatchlistOpenDataStock(sid, name, industry) {
   try {
-    let cached = await _reportCacheGet("ohlc:" + sid);
-    if (!_ohlcCacheFresh(cached)) {
-      const url = await reportSignedUrl("latest", "ohlc", sid);
-      if (!url) return null;
-      const resp = await fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(20000) : undefined });
-      if (!resp.ok) return null;
-      const json = await resp.json();
-      if (!json || !Array.isArray(json.b) || !json.b.length) return null;
-      cached = { json, fetchedDay: taipeiDateKey(new Date()), fetchedMin: _taipeiMinutesNow() };
-      _reportCachePut("ohlc:" + sid, cached).catch(() => {});
-    }
-    const raw = _ohlcBarsToRaw(cached.json.b);
+    const json = await fetchOhlcJson(sid);
+    if (!json) return null;
+    const raw = _ohlcBarsToRaw(json.b);
     // 籌碼副圖在授權確認前暫停（PAUSE_UNLICENSED_SOURCES）：連請求都不發
     const chips = PAUSE_UNLICENSED_SOURCES ? {} : await fetchWatchlistFinMindChips(sid);
     return processWatchlistFinMindRaw(raw, sid, name, industry, chips);
