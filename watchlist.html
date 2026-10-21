@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="409">
+  <meta name="app-version" content="410">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=409" rel="stylesheet">
+  <link href="watchlist.css?v=410" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1291,7 +1291,7 @@
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
-        <h5 class="mb-0">新增分享</h5>
+        <h5 class="mb-0" id="fr-share-title">新增分享</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3" id="fr-share-form">
@@ -1308,6 +1308,9 @@
         <label class="fr-label" for="fr-share-stock">股票（從自選股選）</label>
         <select class="fr-input" id="fr-share-stock"></select>
         <div class="fr-hint" id="fr-share-preview"></div>
+        <!-- 這一檔已經在分享中（一檔一則）：這個視窗改成「加分享對象」，送出＝加進原本那一則
+             （Howard 2026-10-21：已分享的那一檔要再分享給別人，從首頁進來做不到）。frSyncShareFormMode 管 -->
+        <div class="fr-hold" id="fr-share-existing" style="display:none"></div>
 
         <!-- 分享對象：好友與常用名單各一頁可以瀏覽的清單（Howard 2026-10-04）。
              原本是兩種混在一起的一小段勾選清單，好友一多就只能一直往下捲、
@@ -1327,6 +1330,7 @@
           <div class="fr-pick-summary" id="fr-pick-summary"></div>
         </div>
 
+        <div id="fr-share-expiry-box">
         <label class="fr-label" for="fr-share-date">終止日期</label>
         <div class="fr-row" style="margin-top:0">
           <label class="fr-row fr-pick" style="flex:0 0 auto; margin-top:0">
@@ -1334,6 +1338,7 @@
             <span>永不終止</span>
           </label>
           <input class="fr-input" type="date" id="fr-share-date" disabled>
+        </div>
         </div>
         <p class="fr-hint">
           送出的是這檔目前的基礎訊號與進階訊號設定。持有股數與成本不會送出。
@@ -9539,8 +9544,9 @@ function goStockSettings(sid) {
 // 好友清單、名單、「我分享出去的」都還是開 App 那一刻的——之後才加的好友勾不到，
 // 重複邀請的提醒也拿舊資料算。所以先抓最新的再開（先叫 frReload 蓋章，下面 switchTab
 // 觸發的 renderFriends 就不會再抓一次）。
-// 這一檔已經在分享中（一檔一則）：直接帶到那一則，與送出時後端回 already_shared 的去處相同——
-// 分享分頁要先選股票才知道，首頁這裡一開始就知道是哪一檔，不必讓人填完表單才被退回。
+// 這一檔已經在分享中（一檔一則）：視窗照開，自己切成「加分享對象」（frSyncShareFormMode），
+// 送出＝把勾的人加進原本那一則。v409 曾經改成直接帶到那一則，但加對象的入口在那一則裡面
+// 收了兩層，看起來就是「已分享的那一檔不能再分享給別人」（Howard 2026-10-21）。
 async function goStockShare(sid) {
   const want = String(sid || "").trim();
   if (!frEnabled || !want) return;
@@ -9550,15 +9556,6 @@ async function goStockShare(sid) {
   frSwitchShare("out");      // 要在 frSwitchSeg 之後：有待決定的邀請時它會自己切到「好友分享給我」
   await fresh;
   if (currentTab !== "friends") return;   // 抓的這段時間裡他已經去別頁了
-  const live = frLiveShareOf(want);
-  if (live) {
-    frSwitchShare("out");
-    frOpenShare = live.share_id;
-    frFlashAt("share-out", live.share_id);
-    frRenderSharesOut();
-    frToast("這一檔已經在分享中。要增減對象或同步設定，就在這一則上做");
-    return;
-  }
   frOpenShareForm(want);
 }
 
@@ -19674,11 +19671,55 @@ function frUpdateSharePreview() {
   const sid = document.getElementById("fr-share-stock").value;
   const row = (watchlistRows || []).find(r => String(r.stock_id).trim() === sid);
   const el = document.getElementById("fr-share-preview");
+  const live = frSyncShareFormMode(sid);
+  // 加進原本那一則的人收到的是那一則的快照，不是這一檔現在的設定（加對象不動設定）
+  if (live) { el.innerHTML = `新加入的人會收到：${frFlagSummary(live.base)}　${frRulesSummary(live.rules)}`; return; }
   if (!row) { el.textContent = ""; return; }
   const rules = frMyRulesFor(sid);
   const held = frMyRulesHeldFor(sid).length;
   el.innerHTML = `將送出：${frFlagSummary(row)}　${frRulesSummary(rules)}`
     + (held ? `<div class="fr-warn">另外 ${held} 條進階訊號超出你的方案額度，現在不生效、也不會送出。</div>` : "");
+}
+
+// 「新增分享」視窗的兩種樣子（2026-10-21）：選到的那一檔已經在分享中（一檔一則）就是「加分享對象」——
+// 已經是對象的好友勾不了、終止日期沿用原本那一則（藏起來）、送出改叫「加入」。
+// 首頁那一列與分享分頁這顆共用同一個視窗，所以兩個入口一起變；回傳那一則（沒有就 null）。
+function frSyncShareFormMode(sid) {
+  const live = frLiveShareOf(sid);
+  const attached = new Set(((live && live.recipients) || [])
+    .filter(r => ["pending", "held", "accepted"].includes(r.status)).map(r => r.user_id));
+  const box = document.getElementById("fr-share-existing");
+  if (box) {
+    box.style.display = live ? "" : "none";
+    if (live) {
+      const names = ((live.recipients) || []).filter(r => attached.has(r.user_id)).map(r => r.name || "（無名稱）");
+      box.innerHTML = `這一檔已經分享給 ${escapeHtml(names.join("、") || "（沒有對象）")}（${attached.size} 位）。`
+        + `勾選的人會加進這則分享；原本的對象不會被打擾，設定與終止日期都沿用原本那一則。`;
+    }
+  }
+  frShow("fr-share-expiry-box", !live);
+  const title = document.getElementById("fr-share-title");
+  if (title) title.textContent = live ? "加分享對象" : "新增分享";
+  const send = document.getElementById("fr-btn-send-share");
+  if (send) send.textContent = live ? "加入" : "送出";
+  document.querySelectorAll("#fr-pick-friends .fr-sh-friend").forEach(c => {
+    const on = attached.has(c.value);
+    if (on) c.checked = false;
+    c.disabled = on;
+    const li = c.closest("li");
+    if (li) {
+      li.classList.toggle("is-attached", on);
+      let tip = li.querySelector(".fr-attached-tip");
+      if (on && !tip) {
+        tip = document.createElement("span");
+        tip.className = "fr-attached-tip fr-hint";
+        tip.textContent = "已在分享中";
+        c.before(tip);
+      } else if (!on && tip) tip.remove();
+    }
+  });
+  frUpdatePickSummary();
+  return live;
 }
 
 // ── 送出前的提醒（Howard 2026-10-07；2026-10-09 跟著一檔一則改寫）──────────
@@ -19747,6 +19788,9 @@ async function frSendShare() {
 
   if (!sid) { msg.textContent = "先選一檔股票"; msg.classList.add("bad"); return; }
   if (!friends.length && !groups.length) { msg.textContent = "請至少選一位好友或一個常用名單"; msg.classList.add("bad"); return; }
+  // 這一檔已經在分享中：加進原本那一則（與那一則裡的「加分享對象」同一支 RPC），終止日期不看
+  const live = frLiveShareOf(sid);
+  if (live) { await frAddToLiveShare(live, friends, groups); return; }
   if (!forever && !date) { msg.textContent = "請選終止日期，或勾「永不終止」"; msg.classList.add("bad"); return; }
   // 會再收到一次邀請的人、被選到兩次的人，先問一次
   if (!frConfirmShareTargets(sid, friends, groups)) return;
@@ -19782,6 +19826,32 @@ async function frSendShare() {
     await frReload();
   } catch (e) {
     msg.textContent = `送出失敗：${e.message || e}`;
+    msg.classList.add("bad");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 「新增分享」視窗選到的是已經在分享中的那一檔：把勾的人加進那一則（2026-10-21）。
+// 與那一則展開後的「加分享對象」同一支 share_target_add、同一句提示；送完把那一則展開並閃給他看。
+async function frAddToLiveShare(live, friends, groups) {
+  const msg = document.getElementById("fr-share-msg");
+  if (!frConfirmShareTargets(String(live.stock_id || "").trim(), friends, groups)) return;
+  const btn = document.getElementById("fr-btn-send-share");
+  btn.disabled = true;
+  msg.textContent = "加入中…";
+  try {
+    const r = await frRpc("share_target_add", { p_share_id: live.share_id, p_friends: friends, p_groups: groups });
+    const err = frErrText(r);
+    if (err) { msg.textContent = err; msg.classList.add("bad"); return; }
+    frCloseShareForm();
+    frToast(r.added ? `已加入 ${r.added} 位，已送出邀請` : "沒有新加入的對象");
+    frSwitchShare("out");
+    frOpenShare = live.share_id;
+    frFlashAt("share-out", live.share_id);
+    await frReload();
+  } catch (e) {
+    msg.textContent = `加入失敗：${e.message || e}`;
     msg.classList.add("bad");
   } finally {
     btn.disabled = false;
