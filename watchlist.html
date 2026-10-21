@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="411">
+  <meta name="app-version" content="412">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=411" rel="stylesheet">
+  <link href="watchlist.css?v=412" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1716,6 +1716,9 @@
           <div class="kline-readout" id="kline-readout" hidden></div>
         </div>
         <div class="kline-hint" aria-hidden="true">長按顯示數值，按住左右滑動可逐根查看；拖曳平移、雙指縮放</div>
+        <!-- 日 K 全部來自日線倉庫（進榜股的報告分片與其餘股票的 ohlc/<股號>.json 都是）＝開放資料，
+             署名是授權的生效條件（data/open_data.py ATTRIBUTION、DATA_SOURCES.md 第十一節） -->
+        <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
         </div>
 
       </div>
@@ -9368,15 +9371,15 @@ function _askAiReset() {
   askAiPasteClose();
 }
 
-// K 線資料與字卡同一條路：共享檔的分片，沒有就 FinMind 現抓（fetchWatchlistFinMindStock）
+// K 線資料與字卡同一條路：共享檔的分片，沒有就讀開放資料日 K（fetchWatchlistKLineStock）
 async function askAiStockData(sid) {
   const data = await loadSharedReportData();
   await ensureStockDetail(sid).catch(() => {});
   await ensureKLine(sid.slice(0, 2)).catch(() => {});
   let stock = data.stock_data?.[sid];
   if (!stock || !stock.daily) {
-    const live = await fetchWatchlistFinMindStock(sid, universe[sid]?.n || sid, universe[sid]?.i || "");
-    if (!live) throw new Error("共享檔沒有這一檔，FinMind 也抓不到");
+    const live = await fetchWatchlistKLineStock(sid, universe[sid]?.n || sid, universe[sid]?.i || "");
+    if (!live) throw new Error("共享檔與日 K 檔都讀不到這一檔");
     if (!data.stock_data) data.stock_data = {};
     data.stock_data[sid] = live;
     sharedReportData = data;
@@ -14286,27 +14289,24 @@ async function loadKLineIntoCard(sid) {
 
       document.getElementById("kline-name").textContent = displayName;
       document.getElementById("kline-industry").textContent = displayIndustry;
-      // 報告的 stock_data 只涵蓋進榜的 ~30 檔，其他自選股的關卡與均線以前只能等 FinMind
-      // 從瀏覽器現抓（免費額度、逾時都會失敗），失敗就整段空白——同一份資料雷達列明明有。
-      // 先用記憶體裡的兩個來源填上（intraday_state.levels 與 investment_scores 的 ma20/60），
-      // FinMind 成功再換成完整的 MA5/10/20/60。
+      // 報告的 stock_data 只涵蓋進榜的 ~38 檔，其他自選股的日線改讀開放資料日 K（fetchWatchlistKLineStock）。
+      // 下載前先用記憶體裡的兩個來源填上（intraday_state.levels 與 investment_scores 的 ma20/60），
+      // 日 K 到了再換成完整的 MA5/10/20/60。
       const fallback = fallbackKLineLevels(sidKey);
       const hasFallbackMa = Object.keys(fallback.ma).length > 0;
       if (hasFallbackMa) renderKLineMaChip(fallback.ma, "讀取完整 K 線中...");
-      else setKLineMaInfo(inUniverse
-          ? "共享檔未提供 K 線細節，現在改用 FinMind 即時抓取中..."
-          : "找不到共享資料，現在改用 FinMind 即時抓取中...");
-      document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">即時抓取 K 線資料中...</div>';
+      else setKLineMaInfo("讀取 K 線資料中...");
+      document.getElementById("kline-chart").innerHTML = '<div class="kline-loading">讀取 K 線資料中...</div>';
 
-      const liveStock = await fetchWatchlistFinMindStock(sidKey, displayName, displayIndustry);
+      const liveStock = await fetchWatchlistKLineStock(sidKey, displayName, displayIndustry);
       if (!liveStock) {
         if (hasFallbackMa) renderKLineMaChip(fallback.ma, "K 線抓取失敗，請稍後再試");
         else setKLineMaInfo(inUniverse
-            ? "FinMind 即時抓取失敗，請稍後再試"
-            : "FinMind 即時抓取失敗，請確認代號是否正確");
+            ? "K 線資料讀取失敗，請稍後再試"
+            : "K 線資料讀取失敗，請確認代號是否正確");
         document.getElementById("kline-chart").innerHTML = inUniverse
-          ? `<div class="kline-empty">${escapeHtml(sidKey)} 尚未在共享檔內，且 FinMind 即時抓取失敗。</div>`
-          : `<div class="kline-empty">無法即時抓取 ${escapeHtml(sidKey)} 的 K 線資料。</div>`;
+          ? `<div class="kline-empty">${escapeHtml(sidKey)} 的 K 線資料暫時讀不到，請稍後再試。</div>`
+          : `<div class="kline-empty">找不到 ${escapeHtml(sidKey)} 的 K 線資料。</div>`;
         return;
       }
 
@@ -14830,6 +14830,61 @@ function bindKLineTouchInteraction() {
   klineTouchGlobalHandlers = globalHandlers;
 }
 
+// ── K 線日線：日線倉庫（開放資料）的全市場日 K（data/kline_export.py，DATA_SOURCES.md 第十一節）──
+// 報告的 K 線分片只有進榜的約 38 檔；其餘自選股（含全部 ETF）以前由瀏覽器直接向 FinMind 現抓，
+// 而 FinMind 的授權還沒確認（PAUSE_UNLICENSED_SOURCES）。現在改讀 R2 上一檔一個的 ohlc/<股號>.json
+// （每天 15:30 日線補完後輸出），換成跟 FinMind 一樣的列，交給同一支 processWatchlistFinMindRaw——
+// 均線、週月 K、關卡的算法不變。本機 IndexedDB 存一份：同一天點第二次不再下載；
+// 15:45 前抓的那份在 15:45 之後如果還沒有今天那一根，就重抓一次。
+const OHLC_READY_MINUTES = 15 * 60 + 45;
+
+function _ohlcCacheFresh(cached) {
+  if (!cached || !cached.json || !Array.isArray(cached.json.b) || !cached.json.b.length) return false;
+  const today = taipeiDateKey(new Date());
+  if (cached.fetchedDay !== today) return false;
+  if (cached.fetchedMin < OHLC_READY_MINUTES && _taipeiMinutesNow() >= OHLC_READY_MINUTES
+      && String(cached.json.d || "") < today) return false;
+  return true;
+}
+
+function _ohlcBarsToRaw(bars) {
+  return bars.map(b => {
+    const n = Number(b[0]);
+    const date = `${Math.floor(n / 10000)}-${String(Math.floor(n / 100) % 100).padStart(2, "0")}-${String(n % 100).padStart(2, "0")}`;
+    return { date, open: b[1], high: b[2], low: b[3], close: b[4], volume: b[5] };
+  });
+}
+
+async function fetchWatchlistOpenDataStock(sid, name, industry) {
+  try {
+    let cached = await _reportCacheGet("ohlc:" + sid);
+    if (!_ohlcCacheFresh(cached)) {
+      const url = await reportSignedUrl("latest", "ohlc", sid);
+      if (!url) return null;
+      const resp = await fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(20000) : undefined });
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      if (!json || !Array.isArray(json.b) || !json.b.length) return null;
+      cached = { json, fetchedDay: taipeiDateKey(new Date()), fetchedMin: _taipeiMinutesNow() };
+      _reportCachePut("ohlc:" + sid, cached).catch(() => {});
+    }
+    const raw = _ohlcBarsToRaw(cached.json.b);
+    // 籌碼副圖在授權確認前暫停（PAUSE_UNLICENSED_SOURCES）：連請求都不發
+    const chips = PAUSE_UNLICENSED_SOURCES ? {} : await fetchWatchlistFinMindChips(sid);
+    return processWatchlistFinMindRaw(raw, sid, name, industry, chips);
+  } catch (e) {
+    console.warn("[K 線 開放資料]", sid, e.message);
+    return null;
+  }
+}
+
+// K 線卡片與助手共用的入口：先讀開放資料；讀不到時，只有在 FinMind 沒被暫停的情況下才退回 FinMind
+async function fetchWatchlistKLineStock(sid, name, industry) {
+  const stock = await fetchWatchlistOpenDataStock(sid, name, industry);
+  if (stock || PAUSE_UNLICENSED_SOURCES) return stock;
+  return fetchWatchlistFinMindStock(sid, name, industry);
+}
+
 async function fetchWatchlistFinMindStock(sid, name, industry) {
   try {
     const start = new Date();
@@ -14839,7 +14894,7 @@ async function fetchWatchlistFinMindStock(sid, name, industry) {
     // 價格與三大法人並行抓；法人失敗只會讓籌碼副圖顯示「無資料」，不影響 K 線
     const [resp, chips] = await Promise.all([
       fetch(url, { signal: typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(20000) : undefined }),
-      fetchWatchlistFinMindChips(sid),
+      PAUSE_UNLICENSED_SOURCES ? Promise.resolve({}) : fetchWatchlistFinMindChips(sid),
     ]);
     if (!resp.ok) return null;
     const json = await resp.json();
