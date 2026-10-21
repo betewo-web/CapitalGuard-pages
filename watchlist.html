@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="413">
+  <meta name="app-version" content="414">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=413" rel="stylesheet">
+  <link href="watchlist.css?v=414" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5800,8 +5800,10 @@ async function loadIntradayQuotes(force = false, opts) {
       // 不取 volume：那是 MIS 的當日累計張數原值，量能偵測全在自家主機上跑完
       // （monitor/realtime.py），前端只需要判定結果。以前取它是為了讓規則編輯器
       // 的命中預覽能在本地算 volume_vs_ma——那條預覽已改為伺服器端評估。
-      const cols = "stock_id,stock_name,price,prev_close,change_pct,signal,severity,level,signal_at,updated_at";
-      const liveCols = ["stock_id", "price", "change_pct", "updated_at"]
+      // 不取 price（DATA_SOURCES.md 第十三節）：盤中成交價不送到裝置。change_pct 從 2026-10-21 起
+      // 伺服器只寫方向（1／0／−1），這裡也只取它的正負號——舊伺服器還寫百分比的那段期間一樣只留方向
+      const cols = "stock_id,stock_name,prev_close,change_pct,signal,severity,level,signal_at,updated_at";
+      const liveCols = ["stock_id", "change_pct", "updated_at"]
         .concat(intradayOptionalCols.includes("quote_at") ? ["quote_at"] : []).join(",");
       const query = () => ({
         select: needFull ? [cols, ...intradayOptionalCols].join(",") : liveCols,
@@ -5831,15 +5833,7 @@ async function loadIntradayQuotes(force = false, opts) {
           const sid = String(row.stock_id || "").trim();
           const entry = intradayQuoteMap[sid];
           if (!entry) continue;
-          const price = Number(row.price);
-          if (!Number.isFinite(price)) continue;
-          const changePctRaw = row.change_pct == null ? null : Number(row.change_pct);
-          let changePct = (changePctRaw !== null && Number.isFinite(changePctRaw)) ? changePctRaw : null;
-          if (changePct === null && entry.prevClose !== null && entry.prevClose !== undefined) {
-            changePct = ((price - entry.prevClose) / entry.prevClose) * 100;
-          }
-          entry.price = price;
-          entry.changePct = changePct;
+          entry.dir = _intradayDir(row.change_pct);
           entry.updated_at = row.updated_at || entry.updated_at;
           entry.tradeDate = taipeiDateKey(row.updated_at) || entry.tradeDate;
           if ("quote_at" in row) entry.quote_at = row.quote_at || null;
@@ -5851,20 +5845,14 @@ async function loadIntradayQuotes(force = false, opts) {
       for (const row of rows || []) {
         const sid = String(row.stock_id || "").trim();
         if (!isStockId(sid)) continue;
-        const price = Number(row.price);
-        if (!Number.isFinite(price)) continue;
         const prevCloseRaw = row.prev_close == null ? null : Number(row.prev_close);
         const prevClose = (prevCloseRaw !== null && Number.isFinite(prevCloseRaw) && prevCloseRaw > 0) ? prevCloseRaw : null;
-        // 重要：row.change_pct 為 DB NULL 時 Number(null)=0，需先判 null 再轉換
-        const changePctRaw = row.change_pct == null ? null : Number(row.change_pct);
-        let changePct = (changePctRaw !== null && Number.isFinite(changePctRaw)) ? changePctRaw : null;
-        if (changePct === null && prevClose !== null) {
-          changePct = ((price - prevClose) / prevClose) * 100;
-        }
         map[sid] = {
-          price,
+          // price／changePct 永遠是 null：getQuote 因此只會拿到日線收盤（報告），盤中的只有方向 dir
+          price:      null,
           prevClose,
-          changePct,
+          changePct:  null,
+          dir:        _intradayDir(row.change_pct),
           tradeDate:  taipeiDateKey(row.updated_at),
           // signals_today 是哪一天的。與 tradeDate 分開記：見 signalLogFor 的說明
           signalsDate: taipeiDateKey(row.updated_at),
@@ -5892,6 +5880,14 @@ async function loadIntradayQuotes(force = false, opts) {
   } finally {
     intradayQuotesLoadingPromise = null;
   }
+}
+
+// intraday_state.change_pct → 今天的方向（up／down／flat）。重要：DB NULL 時 Number(null)=0，要先判 null
+function _intradayDir(raw) {
+  if (raw == null) return null;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return null;
+  return v > 0 ? "up" : v < 0 ? "down" : "flat";
 }
 
 // intraday_state.levels：監控當日凍結的支撐／壓力（訊號就是用這組判斷的）。只留正數。
@@ -5983,9 +5979,25 @@ async function loadFinMindQuotesForMissing(force = false) {
   }
 }
 
+// 全市場關卡檔（web/market_levels.json，日線倉庫＝開放資料，06:15 更新）的最後收盤：報告的 stock_data
+// 只有進榜的約 38 檔，其餘自選股的收盤從這裡拿。盤中價不送到裝置之後（DATA_SOURCES.md 第十三節），
+// 統計頁、助手的「收盤」就靠這兩份。aiMarketLevels() 載入後填進來
+let _mlCloseData = null;
+let _mlCloseTried = false;
+function ensureMarketLevelsClose() {
+  if (_mlCloseData || _mlCloseTried) return Promise.resolve(false);
+  _mlCloseTried = true;
+  return aiMarketLevels().then(d => !!d).catch(() => false);
+}
+
 function getQuoteFromSharedData(sid) {
   const s = sharedReportData?.stock_data?.[sid];
-  if (!s) return null;
+  if (!s) {
+    const m = _mlCloseData?.stocks?.[sid];
+    const c = Number(m?.c);
+    if (!(c > 0)) return null;
+    return { price: c, changePct: null, tradeDate: String(_mlCloseData.date || "").slice(0, 10) };
+  }
   const ohlcv = s.daily?.ohlcv;
   const cur = Number(s.levels?.current ?? (ohlcv?.length ? ohlcv[ohlcv.length - 1][3] : NaN));
   if (!isFinite(cur)) return null;
@@ -9001,7 +9013,10 @@ function renderHome() {
 // 不設 ±x% 門檻。籤裡沒有數字，首頁不放股價與百分比。拿不到報價就不掛籤。
 const HOME_DIR_LABEL = { up: "漲", down: "跌", flat: "平" };
 function homeDirectionOf(sid) {
-  const q = getQuote(sid);
+  const iq = intradayQuoteMap?.[sid];
+  const q = getQuote(sid);   // 2026-10-21 起只剩日線收盤（報告），盤中價不送到裝置
+  // 監控寫的那一列比日線新（今天盤中）就用它的方向；日線已經追上（收盤後隔天的報告）就用日線
+  if (iq && iq.dir && (!q || String(iq.tradeDate || "") > String(q.tradeDate || ""))) return iq.dir;
   if (!q || q.changePct === null || q.changePct === undefined) return null;
   return q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
 }
@@ -10665,7 +10680,7 @@ function scoreRowHtml(sid, s, opts = {}) {
       ${addSlot}
       <div class="hr-right">
         <div class="hr-price">${total != null ? `${total.toFixed(0)}<span class="score-unit">分</span>` : "—"} ${chgHtml}</div>
-        <div class="hr-sub">${q ? `${fmtPrice(q.price)} ${fmtChgHtml(q.changePct)}` : ""}</div>
+        <div class="hr-sub">${q ? `${q.tradeDate ? `${escapeHtml(_closeDateLabel(q.tradeDate))} 收 ` : ""}${fmtPrice(q.price)}${q.changePct != null ? ` ${fmtChgHtml(q.changePct)}` : ""}` : ""}</div>
       </div>
     </div>`;
 }
@@ -10853,6 +10868,8 @@ async function claimTrial() {
 function renderScores() {
   const listEl = document.getElementById("scores-list");
   if (!listEl) return;
+  // 「我的自選」每列的收盤：沒進榜的那幾檔要等全市場關卡檔，載到了再畫一次
+  ensureMarketLevelsClose().then(fresh => { if (fresh && currentTab === "scores") renderScores(); });
   const dateEl = document.getElementById("scores-date");
   // 📊 統計分頁：plans.stats_enabled 為 false 的方案看到的是上面那張卡
   const filtersEl = document.getElementById("scores-filters");
@@ -10969,9 +10986,9 @@ function maExplainHtml(sid, s) {
     + `<span class="${m.pct >= 0 ? "chg-up" : "chg-down"}">`
     + `${m.pct >= 0 ? "+" : "−"}${Math.abs(m.pct).toFixed(1)}%</span></span>`).join("");
   return `<div class="sd-ma">
-    <div class="sd-ma-head">趨勢分的原料　現價 ${fmtPrice(price)}</div>
+    <div class="sd-ma-head">趨勢分的原料　收盤 ${fmtPrice(price)}</div>
     <div class="sd-ma-list">${items}</div>
-    <div class="sd-ma-note">百分比是現價相對該均線的距離。趨勢分數取「現價是否在各均線之上」、
+    <div class="sd-ma-note">百分比是收盤價相對該均線的距離。趨勢分數取「收盤價是否在各均線之上」、
       「各均線是否高於 20 天前」與「四條是否由短到長遞減排列」三組條件的平均。</div>
   </div>`;
 }
@@ -21076,7 +21093,7 @@ async function aiMarketLevels() {
   if (_aiLevels) return _aiLevels;
   try {
     const r = await fetch("market_levels.json");
-    if (r.ok) _aiLevels = await r.json();
+    if (r.ok) { _aiLevels = await r.json(); _mlCloseData = _aiLevels; }
   } catch (e) { console.error("market_levels failed:", e); }
   return _aiLevels;
 }
@@ -21100,12 +21117,14 @@ const AI_KIND_BASE = { gap_up: "向上跳空", gap_down: "向下跳空", change_
                        "volume_vs_ma:above": "量能", "volume_vs_ma:below": "量縮", break_prior_high: "突破 20 日高",
                        break_prior_low: "跌破 20 日低", break_52w_high: "創 52 週新高", break_52w_low: "創 52 週新低" };
 const AI_RATIO_KINDS = new Set(["volume_vs_ma:above", "volume_vs_ma:below"]);
+// 幅度只留量能倍數：漲跌幅、跳空、突破幅度都是盤中價算的（DATA_SOURCES.md 第十三節），伺服器也不再送
 function aiMagText(kind, mag) {
-  if (mag == null || !Number.isFinite(Number(mag)) || !AI_KIND_BASE[kind]) return aiKindLabel(kind);
+  if (mag == null || !Number.isFinite(Number(mag)) || !AI_KIND_BASE[kind] || !AI_RATIO_KINDS.has(kind)) return aiKindLabel(kind);
   const v = Number(mag);
   return AI_RATIO_KINDS.has(kind) ? `${AI_KIND_BASE[kind]} ${v.toFixed(1)} 倍` : `${AI_KIND_BASE[kind]} ${v.toFixed(2)}%`;
 }
-function aiEntryMag(e) {   // 雷達故事列：「向上跳空 1.34%（門檻 1%）」「漲幅 +5.19%」「量能達 20 日均量 2.3 倍」
+function aiEntryMag(e) {   // 雷達故事列：只認量能倍數（「量能達 20 日均量 2.3 倍」）；百分比幅度不再有（見 aiMagText）
+  if (!AI_RATIO_KINDS.has(String(e && e.key))) return null;
   const t = String((e && e.text) || "");
   const m = AI_RATIO_KINDS.has(String(e && e.key)) ? t.match(/([0-9]+(?:\.[0-9]+)?)\s*倍/) : t.match(/([0-9]+(?:\.[0-9]+)?)\s*%/);
   return m ? Math.abs(Number(m[1])) : null;
@@ -21212,13 +21231,19 @@ const ASSISTANT_ACTIONS = {
       return { head: `${aiStockName(sid)} ${sid}`, sub: mine ? "還沒有盤中報價：先給日線" : "不在自選股：全市場資料", rows,
                actions: [aiOpenBtn(sid, mine ? "radar" : "kline", mine ? "開個股字卡 ›" : "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] };
     }
-    const open = _isMarketOpenNow();
-    const sub = open ? (liveQuotesAllowed() ? "盤中" : `盤中不自動更新（${planTierLabel()}）`) : "收盤";
+    // 盤中成交價與盤中漲跌幅不送到裝置（DATA_SOURCES.md 第十三節）：今天只講方向，價格是最近一次收盤
+    const rows = [];
+    const dir = homeDirectionOf(sid);
+    const iq = intradayQuoteMap?.[sid];
+    if (iq && iq.dir && String(iq.tradeDate || "") > String(q.tradeDate || "")) {
+      rows.push({ label: aiSessionDayTxt(), value: AI_DIR_TXT[{ up: 1, flat: 0, down: -1 }[dir]] || "—", note: "盤中方向" });
+    }
+    const day = q.tradeDate ? q.tradeDate.slice(5).replace("-", "/") : "";
+    rows.push({ label: "收盤", value: fmtPrice(q.price), note: day });
+    if (q.changePct != null) rows.push({ label: "漲跌幅", value: fmtChgHtml(q.changePct), html: true, note: day ? `${day} 收盤` : "" });
     return {
-      head: `${aiStockName(sid)} ${sid}`, sub,
-      rows: [{ label: "價格", value: fmtPrice(q.price), note: q.tradeDate ? q.tradeDate.slice(5).replace("-", "/") : "" },
-             { label: "漲跌幅", value: fmtChgHtml(q.changePct), html: true, note: "" }],
-      actions: [aiOpenBtn(sid, "radar")],
+      head: `${aiStockName(sid)} ${sid}`, sub: "盤中不提供成交價（交易所授權）",
+      rows, actions: [aiOpenBtn(sid, "radar")],
     };
   },
   async assistantLevels(slots) {
@@ -21229,7 +21254,7 @@ const ASSISTANT_ACTIONS = {
     const rows = [];
     if (lv.support != null) rows.push({ label: "支撐", value: fmtPrice(lv.support), note: `距 ${fmtPct(lv.supPct)}%` });
     if (lv.resistance != null) rows.push({ label: "壓力", value: fmtPrice(lv.resistance), note: `距 ${fmtPct(lv.resPct)}%` });
-    if (rows.length) return { head: `${aiStockName(sid)} ${sid}`, sub: price ? `現價 ${fmtPrice(price)}` : "", rows, actions: [aiOpenBtn(sid, "radar")] };
+    if (rows.length) return { head: `${aiStockName(sid)} ${sid}`, sub: price ? `收盤 ${fmtPrice(price)}` : "", rows, actions: [aiOpenBtn(sid, "radar")] };
     // 不在自選股（或關卡還沒載）：全市場關卡檔（日線算的，每天 06:15 更新；第十八節）
     const ml = await aiMarketLevels();
     const m = ml && ml.stocks && ml.stocks[sid];
@@ -21281,7 +21306,7 @@ const ASSISTANT_ACTIONS = {
                actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")], chips: mine ? [] : [aiAddChip(sid)] });
     }
     const priceTxt = price == null ? "" : live != null
-      ? `${_isMarketOpenNow() ? "盤中價" : "收盤價"} ${fmtPrice(price)}${q.tradeDate ? `（${String(q.tradeDate).slice(5).replace("-", "/")}）` : ""}`
+      ? `收盤價 ${fmtPrice(price)}${q.tradeDate ? `（${String(q.tradeDate).slice(5).replace("-", "/")}）` : ""}`
       : `最後收盤 ${fmtPrice(price)}${maDay ? `（${maDay}）` : ""}`;
     const sub = [mine ? "" : "不在自選股", maDay ? `均線以 ${maDay} 的日線算` : ""].filter(Boolean).join("：");
     return { head: `${name} ${sid}`, sub, rows, text: priceTxt ? `${priceTxt}，在${parts.join("、")}。`.replace("，在。", "。") : "",
@@ -21453,7 +21478,7 @@ const ASSISTANT_ACTIONS = {
       const passed = thresholdTxt ? `，${thresholdTxt.trim()} ${new Set(marketHits.map(h => h.sid)).size} 檔` : "";
       const sub = [nearNote ? `${nearNote}（全市場 ${mktN} 檔${passed}）` : mktN != null ? `全市場 ${mktN} 檔${passed}${since ? `（${since}）` : ""}` : `市場脈動不統計${label}`,
                    sids.length ? `自選股與好友分享的 ${mine.length} 檔` : ""].filter(Boolean).join("；");
-      const tail = (noMarketList ? "全市場的名單從下一個交易日起才有。" : "") + (noMag ? `另有 ${noMag} 檔的名單沒有幅度（舊資料），沒列。` : "");
+      const tail = (noMarketList ? "全市場的名單從下一個交易日起才有。" : "") + (noMag ? `盤中不提供漲跌幅度（交易所授權），${noMag} 檔篩不了門檻，沒列。` : "");
       const text = rows.length ? `${more > 0 ? `還有 ${more} 檔沒列出來。` : ""}${tail}` : `${day}沒有${label}${thresholdTxt}的。${tail}`;
       const diag = aiSignalDiag(sids, wanted, kinds);
       if (!mine.length) trackActivity("assistant_diag", { kind: String(slots.kind), diag });   // 自選股一檔都沒列：把手機的狀態記下來，遠端看得到
@@ -21471,21 +21496,19 @@ const ASSISTANT_ACTIONS = {
     const dirs = today && aiTodayIsCurrent(today) ? Object.values(today.dir || {}) : [];
     const mk = dirs.length ? { up: dirs.filter(v => v === 1).length, down: dirs.filter(v => v === -1).length, flat: dirs.filter(v => v === 0).length } : null;
     const dir = String(slots.direction || "any");
-    const items = sids.map(sid => ({ sid, q: aiQuoteOf(sid) }))
-      .filter(x => x.q && x.q.changePct !== null && x.q.changePct !== undefined && Number.isFinite(Number(x.q.changePct)))
-      .map(x => { const pct = Number(x.q.changePct); return { sid: x.sid, pct, price: x.q.price, d: pct > 0 ? "up" : pct < 0 ? "down" : "flat" }; });
+    // 盤中成交價與漲跌幅不送到裝置（DATA_SOURCES.md 第十三節）：清單只有方向，排不出「漲最多」
+    const items = sids.map(sid => ({ sid, d: homeDirectionOf(sid) })).filter(x => x.d);
     const n = { up: items.filter(i => i.d === "up").length, down: items.filter(i => i.d === "down").length, flat: items.filter(i => i.d === "flat").length };
-    let list = dir === "any" ? items.slice() : items.filter(i => i.d === dir);
-    list.sort((a, b) => dir === "down" ? a.pct - b.pct : b.pct - a.pct);
-    if (slots.top) list = list.slice(0, 1);
+    const list = dir === "any" ? items.slice() : items.filter(i => i.d === dir);
     const DIR_TXT = { up: "上漲", down: "下跌", flat: "平盤" };
-    const head = slots.top ? `今天${dir === "down" ? "跌" : "漲"}最多的自選股` : dir === "any" ? "自選股今天的漲跌" : `今天${DIR_TXT[dir]}的自選股`;
+    const head = dir === "any" ? "自選股今天的漲跌" : `今天${DIR_TXT[dir]}的自選股`;
     const b = (typeof marketPayload !== "undefined" && marketPayload && marketPayload.breadth) || null;
     const missing = sids.length - items.length;
-    const sub = [`自選股 漲 ${n.up}・平 ${n.flat}・跌 ${n.down}${missing > 0 ? `（${missing} 檔沒有報價）` : ""}`,
+    const sub = [`自選股 漲 ${n.up}・平 ${n.flat}・跌 ${n.down}${missing > 0 ? `（${missing} 檔還沒有今天的方向）` : ""}`,
                  mk ? `全市場 漲 ${mk.up}・平 ${mk.flat}・跌 ${mk.down}` : b ? `全市場上漲 ${Number(b.up_pct || 0)}%、下跌 ${Number(b.down_pct || 0)}%` : ""].filter(Boolean).join("；");
-    const rows = list.slice(0, 12).map(i => ({ label: aiStockName(i.sid), value: fmtChgHtml(i.pct), html: true, note: fmtPrice(i.price), act: "open", data: { sid: i.sid, tab: "radar" } }));
-    return { head, sub, rows, text: rows.length ? "" : `今天沒有${DIR_TXT[dir] || ""}的。`, actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
+    const rows = list.slice(0, 12).map(i => ({ label: aiStockName(i.sid), value: DIR_TXT[i.d], note: "", act: "open", data: { sid: i.sid, tab: "radar" } }));
+    const topNote = slots.top ? "盤中不提供漲跌幅（交易所授權），排不出誰最多；下面是今天的方向。" : "";
+    return { head, sub, rows, text: rows.length ? topNote : `${topNote}今天沒有${DIR_TXT[dir] || ""}的。`, actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
   },
   assistantHoldings(slots) {
     let entries = holdingEntries();
@@ -21820,14 +21843,14 @@ const ASSISTANT_ACTIONS = {
       if (!row0) {
         if (aiWatchFull()) return aiLimitCard("watchlist");
         return aiConfirmCard({ head: "加入並打開到價設定？", sub: `${name} 不在自選股，會先加入`,
-          rows: [{ label: "股票", value: `${name} ${sid}`, note: cur ? `現價 ${fmtPrice(cur)}` : "" }], mainLabel: "加入並打開",
+          rows: [{ label: "股票", value: `${name} ${sid}`, note: cur ? `收盤 ${fmtPrice(cur)}` : "" }], mainLabel: "加入並打開",
           run: async () => { const r = await aiAddStockById(sid); if (r) aiNav(() => openAlertSettings(r.id)); return { text: `已加入 ${name}，到價設定在剛打開的面板最下面。` }; } });
       }
       const lo0 = row0.target_price_low != null && row0.target_price_low !== "" ? Number(row0.target_price_low) : null;
       const hi0 = row0.target_price_high != null && row0.target_price_high !== "" ? Number(row0.target_price_high) : null;
       const alt = { label: "改一下", act: "open", data: { alert: row0.id } };
       if (lo0 == null && hi0 == null) { aiNav(() => openAlertSettings(row0.id)); return { head: `${name} ${sid}`, text: "還沒有設到價提醒，已打開這一檔的自訂價位面板（最下面兩格）。" }; }
-      const rows = [{ label: "股票", value: `${name} ${sid}`, note: cur ? `現價 ${fmtPrice(cur)}` : "" }];
+      const rows = [{ label: "股票", value: `${name} ${sid}`, note: cur ? `收盤 ${fmtPrice(cur)}` : "" }];
       const pct0 = v => cur ? `距 ${v < cur ? "−" : "+"}${fmtPct((v - cur) / cur * 100)}%` : "";
       if (lo0 != null) rows.push({ label: "跌到", value: fmtPrice(lo0), note: pct0(lo0), act: "open", data: { alert: row0.id } });
       if (hi0 != null) rows.push({ label: "漲到", value: fmtPrice(hi0), note: pct0(hi0), act: "open", data: { alert: row0.id } });
@@ -21840,11 +21863,11 @@ const ASSISTANT_ACTIONS = {
       if (!cur) {
         const dirChip = (d, w) => ({ label: `${w} ${fmtPrice(price)} 通知`, act: "run",
           data: { intent: "price_target_set", slots: { stock: sid, price, direction: d }, text: `${name}${w} ${price} 通知我` } });
-        return { head: `${name} ${sid}`, text: `沒有現價可以判斷 ${fmtPrice(price)} 是跌到還是漲到，點一個：`,
+        return { head: `${name} ${sid}`, text: `沒有收盤價可以判斷 ${fmtPrice(price)} 是跌到還是漲到，點一個：`,
                  chips: [dirChip("down", "跌到"), dirChip("up", "漲到")] };
       }
       dir = price < cur ? "down" : "up";
-      inferred = `${fmtPrice(price)} ${dir === "down" ? "低於" : "高於"}現價，當成${dir === "down" ? "跌到" : "漲到"}`;
+      inferred = `${fmtPrice(price)} ${dir === "down" ? "低於" : "高於"}最近收盤，當成${dir === "down" ? "跌到" : "漲到"}`;
     }
     const patch = {};
     if (dir === "down") patch.target_price_low = price;
@@ -21854,7 +21877,7 @@ const ASSISTANT_ACTIONS = {
     const lo = patch.target_price_low ?? (row && row.target_price_low != null && row.target_price_low !== "" ? Number(row.target_price_low) : null);
     const hi = patch.target_price_high ?? (row && row.target_price_high != null && row.target_price_high !== "" ? Number(row.target_price_high) : null);
     if (lo != null && hi != null && hi <= lo) return { text: `上漲價位（${fmtPrice(hi)}）要大於下跌價位（${fmtPrice(lo)}）。`, muted: true };
-    const rows = [{ label: "股票", value: `${name} ${sid}`, note: cur ? `現價 ${fmtPrice(cur)}` : "" }];
+    const rows = [{ label: "股票", value: `${name} ${sid}`, note: cur ? `收盤 ${fmtPrice(cur)}` : "" }];
     const pct = v => cur ? `距 ${v < cur ? "−" : "+"}${fmtPct((v - cur) / cur * 100)}%` : "";
     const old = (r, f) => r && r[f] != null && r[f] !== "" ? `原本 ${fmtPrice(r[f])}` : "";
     if (patch.target_price_low != null) rows.push({ label: "跌到", value: fmtPrice(patch.target_price_low), note: [pct(patch.target_price_low), old(row, "target_price_low")].filter(Boolean).join(" · ") });
