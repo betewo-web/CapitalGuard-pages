@@ -2459,6 +2459,18 @@ html.home-simple-only #home-filter { display: none !important; }
 
 .home-tile-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
 
+/* 股名＋狀態籤那一組（2026-10-21 Howard：「股票」頁一列太擠）：自己是一個會換行的 flex，
+   一行放不下的籤（已分享／分享者／未讀數／漲平跌／訊號）整顆移到第二行，不再壓成「…」。
+   右邊那格數字與兩顆鈕留在外層、不參與換行，永遠貼在右上。股名排第一個，
+   所以第一行至少是股名；只有股名本身比整組還寬時才省略。 */
+.home-tile-title {
+	display: flex; flex-wrap: wrap; align-items: center;
+	gap: 4px 4px; flex: 1 1 auto; min-width: 0;
+}
+.home-tile-title > * { max-width: 100%; }
+/* 籤原本的 flex-shrink（.home-tile-live／.home-tile-shared）不必拿掉：換行是照籤的完整寬度決定的，
+   只有一顆籤自己就比整行寬時才會縮成「…」。 */
+
 .home-tile-name {
 	min-width: 0;
 	font-size: 1.08rem;
@@ -5006,6 +5018,8 @@ select.fr-input { width: 100%; }
 	min-width: 0; flex-shrink: 8;
 	max-width: 9em; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
 }
+/* 首頁那一列的間距交給 .home-tile-title 的 gap：換到第二行時才會貼齊左邊（2026-10-21） */
+.home-tile-title > .home-tile-shared { margin-left: 0; }
 .rtl-shared-exp { color: var(--text-1); }
 
 /* 進階訊號的個股入口（2026-10-04）：設定頁每一列的「進階」鈕上的小數字，
