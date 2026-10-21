@@ -2919,6 +2919,50 @@ html.home-simple-only #home-filter { display: none !important; }
 
 .rule-card-meta .rule-card-actions { margin-left: auto; }
 
+.rule-expiry {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 0.9rem;
+	align-items: flex-end;
+}
+
+.rule-expiry .rule-param {
+	flex: 1 1 11rem;
+	min-width: 0;
+}
+
+.rule-once {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 0.8rem;
+	color: var(--text-muted);
+	padding-bottom: 0.35rem;
+}
+
+.rule-once input {
+	width: 1rem;
+	height: 1rem;
+	accent-color: var(--accent);
+}
+
+/* 期限與一次性的徽章：與「已停用」同一個形狀（rule-off-tag），顏色留給到期那一個 */
+.rule-until {
+	flex-shrink: 0;
+	font-size: 0.66rem;
+	line-height: 1;
+	padding: 0.22rem 0.4rem;
+	border-radius: 999px;
+	border: 1px solid rgba(146, 146, 163, 0.3);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.rule-until.is-expired {
+	color: var(--accent-2);
+	border-color: rgba(245, 197, 66, 0.5);
+}
+
 .rule-scope {
 	min-width: 0;
 	overflow: hidden;

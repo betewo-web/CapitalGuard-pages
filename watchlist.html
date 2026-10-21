@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="415">
+  <meta name="app-version" content="416">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=415" rel="stylesheet">
+  <link href="watchlist.css?v=416" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1008,7 +1008,7 @@
           <div class="rule-editor-lock" id="rule-editor-lock" style="display:none"></div>
           <div class="rule-step">
             <div class="rule-step-head"><span class="rule-step-no">1</span>要看哪些股票？</div>
-            <select id="rule-scope" class="rule-input" aria-label="套用範圍" onchange="renderRulePreview()"></select>
+            <select id="rule-scope" class="rule-input" aria-label="套用範圍" onchange="onRuleScopeChange()"></select>
             <div class="rule-hint">選「全部自選股」時，之後新加入的自選股也會一起套用。</div>
           </div>
 
@@ -1021,8 +1021,24 @@
                     id="rule-add-cond" onclick="addRuleCondition()">＋ 再加一個條件（且）</button>
           </div>
 
+          <!-- 期限與一次性（2026-10-22）：使用者講的「盯著南亞 30 天」「跌 10% 通知我」
+               有兩層意思——看多久、要通知幾次。兩個都存在條件的 JSON 裡
+               （migrate_rule_expiry.sql 說明為什麼不是新欄位）。 -->
           <div class="rule-step">
-            <div class="rule-step-head"><span class="rule-step-no">3</span>幫規則取個名字
+            <div class="rule-step-head"><span class="rule-step-no">3</span>要盯多久？
+              <span class="rule-step-sub">選填</span></div>
+            <div class="rule-expiry">
+              <label class="rule-param"><span>期限（含當天）</span>
+                <input id="rule-expires" class="rule-input" type="date" onchange="renderRulePreview()"></label>
+              <label class="rule-once"><input id="rule-once" type="checkbox" onchange="renderRulePreview()">
+                <span>通知一次後自動刪除</span></label>
+            </div>
+            <div class="rule-hint">期限那一天過完，這條訊號自動刪除，額度跟著還回來；不填＝一直有效。
+              勾了「通知一次」，成立並通知之後就結束（通知匣裡留著那一則）。</div>
+          </div>
+
+          <div class="rule-step">
+            <div class="rule-step-head"><span class="rule-step-no">4</span>幫規則取個名字
               <span class="rule-step-sub">選填</span></div>
             <input id="rule-name" type="text" class="rule-input" maxlength="40"
                    placeholder="例如：量增突破" oninput="renderRulePreview()">
@@ -6264,6 +6280,18 @@ const RULE_CATALOG = [
     params: [{ k: "value", label: "漲幅 %", type: "number", def: 2, min: 0.1, max: 9, step: 0.1 }] },
   { type: "change_pct_below", tier: "intraday", name: "跌幅超過", preview: true,
     params: [{ k: "value", label: "跌幅 %（填正數）", type: "number", def: 2, min: 0.1, max: 9, step: 0.1 }] },
+  // 自基準價漲跌（2026-10-22）：基準是**建立這條規則時那一檔的收盤價**，不是昨收。所以幅度沒有 ±10%
+  // 的天花板（跨多天累積），上限給 90%；上面那兩條比的是當日漲跌幅，台股限 ±10%，
+  // 所以它們的上限只能是 9%——同樣一句「跌 10%」落在哪一條，意思完全不同。
+  // 基準價是「那一檔」的數字，所以這個條件只能用在單一檔（saveRule 與助手兩條路都擋
+  // 「全部自選股」）；基準價留 0 時由前端在存檔前填入收盤價。
+  { type: "pct_from_base", tier: "intraday", name: "自基準價漲跌", preview: true,
+    params: [
+      { k: "dir", label: "方向", type: "select", def: "down",
+        options: [["down", "跌"], ["up", "漲"]] },
+      { k: "value", label: "幅度 %", type: "number", def: 10, min: 0.1, max: 90, step: 0.1 },
+      { k: "base", label: "基準價", type: "number", def: 0, min: 0, max: 100000, step: 0.01 },
+    ] },
   // 缺口以昨日最高／最低價為基準：開盤高於昨收但仍在昨日區間內的不算跳空。
   // 上限 9%：台股漲跌幅 ±10%，開盤價最多就是昨收 ×1.1，而昨高 >= 昨收，
   // 所以缺口的理論極大值正好是 10%（昨天收在最高價、今天開漲停）。門檻設到
@@ -6364,6 +6392,9 @@ const RULE_EXPLAIN = {
   break_52w_low: { brief: "今天的價格低過最近一年的最低價",
     what: "最近 52 週（約 250 個交易日）的最低價。",
     when: "盤中成交價低於這一年裡的最低價時成立。" },
+  pct_from_base: { brief: "從基準價起算，漲或跌達到設定幅度",
+    what: "建立這條訊號時那一檔的收盤價當基準價，之後每天拿成交價和它比，算累積的漲跌幅。",
+    when: "方向選「跌」時，價格跌到基準價的（100−幅度）% 以下成立；選「漲」時相反。與「跌幅超過」不同的是基準：那一條比的是昨天的收盤價（只看今天一天），這一條比的是基準價那一天（可以跨好幾天累積）。" },
   change_pct_above: { brief: "今天相對昨收的漲幅達到設定值",
     what: "今天的成交價相對昨天收盤價的變動百分比。",
     when: "漲幅達到或超過你設定的百分比時成立，例如設 5 就是漲 5% 以上。" },
@@ -12591,6 +12622,8 @@ function showRulesPane(pane) {
 // 能力本來就有（編輯器第一步的範圍選單、alert_rules.stock_id、monitor 的
 // applies_to），缺的是入口：以前要設某一檔得進全域面板再自己選範圍。
 let rulesStockFilter = null;
+// 到期的規則一個 session 只自動掃一次（refreshRules 會被首頁卡、徽章、面板各自呼叫）
+let _ruleExpirySwept = false;
 
 function openRulesForStock(sid) {
   rulesStockFilter = String(sid || "").trim() || null;
@@ -12658,6 +12691,20 @@ async function refreshRules() {
       <span style="font-size:.75rem;opacity:.8">若為 404，請先在 Supabase 執行 migrate_alert_rules.sql</span></div>`;
     return;
   }
+  // 到期自動刪除：主力是 04:10 的 prune_expired_rules()（migrate_rule_expiry.sql），
+  // 這一段讓使用者一打開就看到正確的清單，也讓還沒跑那支 migration 的環境照樣會刪。
+  // 一個 session 只掃一次：refreshRules 會被首頁卡、徽章、面板各自呼叫，不設旗標會來回刪。
+  if (!_ruleExpirySwept) {
+    _ruleExpirySwept = true;
+    const stale = alertRules.filter(r => ruleExpired(r.conditions));
+    if (stale.length) {
+      await Promise.all(stale.map(r =>
+        sbDelete("alert_rules", { id: `eq.${r.id}` }, state.accessToken).catch(() => {})));
+      setRulesMsg(`已移除 ${stale.length} 條到期的訊號`);
+      return refreshRules();
+    }
+  }
+
   document.getElementById("rules-count").innerHTML = rulesCountLabel();
   renderOverLimitBanner("alert_rules");
 
@@ -12712,6 +12759,8 @@ async function refreshRules() {
   listEl.innerHTML = filterHtml + (tplHtml ? `<div class="rule-tpl-strip">${tplHtml}</div>` : "") + shownRules.map(r => {
     const conds = Array.isArray(r.conditions) ? r.conditions : [];
     const tier = ruleTierOf(conds);
+    const until = ruleExpiresOn(conds);
+    const expired = ruleExpired(conds);
     const scope = r.stock_id
       ? `${escapeHtml(r.stock_id)} ${escapeHtml(stockNameOf(r.stock_id))}`.trim()
       : "全部自選股";
@@ -12737,6 +12786,8 @@ async function refreshRules() {
         <div class="rule-card-meta">
           <span class="rule-tier tier-${tier}">${RULE_TIERS[tier].label}</span>
           <span class="rule-scope">${scope}</span>
+          ${until ? `<span class="rule-until${expired ? " is-expired" : ""}">${expired ? "已到期" : `至 ${mmdd(until)}`}</span>` : ""}
+          ${ruleIsOnce(conds) ? `<span class="rule-until">通知一次</span>` : ""}
           <span class="rule-card-actions">
             <button type="button" class="wl-icon-btn" onclick="openRuleEditor('${jsAttr(id)}')"
                     title="編輯規則">${ICON_EDIT}<span>編輯</span></button>
@@ -12760,9 +12811,39 @@ function ruleTierOf(conds) {
   return order[best < 0 ? 3 : best];
 }
 
+// 期限與一次性放在條件的 JSON 裡（與後端 AlertRule.expires_on()／once_only() 同一個約定，
+// 理由見 migrate_rule_expiry.sql）：多個條件時期限取最早的那個，一次性任一條標了就算。
+function ruleExpiresOn(conds) {
+  const all = (conds || []).map(c => String((c && c.expires_on) || ""))
+    .filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v)).sort();
+  return all[0] || "";
+}
+function ruleIsOnce(conds) { return (conds || []).some(c => c && c.once === true); }
+// 期限當天整天都還算在內：今天 > 期限那一天才算過期（與後端 expired() 同一條線）
+function ruleExpired(conds) {
+  const until = ruleExpiresOn(conds);
+  return !!until && taipeiDateKey(new Date()) > until;
+}
+function mmdd(ymd) { return String(ymd || "").slice(5).replace("-", "/"); }
+
 function describeCondition(c) {
   const spec = RULE_CATALOG_BY_TYPE[c && c.type];
   if (!spec) return `未知條件（${c && c.type}）`;
+  // 自基準價漲跌講成一句話。照通用格式拼會變成「自基準價漲跌｜跌、幅度 10%、基準價 85.3」，
+  // 而這一條的意思全在「從哪一天的哪個價位起算、到哪個價位成立」——
+  // 與後端 _pct_from_base 的通知文字同一句話，卡上看到的就是之後會收到的。
+  if (c.type === "pct_from_base") {
+    const base = Number(c.base) || 0;
+    const v = Math.abs(Number(c.value) || 0);
+    const down = String(c.dir || "down") !== "up";
+    const d = String(c.base_date || "");
+    const head = base > 0
+      ? (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `自 ${mmdd(d)} 收盤 ${fmtPrice(base)}` : `自基準價 ${fmtPrice(base)}`)
+      : "自基準價";
+    const target = base > 0
+      ? `（${fmtPrice(down ? base * (1 - v / 100) : base * (1 + v / 100))}）` : "";
+    return `${head} ${down ? "跌" : "漲"} ${v}% 以上${target}`;
+  }
   const parts = spec.params.map(p => {
     const v = c[p.k] !== undefined ? c[p.k] : p.def;
     if (p.type === "select") {
@@ -12829,6 +12910,13 @@ function openRuleEditor(id) {
   document.getElementById("rules-modal-title").textContent = _rulesEditorTitle;
   document.getElementById("rule-name").value = (r && r.name) || "";
   document.getElementById("rule-editor-msg").textContent = "";
+  const expEl = document.getElementById("rule-expires");
+  const onceEl = document.getElementById("rule-once");
+  if (expEl) {
+    expEl.value = r ? ruleExpiresOn(r.conditions) : "";
+    expEl.min = taipeiDateKey(new Date());   // 不給選過去：存下去就是一條生下來就過期的規則
+  }
+  if (onceEl) onceEl.checked = r ? ruleIsOnce(r.conditions) : false;
   syncRuleEditorLock();
 
   const scopeEl = document.getElementById("rule-scope");
@@ -12963,7 +13051,29 @@ function removeRuleCondition(i) {
 function onConditionTypeChange(i, type) {
   // 換型別就重建參數：舊型別的參數名對新型別沒有意義，留著會存出髒資料
   editorConditions[i] = defaultCondition(type);
+  syncPctBase();
+  // 自基準價漲跌幾乎都是一次性的（跌到基準價下面之後會天天成立），新增時先把
+  // 「通知一次」勾起來，與助手那條路同一個預設；編輯既有規則不動使用者的選擇。
+  const onceEl = document.getElementById("rule-once");
+  if (!editingRuleId && onceEl && type === "pct_from_base") onceEl.checked = true;
   renderRuleConditions();
+}
+
+// 自基準價漲跌的基準價＝目前範圍那一檔的收盤價。換範圍、換型別都重填：
+// 別人的收盤價當基準沒有意義，而手填過的數字（與收盤價不同）保留下來。
+function syncPctBase() {
+  const sid = (document.getElementById("rule-scope") || {}).value || "";
+  const q = sid ? getCloseQuote(sid) : null;
+  for (const c of editorConditions) {
+    if (c.type !== "pct_from_base") continue;
+    c.base = q && q.price > 0 ? q.price : 0;
+    c.base_date = q ? (q.tradeDate || "") : "";
+  }
+}
+
+function onRuleScopeChange() {
+  syncPctBase();
+  renderRuleConditions();   // 裡面會再跑 renderRulePreview()
 }
 
 // input 的 min／max 只是 HTML 屬性：鍵盤打進去的超範圍數字照樣存得下去
@@ -13094,9 +13204,13 @@ function renderRuleSummary() {
   const scope = sid ? `${sid} ${stockNameOf(sid)}`.trim() : "全部自選股";
   const chips = editorConditions.map(c => `<span class="rs-chip">${escapeHtml(describeCondition(c))}</span>`)
     .join('<span class="rs-and">且</span>');
+  const until = (document.getElementById("rule-expires") || {}).value || "";
+  const once = !!(document.getElementById("rule-once") || {}).checked;
+  const tail = [until ? `到 ${mmdd(until)} 止（那一天過完自動刪除）` : "",
+                once ? "通知一次之後就結束" : ""].filter(Boolean).join("、");
   el.innerHTML = `
     <div class="rp-title">這條規則的意思</div>
-    <div class="rs-line">「${escapeHtml(name)}」：<b>${escapeHtml(scope)}</b> 出現 ${chips} 時通知你。</div>
+    <div class="rs-line">「${escapeHtml(name)}」：<b>${escapeHtml(scope)}</b> 出現 ${chips} 時通知你${tail ? `，${escapeHtml(tail)}` : ""}。</div>
     <div class="rs-meta">通知等級依條件自動判定：下跌方向的條件（跌破、跌幅、向下交叉）為 🟠（與漲跌停、跌破關鍵價位、達到設定價格同一級），其餘為 🔵 其他盤中訊號。</div>`;
 }
 
@@ -13110,6 +13224,40 @@ async function saveRule() {
   const name = document.getElementById("rule-name").value.trim() || autoRuleName(editorConditions);
   const stockId = document.getElementById("rule-scope").value || null;
   if (!editorConditions.length) { msgEl.textContent = "至少要有一個條件"; return; }
+
+  // 自基準價漲跌：基準價是「那一檔」的收盤價，「全部自選股」共用一個數字沒有意義
+  // （後端缺基準價就一律不成立，存得下去也不會通知，所以在這裡擋）。
+  const fromBase = editorConditions.filter(c => c.type === "pct_from_base");
+  if (fromBase.length && !stockId) {
+    msgEl.textContent = "「自基準價漲跌」要在第 1 步選一檔：基準價是那一檔的收盤價。";
+    msgEl.className = "small mt-2 text-danger";
+    return;
+  }
+  for (const c of fromBase) {
+    if (Number(c.base) > 0) continue;
+    const q = getCloseQuote(stockId);          // 收盤價，不是盤中價（DATA_SOURCES.md 第十三節）
+    if (!(q && q.price > 0)) {
+      msgEl.textContent = "拿不到這一檔的收盤價，請自己填基準價。";
+      msgEl.className = "small mt-2 text-danger";
+      return;
+    }
+    c.base = q.price;
+    c.base_date = q.tradeDate || "";
+  }
+
+  // 期限與一次性寫進**每一個**條件：後端期限取最早的、一次性任一條標了就算
+  // （monitor/rules.py AlertRule.expires_on()／once_only()）。
+  const until = (document.getElementById("rule-expires") || {}).value || "";
+  const once = !!(document.getElementById("rule-once") || {}).checked;
+  if (until && until < taipeiDateKey(new Date())) {
+    msgEl.textContent = "期限要是今天或之後。";
+    msgEl.className = "small mt-2 text-danger";
+    return;
+  }
+  editorConditions.forEach(c => {
+    if (until) c.expires_on = until; else delete c.expires_on;
+    if (once) c.once = true; else delete c.once;
+  });
 
   // severity 一律 null＝依條件自動判定（後端 ConditionSpec.severity_for）。
   // 編輯舊規則也會被改成自動——這是 2026-09-12 拿掉等級欄位時的決定。
@@ -13238,6 +13386,14 @@ function previewCondition(sid, c) {
     }
     case "break_52w_high": return highs.length >= 1 && price > Math.max(...highs.slice(-250));
     case "break_52w_low":  return lows.length  >= 1 && price < Math.min(...lows.slice(-250));
+    case "pct_from_base": {
+      const base = Number(c.base) || 0;
+      if (!(base > 0)) return false;
+      const v = Math.abs(Number(c.value) || 0);
+      return String(c.dir || "down") !== "up"
+        ? price <= base * (1 - v / 100)
+        : price >= base * (1 + v / 100);
+    }
     case "change_pct_above":
     case "change_pct_below": {
       const prev = Number(bars[bars.length - 2][3]);
@@ -20483,7 +20639,7 @@ function aiIntroHtml(withChips) {
     bodyHtml: `<div class="ai-intro"><p>我可以查、設定、解釋這個 App 裡的東西，例如：</p><ul>
       <li>查 「台積電今天有訊號嗎」、「鴻海支撐在哪」、「聯發科站上月線了嗎」</li>
       <li>加 「把聯發科加進自選」</li>
-      <li>設 「跌到 900 提醒我」、「${AI_RULE_EXAMPLE}」</li>
+      <li>設 「跌到 900 提醒我」、「${AI_RULE_EXAMPLE}」、「盯台積電 30 天，跌 10% 通知我」</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
       <div class="ai-note">只整理與解釋公開資料，不提供買賣建議。用鍵盤上的麥克風也可以說話。</div></div>`,
     chips: withChips ? aiIntroChips() : [],
@@ -20733,6 +20889,63 @@ function aiRowOf(sid) {
   return (watchlistRows || []).find(w => String(w.stock_id || "").trim() === String(sid || "").trim()) || null;
 }
 function aiQuoteOf(sid) { return getQuote(sid) || getCloseQuote(sid) || null; }
+
+// 「盯 30 天」「30 個交易日」→ 一個日期（規則裡存的是日期，不是天數）。
+// 交易日用週一～週五數，與免費體驗的 trial_period_end 同一個算法：未來的國定假日
+// 無從得知（我們刻意不做行事曆，休市只能事後由報價判定），所以碰到長假會比真正的
+// 交易日數早幾天到期。卡上與清單寫的都是那個**真正的日期**，不是「還有幾天」，
+// 使用者看得到也改得動。日期錨在台北 20:00（12:00Z）：加整天不會被時區推過一天。
+function aiExpiryDate(duration) {
+  const days = Number((duration || {}).days) || 0;
+  const sessions = Number((duration || {}).sessions) || 0;
+  if (!(days > 0) && !(sessions > 0)) return "";
+  const d = new Date(`${taipeiDateKey(new Date())}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return "";
+  if (days > 0) {
+    d.setUTCDate(d.getUTCDate() + Math.min(Math.round(days), 730));
+  } else {
+    let left = Math.min(Math.round(sessions), 500);
+    while (left > 0) {
+      d.setUTCDate(d.getUTCDate() + 1);
+      const w = d.getUTCDay();                 // 錨在 12:00Z，與台北是同一個日期
+      if (w >= 1 && w <= 5) left--;
+    }
+  }
+  return taipeiDateKey(d);
+}
+
+// 助手抽到的參數要先過目錄的範圍與選項，不然會建出**永遠不會成立**的規則，而且
+// 不會報錯、只是沒有通知：「10 日均量」後端只有 5 日與 20 日（avg_volume 只存這兩個）、
+// 「300 日前高」要 300 根日 K 才算得出來、「RSI 120」不存在。被改掉的值寫在卡上。
+function aiFitCondParams(type, cond) {
+  const spec = RULE_CATALOG_BY_TYPE[type];
+  const notes = [];
+  if (!spec) return notes;
+  for (const p of spec.params || []) {
+    const raw = cond[p.k];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const label = p.label.replace(/（.*?）/g, "").trim();
+    if (p.type === "number") {
+      const v = Number(raw);
+      if (!isFinite(v)) { delete cond[p.k]; continue; }
+      const fit = clampRuleParam(p, v);
+      if (fit !== v) notes.push(`${label} ${v} → ${fit}`);
+      cond[p.k] = fit;
+    } else if (p.type === "select") {
+      const opts = (p.options || []).map(o => o[0]);
+      const hit = opts.find(o => String(o) === String(raw));
+      if (hit !== undefined) { cond[p.k] = hit; continue; }
+      const nums = opts.filter(o => typeof o === "number");
+      const fit = nums.length && isFinite(Number(raw))
+        ? nums.reduce((a, b) => Math.abs(b - Number(raw)) < Math.abs(a - Number(raw)) ? b : a)
+        : p.def;
+      const shown = (p.options.find(o => String(o[0]) === String(fit)) || [, fit])[1];
+      notes.push(`${label} ${raw} → ${shown}`);
+      cond[p.k] = fit;
+    }
+  }
+  return notes;
+}
 function aiWatchFull() {
   return !!(planState.ready && planState.plan && watchlistRows.length + frSlotsExtra() >= planState.plan.watch_limit);
 }
@@ -20841,7 +21054,16 @@ function aiPrefillRuleEditor(p) {
       if (nameEl) nameEl.value = String(p.name || "").slice(0, 60);
       const scopeEl = document.getElementById("rule-scope");
       if (scopeEl) scopeEl.value = p.stock_id ? String(p.stock_id) : "";
-      if (p.cond && p.cond.type) { editorConditions = [JSON.parse(JSON.stringify(p.cond))]; renderRuleConditions(); }
+      if (p.cond && p.cond.type) {
+        editorConditions = [JSON.parse(JSON.stringify(p.cond))];
+        // 期限與一次性存在條件的 JSON 裡，而編輯器那兩格是 openRuleEditor(null) 清空的：
+        // 不同步的話「改一下」會把助手填好的期限悄悄丟掉（存檔時以那兩格為準）。
+        const expEl = document.getElementById("rule-expires");
+        const onceEl = document.getElementById("rule-once");
+        if (expEl) expEl.value = ruleExpiresOn(editorConditions);
+        if (onceEl) onceEl.checked = ruleIsOnce(editorConditions);
+        renderRuleConditions();
+      }
     } catch (e) { console.error("assistant rule prefill failed:", e); }
   }, 150);
 }
@@ -21879,6 +22101,24 @@ const ASSISTANT_ACTIONS = {
     const rows = [{ label: "股票", value: `${name} ${sid}`, note: cur ? `收盤 ${fmtPrice(cur)}` : "" }];
     const pct = v => cur ? `距 ${v < cur ? "−" : "+"}${fmtPct((v - cur) / cur * 100)}%` : "";
     const old = (r, f) => r && r[f] != null && r[f] !== "" ? `原本 ${fmtPrice(r[f])}` : "";
+    // 到價提醒是自選股上的兩個價位欄位，沒有期限、也沒有「只通知一次」（到價之後每天
+    // 各一則）。使用者講了期限就不能當作沒聽到：同一件事進階訊號講得出來（自基準價
+    // 漲跌＝從收盤價算的百分比），這一列本身就是按鍵，按下去直接建那一條。
+    const wantUntil = aiExpiryDate(slots.duration);
+    if ((wantUntil || slots.once) && cur && dir !== "both") {
+      const away = Math.round(Math.abs((price - cur) / cur * 100) * 100) / 100;
+      rows.push({
+        label: wantUntil ? "期限" : "通知次數",
+        value: wantUntil ? `到 ${mmdd(wantUntil)} 止` : "一次",
+        note: "到價提醒沒有期限｜改用進階訊號 ›",
+        act: "run",
+        data: { intent: "rule_create",
+                text: `${name}自 ${fmtPrice(cur)} 起算${dir === "down" ? "跌" : "漲"} ${away}% 通知我`,
+                slots: { stock: sid, cond_type: "pct_from_base", params_defaults: {},
+                         params: { dir: dir === "down" ? "down" : "up", value: away },
+                         duration: slots.duration, once: slots.once } },
+      });
+    }
     if (patch.target_price_low != null) rows.push({ label: "跌到", value: fmtPrice(patch.target_price_low), note: [pct(patch.target_price_low), old(row, "target_price_low")].filter(Boolean).join(" · ") });
     if (patch.target_price_high != null) rows.push({ label: "漲到", value: fmtPrice(patch.target_price_high), note: [pct(patch.target_price_high), old(row, "target_price_high")].filter(Boolean).join(" · ") });
     if (!row && aiWatchFull()) return aiLimitCard("watchlist");
@@ -21953,23 +22193,68 @@ const ASSISTANT_ACTIONS = {
       },
     });
   },
-  openRuleEditorPrefilled(slots) {
+  async openRuleEditorPrefilled(slots) {
     const ct = slots.cond_type;
     if (!ct || ct === "none") {
       aiNav(() => openRulesModal());
       aiNav(() => aiPrefillRuleEditor({ stock_id: slots.stock || null }));
       return { text: `已打開進階訊號的編輯器${slots.stock ? `（範圍 ${aiStockName(slots.stock)}）` : ""}，在裡面選條件。` };
     }
-    const cond = { type: ct, ...(slots.params_defaults || {}), ...(slots.params || {}) };
-    const desc = describeCondition(cond);
     if (isPausedRuleType(ct)) return aiPausedSourceCard(ct, _aiCurrent.text, "，這一條進階訊號建立了也不會成立");
     const sid = slots.stock || null;
     const name = sid ? aiStockName(sid) : "";
+    let q = sid ? aiQuoteOf(sid) : null;                // 收盤價（DATA_SOURCES.md 第十三節）
+    // 基準價要用得到那一檔的收盤價，而「南亞」這種不在自選股、也沒進日報名單的
+    // 只在全市場關卡檔裡（第十八節）。先載再答，不要回「拿不到收盤價」。
+    if (sid && !(q && q.price > 0)) { await aiMarketLevels(); q = aiQuoteOf(sid); }
+    const cur = q && q.price > 0 ? q.price : null;
+    const said = Math.abs(Number((slots.params || {}).value) || 0);
+
+    // 「跌 10% 通知我」：當日漲跌幅條件的上限是 9%——台股一天最多 ±10%，更大的門檻
+    // 永遠不會成立（目錄的 max 就是這樣訂的）。夾成 9% 等於把他說的數字改掉，所以問一句。
+    // 他要的通常是「從現在這個價位起算跌 10%」，那是另一個條件（自基準價漲跌）。
+    if ((ct === "change_pct_above" || ct === "change_pct_below") && said >= 10) {
+      const up = ct === "change_pct_above";
+      const word = up ? "漲" : "跌";
+      const chips = [];
+      if (cur) chips.push({ label: `自 ${fmtPrice(cur)} 起算${word} ${said}%`, act: "run",
+        data: { intent: "rule_create", text: `${name}自 ${fmtPrice(cur)} 起算${word} ${said}% 通知我`,
+                slots: { ...slots, cond_type: "pct_from_base", params_defaults: {},
+                         params: { dir: up ? "up" : "down", value: said } } } });
+      chips.push({ label: `當日${word}幅 9%`, act: "run",
+        data: { intent: "rule_create", text: `${name ? name : ""}當日${word}幅 9% 通知我`,
+                slots: { ...slots, params: { ...(slots.params || {}), value: 9 } } } });
+      return { head: `${word} ${said}% 要從哪裡算？`,
+               text: `台股一天最多${word} 10%，「當日${word}幅 ${said}%」幾乎不會成立。要哪一種：`,
+               chips };
+    }
+
+    const cond = { type: ct, ...(slots.params_defaults || {}), ...(slots.params || {}) };
+    // 自基準價漲跌：基準價是那一檔建立當下的收盤價，所以一定要指定一檔
+    if (ct === "pct_from_base") {
+      if (!sid) return aiNeedStock();
+      if (!cur) return { text: `拿不到${name || sid}的收盤價，沒辦法定基準價。`, muted: true };
+      cond.base = cur;
+      cond.base_date = q.tradeDate || "";
+    }
+    const fitted = aiFitCondParams(ct, cond);
+
+    // 期限（「盯 30 天」）與一次性。自基準價漲跌預設一次性：基準價是固定的，跌到之後
+    // 會天天成立，而使用者說的是「跌到那裡的時候跟我說」，不是「之後每天提醒我」。
+    // 其他條件維持常設，除非他明講「通知一次」。
+    const until = aiExpiryDate(slots.duration);
+    const once = slots.once === undefined ? ct === "pct_from_base" : !!slots.once;
+    if (until) cond.expires_on = until;
+    if (once) cond.once = true;
+
+    const desc = describeCondition(cond);
     if (aiRuleFull()) return aiLimitCard("alert_rules");   // 與卡上寫的「還能設幾條」同一個定義
     if (sid && !aiRowOf(sid) && aiWatchFull()) return aiLimitCard("watchlist");
-    const rows = [{ label: "條件", value: desc, note: "" },
-                  { label: "範圍", value: sid ? `${name} ${sid}` : "全部自選股", note: "" },
-                  { label: "進階訊號", value: `${(alertRules || []).length}／${planLimitOf("alert_rules") ?? "—"}`, note: "建立後 +1" }];
+    const rows = [{ label: "條件", value: desc, note: fitted.length ? `已調整：${fitted.join("、")}` : "" },
+                  { label: "範圍", value: sid ? `${name} ${sid}` : "全部自選股", note: "" }];
+    if (until) rows.push({ label: "期限", value: `到 ${mmdd(until)} 止`, note: "那一天過完自動刪除" });
+    if (once) rows.push({ label: "通知次數", value: "一次", note: "通知後自動刪除" });
+    rows.push({ label: "進階訊號", value: `${(alertRules || []).length}／${planLimitOf("alert_rules") ?? "—"}`, note: "建立後 +1" });
     return aiConfirmCard({
       head: sid && !aiRowOf(sid) ? "加入並建立進階訊號？" : "建立進階訊號？",
       sub: sid && !aiRowOf(sid) ? `${name} 不在自選股，會先加入` : "",
