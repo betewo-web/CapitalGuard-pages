@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="408">
+  <meta name="app-version" content="409">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=408" rel="stylesheet">
+  <link href="watchlist.css?v=409" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9533,12 +9533,32 @@ function goStockSettings(sid) {
 }
 
 // 「分享」：跳到分享 → 分享股票 → 我分享出去的，並開「新增分享」、股票欄位填好這一檔
-function goStockShare(sid) {
+//
+// 與「分享」分頁那顆「新增分享」走同一個視窗，但進來的時機不同（Howard 2026-10-21 要求對齊）：
+// 從分享分頁按，進那一頁時 renderFriends 已經重抓過；從首頁跳過來，視窗是在同一個瞬間開的，
+// 好友清單、名單、「我分享出去的」都還是開 App 那一刻的——之後才加的好友勾不到，
+// 重複邀請的提醒也拿舊資料算。所以先抓最新的再開（先叫 frReload 蓋章，下面 switchTab
+// 觸發的 renderFriends 就不會再抓一次）。
+// 這一檔已經在分享中（一檔一則）：直接帶到那一則，與送出時後端回 already_shared 的去處相同——
+// 分享分頁要先選股票才知道，首頁這裡一開始就知道是哪一檔，不必讓人填完表單才被退回。
+async function goStockShare(sid) {
   const want = String(sid || "").trim();
   if (!frEnabled || !want) return;
+  const fresh = frReload().catch(() => false);
   switchTab("friends");
   frSwitchSeg("shares");
   frSwitchShare("out");      // 要在 frSwitchSeg 之後：有待決定的邀請時它會自己切到「好友分享給我」
+  await fresh;
+  if (currentTab !== "friends") return;   // 抓的這段時間裡他已經去別頁了
+  const live = frLiveShareOf(want);
+  if (live) {
+    frSwitchShare("out");
+    frOpenShare = live.share_id;
+    frFlashAt("share-out", live.share_id);
+    frRenderSharesOut();
+    frToast("這一檔已經在分享中。要增減對象或同步設定，就在這一則上做");
+    return;
+  }
   frOpenShareForm(want);
 }
 
