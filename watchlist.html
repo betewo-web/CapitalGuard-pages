@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="417">
+  <meta name="app-version" content="418">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=417" rel="stylesheet">
+  <link href="watchlist.css?v=418" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -258,6 +258,7 @@
            底部導覽只有「股票」那一格（2026-10-17 從「首頁」改名），三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
       <nav class="home-tabs" aria-label="股票分頁">
         <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
+        <button type="button" class="home-tab" data-tab="holdings" onclick="switchTab('holdings')"><i data-icon="wallet"></i>持股</button>
         <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
         <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
       </nav>
@@ -438,6 +439,34 @@
 
     </section>
 
+    <!-- ═══ 💼 持股（「股票」頁的第二個分頁，2026-10-22 Howard）═══
+         「在股票分頁新增持股分頁：顯示所有持股的張數、股數以及總金額，用 dashboard 清楚呈現；
+         點個股進去看持股明細；旁邊要能新增持股；明細要有刪除；股數歸零自動移除；助手都要能操作。」
+         資料仍是自選股那一列的 shares／avg_cost（沒有新表、不必跑 migration）：持股一定是自選股，
+         新增一檔不在自選的會先加入自選（與 addStock 同一條 POST），刪除持股不會把它移出自選。
+         金額一律用**收盤價**算（getCloseQuote：日線／報告／全市場關卡檔）——盤中成交價不送到裝置
+         （DATA_SOURCES.md 第十三節），所以這一頁寫「以 M/D 收盤價計算」，不是即時市值。
+         所有寫入走 applyHoldingChange()：介面與助手同一支，算出來的股數與平均成本一定一樣。 -->
+    <section id="view-holdings" class="app-view">
+      <nav class="home-tabs" aria-label="股票分頁">
+        <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
+        <button type="button" class="home-tab" data-tab="holdings" onclick="switchTab('holdings')"><i data-icon="wallet"></i>持股</button>
+        <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
+        <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
+      </nav>
+
+      <!-- 標題列：左邊是標題，右邊是「新增持股」（dashboard 旁的入口，Howard 2026-10-22） -->
+      <div class="home-sec-title hd-title">
+        <span class="hs-label"><i data-icon="wallet"></i>持股總覽</span>
+        <button type="button" class="hd-add-btn" onclick="openHoldingAdd()" aria-label="新增持股"><i data-icon="plus"></i>新增持股</button>
+      </div>
+      <!-- 總覽（總市值、投入成本、未實現損益、檔數／張數／股數）與每一檔一列，都由 renderHoldings() 畫 -->
+      <div id="hd-dash"></div>
+      <div id="hd-list" class="hd-list"></div>
+      <div class="disclaimer-note">持股是你自己記錄的股數與成本，市值與損益以收盤價試算，不含手續費與稅；不是投資建議，本服務非證券投資顧問事業。 <span class="hs-link" onclick="showDisclaimerGate()">完整聲明</span></div>
+      <div class="view-source">收盤價資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
+    </section>
+
     <!-- ═══ 📊 統計 ═══
          取代原本的持股分頁：券商 API 尚未對使用者開放，持股全靠手填、多數人是空的；
          每日評分才是產品的核心產出，卻只有一個開新視窗的連結。持股資訊沒有消失，
@@ -519,6 +548,7 @@
            底部導覽只有「股票」那一格（2026-10-17 從「首頁」改名），三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
       <nav class="home-tabs" aria-label="股票分頁">
         <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
+        <button type="button" class="home-tab" data-tab="holdings" onclick="switchTab('holdings')"><i data-icon="wallet"></i>持股</button>
         <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
         <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
       </nav>
@@ -549,6 +579,7 @@
            底部導覽只有「股票」那一格（2026-10-17 從「首頁」改名），三頁都算它亮著（switchTab 裡的 HOME_GROUP）。 -->
       <nav class="home-tabs" aria-label="股票分頁">
         <button type="button" class="home-tab" data-tab="home" onclick="switchTab('home')"><i data-icon="home"></i>盤中</button>
+        <button type="button" class="home-tab" data-tab="holdings" onclick="switchTab('holdings')"><i data-icon="wallet"></i>持股</button>
         <button type="button" class="home-tab" data-tab="post" onclick="switchTab('post')"><i data-icon="moon"></i>盤後</button>
         <button type="button" class="home-tab" data-tab="watch" onclick="switchTab('watch')"><i data-icon="gear"></i>設定</button>
       </nav>
@@ -1264,34 +1295,24 @@
   </div>
 </div>
 
-<!-- ── 持股（🌙 盤後 的每張卡片點「持股」開）──
-     股數與平均成本 2026-09-22 從「基礎訊號」搬到這裡：那一頁設定通知，這裡是看損益的。 -->
+<!-- ── 持股明細（持股分頁點一列、「新增持股」、盤後卡片的「持股」、助手的鍵都開這一張）──
+     2026-10-22（Howard）起同一張 sheet 有六個畫面，內容由 holdSheetRender() 依 _holdSheet.mode 畫：
+       view    明細：張數／股數、平均成本、投入成本、收盤價、市值、損益、佔持股市值；買進／賣出／修改／刪除
+       buy     買進（加碼）：股數相加、平均成本加權
+       sell    賣出：股數相減；賣到 0 自動從持股移除
+       edit    直接改股數與平均成本（股數填 0＝刪除）
+       add     新增持股：先選股票（不在自選股的會一併加入自選股）
+       delete  刪除確認
+     寫入一律 applyHoldingChange()（助手的確認卡同一支）。 -->
 <div class="modal fade sheet-modal" id="holdingsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content kline-modal-content">
       <div class="modal-header py-2">
+        <button type="button" class="sheet-back" id="hold-back" style="display:none" onclick="holdSheetBack()" aria-label="回到明細">‹ 明細</button>
         <h5 class="mb-0" id="hold-title">持股</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
-      <div class="modal-body p-3">
-        <div class="hold-field">
-          <label class="hold-label" for="hold-shares">持有股數（股，1 張＝1000）</label>
-          <div class="input-group input-group-sm">
-            <input id="hold-shares" type="number" class="form-control hold-input" placeholder="如 1000" step="1" min="0">
-            <button class="btn btn-outline-secondary hold-clear" type="button" onclick="clearHoldingInput('shares')" title="清除">✕</button>
-          </div>
-        </div>
-        <div class="hold-field">
-          <label class="hold-label" for="hold-cost">平均成本（元）</label>
-          <div class="input-group input-group-sm">
-            <input id="hold-cost" type="number" class="form-control hold-input" placeholder="如 580.5" step="0.01" min="0">
-            <button class="btn btn-outline-secondary hold-clear" type="button" onclick="clearHoldingInput('cost')" title="清除">✕</button>
-          </div>
-        </div>
-        <div class="hold-hint">兩欄留空＝純觀察，不計算損益。</div>
-        <div id="hold-msg" class="small mt-2 text-muted"></div>
-        <button type="button" class="btn btn-primary w-100 mt-2" onclick="saveHoldings()">儲存</button>
-      </div>
+      <div class="modal-body p-3" id="hold-body"></div>
     </div>
   </div>
 </div>
@@ -2184,12 +2205,17 @@ const ICON_AI_SEND = _svg('<path d="M8 13.5V3"/><path d="M3.5 7.5 8 3l4.5 4.5"/>
 }
 
 // ── PWA v2: App Shell 狀態 ──
-// 首頁是三個分頁（盤中／盤後／設定），三者都是獨立的 view，由頂端那條 .home-tabs 切換；
-// 底部導覽只有「股票」一格（2026-10-17 從「首頁」改名），三頁都算它亮著（HOME_GROUP）
-const APP_TABS = ["home", "scores", "inbox", "watch", "post", "friends", "ai"];
-const HOME_GROUP = ["home", "post", "watch"];   // 助手（ai）2026-10-16 曾是第四分頁，10-17 晚改成底部導覽最左邊那一格
+// 「股票」頁是四個分頁（盤中／持股／盤後／設定），四者都是獨立的 view，由頂端那條 .home-tabs 切換；
+// 底部導覽只有「股票」一格（2026-10-17 從「首頁」改名），四頁都算它亮著（HOME_GROUP）。
+// 持股（holdings）2026-10-22 加回來（Howard）：2026-09-07 它曾是底部導覽的一格、被統計取代，
+// 這一次是「股票」頁裡的分頁，資料仍是自選股那一列的 shares／avg_cost。
+const APP_TABS = ["home", "scores", "inbox", "watch", "post", "friends", "ai", "holdings"];
+const HOME_GROUP = ["home", "holdings", "post", "watch"];   // 助手（ai）2026-10-16 曾是第四分頁，10-17 晚改成底部導覽最左邊那一格
+// 下面那個旗標開著時，分頁列上看得到的只有這兩格（盤後／設定那兩顆藏在 CSS 裡）
+const HOME_SIMPLE_TABS = ["home", "holdings"];
 // 「股票」頁暫時只呈現「盤中 → 個股」那一塊（2026-10-19 Howard）：
-//   · 盤中／盤後／設定那一條分頁列（.home-tabs，三個 view 各一份）不顯示
+//   · 盤中／盤後／設定那一條分頁列（.home-tabs，四個 view 各一份）原本整條不顯示；
+//     2026-10-22 加了「持股」分頁之後分頁列回來，但只露「盤中｜持股」兩格（HOME_SIMPLE_TABS）
 //   · 個股／市場強度／市場訊號那一排（#home-filter）不顯示，個股清單直接攤在頁面上
 //   · 市場強度與市場訊號兩區因此永遠不開（_marketViewOpen 一直是 false，連那一份 payload 都不去拉）
 // **暫時**：三頁的 markup、那兩區、各自的渲染與測試全部留著，這個旗標改回 false 就整組回來。
@@ -2197,8 +2223,8 @@ const HOME_GROUP = ["home", "post", "watch"];   // 助手（ai）2026-10-16 曾�
 // 寫 style——分頁列在三個 view 裡各有一份，而且主畫面要等登入完才顯示，不會先閃一下再收起來。
 // 連帶三件事：
 //   ① homeFilter 一律當「個股」，本機記著的那一格不覆蓋（旗標關掉就回到他原本選的）
-//   ② 開 App 時 hash 停在 #post／#watch 的人回到盤中頁——那兩頁現在沒有分頁列可以離開
-//      （通知指定的分頁照舊，見 bootTab）
+//   ② 開 App 時 hash 停在 #post／#watch 的人回到盤中頁——那兩頁的分頁鈕藏著，進去了沒有路回來
+//      （通知指定的分頁照舊，見 bootTab；#holdings 照常進持股分頁）
 //   ③ 盤後與設定兩頁沒有拆掉：「＋ 新增自選股」仍然會過去，回來按底部導覽的「股票」
 // 用 let 不是 const：那兩格的煙霧測試（preview/smoke_market_strength.py）要先把它關掉，
 // 才跑得到那一格的內容——它釘的是那兩格本身，不是這裡的關法。程式裡沒有別處寫它。
@@ -5097,9 +5123,10 @@ async function showMain() {
                  : (pendingTabFocus && Date.now() - _pendingTabFocusAt <= 60000) ? pendingTabFocus
                  : null;
   const wantTab = notifTab || (APP_TABS.includes(hashTab) ? hashTab : "home");
-  // 分頁列不顯示時（HOME_SIMPLE_ONLY）上次停在盤後／設定的人回到盤中頁：那兩頁現在
-  // 只進得去（「＋ 新增自選股」）、沒有分頁列出得來。通知指定的分頁照舊（notifTab 優先）。
-  const bootTab = (HOME_SIMPLE_ONLY && !notifTab && HOME_GROUP.includes(wantTab)) ? "home" : wantTab;
+  // 分頁列只露「盤中｜持股」時（HOME_SIMPLE_ONLY）上次停在盤後／設定的人回到盤中頁：那兩頁現在
+  // 只進得去（「＋ 新增自選股」）、分頁列上沒有它們的鈕。持股照常。通知指定的分頁照舊（notifTab 優先）。
+  const bootTab = (HOME_SIMPLE_ONLY && !notifTab && HOME_GROUP.includes(wantTab) && !HOME_SIMPLE_TABS.includes(wantTab))
+    ? "home" : wantTab;
   pendingTabFocus = null;
   if (urlTab) {
     const rest = new URLSearchParams(location.search);
@@ -5550,8 +5577,8 @@ function switchTab(tab, silent = false) {
     _refreshQuotesIfStale();    // 盤中報價只在首頁與字卡輪詢：回來時太舊就補一次
     _loadMarketIfStale();       // 停在「市場」那一格離開又回來：同理
   }
-  // 盤後頁要收盤價：主機沒寫到收盤時向 FinMind 補一次（那支自己限流），回來重畫
-  if (tab === "post" && _isSessionOverToday() && _closeQuoteMissing()) {
+  // 盤後頁與持股頁要收盤價：主機沒寫到收盤時向 FinMind 補一次（那支自己限流），回來重畫
+  if ((tab === "post" || tab === "holdings") && _isSessionOverToday() && _closeQuoteMissing()) {
     loadFinMindCloseQuotes().then(() => renderCurrentTab()).catch(() => {});
   }
   // 評分頁靠報告資料；登入後那次載入還沒回來就先顯示載入中，回來再畫。
@@ -5582,6 +5609,7 @@ function renderCurrentTab() {
   else if (currentTab === "scores") renderScores();
   else if (currentTab === "inbox") renderInbox();
   else if (currentTab === "post") renderPost();
+  else if (currentTab === "holdings") renderHoldings();
   else if (currentTab === "friends") renderFriends();
   else if (currentTab === "ai") renderAssistant();
   else renderWatchlist(watchlistRows);
@@ -9803,6 +9831,141 @@ function holdingEntries() {
       extra: [],
     };
   });
+}
+
+// ── 持股的計算（持股分頁、明細、助手共用，2026-10-22 Howard）──────────────────
+// 股數一律以「股」存（watchlist.shares）；畫面同時寫張數與零股，與券商 App 的庫存同一種講法。
+const SHARES_PER_LOT = 1000;
+
+// 「12 張 450 股」「450 股」「3 張」
+function fmtLots(shares) {
+  const n = Math.max(0, Math.round(Number(shares) || 0));
+  const lots = Math.floor(n / SHARES_PER_LOT), odd = n % SHARES_PER_LOT;
+  if (!lots) return `${odd.toLocaleString()} 股`;
+  return odd ? `${lots.toLocaleString()} 張 ${odd.toLocaleString()} 股` : `${lots.toLocaleString()} 張`;
+}
+
+// 金額一律整數元、千分位：市值與成本動輒幾十萬，角與分只是雜訊
+function fmtMoney(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n).toLocaleString() : "—";
+}
+function fmtSignedMoney(v) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return "—";
+  return n > 0 ? `+${n.toLocaleString()}` : n < 0 ? `-${Math.abs(n).toLocaleString()}` : "0";
+}
+function fmtSignedPct(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${n > 0 ? "+" : n < 0 ? "-" : ""}${Math.abs(n).toFixed(2)}%`;
+}
+// 漲跌色只看正負（台股紅漲綠跌，與 fmtChgHtml 同一組 class）
+function plClass(v) { const n = Number(v); return !Number.isFinite(n) || Math.abs(n) < 1e-9 ? "chg-flat" : n > 0 ? "chg-up" : "chg-down"; }
+
+// 一檔持股的試算。價格一律用**收盤價**（getCloseQuote）：盤中成交價不送到裝置（DATA_SOURCES.md 第十三節），
+// 所以這裡的市值是「最近一個收盤」的，畫面上要寫是哪一天。沒有收盤價（剛上市、資料還沒到）就是 null，不拿別的頂替。
+function holdingValuation(h) {
+  const q = getCloseQuote(h.sid);
+  const price = q && Number(q.price) > 0 ? Number(q.price) : null;
+  const shares = Math.max(0, Number(h.shares) || 0);
+  const cost = Number(h.cost) > 0 ? Number(h.cost) : null;
+  const value = price != null ? price * shares : null;
+  const costTotal = cost != null ? cost * shares : null;
+  const pl = value != null && costTotal != null ? value - costTotal : null;
+  return Object.assign({}, h, {
+    shares, cost, price, tradeDate: q ? String(q.tradeDate || "") : "",
+    value, costTotal, pl, plPct: pl != null && costTotal > 0 ? pl / costTotal * 100 : null,
+  });
+}
+
+// 整份持股的總覽。市值只加得到有收盤價的那幾檔；損益只算「有成本又有收盤價」的——
+// 成本與市值要是同一組股票，報酬率才對得上（少一檔成本就把那一檔的市值也拿掉）。
+function holdingsSummary(entries) {
+  const items = (entries || holdingEntries()).map(holdingValuation);
+  let value = 0, priced = 0, cost = 0, plBase = 0, withPl = 0, shares = 0;
+  const dates = new Set();
+  for (const it of items) {
+    shares += it.shares;
+    if (it.value != null) { value += it.value; priced += 1; if (it.tradeDate) dates.add(it.tradeDate); }
+    if (it.pl != null) { cost += it.costTotal; plBase += it.value; withPl += 1; }
+  }
+  for (const it of items) it.weight = value > 0 && it.value != null ? it.value / value * 100 : null;
+  items.sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || String(a.name).localeCompare(String(b.name), "zh-Hant"));
+  const pl = withPl ? plBase - cost : null;
+  const sorted = [...dates].sort();
+  return {
+    items, n: items.length, shares, priced, withPl,
+    value: priced ? value : null,
+    cost: withPl ? cost : null,
+    pl, plPct: pl != null && cost > 0 ? pl / cost * 100 : null,
+    date: sorted.length ? sorted[sorted.length - 1] : "",   // 最新的那一天；不一致時 mixedDates 會說
+    mixedDates: sorted.length > 1,
+  };
+}
+
+// 持股的下一步——純函式，介面（新增／買進／賣出／修改／刪除）與助手的確認卡都走它，算法只有一份。
+// cur＝{shares, cost}（沒有持股＝0／null）；op.kind：
+//   set     直接設成這個股數（有給價格就一起改平均成本；clearCost＝把成本清掉）
+//   buy     買進：股數相加、平均成本加權（原本有股數卻沒有成本的，平均不出來 → 成本維持空白，不亂猜）
+//   sell    賣出：股數相減、平均成本不變（剩下那些的成本沒有變）；賣得比手上多是錯
+//   cost    只改平均成本
+//   delete  刪掉這一檔的持股
+// 股數歸零＝removed：兩欄都寫回 null，持股分頁那一列自動消失（Howard 2026-10-22「持有股數歸零也要自動移除」）。
+function holdingNext(cur, op) {
+  const have = Math.max(0, Math.round(Number(cur && cur.shares) || 0));
+  const curCost = cur && Number(cur.cost) > 0 ? Number(cur.cost) : null;
+  const kind = String((op && op.kind) || "");
+  const rawQty = op && op.shares != null && op.shares !== "" ? Number(op.shares) : null;
+  const price = op && op.price != null && op.price !== "" ? Number(op.price) : null;
+  if (rawQty != null && !(Number.isFinite(rawQty) && rawQty >= 0 && Math.round(rawQty) === rawQty)) return { error: "股數要是 0 以上的整數。" };
+  if (price != null && !(Number.isFinite(price) && price > 0)) return { error: "價格要大於 0。" };
+  const qty = rawQty;
+  let shares = have, cost = curCost;
+  if (kind === "delete") {
+    shares = 0;
+  } else if (kind === "set") {
+    if (qty == null) return { error: "要填股數。" };
+    shares = qty;
+    if (price != null) cost = price;
+    else if (op.clearCost) cost = null;   // 「修改」那一面把成本那一格清空＝不算損益
+  } else if (kind === "buy") {
+    if (!(qty > 0)) return { error: "買進的股數要大於 0。" };
+    shares = have + qty;
+    if (price != null) cost = have === 0 ? price : curCost != null ? (have * curCost + qty * price) / shares : null;
+  } else if (kind === "sell") {
+    if (!(qty > 0)) return { error: "賣出的股數要大於 0。" };
+    if (!(have > 0)) return { error: "這一檔沒有持股紀錄，沒有可以賣的。" };
+    if (qty > have) return { error: `賣出 ${fmtLots(qty)}，比手上的 ${fmtLots(have)} 多。` };
+    shares = have - qty;
+  } else if (kind === "cost") {
+    if (price == null) return { error: "要填平均成本。" };
+    if (!(have > 0)) return { error: "這一檔還沒有股數，先填股數。" };
+    cost = price;
+  } else {
+    return { error: "不認得的動作。" };
+  }
+  if (shares <= 0) return { shares: null, cost: null, removed: true };
+  return { shares, cost: cost != null ? Math.round(cost * 10000) / 10000 : null, removed: false };
+}
+
+// 持股唯一的寫入口：同一條 sbPatch("watchlist")，只改這一列的 shares／avg_cost。
+// 那一檔不在自選股時由呼叫端先加（aiAddStockById，與 addStock 同一條 POST——持股記在自選股那一列上）。
+// 券商同步開著時股數以券商為準（holdingEntries 讀 broker_holdings），這裡只收改成本。
+async function applyHoldingChange(sid, op) {
+  const key = String(sid || "").trim();
+  const row = (watchlistRows || []).find(r => String(r.stock_id || "").trim() === key);
+  if (!row) return { error: "這一檔不在自選股。" };
+  if (brokerHoldings.length > 0 && op.kind !== "cost") return { error: "股數由券商同步，以券商為準；這裡只能改平均成本。" };
+  const before = { shares: Number(row.shares) || 0, cost: row.avg_cost != null && row.avg_cost !== "" ? Number(row.avg_cost) : null };
+  const next = holdingNext(before, op);
+  if (next.error) return { error: next.error, before };
+  await sbPatch("watchlist", { "id": `eq.${row.id}` }, { shares: next.shares, avg_cost: next.cost }, state.accessToken);
+  row.shares = next.shares;
+  row.avg_cost = next.cost;
+  trackActivity("holding_save", { stock: key, op: String(op.kind), removed: next.removed ? 1 : 0 });
+  renderCurrentTab();
+  return Object.assign({}, next, { before, row });
 }
 
 // ── 📊 統計頁（view-scores）────────────────────────────────────────────────────
@@ -14114,54 +14277,402 @@ function _alertCurrentPrice(field) {
 // savePriceTargets 2026-09-22 併進 saveAlertDraft（價位與開關一起按「完成」儲存）
 
 
-// ── 🌙 盤後：持股（股數與平均成本）──────────────────────────────
-// 2026-09-22 從「基礎訊號」搬過來（Howard）：那一頁在設定通知，持股是看損益用的。
-let holdingsRowId = null;
+// ── 💼 持股：明細與編輯（同一張 sheet，2026-10-22 Howard）──────────────────────
+// 入口：持股分頁點一列（明細）、「新增持股」、盤後卡片的「持股」、助手卡片的鍵。
+// 2026-09-22 起的「盤後卡片 → 股數、平均成本兩格＋儲存」就是現在「修改」那一面。
+// 寫入只有 applyHoldingChange() 一條、算法只有 holdingNext() 一份——助手的確認卡也走它們，
+// 所以「在畫面上賣 1 張」與「跟助手說賣了 1 張」得到的股數與成本一定一樣。
+let _holdSheet = { sid: null, mode: "view", pick: null, msg: "", msgKind: "", busy: false, done: null };
 
-function openHoldingsSheet(sid) {
+function _holdWatchRow(sid) {
   const key = String(sid || "").trim();
-  const row = watchlistRows.find(r => String(r.stock_id || "").trim() === key);
-  if (!row) return;
-  holdingsRowId = row.id;
-  const name = getPreferredStockName(key, row.stock_name) || universe[key]?.n || key;
-  document.getElementById("hold-title").textContent = `持股｜${name} ${key}`;
-  document.getElementById("hold-shares").value = (row.shares   != null && row.shares   !== "") ? row.shares   : "";
-  document.getElementById("hold-cost").value   = (row.avg_cost != null && row.avg_cost !== "") ? row.avg_cost : "";
-  document.getElementById("hold-msg").innerHTML = "";
-  bootstrap.Modal.getOrCreateInstance(document.getElementById("holdingsModal")).show();
+  return (watchlistRows || []).find(r => String(r.stock_id || "").trim() === key) || null;
+}
+function _holdNameOf(sid) {
+  const row = _holdWatchRow(sid);
+  return getPreferredStockName(sid, row ? row.stock_name : universe[sid]?.n) || universe[sid]?.n || sid;
+}
+// 這一檔目前記著的股數與成本（券商同步開著時是券商的股數）
+function _holdCur(sid) {
+  const h = holdingBySid().get(String(sid || "").trim());
+  return h ? { shares: Number(h.shares) || 0, cost: Number(h.cost) > 0 ? Number(h.cost) : null } : { shares: 0, cost: null };
+}
+function _holdModal() { return bootstrap.Modal.getOrCreateInstance(document.getElementById("holdingsModal")); }
+
+// 打開某一檔。mode 沒給：有持股看明細，沒有就直接到「修改」填股數
+function openHoldingsSheet(sid, mode) {
+  const key = String(sid || "").trim();
+  if (!_holdWatchRow(key)) return;
+  const held = _holdCur(key).shares > 0;
+  _holdSheet = { sid: key, mode: mode || (held ? "view" : "edit"), pick: null, msg: "", msgKind: "", busy: false, done: null };
+  holdSheetRender();
+  _holdModal().show();
+  trackActivity("holding_open", { stock: key, mode: _holdSheet.mode });
 }
 
-function clearHoldingInput(which) {
-  document.getElementById(which === "shares" ? "hold-shares" : "hold-cost").value = "";
+// 「新增持股」：先選股票。帶 sid（助手的鍵）就直接選好
+function openHoldingAdd(sid) {
+  const pick = isStockId(String(sid || "")) && universe[String(sid)] ? String(sid) : null;
+  _holdSheet = { sid: null, mode: "add", pick, msg: "", msgKind: "", busy: false, done: null };
+  holdSheetRender();
+  _holdModal().show();
+  trackActivity("holding_open", { mode: "add" });
 }
 
-async function saveHoldings() {
-  if (!holdingsRowId) return;
-  const msgEl = document.getElementById("hold-msg");
-  const sharesRaw = document.getElementById("hold-shares").value.trim();
-  const costRaw   = document.getElementById("hold-cost").value.trim();
-  const shares = sharesRaw !== "" ? parseFloat(sharesRaw) : null;
-  const cost   = costRaw   !== "" ? parseFloat(costRaw)   : null;
-  if (shares !== null && (isNaN(shares) || shares < 0)) {
-    msgEl.innerHTML = '<span class="text-danger">❌ 股數格式錯誤（需 ≥ 0）</span>';
+function holdSheetGo(mode) {
+  Object.assign(_holdSheet, { mode, msg: "", msgKind: "" });
+  holdSheetRender();
+}
+function holdSheetBack() { holdSheetGo("view"); }
+function holdSheetClose() { _holdModal().hide(); }
+function holdOpenCard() {
+  const sid = _holdSheet.sid;
+  _holdModal().hide();
+  if (sid) setTimeout(() => openStockCard(sid, { tab: "radar" }), 320);   // 等這張收起來再開字卡，兩張 modal 不疊
+}
+
+const HOLD_VERB = { buy: "買進", sell: "賣出", edit: "修改", add: "新增", delete: "刪除" };
+
+// 張＋股兩格 → 股數。「1.5 張」＝1500 股；兩格都空＝沒填（null）
+function _holdQtyInput() {
+  const lotsRaw = (document.getElementById("hold-lots")?.value || "").trim();
+  const oddRaw = (document.getElementById("hold-odd")?.value || "").trim();
+  if (lotsRaw === "" && oddRaw === "") return null;
+  const lots = lotsRaw === "" ? 0 : Number(lotsRaw);
+  const odd = oddRaw === "" ? 0 : Number(oddRaw);
+  if (!Number.isFinite(lots) || !Number.isFinite(odd) || lots < 0 || odd < 0) return NaN;
+  return Math.round(lots * SHARES_PER_LOT) + odd;
+}
+function _holdPriceInput() {
+  const raw = (document.getElementById("hold-price")?.value || "").trim();
+  return raw === "" ? null : Number(raw);
+}
+// 這一面要送給 holdingNext 的動作
+function _holdOp() {
+  const m = _holdSheet.mode;
+  if (m === "delete") return { kind: "delete" };
+  const qty = _holdQtyInput(), price = _holdPriceInput();
+  if (m === "buy" || m === "add") return { kind: "buy", shares: qty, price };
+  if (m === "sell") return { kind: "sell", shares: qty };
+  if (m === "edit") {
+    if (brokerHoldings.length > 0) return { kind: "cost", price };
+    return { kind: "set", shares: qty, price, clearCost: price == null };
+  }
+  return null;
+}
+
+function _holdQtyFieldsHtml(shares) {
+  const n = Math.max(0, Math.round(Number(shares) || 0));
+  const lots = n ? Math.floor(n / SHARES_PER_LOT) : "", odd = n ? n % SHARES_PER_LOT : "";
+  return `<div class="hold-field">
+      <label class="hold-label" for="hold-lots">股數（1 張＝1,000 股，零股填在「股」）</label>
+      <div class="hold-qty">
+        <input id="hold-lots" type="number" inputmode="decimal" class="form-control hold-input" min="0" step="1" placeholder="0" value="${escapeHtml(String(lots))}" oninput="holdSheetPreview()"><span>張</span>
+        <input id="hold-odd" type="number" inputmode="numeric" class="form-control hold-input" min="0" step="1" placeholder="0" value="${escapeHtml(String(odd))}" oninput="holdSheetPreview()"><span>股</span>
+      </div>
+    </div>`;
+}
+function _holdPriceFieldHtml(label, value, placeholder) {
+  return `<div class="hold-field">
+      <label class="hold-label" for="hold-price">${escapeHtml(label)}</label>
+      <input id="hold-price" type="number" inputmode="decimal" class="form-control hold-input" min="0" step="0.01"
+             placeholder="${escapeHtml(placeholder || "")}" value="${value != null ? escapeHtml(String(value)) : ""}" oninput="holdSheetPreview()">
+    </div>`;
+}
+
+function holdSheetRender() {
+  const body = document.getElementById("hold-body");
+  const title = document.getElementById("hold-title");
+  if (!body || !title) return;
+  const s = _holdSheet;
+  const sid = s.mode === "add" ? s.pick : s.sid;
+  const name = sid ? _holdNameOf(sid) : "";
+  const cur = sid ? _holdCur(sid) : { shares: 0, cost: null };
+  const broker = brokerHoldings.length > 0;
+  const back = document.getElementById("hold-back");
+  if (back) back.style.display = s.sid && cur.shares > 0 && s.mode !== "view" && s.mode !== "done" ? "" : "none";
+  const msg = `<div id="hold-msg" class="hold-msg${s.msgKind ? " is-" + s.msgKind : ""}" role="status">${escapeHtml(s.msg || "")}</div>`;
+  const preview = `<div id="hold-preview" class="hold-preview" aria-live="polite"></div>`;
+  const submit = label => `<button type="button" class="btn alert-done w-100 mt-1" onclick="holdSheetSubmit()">${escapeHtml(label)}</button>`;
+  const nowLine = cur.shares > 0
+    ? `<div class="hold-now">現在 <b>${escapeHtml(fmtLots(cur.shares))}</b>${cur.cost != null ? `・平均成本 ${escapeHtml(fmtPrice(cur.cost))}` : "・平均成本未填"}</div>` : "";
+
+  if (s.mode === "done") {
+    const d = s.done || {};
+    title.textContent = "持股";
+    body.innerHTML = `<div class="hold-done">
+        <div class="hold-done-head">${escapeHtml(d.head || "完成")}</div>
+        <div class="hold-hint">${escapeHtml(d.text || "")}</div>
+      </div>
+      <button type="button" class="btn alert-done w-100 mt-2" onclick="holdSheetClose()">知道了</button>`;
     return;
   }
-  if (cost !== null && (isNaN(cost) || cost <= 0)) {
-    msgEl.innerHTML = '<span class="text-danger">❌ 平均成本格式錯誤（需大於 0）</span>';
+
+  if (s.mode === "view") {
+    const v = holdingValuation({ sid, name, shares: cur.shares, cost: cur.cost });
+    const total = holdingsSummary();
+    const w = total.value > 0 && v.value != null ? v.value / total.value * 100 : null;
+    title.textContent = `${name} ${sid}`;
+    const dl = [
+      ["平均成本", v.cost != null ? `${fmtPrice(v.cost)} 元` : "未填"],
+      ["投入成本", v.costTotal != null ? `${fmtMoney(v.costTotal)} 元` : "—"],
+      ["收盤價", v.price != null ? `${fmtPrice(v.price)} 元${v.tradeDate ? `（${_closeDateLabel(v.tradeDate)}）` : ""}` : "還沒有收盤價"],
+      ["市值", v.value != null ? `${fmtMoney(v.value)} 元` : "—"],
+    ].map(([k, val]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(val)}</dd></div>`).join("")
+      + `<div><dt>未實現損益</dt><dd>${v.pl != null
+          ? `<b class="${plClass(v.pl)}">${escapeHtml(fmtSignedMoney(v.pl))} 元（${escapeHtml(fmtSignedPct(v.plPct))}）</b>`
+          : escapeHtml(v.cost == null ? "填了平均成本才算得出來" : "—")}</dd></div>`
+      + `<div><dt>佔持股市值</dt><dd>${w != null ? `${w.toFixed(1)}%` : "—"}</dd></div>`;
+    const acts = broker
+      ? `<div class="hold-acts"><button type="button" class="hold-act" onclick="holdSheetGo('edit')">改平均成本</button></div>
+         <div class="hold-hint">股數由券商同步${brokerHoldingsAt ? `（${escapeHtml(_closeDateLabel(String(brokerHoldingsAt).slice(0, 10)))}）` : ""}，以券商為準；這裡只改平均成本。</div>`
+      : `<div class="hold-acts">
+           <button type="button" class="hold-act" onclick="holdSheetGo('buy')">買進</button>
+           <button type="button" class="hold-act" onclick="holdSheetGo('sell')">賣出</button>
+           <button type="button" class="hold-act" onclick="holdSheetGo('edit')">修改</button>
+         </div>
+         <div class="hold-acts2">
+           <button type="button" class="hold-link" onclick="holdOpenCard()">開個股字卡 ›</button>
+           <button type="button" class="hold-del" onclick="holdSheetGo('delete')">${ICON_TRASH}<span>刪除持股</span></button>
+         </div>
+         <div class="hold-hint">賣到 0 股或按「刪除持股」，這一檔就從持股移除；它仍在自選股裡，訊號照常。</div>`;
+    body.innerHTML = `${msg}
+      <div class="hold-hero">
+        <div class="hold-hero-lots">${escapeHtml(fmtLots(v.shares))}</div>
+        <div class="hold-hero-sub">共 ${escapeHtml(v.shares.toLocaleString())} 股</div>
+      </div>
+      <dl class="hold-dl">${dl}</dl>
+      ${acts}`;
     return;
   }
-  msgEl.innerHTML = '<span class="text-muted">儲存中…</span>';
+
+  if (s.mode === "delete") {
+    title.textContent = "刪除持股？";
+    body.innerHTML = `<div class="hold-confirm">
+        <div class="hold-confirm-q">${escapeHtml(name)} <span class="wl-sid">${escapeHtml(sid)}</span></div>
+        ${nowLine}
+        <div class="hold-hint">股數與平均成本一起清掉，這一檔從持股分頁移除；它仍在自選股裡，訊號照常。</div>
+      </div>
+      ${msg}
+      <div class="hold-two">
+        <button type="button" class="btn alert-cancel" onclick="holdSheetBack()">取消</button>
+        <button type="button" class="btn hold-danger" onclick="holdSheetSubmit()">刪除</button>
+      </div>`;
+    return;
+  }
+
+  if (s.mode === "add") {
+    title.textContent = "新增持股";
+    if (broker) {
+      body.innerHTML = `<div class="hold-hint">持股由券商同步，股數以券商為準，這裡不能另外新增。</div>`;
+      return;
+    }
+    let pickHtml;
+    if (sid) {
+      const notes = [];
+      if (cur.shares > 0) notes.push(`已經有 ${fmtLots(cur.shares)}：這次記成買進（股數相加、平均成本加權）。`);
+      if (!_holdWatchRow(sid)) notes.push(`不在自選股：儲存時會一併加入自選股（自選 ${aiWatchUsage()}）。`);
+      pickHtml = `<div class="hold-picked"><b>${escapeHtml(name)}</b> <span class="wl-sid">${escapeHtml(sid)}</span>
+          <button type="button" class="hold-link" onclick="holdPick(null)">換一檔</button></div>
+        ${notes.map(n => `<div class="hold-note">${escapeHtml(n)}</div>`).join("")}`;
+    } else {
+      pickHtml = `<input id="hold-q" class="form-control hold-input" placeholder="代號或名稱，如 2330／台積電" autocomplete="off"
+                    aria-label="輸入股票代號或名稱" oninput="holdSearch()">
+        <div id="hold-results" class="hold-results"></div>`;
+    }
+    body.innerHTML = `<div class="hold-field"><label class="hold-label" for="hold-q">股票</label>${pickHtml}</div>
+      ${sid ? _holdQtyFieldsHtml(0) + _holdPriceFieldHtml("成交價（元）", null, "選填，填了才算得出損益") + preview + msg + submit("新增") : msg}`;
+    return;
+  }
+
+  // buy／sell／edit
+  title.textContent = `${HOLD_VERB[s.mode] || ""} ${name} ${sid}`;
+  let fields;
+  if (s.mode === "buy") {
+    fields = _holdQtyFieldsHtml(0) + _holdPriceFieldHtml("成交價（元）", null, "選填，填了會重算平均成本");
+  } else if (s.mode === "sell") {
+    fields = _holdQtyFieldsHtml(0)
+      + `<div class="hold-quick">
+           <button type="button" class="hold-chip" onclick="holdFillQty('${jsAttr(String(cur.shares))}')">全部 ${escapeHtml(fmtLots(cur.shares))}</button>
+           ${cur.shares > SHARES_PER_LOT ? `<button type="button" class="hold-chip" onclick="holdFillQty('${jsAttr(String(SHARES_PER_LOT))}')">1 張</button>` : ""}
+         </div>
+         <div class="hold-hint">賣出不改平均成本（剩下那些的成本沒有變）。賣到 0 股，這一檔就從持股移除。</div>`;
+  } else if (broker) {
+    fields = _holdPriceFieldHtml("平均成本（元）", cur.cost, "如 580.5");
+  } else {
+    fields = _holdQtyFieldsHtml(cur.shares) + _holdPriceFieldHtml("平均成本（元）", cur.cost, "選填，留空＝不算損益")
+      + `<div class="hold-hint">股數填 0＝刪除這一檔的持股。</div>`;
+  }
+  body.innerHTML = `${nowLine}${fields}${preview}${msg}${submit(s.mode === "edit" ? "儲存" : `確定${HOLD_VERB[s.mode]}`)}`;
+  holdSheetPreview();
+}
+
+function holdFillQty(n) {
+  const v = Math.max(0, Math.round(Number(n) || 0));
+  const lots = document.getElementById("hold-lots"), odd = document.getElementById("hold-odd");
+  if (lots) lots.value = String(Math.floor(v / SHARES_PER_LOT));
+  if (odd) odd.value = String(v % SHARES_PER_LOT);
+  holdSheetPreview();
+}
+
+// 按下去之前就看得到結果：「買進後：12 張 450 股・平均成本 963.42」
+function holdSheetPreview() {
+  const el = document.getElementById("hold-preview");
+  if (!el) return;
+  const s = _holdSheet;
+  const sid = s.mode === "add" ? s.pick : s.sid;
+  const op = sid ? _holdOp() : null;
+  if (!op || (op.kind !== "cost" && op.kind !== "delete" && op.shares == null)) { el.textContent = ""; el.className = "hold-preview"; return; }
+  const cur = _holdCur(sid);
+  const next = holdingNext(cur, op);
+  el.className = "hold-preview" + (next.error ? " is-err" : "");
+  if (next.error) { el.textContent = next.error; return; }
+  if (next.removed) { el.textContent = "股數歸零：這一檔會從持股移除（仍留在自選股）。"; return; }
+  let t = `${HOLD_VERB[s.mode] || "改"}後：${fmtLots(next.shares)}（${next.shares.toLocaleString()} 股）`
+    + (next.cost != null ? `・平均成本 ${fmtPrice(next.cost)}` : "・平均成本未填");
+  if (op.kind === "buy" && cur.shares > 0 && cur.cost == null && op.price != null) t += "。原本沒有平均成本，加權算不出來——之後在「修改」直接填。";
+  el.textContent = t;
+}
+
+function _holdSetMsg(text, kind) {
+  Object.assign(_holdSheet, { msg: text || "", msgKind: kind || "" });
+  const el = document.getElementById("hold-msg");
+  if (el) { el.textContent = text || ""; el.className = "hold-msg" + (kind ? " is-" + kind : ""); }
+}
+
+async function holdSheetSubmit() {
+  const s = _holdSheet;
+  if (s.busy) return;
+  const sid = s.mode === "add" ? s.pick : s.sid;
+  if (!sid) { _holdSetMsg("先選一檔股票。", "err"); return; }
+  const op = _holdOp();
+  if (!op) return;
+  const name = _holdNameOf(sid);
+  s.busy = true;
+  _holdSetMsg("儲存中…", "");
   try {
-    await sbPatch("watchlist", { "id": `eq.${holdingsRowId}` },
-      { shares: shares, avg_cost: cost }, state.accessToken);
-    const row = getWatchlistRowById(holdingsRowId);
-    if (row) { row.shares = shares; row.avg_cost = cost; }
-    msgEl.innerHTML = `<span class="text-success">✅ 已儲存${shares ? `（${shares} 股）` : "（已清除）"}</span>`;
-    renderPost();   // 卡片上的持股與損益立刻跟著換
-    setTimeout(() => bootstrap.Modal.getInstance(document.getElementById("holdingsModal"))?.hide(), 600);
+    if (!_holdWatchRow(sid)) {
+      // 新增的這一檔不在自選股：先驗數字（填錯不要白白多一檔自選），再加入自選（與 addStock 同一條 POST）
+      const pre = holdingNext(_holdCur(sid), op);
+      if (pre.error) throw new Error(pre.error);
+      if (aiWatchFull()) throw new Error(`${aiLimitLabel("watchlist")}。${aiLimitWayOut("watchlist")}`);
+      await aiAddStockById(sid);
+      if (!_holdWatchRow(sid)) throw new Error("加入自選股沒有成功，請再試一次。");
+    }
+    const r = await applyHoldingChange(sid, op);
+    if (r.error) throw new Error(r.error);
+    s.busy = false;
+    if (r.removed) {
+      // 歸零：這一檔已經不在持股，明細沒得看了。結果講清楚，列表那一列已經消失
+      _holdSheet = { sid: null, mode: "done", pick: null, msg: "", msgKind: "", busy: false,
+                     done: { head: `已從持股移除：${name} ${sid}`, text: "股數歸零，這一檔不再列在持股分頁；它仍在自選股裡，訊號照常。" } };
+    } else {
+      _holdSheet = { sid, mode: "view", pick: null, busy: false, done: null, msgKind: "ok",
+                     msg: `已${HOLD_VERB[s.mode] || "儲存"}：現在 ${fmtLots(r.shares)}${r.cost != null ? `、平均成本 ${fmtPrice(r.cost)}` : ""}。` };
+    }
+    holdSheetRender();
   } catch (e) {
-    msgEl.innerHTML = `<span class="text-danger">❌ 儲存失敗：${e.message}<br><span style="font-size:.72rem">若為欄位錯誤，請先在 Supabase 執行 migrate_pwa_v2.sql</span></span>`;
+    s.busy = false;
+    _holdSetMsg(isLimitError(e, "watchlist") ? `${aiLimitLabel("watchlist")}。${aiLimitWayOut("watchlist")}`
+      : String((e && e.message) || e || "沒有成功，請再試一次。"), "err");
   }
+}
+
+// 新增持股的股票搜尋：與「新增自選股」同一個比對（findStockMatches），列八檔
+function holdSearch() {
+  const q = (document.getElementById("hold-q")?.value || "").trim();
+  const box = document.getElementById("hold-results");
+  if (!box) return;
+  if (!q) { box.innerHTML = ""; return; }
+  if (!Object.keys(universe).length) {
+    box.innerHTML = `<div class="hold-hint">載入股票清單中…</div>`;
+    loadUniverse().then(() => { if (Object.keys(universe).length) holdSearch(); }).catch(() => {});
+    return;
+  }
+  const matches = findStockMatches(q, 8);
+  box.innerHTML = matches.length
+    ? matches.map(([sid, v]) => {
+        const have = _holdCur(sid).shares;
+        return `<button type="button" class="hold-res" onclick="holdPick('${jsAttr(sid)}')">${escapeHtml(v.n || "")}<span class="wl-sid">${escapeHtml(sid)}</span>${have > 0 ? `<i>已有 ${escapeHtml(fmtLots(have))}</i>` : ""}</button>`;
+      }).join("")
+    : `<div class="hold-hint">查無符合的股票</div>`;
+}
+function holdPick(sid) {
+  _holdSheet.pick = sid ? String(sid) : null;
+  _holdSheet.msg = "";
+  holdSheetRender();
+  if (!sid) setTimeout(() => document.getElementById("hold-q")?.focus(), 50);
+}
+
+// ── 💼 持股分頁（view-holdings）：總覽＋每一檔一列 ─────────────────────────────
+// 版型：一個主數字（總市值）、一排三格（投入成本／未實現損益／檔數與張數）、每一列一條佔比細條（單一色相）。
+// 金額全部是收盤價試算，主數字下面寫是哪一天的收盤；漲跌色只給損益（台股紅漲綠跌，帶正負號，不只靠顏色）。
+function renderHoldings() {
+  const dash = document.getElementById("hd-dash");
+  const list = document.getElementById("hd-list");
+  if (!dash || !list) return;
+  // 收盤價：報告只涵蓋進榜的幾十檔，其餘的在全市場關卡檔（一個 session 抓一次；抓到了重畫）
+  ensureMarketLevelsClose().then(got => { if (got && currentTab === "holdings") renderHoldings(); });
+  const s = holdingsSummary();
+  const addBtn = document.querySelector("#view-holdings .hd-add-btn");
+  if (addBtn) addBtn.style.display = brokerHoldings.length > 0 ? "none" : "";
+  if (!s.n) {
+    dash.innerHTML = "";
+    list.innerHTML = `<div class="home-empty-cta">
+        <div class="hec-title">還沒有持股紀錄</div>
+        <button type="button" class="btn-cta-lg" onclick="openHoldingAdd()">＋ 新增持股</button>
+        <div class="hec-sub">記下股數與成本，這裡會算出市值與損益。也可以跟助手說「我有 2 張台積電成本 900」。</div>
+      </div>`;
+    return;
+  }
+  const lots = Math.floor(s.shares / SHARES_PER_LOT), odd = s.shares % SHARES_PER_LOT;
+  const missing = s.n - s.priced;
+  const heroSub = [
+    s.date ? `以 ${_closeDateLabel(s.date)} 收盤價計算${s.mixedDates ? "（有幾檔是更早的收盤）" : ""}` : "還沒有收盤價",
+    missing > 0 ? `${missing} 檔沒有收盤價，未計入` : "",
+  ].filter(Boolean).join("・");
+  const plSub = s.pl != null
+    ? `<span class="hd-kpi-sub ${plClass(s.pl)}">${escapeHtml(fmtSignedPct(s.plPct))}</span>`
+    : `<span class="hd-kpi-sub">填了平均成本才算得出來</span>`;
+  const costNote = s.withPl && s.withPl < s.n
+    ? `<span class="hd-kpi-sub">${s.withPl}／${s.n} 檔有成本</span>` : `<span class="hd-kpi-sub">元</span>`;
+  dash.innerHTML = `<div class="hd-dash">
+      <div class="hd-hero">
+        <div class="hd-hero-label">總市值</div>
+        <div class="hd-hero-val">${s.value != null ? escapeHtml(fmtMoney(s.value)) : "—"}<small>元</small></div>
+        <div class="hd-hero-sub">${escapeHtml(heroSub)}</div>
+      </div>
+      <div class="hd-kpis">
+        <div class="hd-kpi"><span class="hd-kpi-label">投入成本</span><b class="hd-kpi-val">${s.cost != null ? escapeHtml(fmtMoney(s.cost)) : "—"}</b>${costNote}</div>
+        <div class="hd-kpi"><span class="hd-kpi-label">未實現損益</span><b class="hd-kpi-val ${s.pl != null ? plClass(s.pl) : ""}">${s.pl != null ? escapeHtml(fmtSignedMoney(s.pl)) : "—"}</b>${plSub}</div>
+        <div class="hd-kpi hd-kpi-wide"><span class="hd-kpi-label">持股</span><b class="hd-kpi-val">${s.n} 檔・${escapeHtml(lots ? `${lots.toLocaleString()} 張${odd ? ` ${odd.toLocaleString()} 股` : ""}` : `${odd.toLocaleString()} 股`)}</b><span class="hd-kpi-sub">共 ${escapeHtml(s.shares.toLocaleString())} 股</span></div>
+      </div>
+    </div>`;
+  list.innerHTML = s.items.map(it => {
+    const w = it.weight;
+    const pl = it.plPct != null
+      ? `<span class="hd-pl ${plClass(it.pl)}">${escapeHtml(fmtSignedPct(it.plPct))}</span>`
+      : `<span class="hd-pl chg-flat">${it.cost == null ? "未填成本" : "—"}</span>`;
+    const extra = (it.extra || []).length ? `<span class="hd-extra">${escapeHtml(it.extra.join("・"))}</span>` : "";
+    const label = `${it.name} ${it.sid}，${fmtLots(it.shares)}，市值 ${it.value != null ? fmtMoney(it.value) + " 元" : "沒有收盤價"}`;
+    // 不到一張的，張數那一格本來就寫「500 股」，後面不再重複股數
+    const facts = [it.shares >= SHARES_PER_LOT ? `${it.shares.toLocaleString()} 股` : "", it.cost != null ? `成本 ${fmtPrice(it.cost)}` : ""].filter(Boolean);
+    return `<button type="button" class="hd-row" onclick="openHoldingsSheet('${jsAttr(it.sid)}')" aria-label="${escapeHtml(label)}">
+        <div class="hd-row-top">
+          <span class="hd-name">${escapeHtml(it.name)}</span><span class="wl-sid">${escapeHtml(it.sid)}</span>
+          <span class="hd-val">${it.value != null ? `${escapeHtml(fmtMoney(it.value))}<small>元</small>` : `<small>沒有收盤價</small>`}</span>
+        </div>
+        <div class="hd-row-mid">
+          <span class="hd-lots">${escapeHtml(fmtLots(it.shares))}</span>
+          ${facts.length ? `<span class="hd-shares">${escapeHtml(facts.join("・"))}</span>` : ""}
+          ${extra}${pl}
+        </div>
+        <div class="hd-weight" aria-hidden="true">
+          <span class="hd-meter"><i style="width:${w != null ? Math.max(1, Math.min(100, w)).toFixed(1) : 0}%"></i></span>
+          <span class="hd-wpct">${w != null ? `${w.toFixed(1)}%` : "—"}</span>
+        </div>
+      </button>`;
+  }).join("");
 }
 
 function openRemoveStockConfirm(rowId) {
@@ -20520,7 +21031,7 @@ function aiStockName(sid) {
 }
 
 // 句子裡的股票：代號直接比對；名稱取最長命中；都沒有才試「前兩字」簡稱（台積→台積電），唯一才算。
-// 帶單位或跟在「到／於／成本」後面的數字先剝掉（「跌到 2330」「2000 張」不是代號）。
+// 帶單位或跟在「到／於／成本／均價」後面的數字先剝掉（「跌到 2330」「2000 張」「均價 1101」不是代號）。
 // 與 assistant_eval.py 的 resolve_stocks 同一套規則，Worker 不自己認（名單在這裡、不必搬過去）。
 function aiMentionsOf(text) {
   const n = Object.keys(universe).length;
@@ -20532,7 +21043,7 @@ function aiMentionsOf(text) {
   const found = [], seen = new Set();
   const stripped = String(text || "")
     .replace(/\d+(?:\.\d+)?\s*(?:%|％|趴|張|股|天|日|倍|元|塊|點)/g, " ")
-    .replace(/(?:到|於|破|過|至|成本\s*(?:是|改成|改|為)?|改成|設|一個)\s*\d+(?:\.\d+)?/g, " ");
+    .replace(/(?:到|於|破|過|至|成本\s*(?:是|改成|改|為)?|均價|成交價|價格|單價|每股|買在|@|改成|設|一個)\s*\d+(?:\.\d+)?/g, " ");
   for (const tok of stripped.split(/[^\dA-Za-z]+/)) {
     const code = tok.toUpperCase();
     if (/^(00\d{2,4}[A-Z]?|\d{4})$/.test(code) && universe[code] && !seen.has(code)) {
@@ -20641,6 +21152,7 @@ function aiIntroHtml(withChips) {
       <li>查 「台積電今天有訊號嗎」、「鴻海支撐在哪」、「聯發科站上月線了嗎」</li>
       <li>加 「把聯發科加進自選」</li>
       <li>設 「跌到 900 提醒我」、「${AI_RULE_EXAMPLE}」、「盯台積電 30 天，跌 10% 通知我」</li>
+      <li>記 「我買了 2 張台積電 成本 900」、「賣掉 1 張鴻海」、「我的持股總共多少錢」</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
       <div class="ai-note">只整理與解釋公開資料，不提供買賣建議。用鍵盤上的麥克風也可以說話。</div></div>`,
     chips: withChips ? aiIntroChips() : [],
@@ -21026,7 +21538,8 @@ function aiOpen(d) {
   if (d.score) { openScoreDetail(String(d.score)); return; }
   if (d.filter) { switchTab("home"); setHomeFilter(String(d.filter)); return; }
   if (d.alert !== undefined && d.alert !== null) { openAlertSettings(d.alert); return; }
-  if (d.holdings) { openHoldingsSheet(String(d.holdings)); return; }
+  if (d.holdings) { openHoldingsSheet(String(d.holdings), d.mode ? String(d.mode) : undefined); return; }
+  if (d.holdadd !== undefined && d.holdadd !== null) { openHoldingAdd(d.holdadd === true ? null : String(d.holdadd)); return; }
   if (d.tab === "friends" && (d.fseg || d.fadd)) {   // 分享分頁直接開到「加好友」的某一格（條碼／掃描／ID／搜尋）
     switchTab("friends");
     if (d.fseg) frSwitchSeg(String(d.fseg));
@@ -21752,17 +22265,63 @@ const ASSISTANT_ACTIONS = {
     return { head: "我的自選股", sub, rows, text: more > 0 ? `還有 ${more} 檔沒列出來。` : "",
              actions: [{ label: "去設定頁管理 ›", act: "open", data: { tab: "watch" } }] };
   },
+  // 持股（Howard 2026-10-22：持股分頁的總覽也要問得到）：整份＝總市值、投入成本、未實現損益＋每一檔一列；
+  // 問某一檔＝那一檔的明細。數字與持股分頁同一支（holdingsSummary／holdingValuation，收盤價試算）。
   assistantHoldings(slots) {
-    let entries = holdingEntries();
-    if (slots.stock) entries = entries.filter(h => h.sid === slots.stock);
-    if (!entries.length) return { text: "還沒有持股資料。盤後頁每張卡片的「持股」可以填。", actions: [{ label: "去盤後頁 ›", act: "open", data: { tab: "post" } }] };
-    const rows = entries.slice(0, 10).map(h => ({ label: h.name, value: `${Number(h.shares).toLocaleString()} 股`, note: h.cost != null ? `成本 ${fmtPrice(h.cost)}` : "", act: "open", data: { holdings: h.sid } }));
-    return { head: "持股", rows, actions: [{ label: "去盤後頁看損益 ›", act: "open", data: { tab: "post" } }] };
+    const s = holdingsSummary();
+    const pageBtn = { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } };
+    const addBtn = { label: "新增持股 ›", act: "open", data: { holdadd: true } };
+    if (slots.open) aiNav(() => switchTab("holdings"));   // 「打開持股頁」：卡先畫、再跳
+    const dateTxt = s.date ? `以 ${_closeDateLabel(s.date)} 收盤價計算` : "還沒有收盤價";
+    const plHtml = (pl, empty) => pl != null
+      ? `<span class="${plClass(pl)}">${escapeHtml(fmtSignedMoney(pl))} 元</span>` : escapeHtml(empty);
+    const sid = slots.stock;
+    if (sid) {
+      const name = aiStockName(sid);
+      const it = s.items.find(h => h.sid === sid);
+      if (!it) {
+        return { head: `${name} ${sid}`, text: `沒有記錄${name}的持股。`,
+                 chips: [{ label: `記錄${name}的持股`, act: "run",
+                           data: { intent: "holdings_set", slots: { stock: sid, hold_action: "set" }, text: `記錄${name}的持股` } }],
+                 actions: [pageBtn] };
+      }
+      const run = (label, holdAction) => ({ label, act: "run",
+        data: { intent: "holdings_set", slots: { stock: sid, hold_action: holdAction }, text: `${label}${name}` } });
+      return {
+        head: `${name} ${sid} 的持股`, sub: dateTxt,
+        rows: [
+          { label: "持股", value: fmtLots(it.shares), note: `${it.shares.toLocaleString()} 股` },
+          { label: "平均成本", value: it.cost != null ? fmtPrice(it.cost) : "未填", note: it.costTotal != null ? `投入 ${fmtMoney(it.costTotal)} 元` : "" },
+          { label: "市值", value: it.value != null ? `${fmtMoney(it.value)} 元` : "沒有收盤價",
+            note: it.price != null ? `收盤 ${fmtPrice(it.price)}${it.tradeDate ? `（${_closeDateLabel(it.tradeDate)}）` : ""}` : "" },
+          { label: "未實現損益", value: plHtml(it.pl, it.cost == null ? "填了平均成本才算得出來" : "—"), html: true,
+            note: it.plPct != null ? fmtSignedPct(it.plPct) : "" },
+          { label: "佔持股市值", value: it.weight != null ? `${it.weight.toFixed(1)}%` : "—", note: "" },
+        ],
+        chips: [run("記錄買進", "buy"), run("記錄賣出", "sell")],
+        actions: [{ label: "看持股明細 ›", act: "open", data: { holdings: sid } }, pageBtn],
+      };
+    }
+    if (!s.n) {
+      return { text: "還沒有持股紀錄。在持股頁按「新增持股」，或直接跟我說「我有 2 張台積電成本 900」。", actions: [addBtn, pageBtn] };
+    }
+    const rows = [
+      { label: "總市值", value: s.value != null ? `${fmtMoney(s.value)} 元` : "—", note: s.priced < s.n ? `${s.n - s.priced} 檔沒有收盤價` : "" },
+      { label: "投入成本", value: s.cost != null ? `${fmtMoney(s.cost)} 元` : "—", note: s.withPl && s.withPl < s.n ? `${s.withPl}／${s.n} 檔有成本` : "" },
+      { label: "未實現損益", value: plHtml(s.pl, "填了平均成本才算得出來"), html: true, note: s.plPct != null ? fmtSignedPct(s.plPct) : "" },
+    ].concat(s.items.slice(0, 10).map(it => ({
+      label: it.name, value: fmtLots(it.shares),
+      note: [it.value != null ? `市值 ${fmtMoney(it.value)}` : "沒有收盤價", it.plPct != null ? fmtSignedPct(it.plPct) : ""].filter(Boolean).join("・"),
+      act: "open", data: { holdings: it.sid },
+    })));
+    const more = s.n - Math.min(10, s.n);
+    return { head: "我的持股", sub: `${s.n} 檔・${fmtLots(s.shares)}・${dateTxt}`, rows,
+             text: more > 0 ? `還有 ${more} 檔沒列出來，在持股頁看得到全部。` : "", actions: [pageBtn, addBtn] };
   },
   switchTab(slots, args) {
     const tab = String(args.tab || "home");
     aiNav(() => switchTab(tab));
-    const label = { inbox: "通知", friends: "分享", post: "盤後", scores: "統計", watch: "設定", home: "盤中" }[tab] || tab;
+    const label = { inbox: "通知", friends: "分享", post: "盤後", scores: "統計", watch: "設定", home: "盤中", holdings: "持股" }[tab] || tab;
     return { text: `已打開${label}。` };
   },
   assistantPlan(slots) {
@@ -22012,11 +22571,12 @@ const ASSISTANT_ACTIONS = {
       { label: "基礎訊號", value: "11 種、每檔可開關", note: "成立就推播到手機", act: "open", data: { alert: ALERT_SCOPE_ALL } },
       { label: "進階訊號", value: "自己組條件", note: `${AI_COND_EXAMPLES}…`, act: "open", data: { rules: true } },
       { label: "到價提醒", value: "跌到／漲到就通知", note: "每一檔各自設", act: "open", data: { alert: ALERT_SCOPE_ALL } },
+      { label: "持股", value: "張數、股數、市值、損益", note: "收盤價試算；買進、賣出、刪除都記得住", act: "open", data: { tab: "holdings" } },
     ];
     if (frEnabled) rows.push({ label: "分享", value: "好友看同一檔", note: "他設的訊號你也收得到", act: "open", data: { tab: "friends" } });
     rows.push({ label: "方案", value: planState.ready && planState.plan ? planState.plan.name : "免費／專業／旗艦", note: "自選股額度與功能差別", act: "open", data: { plan: true } });
     return { head: "股市雷達能做什麼", sub: "點一列就過去那裡", rows,
-             text: "助手這一格可以查、設定、解釋上面這些——例如「台積電今天有訊號嗎」「跌到 900 提醒我」「什麼是逼近壓力」。只整理與解釋公開資料，不提供買賣建議。",
+             text: "助手這一格可以查、設定、解釋上面這些——例如「台積電今天有訊號嗎」「跌到 900 提醒我」「我買了 2 張鴻海 成本 180」「什麼是逼近壓力」。只整理與解釋公開資料，不提供買賣建議。",
              chips: aiIntroChips() };
   },
   // 拒答與範圍外：固定句照舊，後面接「交給你自己的 AI」的籤（第十七節）
@@ -22291,41 +22851,101 @@ const ASSISTANT_ACTIONS = {
       },
     });
   },
+  // 持股的寫入（Howard 2026-10-22：持股頁的每一個操作助手都要能直接做）：
+  // 買進／賣出／刪除／改股數／改成本。做哪一件是 Worker 抽的 hold_action 槽位（關鍵字表），數字是 shares／avg_cost；
+  // 算法與寫入都是持股頁那兩支（holdingNext／applyHoldingChange），所以卡上預告的「之後」就是按下去真的會變成的樣子。
+  // 缺一格只問那一格（賣出沒說多少 → 全部／1 張兩顆籤）；什麼數字都沒有就直接開那一檔的面板（第十四節的三條原則）。
   assistantHoldingsSet(slots) {
     const sid = slots.stock;
     if (!sid) return aiNeedStock();
     const name = aiStockName(sid);
-    const shares = slots.shares != null ? Number(slots.shares) : null;
-    const cost = slots.avg_cost != null ? Number(slots.avg_cost) : null;
     const row = aiRowOf(sid);
-    if (!row && aiWatchFull()) return aiLimitCard("watchlist");
-    if (shares == null && cost == null) {   // 沒有數字＝要去填：直接開那一檔的持股面板
-      if (row) { aiNav(() => openHoldingsSheet(sid)); return { text: `已打開 ${name} 的持股面板。` }; }
-      return aiConfirmCard({ head: "加入並打開持股？", sub: `${name} 不在自選股，會先加入`,
-        rows: [{ label: "股票", value: `${name} ${sid}`, note: "" }], mainLabel: "加入並打開",
-        run: async () => { const r = await aiAddStockById(sid); if (r) aiNav(() => openHoldingsSheet(sid)); return { text: `已加入 ${name}，持股面板已打開。` }; } });
+    const h = holdingBySid().get(sid);
+    const cur = h ? { shares: Number(h.shares) || 0, cost: Number(h.cost) > 0 ? Number(h.cost) : null } : { shares: 0, cost: null };
+    const shares = slots.shares != null && slots.shares !== "" ? Number(slots.shares) : null;
+    const price = slots.avg_cost != null && slots.avg_cost !== "" ? Number(slots.avg_cost) : null;
+    let act = String(slots.hold_action || "");
+    // 「我有幾張鴻海」被分到這一類（v21 評估 0.81）：沒有數字、是問句、也沒說要買賣刪——那是在查，回答持股
+    if (slots.ask && shares == null && price == null && !["buy", "sell", "delete"].includes(act)) {
+      return ASSISTANT_ACTIONS.assistantHoldings({ stock: sid });
     }
-    if (shares != null && !(shares >= 0)) return { text: "股數要是 0 以上的數字。", muted: true };
-    if (cost != null && !(cost > 0)) return { text: "成本要大於 0。", muted: true };
-    const clearing = shares === 0;
-    const rows = [{ label: "股票", value: `${name} ${sid}`, note: "" }];
-    if (shares != null) rows.push({ label: "股數", value: clearing ? "清掉" : `${shares.toLocaleString()} 股`, note: row && Number(row.shares) > 0 ? `原本 ${Number(row.shares).toLocaleString()}` : "" });
-    if (cost != null && !clearing) rows.push({ label: "平均成本", value: fmtPrice(cost), note: row && row.avg_cost != null && row.avg_cost !== "" ? `原本 ${fmtPrice(row.avg_cost)}` : "" });
+    if (!["set", "buy", "sell", "delete", "cost"].includes(act)) act = shares != null ? "set" : price != null ? "cost" : "set";
+    if (act === "set" && shares === 0) act = "delete";                               // 「持股清掉」「改成 0 張」
+    if (act === "set" && shares == null && price != null && cur.shares > 0) act = "cost";
+    const detailBtn = { label: "看持股明細 ›", act: "open", data: { holdings: sid } };
+    const recordChip = { label: `記錄${name}的持股`, act: "run",
+                         data: { intent: "holdings_set", slots: { stock: sid, hold_action: "set" }, text: `記錄${name}的持股` } };
+
+    // 券商同步開著：股數以券商為準，只收改成本
+    if (brokerHoldings.length > 0 && act !== "cost") {
+      return { text: "持股由券商同步，股數以券商為準；這裡只能改平均成本。", muted: true, actions: cur.shares > 0 ? [detailBtn] : [] };
+    }
+    // 沒有可以賣、可以刪、可以改成本的：這是答案（查過了，沒有），不是死路
+    if ((act === "sell" || act === "delete" || act === "cost") && !(cur.shares > 0)) {
+      const verb = act === "sell" ? "賣" : act === "delete" ? "刪" : "改成本";
+      return { head: `${name} ${sid}`, text: `沒有記錄${name}的持股，沒有可以${verb}的。`, chips: [recordChip] };
+    }
+    // 賣出沒說多少：只問那一格
+    if (act === "sell" && shares == null && !slots.all) {
+      const chips = [{ label: `全部（${fmtLots(cur.shares)}）`, act: "run",
+                       data: { intent: "holdings_set", slots: { stock: sid, hold_action: "sell", all: true }, text: `${name}全部賣出` } }];
+      if (cur.shares > SHARES_PER_LOT) chips.push({ label: "1 張", act: "run",
+        data: { intent: "holdings_set", slots: { stock: sid, hold_action: "sell", shares: SHARES_PER_LOT }, text: `賣出 1 張${name}` } });
+      return { head: `賣出多少${name}？`, text: `現在 ${fmtLots(cur.shares)}。點一個，或打「賣了 2 張${name}」。`, chips,
+               actions: [{ label: "打開賣出面板 ›", act: "open", data: { holdings: sid, mode: "sell" } }] };
+    }
+    // 沒有數字＝要去填：直接開那一檔的面板；不在自選股的開「新增持股」並選好那一檔（存的時候才加自選）
+    if (((act === "buy" || act === "set") && shares == null) || (act === "cost" && price == null)) {
+      const mode = act === "buy" && cur.shares > 0 ? "buy" : "edit";
+      if (row) aiNav(() => openHoldingsSheet(sid, mode));
+      else aiNav(() => openHoldingAdd(sid));
+      return { text: row ? `已打開${name}的${mode === "buy" ? "買進" : "持股"}面板，數字填在那裡。`
+                         : `已打開「新增持股」，選好了${name}，填股數就好。` };
+    }
+    if (!row && aiWatchFull()) return aiLimitCard("watchlist");
+    const op = act === "sell" && slots.all ? { kind: "sell", shares: cur.shares }
+      : act === "buy" ? { kind: "buy", shares, price }
+      : act === "sell" ? { kind: "sell", shares }
+      : act === "cost" ? { kind: "cost", price }
+      : act === "delete" ? { kind: "delete" }
+      : { kind: "set", shares, price };
+    const next = holdingNext(cur, op);
+    if (next.error) {
+      return { head: `${name} ${sid}`, text: next.error, muted: true,
+               actions: [{ label: "打開持股面板 ›", act: "open", data: row ? { holdings: sid } : { holdadd: sid } }] };
+    }
+    const what = {
+      buy: `買進 ${fmtLots(op.shares)}${price != null ? `，成交價 ${fmtPrice(price)}` : ""}`,
+      sell: `賣出 ${fmtLots(op.shares)}`,
+      delete: "刪除這一檔的持股",
+      cost: `平均成本改成 ${fmtPrice(price)}`,
+      set: `股數改成 ${fmtLots(op.shares)}${price != null ? `，平均成本 ${fmtPrice(price)}` : ""}`,
+    }[act];
+    const rows = [{ label: "股票", value: `${name} ${sid}`, note: "" },
+                  { label: "動作", value: what, note: "" },
+                  { label: "股數", value: next.removed ? "歸零" : fmtLots(next.shares), note: cur.shares > 0 ? `原本 ${fmtLots(cur.shares)}` : "原本沒有" }];
+    if (next.removed) rows.push({ label: "結果", value: "從持股移除", note: "仍留在自選股" });
+    else rows.push({ label: "平均成本", value: next.cost != null ? fmtPrice(next.cost) : "未填",
+                     note: cur.cost != null && cur.cost !== next.cost ? `原本 ${fmtPrice(cur.cost)}` : "" });
+    if (act === "buy" && cur.shares > 0 && cur.cost == null && price != null) rows.push({ label: "平均成本", value: "算不出來", note: "原本沒有成本，之後在持股面板直接填" });
+    const head = { buy: "記錄買進？", sell: next.removed ? "全部賣出？" : "記錄賣出？", delete: "刪除持股？", cost: "改平均成本？", set: "記錄持股？" }[act];
     return aiConfirmCard({
-      head: row ? "記錄持股？" : "加入並記錄持股？",
-      sub: row ? "" : `${name} 不在自選股，會先加入`,
-      rows, mainLabel: "儲存",
-      alt: row ? { label: "改一下", act: "open", data: { holdings: sid } } : null,
+      head: row ? head : "加入並記錄持股？",
+      sub: row ? (next.removed ? "股數歸零，這一檔會從持股移除" : "") : `${name} 不在自選股，會先加入（持股記在自選股那一列上）`,
+      rows, mainLabel: { buy: "記錄買進", sell: "記錄賣出", delete: "刪除", cost: "儲存", set: "儲存" }[act],
+      alt: { label: "改一下", act: "open",
+             data: row ? { holdings: sid, mode: act === "buy" || act === "sell" ? act : "edit" } : { holdadd: sid } },
       run: async () => {
         const r = row || await aiAddStockById(sid);
         if (!r) throw new Error("加入自選股後找不到那一列");
-        const patch = clearing ? { shares: null, avg_cost: null } : {};
-        if (!clearing && shares != null) patch.shares = shares;
-        if (!clearing && cost != null) patch.avg_cost = cost;
-        await sbPatch("watchlist", { "id": `eq.${r.id}` }, patch, state.accessToken);
-        Object.assign(r, patch);
-        renderCurrentTab();
-        return { text: clearing ? `已清掉 ${name} 的持股紀錄。` : `已記錄 ${name} 持股。`, actions: [{ label: "去盤後頁看損益 ›", act: "open", data: { tab: "post" } }] };
+        const res = await applyHoldingChange(sid, op);
+        if (res.error) return { text: res.error, muted: true, failed: true };
+        if (res.removed) {
+          return { text: `已把${name}從持股移除（股數歸零）。它仍在自選股裡，訊號照常。`,
+                   actions: [{ label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }] };
+        }
+        return { text: `已記錄：${name} 現在 ${fmtLots(res.shares)}${res.cost != null ? `、平均成本 ${fmtPrice(res.cost)}` : ""}。`,
+                 actions: [detailBtn, { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }] };
       },
     });
   },

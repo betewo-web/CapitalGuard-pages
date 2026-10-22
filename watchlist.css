@@ -2055,11 +2055,13 @@ body.modal-blocking .modal-backdrop.show {
 	box-shadow: 0 2px 8px rgba(139, 124, 255, 0.35);
 }
 
-/* 「股票」頁暫時只呈現「盤中 → 個股」那一塊（2026-10-19 Howard）：這一條分頁列與
-   個股／市場強度／市場訊號那一排都不顯示。旗標是 watchlist.html 的 HOME_SIMPLE_ONLY，
-   開機時掛上 <html class="home-simple-only">；markup 與這兩組樣式全部留著，旗標關掉就回來。
-   寫在 CSS 而不是逐個元素寫 style：分頁列在三個 view 裡各有一份。 */
-html.home-simple-only .home-tabs,
+/* 「股票」頁暫時只呈現「盤中 → 個股」那一塊（2026-10-19 Howard）：個股／市場強度／市場訊號
+   那一排不顯示。旗標是 watchlist.html 的 HOME_SIMPLE_ONLY，開機時掛上 <html class="home-simple-only">；
+   markup 與樣式全部留著，旗標關掉就回來。寫在 CSS 而不是逐個元素寫 style：分頁列在四個 view 裡各有一份。
+   分頁列本身 2026-10-19 也整條藏著；2026-10-22 加了「持股」分頁（Howard）之後回來，
+   但只露「盤中｜持股」兩格（HOME_SIMPLE_TABS）——盤後與設定那兩顆照樣藏。 */
+html.home-simple-only .home-tab[data-tab="post"],
+html.home-simple-only .home-tab[data-tab="watch"],
 html.home-simple-only #home-filter { display: none !important; }
 
 /* ── 助手分頁（ASSISTANT.md 第七節，2026-10-16）──────────────────────────
@@ -2232,13 +2234,106 @@ html.home-simple-only #home-filter { display: none !important; }
 .post-actions .post-ev { flex: 2 1 auto; width: auto; }
 .post-actions .wl-icon-btn { flex: 1 1 0; min-width: 88px; }
 
-/* 持股面板（盤後卡片的「持股」開的）：兩個欄位、一句說明、一顆整寬的儲存 */
+/* ── 持股明細（#holdingsModal，2026-10-22 起同一張 sheet 六個畫面）──────────────
+   明細：上面一個大的張數、下面一張兩欄的資料表、三顆等寬的動作（買進／賣出／修改），
+   刪除另外放一行而且是紅字——它清掉資料，不該跟「買進」長得一樣。 */
 .hold-field { margin-bottom: 0.9rem; }
 .hold-label { display: block; font-size: 0.86rem; font-weight: 600; color: var(--text-1); margin-bottom: 0.35rem; }
 .hold-input { background: #1c1c2b; color: var(--text-0); border-color: #3a3a52; font-size: 1rem; }
 .hold-input:focus { background: #1c1c2b; color: var(--text-0); }
-.hold-clear { color: var(--text-muted); border-color: #3a3a52; }
-.hold-hint { font-size: 0.78rem; color: var(--text-muted); }
+.hold-hint { font-size: 0.8rem; line-height: 1.55; color: var(--text-muted); margin-top: 0.5rem; }
+.hold-now { font-size: 0.86rem; color: var(--text-1); margin-bottom: 0.8rem; }
+.hold-now b { color: var(--text-0); }
+.hold-hero { text-align: center; padding: 0.4rem 0 0.9rem; }
+.hold-hero-lots { font-size: 1.9rem; font-weight: 700; line-height: 1.2; color: var(--text-0); }
+.hold-hero-sub { font-size: 0.86rem; color: var(--text-muted); margin-top: 0.15rem; }
+.hold-dl { margin: 0 0 1rem; border-top: 1px solid var(--border); }
+.hold-dl > div { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem;
+	padding: 0.55rem 0.1rem; border-bottom: 1px solid var(--border); }
+.hold-dl dt { font-weight: 500; font-size: 0.86rem; color: var(--text-muted); }
+.hold-dl dd { margin: 0; font-size: 0.96rem; color: var(--text-0); text-align: right; font-variant-numeric: tabular-nums; }
+.hold-dl dd b { font-weight: 700; }
+.hold-acts { display: flex; gap: 0.5rem; }
+.hold-act { flex: 1 1 0; min-height: 44px; border: 1px solid var(--accent); border-radius: 12px;
+	background: rgba(139, 124, 255, 0.16); color: var(--text-0); font-size: 0.98rem; font-weight: 700; cursor: pointer; }
+.hold-act:active { background: rgba(139, 124, 255, 0.3); }
+.hold-acts2 { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 0.7rem; }
+.hold-link { border: 0; background: none; padding: 0.35rem 0; color: var(--accent); font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+.hold-del { display: inline-flex; align-items: center; gap: 0.3rem; border: 1px solid rgba(255, 95, 133, 0.5); border-radius: 10px;
+	background: transparent; color: var(--danger); padding: 0.4rem 0.75rem; font-size: 0.88rem; font-weight: 600; cursor: pointer; }
+.hold-del .ic { width: 14px; height: 14px; }
+.hold-qty { display: flex; align-items: center; gap: 0.4rem; }
+.hold-qty .hold-input { flex: 1 1 0; min-width: 0; }
+.hold-qty span { flex: 0 0 auto; color: var(--text-1); font-size: 0.92rem; }
+.hold-quick { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: -0.3rem 0 0.4rem; }
+.hold-chip { border: 1px solid var(--border); border-radius: 999px; background: rgba(146, 146, 163, 0.12);
+	color: var(--text-0); padding: 0.3rem 0.8rem; font-size: 0.86rem; cursor: pointer; }
+.hold-preview { min-height: 1.2rem; margin: 0.2rem 0 0.6rem; font-size: 0.9rem; color: var(--text-0); font-weight: 600; }
+.hold-preview.is-err { color: var(--danger); }
+.hold-msg { font-size: 0.86rem; margin: 0 0 0.5rem; color: var(--text-muted); }
+.hold-msg:empty { display: none; }
+.hold-msg.is-ok { color: var(--text-0); padding: 0.5rem 0.65rem; border-radius: 10px; background: rgba(139, 124, 255, 0.16); }
+.hold-msg.is-err { color: var(--danger); }
+.hold-picked { display: flex; align-items: baseline; gap: 0.4rem; font-size: 1.02rem; }
+.hold-picked .hold-link { margin-left: auto; }
+.hold-note { font-size: 0.82rem; color: var(--sig-orange); margin-top: 0.3rem; }
+.hold-results { display: flex; flex-direction: column; margin-top: 0.4rem; max-height: 16rem; overflow-y: auto; }
+.hold-res { display: flex; align-items: baseline; gap: 0.45rem; padding: 0.6rem 0.4rem; border: 0;
+	border-bottom: 1px solid var(--border); background: none; color: var(--text-0); font-size: 0.96rem; text-align: left; cursor: pointer; }
+.hold-res i { margin-left: auto; font-style: normal; font-size: 0.78rem; color: var(--text-muted); }
+.hold-confirm { margin-bottom: 0.8rem; }
+.hold-confirm-q { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.3rem; }
+.hold-two { display: flex; gap: 0.5rem; }
+.hold-two .btn { flex: 1 1 0; }
+.hold-danger { border: 1px solid var(--danger); background: var(--danger); color: #fff; font-weight: 700; }
+.hold-done { text-align: center; padding: 0.6rem 0 0.4rem; }
+.hold-done-head { font-size: 1.05rem; font-weight: 700; color: var(--text-0); }
+
+/* ── 💼 持股分頁（#view-holdings，2026-10-22 Howard）───────────────────────────
+   一個主數字（總市值）、一排三格 KPI、每一檔一列（市值、張數／股數、損益、佔比細條）。
+   主數字用比例字寬（大字用 tabular 會鬆），列裡要對齊的數字才用 tabular-nums。
+   佔比細條是單一色相：軌道是同一個紫的淡色、填色是品牌紫——它講的是「多少」，不是「哪一檔」。 */
+.hd-title { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.hd-add-btn { display: inline-flex; align-items: center; gap: 0.3rem; flex: 0 0 auto;
+	padding: 0.45rem 0.85rem; border: 1px solid var(--accent); border-radius: 999px;
+	background: rgba(139, 124, 255, 0.18); color: var(--text-0); font-size: 0.9rem; font-weight: 700; cursor: pointer; }
+.hd-add-btn:active { background: rgba(139, 124, 255, 0.32); }
+.hd-add-btn [data-icon] { display: inline-flex; margin-right: 0; color: inherit; }
+.hd-add-btn .ic { width: 1rem; height: 1rem; }
+.hd-dash { padding: 1rem 1rem 0.9rem; margin-bottom: 0.8rem; border: 1px solid var(--border);
+	border-radius: var(--radius); background: var(--surface); }
+.hd-hero-label { font-size: 0.86rem; color: var(--text-muted); }
+.hd-hero-val { font-size: clamp(2rem, 10.5vw, 3.4rem); font-weight: 700; line-height: 1.15; color: var(--text-0);
+	letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.hd-hero-val small { font-size: 0.4em; font-weight: 600; color: var(--text-1); margin-left: 0.25rem; }
+.hd-hero-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; }
+/* 兩欄：三欄在 390px 上放不下七位數（「4,143,400」會折成兩行）。持股那一格自己一整列、橫著排 */
+.hd-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.9rem; }
+.hd-kpi { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; padding: 0.55rem 0.6rem;
+	border-radius: 12px; background: rgba(146, 146, 163, 0.08); }
+.hd-kpi-label { font-size: 0.78rem; color: var(--text-muted); }
+.hd-kpi-val { font-size: 1.08rem; font-weight: 700; color: var(--text-0); overflow-wrap: anywhere; }
+.hd-kpi-sub { font-size: 0.78rem; color: var(--text-muted); }
+.hd-kpi-wide { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.6rem; }
+.hd-kpi-wide .hd-kpi-label { flex: 0 0 auto; margin-right: 0.2rem; }
+.hd-kpi .hd-kpi-val.chg-up, .hd-kpi .hd-kpi-sub.chg-up { color: var(--chg-up); }
+.hd-kpi .hd-kpi-val.chg-down, .hd-kpi .hd-kpi-sub.chg-down { color: var(--chg-down); }
+.hd-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.8rem; }
+.hd-row { display: block; width: 100%; padding: 0.75rem 0.85rem 0.7rem; border: 1px solid var(--border);
+	border-radius: 14px; background: var(--surface); color: var(--text-0); text-align: left; cursor: pointer; }
+.hd-row:active { transform: scale(0.995); background: var(--surface-2); }
+.hd-row-top { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
+.hd-name { font-size: 1.04rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hd-val { margin-left: auto; font-size: 1.02rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hd-val small { font-size: 0.74rem; font-weight: 500; color: var(--text-muted); margin-left: 0.15rem; }
+.hd-row-mid { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.15rem 0.6rem; margin-top: 0.25rem; font-size: 0.86rem; }
+.hd-lots { color: var(--text-0); font-weight: 600; }
+.hd-shares, .hd-extra { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.hd-pl { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hd-weight { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.45rem; }
+.hd-meter { flex: 1 1 auto; height: 6px; border-radius: 4px; background: rgba(139, 124, 255, 0.18); overflow: hidden; }
+.hd-meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.hd-wpct { flex: 0 0 3.2rem; text-align: right; font-size: 0.78rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
 /* 標題那一欄（圖示＋字）自己是一個 flex 項目。不包起來的話，文字會是另一個匿名
    flex 項目，被 space-between 推到右邊——標題就不靠左了（2026-09-23 Howard）。 */
