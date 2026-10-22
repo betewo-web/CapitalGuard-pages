@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="416">
+  <meta name="app-version" content="417">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=416" rel="stylesheet">
+  <link href="watchlist.css?v=417" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -20464,7 +20464,7 @@ let aiLog = [];              // [{kind:"user", text} | {kind:"card", html}]
 let aiBusy = false;
 let aiRouteUrl = "";         // app_status().assistant_route_url（Worker 網址；空＝還沒開）
 let aiEnabled = false;       // app_status().assistant_enabled
-let aiIsAdmin = false;       // loadAdminFlag()：只有 admin 看得到卡片底部「分類 ○○ 92%」
+let aiIsAdmin = false;       // loadAdminFlag()：只有 admin 看得到卡片底部那一行診斷
 let _aiNames = null;         // universe 的 [名稱, 代號] 依名稱長度排序（認股票用）
 let _aiNamesN = 0;
 
@@ -20482,6 +20482,7 @@ const AI_INTENTS = {
   market_strength:  ["assistantMarketStrength", { mode: "market" }],
   market_signals:   ["assistantMarketSignals", {}],
   movers:           ["assistantMovers", {}],
+  watch_list:       ["assistantWatchList", {}],
   holdings:         ["assistantHoldings", {}],
   inbox:            ["assistantInbox", {}],
   watch_add:        ["assistantWatchAdd", {}],
@@ -20591,7 +20592,7 @@ function aiStripMarketNav(c) {
   return out;
 }
 
-// 卡片：{head, sub, rows:[{label, value, note, html, act, data}], text, bodyHtml, chips, actions, meta, muted}
+// 卡片：{head, sub, rows:[{label, value, note, html, act, data}], text, bodyHtml, chips, actions, muted}
 // 列帶 act 就能點（第十五節 B3）：列出來的那一檔／那一條本身就是入口，與籤、鍵走同一個 listener
 function aiCardHtml(c) {
   if (HOME_SIMPLE_ONLY) c = aiStripMarketNav(c);
@@ -20606,14 +20607,14 @@ function aiCardHtml(c) {
   const body = c.text ? `<p>${escapeHtml(c.text)}</p>` : (c.bodyHtml || "");
   const chips = c.chips && c.chips.length ? `<div class="ai-chips">${c.chips.map(aiChipHtml).join("")}</div>` : "";
   const actions = c.actions && c.actions.length ? `<div class="ai-actions">${c.actions.map(aiBtnHtml).join("")}</div>` : "";
-  // 分類資訊只給 admin（Howard 2026-10-16）；所有人的結果照樣進 assistant_log。
+  // 卡上不再顯示分類結果與百分比（Howard 2026-10-22）：那是分類器的內部狀態，看的人要的是答案。
+  // 結果照樣進 assistant_log，要查哪一句分到哪一類在 admin 儀表板看。
   // 「不是我要的」給所有人：有 log_id 的卡（＝Jev 分過類的）才有，按過變成「已記下」
-  const metaTxt = aiIsAdmin && c.meta ? `分類 <span class="ai-pct">${escapeHtml(c.meta)}</span>` : "";
   const wrong = c.log_id
     ? (_aiWrong.has(c.log_id) ? `<span class="ai-wrong is-done">已記下，謝謝</span>`
        : `<button type="button" class="ai-wrong" data-ai-act="wrong" data-ai-data="${escapeHtml(JSON.stringify({ log_id: c.log_id }))}">不是我要的</button>`)
     : "";
-  const meta = metaTxt || wrong ? `<div class="ai-meta">${metaTxt}${wrong}</div>` : "";
+  const meta = wrong ? `<div class="ai-meta">${wrong}</div>` : "";
   // admin 才看得到的一行診斷（Howard 2026-10-18：卡上沒名單時，遠端看不到手機的狀態，問一句就能回報）
   const diag = aiIsAdmin && c.diag ? `<div class="ai-meta">${escapeHtml(c.diag)}</div>` : "";
   return `<div class="ai-card${c.muted ? " is-muted" : ""}">${head}${sub}<div class="ai-card-body">${rows}${body}${chips}</div>${actions}${meta}${diag}</div>`;
@@ -20990,7 +20991,7 @@ function aiAct(act, data) {
   if (act === "pick") {    // 反問卡：使用者選了哪一類 → 用同一組槽位在本機執行，並回寫是哪一個
     aiSkipPending();
     aiOutcome(data.log_id, data.intent, null);
-    aiRun(data.intent, data.slots || {}, { log_id: data.log_id, meta: "使用者選的", text: String(data.text || "") }).then(aiAfterRun);
+    aiRun(data.intent, data.slots || {}, { log_id: data.log_id, text: String(data.text || "") }).then(aiAfterRun);
   }
 }
 
@@ -21004,7 +21005,7 @@ function aiRunChip(d) {
   const text = String(d.text || "").slice(0, AI_MAX_CHARS);
   aiLog.push({ kind: "user", text });
   trackActivity("assistant", { intent, decision: "chip" });
-  aiRun(intent, d.slots || {}, { log_id: d.log_id || null, meta: "籤", text }).then(aiAfterRun);
+  aiRun(intent, d.slots || {}, { log_id: d.log_id || null, text }).then(aiAfterRun);
 }
 
 function aiAfterRun() { renderAssistant(); aiRefocus(); }
@@ -21130,20 +21131,18 @@ function aiHandleError(status, r) {
 
 async function aiHandleResponse(r, text) {
   trackActivity("assistant", { intent: String(r.intent || ""), decision: String(r.decision || "") });
-  const top = r.candidates && r.candidates[0];
-  const meta = top ? `${r.label || r.intent} ${Math.round((Number(top.p) || 0) * 100)}%` : String(r.label || r.intent || "");
   if (r.decision === "refuse" || r.decision === "fallback") {
     // 答不出來的（範圍外、聽不懂、買賣建議）：固定句照舊，後面接「交給你自己的 AI」的籤。
     // 買賣建議那一句**我們還是不答**——卡上仍然是「本服務不提供買賣建議」，只是多給一條他自己的路；
     // 問題走剪貼簿、由他自己貼上，我們不代送也看不到回答（Howard 2026-10-18：答不出來的就引導給 AI）。
     // 只有分類器自己壞掉（r.code）不給這條路——那一句八成是我們做得到的，再試一次就好。
     const card = !r.code ? aiHandoffCard(text, r.say, (r.slots || {}).stock) : { text: r.say || AI_FALLBACK, muted: true };
-    aiPushCard(Object.assign(card, { meta, log_id: r.log_id }));
+    aiPushCard(Object.assign(card, { log_id: r.log_id }));
     return;
   }
   // 籌碼層暫停：在反問之前就攔下來——反問的每一個候選都會得到同一個答案
   if (isPausedRuleType(String(r.cond_type || "")) && AI_CHIPS_INTENTS.has(String(r.intent || ""))) {
-    aiPushCard(Object.assign(aiPausedSourceCard(r.cond_type, text), { meta, log_id: r.log_id }));
+    aiPushCard(Object.assign(aiPausedSourceCard(r.cond_type, text), { log_id: r.log_id }));
     return;
   }
   if (r.decision === "clarify") {
@@ -21160,10 +21159,10 @@ async function aiHandleResponse(r, text) {
         data: { intent: c.intent, slots: r.slots || {}, log_id: r.log_id, text },
       }));
     }
-    aiPushCard({ head: r.say || "你想要的是哪一種？", chips, meta, log_id: r.log_id });
+    aiPushCard({ head: r.say || "你想要的是哪一種？", chips, log_id: r.log_id });
     return;
   }
-  await aiRun(String(r.intent || ""), r.slots || {}, { log_id: r.log_id, say: r.say, meta, args: (r.action && r.action.args) || null, text });
+  await aiRun(String(r.intent || ""), r.slots || {}, { log_id: r.log_id, say: r.say, args: (r.action && r.action.args) || null, text });
 }
 
 // 執行：只走白名單。回傳卡片就畫、回傳 null 代表已經跳去別的頁（對話裡留一行）
@@ -21173,7 +21172,7 @@ async function aiRun(intent, slots, opts) {
   const spec = AI_INTENTS[intent];
   const fn = spec ? spec[0] : "";
   const h = ASSISTANT_ACTIONS[fn];
-  if (!h) { aiPushCard({ text: "這個動作這一版還沒接上。", muted: true, meta: opts && opts.meta }); return; }
+  if (!h) { aiPushCard({ text: "這個動作這一版還沒接上。", muted: true }); return; }
   const args = Object.assign({}, spec ? spec[1] : {}, (opts && opts.args) || {}, slots || {});
   let card = null;
   _aiCurrent = { intent, slots: slots || {}, log_id: (opts && opts.log_id) || null, text: String((opts && opts.text) || "") };
@@ -21182,7 +21181,7 @@ async function aiRun(intent, slots, opts) {
   try { card = await h(slots || {}, args, opts || {}); }
   catch (e) { console.error("assistant action failed:", fn, e); card = { text: "這個動作剛才沒有成功，請再試一次。", muted: true }; }
   finally { aiBusy = false; }
-  if (card) { card.meta = card.meta || (opts && opts.meta); card.log_id = card.log_id || (opts && opts.log_id) || null; aiPushCard(card, card._id); }
+  if (card) { card.log_id = card.log_id || (opts && opts.log_id) || null; aiPushCard(card, card._id); }
   // 確認卡：executed 等按了主鍵／取消才回寫；其餘現在就算執行過
   if (card && card._id && aiPending[card._id]) aiPending[card._id].log_id = opts && opts.log_id;
   else aiOutcome(opts && opts.log_id, null, true);
@@ -21730,6 +21729,28 @@ const ASSISTANT_ACTIONS = {
                  mk ? `全市場 漲 ${mk.up}・平 ${mk.flat}・跌 ${mk.down}` : b ? `全市場上漲 ${Number(b.up_pct || 0)}%、下跌 ${Number(b.down_pct || 0)}%` : ""].filter(Boolean).join("；");
     const rows = list.slice(0, 12).map(i => ({ label: aiStockName(i.sid), value: DIR_TXT[i.d], note: "", act: "open", data: { sid: i.sid, tab: "radar" } }));
     return { head, sub, rows, text: rows.length ? "" : `今天沒有${DIR_TXT[dir] || ""}的。`, actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
+  },
+  // 自選股清單本身（Howard 2026-10-22：「我現在有幾個自選股」以前被分到範圍外）：幾檔、哪幾檔、
+  // 某一檔在不在。名單就是首頁那一份（自選股＋好友分享給我的），不另外讀；還能加幾檔是 plan 那一類。
+  assistantWatchList(slots) {
+    const mine = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId);
+    const shared = [...new Set(sharedInSids().filter(s => isStockId(s) && !mine.includes(s)))];   // 同一檔被兩個好友分享只算一檔
+    const sharedSet = new Set(shared);
+    const sid = isStockId(String(slots.stock || "")) ? String(slots.stock) : "";
+    if (sid) {   // 「清單裡有台積電嗎」：只回答那一檔在不在
+      const where = mine.includes(sid) ? "在你的自選股裡。" : sharedSet.has(sid) ? "在你的清單裡（好友分享的）。" : "";
+      return where
+        ? { head: `${aiStockName(sid)} ${sid}`, text: where, actions: [aiOpenBtn(sid)] }
+        : { head: `${aiStockName(sid)} ${sid}`, text: "不在你的自選股裡。", chips: [aiAddChip(sid)] };
+    }
+    const sids = aiSignalSids();
+    if (!sids.length) return { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
+    const rows = sids.slice(0, 20).map(s => ({ label: aiStockName(s), value: s, note: sharedSet.has(s) ? "好友分享" : "",
+                                               act: "open", data: { sid: s, tab: "radar" } }));
+    const more = sids.length - rows.length;
+    const sub = [`自選股 ${mine.length} 檔`, shared.length ? `好友分享 ${shared.length} 檔` : ""].filter(Boolean).join("・");
+    return { head: "我的自選股", sub, rows, text: more > 0 ? `還有 ${more} 檔沒列出來。` : "",
+             actions: [{ label: "去設定頁管理 ›", act: "open", data: { tab: "watch" } }] };
   },
   assistantHoldings(slots) {
     let entries = holdingEntries();
