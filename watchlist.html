@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="418">
+  <meta name="app-version" content="419">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=418" rel="stylesheet">
+  <link href="watchlist.css?v=419" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7878,12 +7878,17 @@ function _intradayQuoteIsClose(iq) {
 // 兩條退路在授權確認之前不用（PAUSE_UNLICENSED_SOURCES），所以當天收盤價要等
 // 日線／報告更新才出現；在那之前這一格顯示上一個交易日的收盤，日期籤會標出來
 // （_closeDateLabel）。恢復時把 PAUSE_UNLICENSED_SOURCES 關掉就回來。
+// 2026-10-23（Howard：「持股損益為什麼是 10/21 不是 10/22 的收盤價」）：多一個開放資料日 K——
+// R2 的 ohlc/<股號>.json 在 15:30 日線補完就有當天那一根（K 線卡片早就讀它），報告與全市場關卡檔
+// 卻要到隔天 06:15 才換。它跟報告是同一個日線倉庫、同樣是開放資料，所以不受暫停旗標影響；
+// 只有載過的那幾檔才有（持股頁、明細、助手會先載自己那幾檔，見 ensureHoldingCloses）。
 function getCloseQuote(sid) {
   const today = taipeiDateKey(new Date());
   const sessionOver = _isSessionOverToday();
   const iq = intradayQuoteMap?.[sid];
   const candidates = [
     _toQuoteCandidate(getQuoteFromSharedData(sid), 3),
+    _toQuoteCandidate(_ohlcLatestQuote(sid), 3),
     PAUSE_UNLICENSED_SOURCES ? null : _toQuoteCandidate(finmindQuoteMap?.[sid], 2),
     PAUSE_UNLICENSED_SOURCES ? null : (_intradayQuoteIsClose(iq) ? _toQuoteCandidate(iq, 1) : null),
   ].filter(c => c && c.tradeDate && (c.tradeDate < today || (c.tradeDate === today && sessionOver)));
@@ -9902,6 +9907,16 @@ function holdingsSummary(entries) {
     date: sorted.length ? sorted[sorted.length - 1] : "",   // 最新的那一天；不一致時 mixedDates 會說
     mixedDates: sorted.length > 1,
   };
+}
+
+// 持股那幾檔的開放資料日 K 先載（Howard 2026-10-23）：報告與全市場關卡檔要到隔天 06:15 才有今天的收盤，
+// 這一份 15:30 日線補完就有。每檔每天最多試兩次（早上一次、15:45 後一次，ensureOhlcCloses 自己記），
+// 載到的存在本機。回傳有沒有拿到資料——有就重畫，畫面上那個「以 M/D 收盤價計算」會跟著換。
+async function ensureHoldingCloses() {
+  const sids = holdingEntries().map(h => h.sid).filter(isStockId);
+  if (!sids.length) return false;
+  const got = await Promise.all(sids.map(sid => ensureOhlcCloses(sid).catch(() => false)));
+  return got.some(Boolean);
 }
 
 // 持股的下一步——純函式，介面（新增／買進／賣出／修改／刪除）與助手的確認卡都走它，算法只有一份。
@@ -14308,6 +14323,10 @@ function openHoldingsSheet(sid, mode) {
   holdSheetRender();
   _holdModal().show();
   trackActivity("holding_open", { stock: key, mode: _holdSheet.mode });
+  // 從盤後頁或助手直接開進來的：那一檔今天的收盤（開放資料日 K）可能還沒載，載到了明細重畫一次
+  ensureOhlcCloses(key).then(got => {
+    if (got && _holdSheet.sid === key && _holdSheet.mode === "view") holdSheetRender();
+  }).catch(() => {});
 }
 
 // 「新增持股」：先選股票。帶 sid（助手的鍵）就直接選好
@@ -14611,8 +14630,10 @@ function renderHoldings() {
   const dash = document.getElementById("hd-dash");
   const list = document.getElementById("hd-list");
   if (!dash || !list) return;
-  // 收盤價：報告只涵蓋進榜的幾十檔，其餘的在全市場關卡檔（一個 session 抓一次；抓到了重畫）
-  ensureMarketLevelsClose().then(got => { if (got && currentTab === "holdings") renderHoldings(); });
+  // 收盤價：報告只涵蓋進榜的幾十檔，其餘的在全市場關卡檔（一個 session 抓一次；抓到了重畫）。
+  // 兩份都要到隔天 06:15 才有今天的收盤，所以持股那幾檔另外讀開放資料日 K（15:30 後就有今天的）
+  ensureMarketLevelsClose().then(got => { if (got && currentTab === "holdings") renderHoldings(); }).catch(() => {});
+  ensureHoldingCloses().then(got => { if (got && currentTab === "holdings") renderHoldings(); }).catch(() => {});
   const s = holdingsSummary();
   const addBtn = document.querySelector("#view-holdings .hd-add-btn");
   if (addBtn) addBtn.style.display = brokerHoldings.length > 0 ? "none" : "";
@@ -15603,11 +15624,23 @@ const _ohlcCloses = {};
 const _ohlcClosesTried = {};
 function _ohlcCloseMap(bars, fetchedDay, fetchedMin) {
   const m = {};
+  let lastDate = "", last = null, prev = null;   // 最後一根與前一根（檔案是舊到新）：getCloseQuote 用
   for (const b of bars || []) {
     const n = Number(b[0]);
-    m[`${Math.floor(n / 10000)}-${String(Math.floor(n / 100) % 100).padStart(2, "0")}-${String(n % 100).padStart(2, "0")}`] = Number(b[4]);
+    const d = `${Math.floor(n / 10000)}-${String(Math.floor(n / 100) % 100).padStart(2, "0")}-${String(n % 100).padStart(2, "0")}`;
+    m[d] = Number(b[4]);
+    prev = last; last = Number(b[4]); lastDate = d;
   }
-  return { m, fetchedDay, fetchedMin };
+  return { m, fetchedDay, fetchedMin, lastDate, last, prev };
+}
+
+// 開放資料日 K 的最後一根收盤＝getCloseQuote 的一個來源（15:30 後就有今天的，報告要等隔天 06:15）。
+// 漲跌幅用前一根算，與報告那一份（getQuoteFromSharedData）同一個算法。沒載過就是 null
+function _ohlcLatestQuote(sid) {
+  let c;
+  try { c = _ohlcCloses[sid]; } catch { return null; }   // 開機最早期、宣告之前就被叫到：當作還沒載
+  if (!c || !(c.last > 0) || !c.lastDate) return null;
+  return { price: c.last, changePct: c.prev > 0 ? (c.last - c.prev) / c.prev * 100 : null, tradeDate: c.lastDate };
 }
 // undefined＝還沒載（或載的那份已經舊了，該補抓）；null＝載過、那天沒有收盤（盤中、休市、新股）
 function ohlcCloseOf(sid, date) {
@@ -22267,7 +22300,9 @@ const ASSISTANT_ACTIONS = {
   },
   // 持股（Howard 2026-10-22：持股分頁的總覽也要問得到）：整份＝總市值、投入成本、未實現損益＋每一檔一列；
   // 問某一檔＝那一檔的明細。數字與持股分頁同一支（holdingsSummary／holdingValuation，收盤價試算）。
-  assistantHoldings(slots) {
+  async assistantHoldings(slots) {
+    // 收盤價先補今天的（開放資料日 K，15:30 後就有；報告要到隔天 06:15）。最多等 4 秒，拿不到就用手上的
+    await Promise.race([ensureHoldingCloses().catch(() => false), new Promise(r => setTimeout(r, 4000))]);
     const s = holdingsSummary();
     const pageBtn = { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } };
     const addBtn = { label: "新增持股 ›", act: "open", data: { holdadd: true } };
