@@ -2840,6 +2840,164 @@ html.home-simple-only #home-filter { display: none !important; }
 .rtl-day-n { font-size: 13.76px; color: var(--text-muted); white-space: nowrap; }
 .rtl-day-sigs { margin-top: 5px; font-size: 14.4px; line-height: 1.6; color: var(--text-1); }
 .rtl-day-more { color: var(--text-muted); }
+
+/* ── 字卡分頁二「觀察紀錄」（OBSERVATION.md，2026-10-23）──
+   近 10 個交易日那份清單的上下多了幾段：加入自選以來／你設定的價位／最近的變化／常出現的訊號／出現之後。
+   跟這張卡其他地方一樣用 px（不跟著「文字大小」放大，test_pwa_tabs 的理由）。
+   顏色只做強調：橘＝「最近和過去一年很不一樣」那幾列（文字自己講了哪裡不一樣）、
+   紫＝可以點的（常出現的訊號那幾列、收漲／收跌的切換、改價位）、紅綠只給漲跌。 */
+.obs-sec { margin: 0 0 22px; }
+.obs-days { padding-top: 2px; }
+.obs-head {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 2px 0;
+	font-size: 15.2px;
+	font-weight: 700;
+	margin-bottom: 8px;
+	color: var(--text-0);
+}
+.obs-head .k { font-size: 13.76px; font-weight: 400; color: var(--text-muted); }
+.obs-link {
+	margin-left: auto;
+	padding: 2px 0 2px 10px;
+	border: none;
+	background: transparent;
+	color: var(--accent);
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+}
+.obs-note, .obs-lead, .obs-empty, .obs-foot {
+	font-size: 13.6px;
+	line-height: 1.6;
+	color: var(--text-muted);
+}
+.obs-note { margin: -2px 0 10px; }
+.obs-note b { font-weight: 700; color: var(--text-1); }
+.obs-lead { margin: 0 0 8px; color: var(--text-1); }
+.obs-foot { margin: 4px 0 10px; }
+
+/* ① 加入自選以來 */
+.obs-since {
+	padding: 12px 14px;
+	border: 1px solid rgba(150, 178, 235, 0.22);
+	border-radius: 14px;
+	background: rgba(146, 146, 163, 0.07);
+}
+.obs-since-head { font-size: 16px; color: var(--text-0); }
+.obs-since-head b { font-weight: 700; }
+.obs-since-line { margin-top: 6px; font-size: 14.4px; line-height: 1.55; color: var(--text-1); }
+.obs-since-line b { margin-left: 6px; font-weight: 700; }
+
+/* ② 你設定的價位：近 60 天的收盤（實線）＋價位（虛線），下面一個價位一列、收盤夾在中間 */
+.obs-chart { display: block; width: 100%; max-width: 400px; height: auto; margin: 2px auto 8px; }
+.obs-chart-line { fill: none; stroke: var(--text-1); stroke-width: 1.8; stroke-linejoin: round; }
+.obs-chart-ref { stroke: var(--text-muted); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.obs-chart-ref.is-cost { stroke-dasharray: 1.5 3; }
+.obs-chart-dot { fill: var(--text-0); }
+.obs-chart-lbl { fill: var(--text-muted); font-size: 12px; }
+.obs-chart-lbl.is-close { fill: var(--text-0); font-weight: 700; }
+.obs-tgts { display: flex; flex-direction: column; }
+.obs-tgt {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	grid-template-areas: "k p" "d d";
+	gap: 2px 10px;
+	padding: 9px 2px;
+	border-bottom: 1px solid rgba(146, 146, 163, 0.16);
+}
+.obs-tgt:last-child { border-bottom: none; }
+.obs-tgt-k { grid-area: k; min-width: 0; font-size: 14.4px; color: var(--text-1); }
+.obs-tgt-p { grid-area: p; font-size: 15.2px; font-weight: 700; color: var(--text-0); }
+.obs-tgt-d { grid-area: d; font-size: 13.6px; color: var(--text-muted); }
+.obs-tgt-d b { color: var(--text-0); font-weight: 700; }
+.obs-tgt.is-close {
+	grid-template-areas: "k d p";
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: baseline;
+	margin: 2px 0;
+	padding: 8px 10px;
+	border: none;
+	border-radius: 10px;
+	background: rgba(146, 146, 163, 0.12);
+}
+.obs-tgt.is-close .obs-tgt-k { font-weight: 700; color: var(--text-0); }
+
+/* ③ 最近的變化：左邊一欄名稱、右邊一句話；hot 的那幾列左邊一條橘線（意思由句子講） */
+.obs-chg {
+	display: grid;
+	grid-template-columns: 72px minmax(0, 1fr);
+	gap: 10px;
+	padding: 10px 2px 10px 10px;
+	border-left: 3px solid transparent;
+	border-bottom: 1px solid rgba(146, 146, 163, 0.16);
+}
+.obs-chg:last-child { border-bottom: none; }
+.obs-chg.is-hot { border-left-color: var(--sig-orange); }
+.obs-chg-k { font-size: 14px; font-weight: 700; color: var(--text-1); }
+.obs-chg.is-hot .obs-chg-k { color: var(--text-0); }
+.obs-chg-v { font-size: 14.4px; line-height: 1.55; color: var(--text-0); }
+.obs-chg-sub { margin-top: 2px; font-size: 13.2px; color: var(--text-muted); }
+
+/* ④ 常出現的訊號：一種一列，可以點（點了下面換成那一種出現之後） */
+.obs-freq {
+	display: grid;
+	grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) auto;
+	grid-template-areas: "name bar n" "last last last";
+	align-items: center;
+	gap: 3px 10px;
+	width: 100%;
+	margin: 0 0 5px;
+	padding: 8px 10px;
+	border: 1px solid rgba(146, 146, 163, 0.18);
+	border-radius: 10px;
+	background: rgba(146, 146, 163, 0.05);
+	color: var(--text-0);
+	text-align: left;
+	cursor: pointer;
+}
+.obs-freq.is-sel { border-color: var(--accent); background: rgba(139, 124, 255, 0.1); }
+.obs-freq-name { grid-area: name; min-width: 0; font-size: 14.4px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.obs-freq-bar { grid-area: bar; height: 6px; border-radius: 3px; background: rgba(146, 146, 163, 0.16); overflow: hidden; }
+.obs-freq-bar i { display: block; height: 100%; border-radius: 3px; background: var(--text-muted); }
+.obs-freq.is-sel .obs-freq-bar i { background: var(--accent); }
+.obs-freq-n { grid-area: n; font-size: 14.4px; font-weight: 700; white-space: nowrap; }
+.obs-freq-last { grid-area: last; font-size: 12.8px; color: var(--text-muted); }
+.obs-more { margin-top: 2px; }
+.obs-more > summary {
+	padding: 6px 2px 10px;
+	font-size: 13.6px;
+	color: var(--accent);
+	cursor: pointer;
+}
+
+/* ⑤ 出現之後：收漲／收跌的切換、三個時間點的表、最近幾次 */
+.obs-splits { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.obs-split {
+	padding: 5px 12px;
+	border: 1px solid rgba(146, 146, 163, 0.3);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-1);
+	font-size: 13.6px;
+	cursor: pointer;
+}
+.obs-split.is-sel { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 700; }
+.obs-tbl { width: 100%; margin: 0 0 12px; border-collapse: collapse; font-size: 14px; color: var(--text-0); }
+.obs-tbl th, .obs-tbl td { padding: 7px 4px; text-align: right; border-bottom: 1px solid rgba(146, 146, 163, 0.16); }
+.obs-tbl tbody th { text-align: left; font-weight: 600; color: var(--text-1); white-space: nowrap; }
+.obs-tbl thead th { font-size: 13.6px; font-weight: 700; color: var(--text-1); vertical-align: bottom; }
+.obs-tbl thead th i { display: block; font-style: normal; font-weight: 400; font-size: 12px; color: var(--text-muted); }
+.obs-tbl tr:last-child th, .obs-tbl tr:last-child td { border-bottom: none; }
+.obs-eps-head { margin: 6px 0 4px; font-size: 14px; font-weight: 700; color: var(--text-1); }
+.obs-ep { padding: 9px 2px; border-bottom: 1px solid rgba(146, 146, 163, 0.16); }
+.obs-ep:last-child { border-bottom: none; }
+.obs-ep-top { display: flex; justify-content: space-between; gap: 10px; font-size: 14.4px; color: var(--text-0); }
+.obs-ep-top span { font-size: 13.6px; color: var(--text-muted); }
+.obs-ep-r { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 13.6px; color: var(--text-muted); }
+.obs-ep-r i { font-style: normal; }
 .rtl-sub-gap { margin-left: 0.55rem; }
 
 .home-stat-row {

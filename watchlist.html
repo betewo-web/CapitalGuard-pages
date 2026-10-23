@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="424">
+  <meta name="app-version" content="425">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=424" rel="stylesheet">
+  <link href="watchlist.css?v=425" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -284,7 +284,7 @@
            · 一列上放得下的只有：股名＋漲／平／跌＋漲停／跌停，以及右側兩格數字
              （⚡ 訊號＝這檔今天幾則；「🎯 逼近關卡」2026-10-07 拿掉）。今天有事件就多一行「N 件資料」。
            · 標題「今日總覽」、總覽卡、清單說明、方塊裡的評分都拿掉了——首頁只講「今天誰有事」，
-             其餘一律點進個股字卡（盤中雷達／歷史訊號／看 K 線）。評分變化在 📊 統計 分頁。
+             其餘一律點進個股字卡（盤中雷達／觀察紀錄／看 K 線）。評分變化在 📊 統計 分頁。
            · 仍然成立的原則：首頁不放股價與百分比（只有漲／平／跌、盤中即時、漲跌為零才是平）、
              不放縮寫籤（那是雷達分頁的顆粒度）。
            · 事件卡放今天的事件；「接下來 7 天」放 stock_events 裡的未來日程；規則推薦降為最底一行 -->
@@ -1674,7 +1674,7 @@
 </div>
 
 <!-- ═══ 個股字卡：三個分頁 ═══
-     盤中雷達（預設，09:00–13:30 的訊號序列）／歷史訊號（近 10 個交易日）／看 K 線。
+     盤中雷達（預設，09:00–13:30 的訊號序列）／觀察紀錄（這一檔的長期紀錄＋近 10 個交易日）／看 K 線。
      2026-09-22 三版（Howard）：K 線本來是另一張 modal，同一檔股票被拆成兩張卡片、還會互相蓋掉；
      現在併成一張——首頁方塊、雷達列、自選列的 K 線鈕都開這一張，只是進來時停在不同分頁。
      K 線的圖表要有可見容器才量得到高度，所以切到那一頁才載（switchStockCardTab）。 -->
@@ -1692,7 +1692,7 @@
             <button type="button" class="rtl-tab is-active" id="rtl-tab-radar" role="tab"
                     onclick="switchStockCardTab('radar')">盤中雷達</button>
             <button type="button" class="rtl-tab" id="rtl-tab-history" role="tab"
-                    onclick="switchStockCardTab('history')">歷史訊號</button>
+                    onclick="switchStockCardTab('history')">觀察紀錄</button>
             <button type="button" class="rtl-tab" id="rtl-tab-kline" role="tab"
                     onclick="switchStockCardTab('kline')">看 K 線</button>
           </div>
@@ -1712,10 +1712,19 @@
           <div id="rtl-story"></div>
         </div>
 
-        <!-- 分頁二：歷史訊號——一天一列（日期、則數、那天的訊號全名），純清單不是按鈕（rtlDaysHtml） -->
+        <!-- 分頁二：觀察紀錄（OBSERVATION.md，2026-10-23 Howard「像信用監控一樣追蹤股票」）——
+             這一檔自己的長期紀錄。由上而下：加入自選以來／你設定的價位／最近的變化（#obs-top）→
+             過去一年常出現的訊號／出現之後（#obs-bottom）→ 近 10 個交易日每天的明細（一天一列，純清單不是按鈕，rtlDaysHtml）。
+             長期的統計是後端從開放資料日 K 算好的，跟著 ohlc/<股號>.json 一起來（obs 那一格，renderObservation） -->
         <div class="rtl-pane" id="rtl-pane-history" style="display:none">
-          <div class="rtl-history-head">近 <span id="rtl-history-n"></span> 個交易日<span class="k">，每天各發生過什麼</span></div>
-          <div class="rtl-days" id="rtl-days"></div>
+          <div id="obs-top"></div>
+          <div id="obs-bottom"></div>
+          <div class="obs-sec obs-days">
+            <div class="rtl-history-head">近 <span id="rtl-history-n"></span> 個交易日<span class="k">，每天各發生過什麼</span></div>
+            <div class="rtl-days" id="rtl-days"></div>
+          </div>
+          <!-- 長期統計全部來自日線倉庫（開放資料），署名是授權的生效條件（同 K 線那一頁） -->
+          <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
         </div>
 
         <!-- 分頁三：K 線（原本的 #klineModal 整組搬進來） -->
@@ -11039,7 +11048,7 @@ function klineLockedHtml() {
       <li>今天發過的訊號直接標在對應的 K 棒上</li>
       <li>籌碼與均線切換、長按讀數</li>
     </ul>
-    <div class="plan-locked-note">「盤中雷達」與「歷史訊號」這兩頁不受影響。</div>
+    <div class="plan-locked-note">「盤中雷達」與「觀察紀錄」這兩頁不受影響。</div>
     ${btn}${trial}</div>`;
 }
 
@@ -11708,7 +11717,7 @@ function _sessionMinutesOf(ts) {
   return (part("hour") - 9) * 60 + part("minute");
 }
 
-// ── 個股字卡（三個分頁：盤中雷達／歷史訊號／看 K 線）────────────────────────
+// ── 個股字卡（三個分頁：盤中雷達／觀察紀錄／看 K 線）────────────────────────
 // 2026-09-22 三版（Howard）：K 線從獨立 modal 併進來當第三個分頁。所有入口都開這一張卡，
 // 差別只在停在哪一頁：首頁方塊與雷達列停在「盤中雷達」，自選列的 K 線鈕停在「看 K 線」。
 const STOCK_CARD_TABS = ["radar", "history", "kline"];
@@ -11721,6 +11730,7 @@ function openStockCard(sid, opts = {}) {
   _rtlScrollKey = "";     // 每次打開字卡，時間軸都從最右邊（現在）開始——上次捲到哪裡不算數
   _rxRadarOpenEid = null; // 貼圖選單每次開卡都是收著的
   if (sidKey !== radarTimelineSid) cvResetForCard();   // 換股票＝換房間（CHAT.md）
+  _obsSid = null;         // 觀察紀錄的「出現之後」每次開卡都從預設那一種（爆量）開始
   radarTimelineSid = sidKey;
   radarTimelineShare = opts.share || null;
   _refreshQuotesIfStale();      // 在別的分頁待了一陣子才開字卡：報價可能是幾分鐘前的
@@ -11806,6 +11816,412 @@ function _mdOf(dateKey) {
   const [, m, d] = String(dateKey || "").split("-");
   return m && d ? `${Number(m)}/${Number(d)}` : String(dateKey || "");
 }
+
+// ── 個股觀察紀錄（OBSERVATION.md，2026-10-23 Howard：「像信用監控一樣追蹤股票」）──────────────
+// 字卡第二頁從「歷史訊號」（近 10 天）長成「觀察紀錄」：不只是一則一則的通知，而是同一檔股票累積下來的紀錄。
+// 回答 Howard 問的四件事——這檔過去常出現哪些訊號、出現爆量之後後來怎麼走、離自己設定的價位多遠、
+// 最近有沒有跟過去不一樣——再加「加入自選以來」：開始看這一檔多久了、這段期間怎麼走。
+//   · 長期的統計（每種訊號出現在哪幾天、出現之後、最近的變化）是後端從開放資料日 K 算好的
+//     （analysis/observation.py），跟著 ohlc/<股號>.json 一起來（obs 那一格）。這裡只排版與計數，
+//     不重判任何條件——重判就是第二份實作。
+//   · 價位、加入日期、成本是每個人自己的資料，在這裡對上收盤價（只用開放資料的收盤，寫日期）。
+// 用字的界線（COMPLIANCE.md 第 12 條，test_observation_tab 會掃這一段）：只寫紀錄、次數、中位數與範圍，
+// 不寫推論那一類的字；最後一句「這是這檔股票過去的紀錄，不代表之後的走勢」。
+const OBS_FORMAT = 1;          // 與 analysis/observation.OBS_VERSION 同號：格式換了，舊版 App 就不畫（不會畫錯）
+const OBS_YEAR = 250;          // 「過去一年」＝250 個交易日（同後端 YEAR）
+const OBS_FREQ_SHOW = 8;       // 常出現的訊號先列幾種，其餘收在「其他 N 種」
+const OBS_STATS_MIN = 3;       // 出現之後少於 3 次就只列每一次，不給次數統計
+const OBS_HORIZONS = [[1, "隔天"], [5, "5 天後"], [20, "20 天後"]];   // 與後端 HORIZONS 同一個順序
+// AUTO_CATALOG 以外的三種（內建訊號）；其餘的名稱用 AUTO_SIGNAL_LABELS（與雷達同一張表）
+const OBS_EXTRA_LABELS = { volume_spike: "爆量", limit_up: "收在漲停", limit_down: "收在跌停" };
+let _obsSid = null;            // 現在畫的是哪一檔（換一檔就回到預設）
+let _obsKey = null;            // 「出現之後」看哪一種：點「常出現的訊號」那一列換
+let _obsSplit = "all";         // 量能那兩種再分那天收漲／收跌（all／u／d）
+
+// 訊號的名稱。爆量把倍數寫出來（倍數跟推播的爆量同一個設定，後端放在 obs.vr）；short＝一句話裡用的短名
+function obsSignalName(key, obs, short = false) {
+  if (key === "volume_spike" && !short) {
+    const vr = Number(obs && obs.vr) > 0 ? Number(obs.vr) : 3;
+    return `爆量（成交量達前 20 日均量 ${fmtPct(vr)} 倍）`;
+  }
+  return OBS_EXTRA_LABELS[key] || AUTO_SIGNAL_LABELS[key] || key;
+}
+
+// 日 K 檔（{sid, d, b, obs}）：fetchOhlcJson 拿到就記在 _ohlcJsonMem。obs 的格式不是這一版認得的就當沒有
+function _obsData(sid) {
+  let json;
+  try { json = _ohlcJsonMem[sid]; } catch { return null; }   // 開機最早期、宣告之前就被叫到：當作還沒載
+  if (!json || !Array.isArray(json.b) || !json.b.length) return null;
+  const obs = json.obs && json.obs.v === OBS_FORMAT ? json.obs : null;
+  return { bars: json.b, obs };
+}
+
+// [YYYYMMDD, …] → "YYYY-MM-DD"
+function _obsDay(bar) {
+  const n = Number(bar && bar[0]);
+  return `${Math.floor(n / 10000)}-${String(Math.floor(n / 100) % 100).padStart(2, "0")}-${String(n % 100).padStart(2, "0")}`;
+}
+
+// 加入自選之後的第一根 K 棒：13:30 前加入的，那一天算在「加入以來」；13:30 後加入的從下一個交易日算。
+// 可能等於 bars.length（今天才加入、還沒有加入之後的收盤）
+function _obsSinceIndex(bars, createdAt) {
+  const day = taipeiDateKey(createdAt);
+  if (!day) return null;
+  const afterClose = (_sessionMinutesOf(createdAt) ?? 0) >= 270;
+  let i = 0;
+  while (i < bars.length && (afterClose ? _obsDay(bars[i]) <= day : _obsDay(bars[i]) < day)) i++;
+  return i;
+}
+
+// 比較的那一段：滿一年寫「過去一年」，不滿（新上市、價格單位換過）寫實際的交易日數（後端給 days）
+function _obsSpanText(c) {
+  return c && c.days && c.days < OBS_YEAR ? `過去 ${_obsInt(c.days)} 個交易日` : "過去一年";
+}
+
+// 一個數字在那一段裡排在哪：p＝有幾 % 的日子比現在小（後端算好）
+function _obsRankText(p, more, less, span = "過去一年") {
+  const n = Math.round(Number(p));
+  if (!Number.isFinite(n)) return "";
+  if (n >= 100) return `${more}${span}的每一天`;
+  if (n <= 0) return `${less}${span}的每一天`;
+  return n >= 50 ? `${more}${span} ${n}% 的日子` : `${less}${span} ${100 - n}% 的日子`;
+}
+
+function _obsInt(v) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? n.toLocaleString() : "—";
+}
+
+// 帶正負號的百分比、一位小數（出現之後那幾格用；字卡上兩位小數太密）
+function _obsPct(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(1)}%`;
+}
+
+// ① 加入自選以來：開始看這一檔多久了、期間收盤怎麼走、出現過幾次訊號
+function obsSinceHtml(wl, d) {
+  if (!wl || !wl.created_at || !d) return "";
+  const { bars, obs } = d;
+  const start = _obsSinceIndex(bars, wl.created_at);
+  if (start === null) return "";
+  const n = bars.length - start;
+  const last = bars[bars.length - 1];
+  const parts = [`<div class="obs-since-head"><b>${escapeHtml(_mdOf(taipeiDateKey(wl.created_at)))}</b> 加入自選`
+    + (n > 0 ? `，至今 ${n} 個交易日` : "，從下一個交易日開始累積") + `</div>`];
+  if (n > 0 && start > 0) {
+    const base = bars[start - 1];
+    const chg = (Number(last[4]) / Number(base[4]) - 1) * 100;
+    parts.push(`<div class="obs-since-line">收盤 ${fmtPrice(base[4])}（${escapeHtml(_mdOf(_obsDay(base)))}）→ `
+      + `${fmtPrice(last[4])}（${escapeHtml(_mdOf(_obsDay(last)))}）<b class="${plClass(chg)}">${_obsPct(chg)}</b></div>`);
+  }
+  if (n > 0 && obs) {
+    let total = 0, top = null, topN = 0;
+    for (const [k, idx] of Object.entries(obs.h || {})) {
+      const c = (Array.isArray(idx) ? idx : []).filter(i => i >= start).length;
+      total += c;
+      if (c > topN) { topN = c; top = k; }
+    }
+    parts.push(`<div class="obs-since-line">這段期間依收盤出現 ${total} 次訊號`
+      + (top ? `，最多的是「${escapeHtml(obsSignalName(top, obs, true))}」${topN} 次` : "") + `</div>`);
+  }
+  return `<div class="obs-sec obs-since">${parts.join("")}</div>`;
+}
+
+// 你設定的價位：到價提醒的上漲／下跌價位、進階訊號「自基準價漲跌」換算出的價位（同一檔、開著、沒過期）
+function _obsTargets(sid, wl) {
+  const out = [];
+  const hi = Number(wl && wl.target_price_high), lo = Number(wl && wl.target_price_low);
+  if (hi > 0) out.push({ up: true, label: "上漲價位", short: "上漲", price: hi });
+  if (lo > 0) out.push({ up: false, label: "下跌價位", short: "下跌", price: lo });
+  const today = taipeiDateKey(new Date());
+  for (const r of (ruleNudge && ruleNudge.rules) || []) {
+    if (String(r.stock_id || "").trim() !== sid) continue;
+    // ruleNudge 只有條件；開關要看完整那一份（打開過進階訊號才有），關掉的不算
+    const full = (alertRules || []).find(x => String(x.id) === String(r.id));
+    if (full && full.enabled === false) continue;
+    for (const c of Array.isArray(r.conditions) ? r.conditions : []) {
+      const base = Number(c && c.base), v = Math.abs(Number(c && c.value) || 0);
+      if (!c || c.type !== "pct_from_base" || !(base > 0) || !(v > 0)) continue;
+      if (c.expires_on && String(c.expires_on) < today) continue;
+      const down = String(c.dir || "down") !== "up";
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(String(c.base_date || "")) ? `自 ${_mdOf(c.base_date)} 收盤` : "自基準價";
+      out.push({ up: !down, label: `進階訊號：${since} ${fmtPrice(base)} ${down ? "跌" : "漲"} ${fmtPct(v)}%`,
+                 short: `${down ? "跌" : "漲"} ${fmtPct(v)}%`, price: base * (down ? 1 - v / 100 : 1 + v / 100) });
+    }
+  }
+  return out;
+}
+
+// 近 60 個交易日的收盤＋你設定的價位（虛線）。離收盤太遠（±30% 以外）的價位只寫在下面的清單裡、
+// 不把縱軸拉開——拉開了，這 60 天就擠成一條平線，看不出它是往哪個價位走。
+function obsTargetChartSvg(bars, lines) {
+  const pts = bars.slice(-60).map(b => Number(b[4])).filter(v => v > 0);
+  if (pts.length < 5) return "";
+  const close = pts[pts.length - 1];
+  const shown = lines.filter(l => l.price >= close * 0.7 && l.price <= close * 1.3);
+  let lo = Math.min(...pts, ...shown.map(l => l.price)), hi = Math.max(...pts, ...shown.map(l => l.price));
+  if (!(hi > lo)) hi = lo * 1.01 + 0.01;
+  const pad = (hi - lo) * 0.12;
+  lo -= pad; hi += pad;
+  const W = 320, H = 132, X0 = 4, X1 = 222, Y0 = 8, Y1 = H - 8;
+  const x = i => X0 + (X1 - X0) * i / (pts.length - 1);
+  const y = v => Y0 + (Y1 - Y0) * (hi - v) / (hi - lo);
+  const path = pts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  // 右邊的標籤由上而下排，靠太近的往下推（至少 14 個單位），推出底邊就整串往上收
+  const labels = shown.map(l => ({ y: y(l.price), text: `${l.short} ${fmtPrice(l.price)}`, cls: l.cls || "" }))
+    .concat([{ y: y(close), text: `收盤 ${fmtPrice(close)}`, cls: "is-close" }])
+    .sort((a, b) => a.y - b.y);
+  let prev = -Infinity;
+  for (const lb of labels) { lb.ty = Math.max(lb.y, prev + 14); prev = lb.ty; }
+  const over = labels.length ? labels[labels.length - 1].ty - (H - 6) : 0;
+  if (over > 0) for (const lb of labels) lb.ty = Math.max(6, lb.ty - over);
+  const refs = shown.map(l => `<line class="obs-chart-ref ${l.cls || ""}" x1="${X0}" x2="${X1}" y1="${y(l.price).toFixed(1)}" y2="${y(l.price).toFixed(1)}"/>`).join("");
+  const texts = labels.map(lb => `<text class="obs-chart-lbl ${lb.cls}" x="${X1 + 8}" y="${(lb.ty + 4).toFixed(1)}">${escapeHtml(lb.text)}</text>`).join("");
+  return `<svg class="obs-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="近 ${pts.length} 個交易日的收盤與你設定的價位">`
+    + `${refs}<path class="obs-chart-line" d="${path}"/>`
+    + `<circle class="obs-chart-dot" cx="${x(pts.length - 1).toFixed(1)}" cy="${y(close).toFixed(1)}" r="3.4"/>${texts}</svg>`;
+}
+
+// ② 你設定的價位：收盤離每一個價位還有多遠（只講距離，不講該怎麼做）
+function obsTargetsHtml(sid, wl, d) {
+  if (!wl) return "";
+  const targets = _obsTargets(sid, wl);
+  const h = holdingBySid().get(sid);
+  const cost = h && Number(h.cost) > 0 ? Number(h.cost) : null;
+  const edit = `<button type="button" class="obs-link" onclick="obsEditTargets('${jsAttr(wl.id)}')">${targets.length ? "改價位" : "設定價位"} ›</button>`;
+  const head = `<div class="obs-head">你設定的價位${edit}</div>`;
+  if (!targets.length && !cost) {
+    return `<div class="obs-sec">${head}<div class="obs-empty">還沒有設定上漲／下跌價位；設定之後，這裡會列出收盤離它們還有多遠。</div></div>`;
+  }
+  const lastBar = d ? d.bars[d.bars.length - 1] : null;
+  const q = lastBar ? { price: Number(lastBar[4]), tradeDate: _obsDay(lastBar) } : getCloseQuote(sid);
+  const close = q && Number(q.price) > 0 ? Number(q.price) : null;
+  if (!close) return `<div class="obs-sec">${head}<div class="obs-empty">收盤價還沒載到。</div></div>`;
+  const rows = targets.map(t => {
+    const pct = (t.price / close - 1) * 100;
+    const crossed = t.up ? close >= t.price : close <= t.price;
+    const dist = crossed
+      ? `收盤已${t.up ? "高出" : "低於"}這個價位 ${fmtPct(Math.abs(pct))}%`
+      : `還差 <b>${_obsPct(pct)}</b>`;
+    return { price: t.price, html: `<div class="obs-tgt"><span class="obs-tgt-k">${escapeHtml(t.label)}</span>`
+      + `<b class="obs-tgt-p">${fmtPrice(t.price)}</b><span class="obs-tgt-d">${dist}</span></div>` };
+  });
+  if (cost) {
+    const pl = (close / cost - 1) * 100;
+    rows.push({ price: cost, html: `<div class="obs-tgt"><span class="obs-tgt-k">持股成本</span><b class="obs-tgt-p">${fmtPrice(cost)}</b>`
+      + `<span class="obs-tgt-d">收盤比成本 <b class="${plClass(pl)}">${_obsPct(pl)}</b></span></div>` });
+  }
+  rows.sort((a, b) => b.price - a.price);
+  const at = rows.findIndex(r => r.price < close);
+  const closeRow = `<div class="obs-tgt is-close"><span class="obs-tgt-k">收盤</span><b class="obs-tgt-p">${fmtPrice(close)}</b>`
+    + `<span class="obs-tgt-d">${escapeHtml(_mdOf(q.tradeDate || ""))}</span></div>`;
+  rows.splice(at < 0 ? rows.length : at, 0, { html: closeRow });
+  const chartLines = targets.map(t => ({ price: t.price, short: t.short, cls: "" }))
+    .concat(cost ? [{ price: cost, short: "成本", cls: "is-cost" }] : []);
+  const chart = d ? obsTargetChartSvg(d.bars, chartLines) : "";
+  return `<div class="obs-sec">${head}${chart}<div class="obs-tgts">${rows.map(r => r.html).join("")}</div></div>`;
+}
+
+// ③ 最近的變化：和這檔自己過去一年比（後端排好了名次與 hot；這裡把它寫成一句話）
+function _obsChangeRow(c, obs) {
+  const yearOr = c.days && c.days < OBS_YEAR ? `近 ${c.days} 個交易日` : "近一年";
+  const span = _obsSpanText(c);
+  switch (c.k) {
+    case "vol":
+      return ["成交量", `近 5 日平均 ${_obsInt(c.now)} 張，${_obsRankText(c.p, "高於", "低於", span)}`, `${span}的中位數 ${_obsInt(c.med)} 張`];
+    case "amp":
+      return ["振幅", `近 10 日平均每天 ${fmtPct(c.now)}%，${_obsRankText(c.p, "大於", "小於", span)}`, `${span}的中位數 ${fmtPct(c.med)}%`];
+    case "sig":
+      return ["訊號次數", `近 20 個交易日 ${_obsInt(c.now)} 次` + (c.hot ? `，${_obsRankText(c.p, "多於", "少於", span)}` : ""),
+              `${span}平均每 20 個交易日 ${fmtPct(c.avg)} 次`];
+    case "pos": {
+      const p = Math.round(Number(c.p));
+      const main = p >= 100 ? `收盤在${yearOr}的最高點` : p <= 0 ? `收盤在${yearOr}的最低點` : `收盤在${yearOr}高低區間的 ${p}% 處`;
+      return ["價格位置", main, `最高 ${fmtPrice(c.hi)}、最低 ${fmtPrice(c.lo)}`];
+    }
+    case "ma20":
+      if (!c.hot) return null;
+      return ["月線", `已連續 ${_obsInt(c.n)} 天收在月線${c.side > 0 ? "之上" : "之下"}`,
+              c.max > 0 ? `比過去一年任何一段都長（之前最長 ${_obsInt(c.max)} 天）` : "過去一年沒有收在月線同一側這麼久過"];
+    case "run":
+      if (!c.hot) return null;
+      return ["連續", `連續 ${_obsInt(c.n)} 天收${c.side > 0 ? "漲" : "跌"}`,
+              c.max > 0 ? `過去一年最多連續 ${_obsInt(c.max)} 天` : ""];
+    case "new": {
+      const names = (c.keys || []).map(k => `「${escapeHtml(obsSignalName(k, obs, true))}」`).join("、");
+      return names ? ["第一次", `近 20 個交易日出現${names}`, `前 ${_obsInt(c.days)} 個交易日都沒有出現過`] : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function obsChangesHtml(d) {
+  const obs = d && d.obs;
+  if (!obs || !Array.isArray(obs.c) || !obs.c.length) return "";
+  const items = obs.c.slice().sort((a, b) => (b.hot ? 1 : 0) - (a.hot ? 1 : 0));
+  const rows = [];
+  for (const c of items) {
+    const r = _obsChangeRow(c, obs);
+    if (!r) continue;
+    rows.push(`<div class="obs-chg${c.hot ? " is-hot" : ""}"><div class="obs-chg-k">${escapeHtml(r[0])}</div>`
+      + `<div class="obs-chg-v">${r[1]}${r[2] ? `<div class="obs-chg-sub">${r[2]}</div>` : ""}</div></div>`);
+  }
+  if (!rows.length) return "";
+  const lead = items.some(c => c.hot) ? ""
+    : `<div class="obs-lead">最近的成交量、振幅、訊號次數與價格位置，都沒有落在這檔過去一年最高或最低的 10%。</div>`;
+  return `<div class="obs-sec"><div class="obs-head">最近的變化<span class="k">，和這檔自己過去一年比</span></div>${lead}${rows.join("")}</div>`;
+}
+
+// ④ 常出現的訊號：過去一年（250 個交易日）依每天收盤判斷，每一種出現幾天。點一列＝下面「出現之後」換成那一種
+function _obsFreqRows(d) {
+  const obs = d.obs, n = d.bars.length, from = Math.max(0, n - OBS_YEAR);
+  return Object.entries(obs.h || {})
+    .map(([k, idx]) => {
+      const list = Array.isArray(idx) ? idx : [];
+      return { k, c: list.filter(i => i >= from).length, last: list.length ? list[list.length - 1] : -1 };
+    })
+    .filter(r => r.c > 0)
+    .sort((a, b) => b.c - a.c || b.last - a.last);
+}
+
+// 「出現之後」預設看爆量（Howard 問的就是它）；這檔兩年都沒爆量過，就看過去一年最常出現的那一種
+function _obsCurrentKey(d) {
+  const a = (d.obs && d.obs.a) || {};
+  if (_obsKey && (a[_obsKey] || (d.obs.h || {})[_obsKey])) return _obsKey;
+  if (a.volume_spike) return "volume_spike";
+  const top = _obsFreqRows(d).find(r => a[r.k]);
+  return top ? top.k : "volume_spike";
+}
+
+function obsFreqHtml(d) {
+  const obs = d && d.obs;
+  if (!obs) return "";
+  const rows = _obsFreqRows(d);
+  const span = d.bars.length >= OBS_YEAR ? "過去一年" : `近 ${d.bars.length} 個交易日`;
+  if (!rows.length) {
+    return `<div class="obs-sec"><div class="obs-head">常出現的訊號<span class="k">，${span}</span></div><div class="obs-empty">${span}依收盤沒有出現任何訊號。</div></div>`;
+  }
+  const key = _obsCurrentKey(d);
+  const max = rows[0].c;
+  const rowHtml = r => `<button type="button" class="obs-freq${r.k === key ? " is-sel" : ""}" onclick="obsPick('${jsAttr(r.k)}')">`
+    + `<span class="obs-freq-name">${escapeHtml(obsSignalName(r.k, obs, true))}</span>`
+    + `<span class="obs-freq-bar"><i style="width:${Math.max(4, Math.round(r.c / max * 100))}%"></i></span>`
+    + `<span class="obs-freq-n">${r.c} 天</span>`
+    + `<span class="obs-freq-last">最近 ${escapeHtml(_mdOf(_obsDay(d.bars[r.last] || [0])))}</span></button>`;
+  const head = rows.slice(0, OBS_FREQ_SHOW).map(rowHtml).join("");
+  const rest = rows.slice(OBS_FREQ_SHOW);
+  const more = rest.length ? `<details class="obs-more"${rest.some(r => r.k === key) ? " open" : ""}><summary>其他 ${rest.length} 種</summary>${rest.map(rowHtml).join("")}</details>` : "";
+  return `<div class="obs-sec"><div class="obs-head">常出現的訊號<span class="k">，${span}，每一種出現幾天</span></div>`
+    + `<div class="obs-note">依每天的收盤價與成交量判斷，和盤中通知的時間點不一定一樣。點一列，下面就換成那一種出現之後的紀錄。</div>`
+    + `${head}${more}</div>`;
+}
+
+// ⑤ 出現之後：每一次（連續幾天都出現只算第一天）那天收盤之後第 1／5／20 個交易日的收盤，比那天高或低
+function _obsStatsTable(view) {
+  const byK = {};
+  for (const r of (view && view.s) || []) byK[r[0]] = r;    // [k, 樣本, 比那天高, 比那天低, 中位數, 最低, 最高]
+  const enough = OBS_HORIZONS.some(([k]) => byK[k] && byK[k][1] >= OBS_STATS_MIN);
+  if (!enough) return "";
+  const cell = (k, f) => byK[k] ? f(byK[k]) : "—";
+  const headRow = OBS_HORIZONS.map(([k, label]) => `<th>${label}<i>${byK[k] ? `${byK[k][1]} 次` : "還沒到"}</i></th>`).join("");
+  const line = (label, f) => `<tr><th>${label}</th>${OBS_HORIZONS.map(([k]) => `<td>${cell(k, f)}</td>`).join("")}</tr>`;
+  return `<table class="obs-tbl"><thead><tr><th></th>${headRow}</tr></thead><tbody>`
+    + line("比那天高", r => `${r[2]} 次`)
+    + line("比那天低", r => `${r[3]} 次`)
+    + line("中位數", r => `<b class="${plClass(r[4])}">${_obsPct(r[4])}</b>`)
+    + line("最低", r => _obsPct(r[5]))
+    + line("最高", r => _obsPct(r[6]))
+    + `</tbody></table>`;
+}
+
+function obsAfterHtml(d) {
+  const obs = d && d.obs;
+  if (!obs) return "";
+  const key = _obsCurrentKey(d);
+  const name = obsSignalName(key, obs);
+  const e = (obs.a || {})[key];
+  const since = _obsDay(d.bars[0]);
+  const sinceText = `${since.slice(0, 4)}/${Number(since.slice(5, 7))} 起`;
+  if (!e) {
+    return `<div class="obs-sec" id="obs-after"><div class="obs-head">出現「${escapeHtml(name)}」之後</div>`
+      + `<div class="obs-empty">${sinceText}沒有出現過。</div></div>`;
+  }
+  // 量能那兩種：那天收漲與收跌分開看（帶量上漲和帶量下跌是兩回事）
+  let view = e, split = "";
+  if (e.u || e.d) {
+    const pick = _obsSplit === "u" && e.u ? "u" : _obsSplit === "d" && e.d ? "d" : "all";
+    view = pick === "u" ? e.u : pick === "d" ? e.d : e;
+    const chip = (v, label, n) => `<button type="button" class="obs-split${pick === v ? " is-sel" : ""}" onclick="obsPickSplit('${jsAttr(v)}')">${label} ${n}</button>`;
+    split = `<div class="obs-splits">${chip("all", "全部", e.n)}${e.u ? chip("u", "那天收漲", e.u.n) : ""}${e.d ? chip("d", "那天收跌", e.d.n) : ""}</div>`;
+  }
+  const table = _obsStatsTable(view);
+  const want = _obsSplit === "u" ? (r => r[1] > 0) : _obsSplit === "d" ? (r => r[1] < 0) : (() => true);
+  const recent = (e.e || []).filter(r => !(e.u || e.d) || want(r)).map(r => {
+    const bar = d.bars[r[0]];
+    if (!bar) return "";
+    const day = _obsDay(bar);
+    const after = OBS_HORIZONS.map(([, label], j) => {
+      const v = r[2 + j];
+      return `<span>${label} ${v === null || v === undefined ? "<i>還沒到</i>" : `<b class="${plClass(v)}">${_obsPct(v)}</b>`}</span>`;
+    }).join("");
+    return `<div class="obs-ep"><div class="obs-ep-top"><b>${escapeHtml(_mdOf(day))}（${escapeHtml(_weekdayZh(day))}）</b>`
+      + `<span>那天 <b class="${plClass(r[1])}">${_obsPct(r[1])}</b></span></div><div class="obs-ep-r">${after}</div></div>`;
+  }).join("");
+  const few = table ? "" : `<div class="obs-note">次數不多，下面列出每一次。</div>`;
+  return `<div class="obs-sec" id="obs-after"><div class="obs-head">出現「${escapeHtml(name)}」之後</div>`
+    + `<div class="obs-note"><b>${sinceText}共 ${view.n} 次</b>（連續幾天都出現只算第一天）。比較出現那天的收盤，和之後第 1、5、20 個交易日的收盤。</div>`
+    + `${split}${table}${few}${recent ? `<div class="obs-eps-head">最近幾次</div>${recent}` : ""}</div>`;
+}
+
+function obsFootHtml() {
+  return `<div class="obs-foot">以每天的收盤價與成交量計算，價格沒有還原除權息（除息那幾天的變化包含配息）。`
+    + `這是這檔股票過去的紀錄，不代表之後的走勢。</div>`;
+}
+
+// 字卡重畫時跟著畫（renderRadarTimeline 的最後）。日 K 檔還沒載就先載、載到了整張重畫一次
+function renderObservation(sid) {
+  const topEl = document.getElementById("obs-top"), botEl = document.getElementById("obs-bottom");
+  if (!topEl || !botEl || !sid) return;
+  if (_obsSid !== sid) { _obsSid = sid; _obsKey = null; _obsSplit = "all"; }
+  const d = _obsData(sid);
+  if (!d) ensureOhlcCloses(sid).then(fresh => { if (fresh) refreshRadarTimelineIfOpen(); }).catch(() => {});
+  const wl = watchlistRows.find(w => String(w.stock_id || "").trim() === sid) || null;
+  _obsSetHtml(topEl, obsSinceHtml(wl, d) + obsTargetsHtml(sid, wl, d) + obsChangesHtml(d));
+  _obsSetHtml(botEl, obsFreqHtml(d) + obsAfterHtml(d) + (d && d.obs ? obsFootHtml() : ""));
+}
+
+// 內容沒變就不動 DOM：盤中每 5 秒重畫一次，整段換掉會讓展開的「其他 N 種」收回去、畫面閃一下
+function _obsSetHtml(el, html) {
+  if (el._obsHtml === html) return;
+  el._obsHtml = html;
+  el.innerHTML = html;
+}
+
+function obsPick(key) {
+  if (!radarTimelineSid) return;
+  _obsKey = key;
+  _obsSplit = "all";
+  trackActivity("obs_pick", { stock: radarTimelineSid, key });
+  renderObservation(radarTimelineSid);
+  document.getElementById("obs-after")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function obsPickSplit(which) {
+  if (!radarTimelineSid) return;
+  _obsSplit = ["u", "d"].includes(which) ? which : "all";
+  renderObservation(radarTimelineSid);
+}
+
+// 「設定價位」：基礎訊號那一張在 DOM 裡排在字卡前面（兩個 modal 同一個 z-index，後面的蓋前面的），
+// 所以先收掉字卡再開——跟 openPlanModal 的「跳轉」同一個做法
+function obsEditTargets(rowId) {
+  trackActivity("obs_targets_edit", { stock: radarTimelineSid || "" });
+  if (_closeOpenModals("")) setTimeout(() => openAlertSettingsForStock(rowId), 220);
+  else openAlertSettingsForStock(rowId);
+}
+// ── 個股觀察紀錄 結束 ──
 
 // 盤中每 15 秒拉一次 intraday_state（推播到的訊號另由 ingestPushedAlert 即時插入）：時間軸開著就跟著重畫
 // 字卡開著就重畫。**判斷只看 radarTimelineSid**——它在 hidden.bs.modal 那一刻就被清成 null，
@@ -12002,6 +12418,7 @@ function renderRadarTimeline(sid) {
   if (daysEl) daysEl.innerHTML = rtlDaysHtml(sid);
   const dayCountEl = document.getElementById("rtl-history-n");
   if (dayCountEl) dayCountEl.textContent = String(radarHistoryDates(HOME_HISTORY_DAYS).length);
+  renderObservation(sid);   // 第二頁的其餘幾段（觀察紀錄）：沒變就不動 DOM，每 5 秒重畫也不閃
   // covered：signal_history 真的有這檔、這天的那一列。沒有列 ≠ 那天沒有訊號，
   // 而是「我們沒有那天的紀錄」（還沒納入監控、寫入失敗、或這次沒載到）——
   // 兩者要分開講，不能把缺資料說成「所有條件都沒成立」（稽核 I13）。
@@ -15731,12 +16148,14 @@ async function fetchOhlcJson(sid) {
     _reportCachePut("ohlc:" + sid, cached).catch(() => {});
   }
   _ohlcCloses[sid] = _ohlcCloseMap(cached.json.b, cached.fetchedDay, cached.fetchedMin);
+  _ohlcJsonMem[sid] = cached.json;   // 觀察紀錄（renderObservation）讀整份：K 棒＋obs 那一格
   return cached.json;
 }
 
 // 時間軸的「收盤」線：{ "YYYY-MM-DD": 收盤 }。只有開放資料日 K 的（DATA_SOURCES.md 第十二節）
 const _ohlcCloses = {};
 const _ohlcClosesTried = {};
+const _ohlcJsonMem = {};    // 整份日 K 檔（含觀察紀錄的 obs）：字卡每 5 秒重畫，不能每次都去 IndexedDB 讀
 function _ohlcCloseMap(bars, fetchedDay, fetchedMin) {
   const m = {};
   let lastDate = "", last = null, prev = null;   // 最後一根與前一根（檔案是舊到新）：getCloseQuote 用
@@ -22388,7 +22807,7 @@ const ASSISTANT_ACTIONS = {
   openStockCard(slots, args) {
     if (!slots.stock) return aiNeedStock();
     aiNav(() => openStockCard(slots.stock, { tab: args.tab || "radar" }));
-    const label = args.tab === "kline" ? "K 線" : args.tab === "history" ? "歷史訊號" : "盤中雷達";
+    const label = args.tab === "kline" ? "K 線" : args.tab === "history" ? "觀察紀錄" : "盤中雷達";
     return { text: `已打開 ${aiStockName(slots.stock)} 的個股字卡（${label}）。`, actions: [aiOpenBtn(slots.stock, args.tab || "radar", "再開一次 ›")] };
   },
   async assistantQuote(slots) {
@@ -22504,7 +22923,7 @@ const ASSISTANT_ACTIONS = {
     const dates = Object.keys(hist).sort().reverse().slice(0, 10);
     if (!dates.length) {
       aiNav(() => openStockCard(sid, { tab: "history" }));
-      return aiNoData({ head: `${name} ${sid}`, text: "這裡拿不到紀錄，已直接打開字卡的歷史訊號。" });
+      return aiNoData({ head: `${name} ${sid}`, text: "這裡拿不到紀錄，已直接打開字卡的觀察紀錄。" });
     }
     const labelOf = k => SIGNAL_LABEL_MAP[k] || AUTO_SIGNAL_LABELS[k] || String(k || "");
     const rows = dates.map(d => {
@@ -22513,7 +22932,7 @@ const ASSISTANT_ACTIONS = {
       return { label: `${_mdOf(d)}（${_weekdayZh(d)}）`, value: sigs.length ? `${sigs.length} 則` : "—", note: names, act: "open", data: { sid, tab: "history" } };
     });
     const total = dates.reduce((n, d) => n + (((hist[d] && hist[d].signals) || []).length), 0);
-    return { head: `${name} ${sid}`, sub: `近 ${dates.length} 個交易日 ${total} 則訊號`, rows, actions: [aiOpenBtn(sid, "history", "看歷史訊號 ›")] };
+    return { head: `${name} ${sid}`, sub: `近 ${dates.length} 個交易日 ${total} 則訊號`, rows, actions: [aiOpenBtn(sid, "history", "看觀察紀錄 ›")] };
   },
   async assistantEvents(slots) {
     const sid = slots.stock || null;
