@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="427">
+  <meta name="app-version" content="428">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=427" rel="stylesheet">
+  <link href="watchlist.css?v=428" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -665,6 +665,8 @@
       <!-- 2026-10-17 晚起是底部導覽最左邊那一格（與統計／通知同一層），不再掛「股票」頁的分頁列 -->
       <div class="view-head">
         <h2 class="view-title"><i data-icon="ai"></i>助手</h2>
+        <!-- 對話留在這支手機上（重開 App 還在），這顆清掉；有對話時才出現 -->
+        <button type="button" class="btn btn-sm btn-outline-light" id="ai-clear" onclick="aiClearLog()" hidden>清除對話</button>
       </div>
       <div class="ai-view">
         <div class="ai-log" id="ai-log" role="log" aria-live="polite"></div>
@@ -676,7 +678,7 @@
             <button type="button" class="ai-attach" id="ai-attach" onclick="aiPickImage()" aria-label="上傳持股截圖" title="上傳持股截圖"><i data-icon="photo"></i></button>
             <input type="file" id="ai-file" accept="image/*" multiple hidden onchange="aiImageChosen(this)">
             <input class="ai-input" id="ai-input" type="text" maxlength="200" enterkeyhint="send"
-                   placeholder="輸入問題或指令…" aria-label="對助手說" oninput="aiComposerSync()">
+                   placeholder="輸入問題或指令…" aria-label="對助手說" oninput="aiComposerSync()" onkeydown="aiInputKey(event)">
             <button type="submit" class="ai-send" id="ai-send" aria-label="送出"><i data-icon="aisend"></i></button>
           </div>
         </form>
@@ -5212,6 +5214,7 @@ function logout() {
     // 通知匣與事件快取都是個人資料（誰在看哪幾檔），登出就刪
     _reportCacheDelete(_inboxCacheKey()).catch(() => {});
     _reportCacheDelete(_eventsCacheKey()).catch(() => {});
+    try { localStorage.removeItem(`cg-ai-log:${state.userId}`); } catch { /* 助手的對話（問過哪幾檔、持股數字）也是個人資料 */ }
   }
   localStorage.removeItem("sma_session");
   location.reload();
@@ -21810,6 +21813,12 @@ let aiEnabled = false;       // app_status().assistant_enabled
 let aiIsAdmin = false;       // loadAdminFlag()：只有 admin 看得到卡片底部那一行診斷
 let _aiNames = null;         // universe 的 [名稱, 代號] 依名稱長度排序（認股票用）
 let _aiNamesN = 0;
+const AI_ROUTE_TIMEOUT_MS = 20000;   // Jev 的尾巴 2–4 秒加一次 gate RPC：20 秒還沒回就是卡住了，不要讓輸入列一直鎖著
+const AI_CARRY_MS = 10 * 60000;      // 「那支撐呢」：10 分鐘內剛問過的那一檔可以沿用
+const AI_STORE_DAYS = 7;             // 對話留在這支手機上幾天
+let _aiLast = { sid: "", at: 0 };    // 最近一次問到的那一檔（追問沿用）
+let _aiRecentSids = [];              // 最近問過的幾檔：反問「要查哪一檔」時排最前面
+const _aiCands = new Map();          // log_id → Worker 的前三名候選：按「不是我要的」之後直接給這幾個選
 
 // 目錄（cloudflare/assistant-route/catalog.json）每一類對到哪一支函式、帶什麼固定參數。
 // 與目錄的 handler.fn／args 逐項相同（test_assistant_tab 釘住）：反問卡點籤時只有 intent id，要靠這張表。
@@ -21906,6 +21915,7 @@ function renderAssistant() {
   const log = document.getElementById("ai-log");
   if (!log) return;
   aiBindOnce();
+  aiRestoreLog();
   const parts = aiLog.length ? aiLog.map(m => m.kind === "user" ? aiUserHtml(m.text) : aiCardHtml(m.spec)) : [aiIntroHtml(true)];
   // 讀截圖要 10–30 秒（視覺模型）：只有三個點會以為當掉了，寫出在做什麼、大概多久
   if (aiBusy) parts.push(aiBusyNote ? `<div class="ai-typing is-note" aria-label="處理中">${escapeHtml(aiBusyNote)}</div>`
@@ -21917,7 +21927,10 @@ function renderAssistant() {
   if (send) send.disabled = aiBusy;
   const attach = document.getElementById("ai-attach");
   if (attach) attach.disabled = aiBusy;
+  const clr = document.getElementById("ai-clear");
+  if (clr) clr.hidden = !aiLog.length || aiBusy;
   aiComposerSync();
+  aiSaveLog();
   if (aiLog.length && currentTab === "ai") {
     requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }));
   }
@@ -21945,7 +21958,9 @@ function aiStripMarketNav(c) {
 function aiCardHtml(c) {
   if (HOME_SIMPLE_ONLY) c = aiStripMarketNav(c);
   const head = c.head ? `<div class="ai-card-head">${ICON_AI}${escapeHtml(c.head)}</div>` : "";
-  const sub = c.sub ? `<div class="ai-card-sub">${escapeHtml(c.sub)}</div>` : "";
+  // 追問沿用了剛才那一檔：卡頂寫出來（下面有「換一檔」籤），不要讓人以為是自己說的
+  const carried = c.carried ? `<div class="ai-card-ctx">沿用剛才的 ${escapeHtml(aiStockName(c.carried))}</div>` : "";
+  const sub = (c.sub ? `<div class="ai-card-sub">${escapeHtml(c.sub)}</div>` : "") + carried;
   const rows = (c.rows || []).map(r => {
     const inner = `<b>${escapeHtml(r.label)}</b><span class="ai-val">${r.html ? r.value : escapeHtml(r.value ?? "")}</span><i>${escapeHtml(r.note ?? "")}</i>`;
     return r.act
@@ -21959,7 +21974,7 @@ function aiCardHtml(c) {
   // 結果照樣進 assistant_log，要查哪一句分到哪一類在 admin 儀表板看。
   // 「不是我要的」給所有人：有 log_id 的卡（＝Jev 分過類的）才有，按過變成「已記下」
   const wrong = c.log_id
-    ? (_aiWrong.has(c.log_id) ? `<span class="ai-wrong is-done">已記下，謝謝</span>`
+    ? (_aiWrong.has(c.log_id) || c.wrongDone ? `<span class="ai-wrong is-done">已記下，謝謝</span>`
        : `<button type="button" class="ai-wrong" data-ai-act="wrong" data-ai-data="${escapeHtml(JSON.stringify({ log_id: c.log_id }))}">不是我要的</button>`)
     : "";
   const meta = wrong ? `<div class="ai-meta">${wrong}</div>` : "";
@@ -22024,14 +22039,67 @@ function aiReplaceCard(id, c) {
   aiLog[i] = { kind: "card", spec: c, id };
 }
 
+// ── 對話留在這支手機上（重開 App 還在）：每個帳號一份、AI_STORE_DAYS 天、最多 AI_LOG_MAX 則 ─────────
+// 存的是卡片規格（JSON）。沒按的確認卡與截圖匯入的選項存不了動作（run 是函式、選項在 aiPending），
+// 還原時收成「已失效」；其餘的卡原樣，籤與鍵都還按得動。登出時刪掉（logout）：裡面有問過哪幾檔、持股的數字。
+function _aiStoreKey() { return state.userId ? `cg-ai-log:${state.userId}` : ""; }
+const AI_LIVE_ACTS = new Set(["confirm", "cancel", "impchoose", "imptoggle"]);
+function aiSaveLog() {
+  const key = _aiStoreKey();
+  if (!key || _aiRestored !== key) return;   // 還沒還原過就存＝把上一次的對話蓋掉
+  try {
+    if (!aiLog.length) { localStorage.removeItem(key); return; }
+    localStorage.setItem(key, JSON.stringify({ v: 1, at: Date.now(), log: aiLog, recent: _aiRecentSids }));
+  } catch { /* 空間滿了或被關掉：這一次就不存，對話照常 */ }
+}
+let _aiRestored = "";
+function aiRestoreLog() {
+  const key = _aiStoreKey();
+  if (!key || _aiRestored === key) return;
+  _aiRestored = key;
+  if (aiLog.length) return;
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || "null");
+    if (!raw || raw.v !== 1 || !Array.isArray(raw.log) || Date.now() - Number(raw.at || 0) > AI_STORE_DAYS * 86400000) return;
+    aiLog = raw.log.filter(m => m && (m.kind === "user" ? typeof m.text === "string" : m.kind === "card" && m.spec && typeof m.spec === "object"))
+      .slice(-AI_LOG_MAX).map(aiRestoreEntry);
+    _aiRecentSids = (Array.isArray(raw.recent) ? raw.recent : []).map(String).filter(isStockId).slice(0, 5);
+  } catch { aiLog = []; }
+}
+function aiRestoreEntry(m) {
+  if (m.kind !== "card") return m;
+  const s = m.spec;
+  const acts = (s.actions || []).concat(s.chips || []);
+  const live = acts.some(a => a && AI_LIVE_ACTS.has(a.act)) || /data-ai-act="(?:confirm|cancel|impchoose|imptoggle)"/.test(String(s.bodyHtml || ""));
+  if (!live) return { kind: "card", spec: s, id: null };
+  return { kind: "card", id: null, spec: { head: s.head, sub: "已失效（App 重新開過），要做請再說一次", rows: s.rows, muted: true } };
+}
+// 「清除對話」（標題列右邊）：只清這支手機上的對話；assistant_log 照舊（那是分類的紀錄，不是對話）
+function aiClearLog() {
+  if (aiBusy) return;
+  aiLog = []; aiPending = {}; _aiLast = { sid: "", at: 0 };
+  aiSaveLog();
+  renderAssistant();
+}
+
 // 「不是我要的」（第十五節 B4）：使用者最便宜的回饋，寫進 assistant_log.picked_intent='wrong'，
-// admin 在儀表板標正確類別後由 assistant_eval.py --harvest 匯回目錄
+// admin 在儀表板標正確類別後由 assistant_eval.py --harvest 匯回目錄。
+// 按了之後直接給 Worker 那一次的其他候選（點了就做、picked_intent 改寫成他點的那一類——回收迴圈拿到的是正確答案，
+// 不只是「錯了」），最後一顆「都不是」交給他自己的 AI（不留死路）。
 const _aiWrong = new Set();
 function aiMarkWrong(logId) {
   if (!logId || _aiWrong.has(logId)) return;
   _aiWrong.add(logId);
+  for (const m of aiLog) if (m.kind === "card" && m.spec && m.spec.log_id === logId) m.spec.wrongDone = true;   // 重開 App 也記得按過
   aiOutcome(logId, "wrong", null);
   trackActivity("assistant_wrong", {});
+  const c = _aiCands.get(logId);
+  if (c) {
+    const picks = (c.cands || []).filter(x => x && x.intent !== c.intent && AI_INTENTS[x.intent] && !["advice", "out_of_scope"].includes(x.intent)).slice(0, 3);
+    const chips = picks.map(x => ({ label: String(x.label || x.intent), act: "pick", data: { intent: x.intent, slots: c.slots || {}, log_id: logId, text: c.text } }));
+    if (c.text) chips.push({ label: "都不是，問其他 AI", act: "handoff", data: { text: c.text, sid: String((c.slots || {}).stock || "") } });
+    if (chips.length) aiPushCard({ head: picks.length ? "那你要的是哪一種？" : "那這一題交給其他 AI", chips });
+  }
   renderAssistant();
 }
 
@@ -22340,6 +22408,13 @@ function aiAct(act, data) {
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
   if (act === "wrong") { aiMarkWrong(String(data.log_id || "")); return; }
   if (act === "ai") { askAiHandoffPick(data); return; }   // 交給使用者自己的 AI：這一下就把問題複製起來
+  // 送不出去（逾時、離線、伺服器錯）的那一句：原句再送一次 Worker——這一句根本還沒被分類過，不能在本機做
+  if (act === "retry") { assistantSend(String(data.text || "")); return; }
+  if (act === "handoff") {   // 「不是我要的」→「都不是」：同一句交給他自己的 AI（與答不出來的那幾類同一套籤）
+    aiPushCard(aiHandoffCard(String(data.text || ""), "那這一題交給其他 AI 問問看：", String(data.sid || "")));
+    renderAssistant();
+    return;
+  }
   // 這三個瀏覽器要「使用者的手勢」：按鍵本身就是那個手勢
   if (act === "push") { togglePushSubscription(); return; }
   if (act === "install") { installPwa("assistant"); return; }
@@ -22436,6 +22511,18 @@ function aiOutcome(logId, picked, executed) {
   sbRpc("assistant_log_outcome", { p_log: logId, p_picked: picked, p_executed: executed }, state.accessToken).catch(() => {});
 }
 
+// 桌機：輸入框空著時按 ↑ 叫回上一句（打錯一個字不用整句重打）
+function aiInputKey(ev) {
+  if (!ev || ev.key !== "ArrowUp" || ev.isComposing) return;
+  const inp = ev.target;
+  if (!inp || inp.value) return;
+  const last = [...aiLog].reverse().find(m => m.kind === "user" && !/^［/.test(m.text));   // 「［持股截圖］」那種不是打的字
+  if (!last) return;
+  ev.preventDefault();
+  inp.value = last.text;
+  aiComposerSync();
+}
+
 // 送出鍵空白時暗、有字變金色（.has-text）；送出清空輸入框後也要跟著暗回去
 function aiComposerSync() {
   const inp = document.getElementById("ai-input");
@@ -22458,14 +22545,21 @@ async function assistantSend(raw) {
   // NFKC：IME 打出來的全形數字與空白（「２３３０」「１８０」）先變半形，認股票與抽價位才看得到（第十五節 A10；Worker 同）
   const text = String(raw || "").normalize("NFKC").trim().slice(0, AI_MAX_CHARS);
   if (!text || aiBusy) return;
+  aiRestoreLog();   // 開頁後第一句就從這裡進來（還沒畫過助手頁）：先把上次的對話接回來，不然會被這一句蓋掉
   aiSkipPending();
   aiLog.push({ kind: "user", text });
   if (!state.accessToken) { aiPushCard({ text: "登入後才能使用助手。", muted: true }); renderAssistant(); return; }
   if (!aiRouteUrl || !aiEnabled) { aiPushCard({ text: "助手尚未啟用。", muted: true }); renderAssistant(); return; }
+  // 沒有網路就不送：fetch 要等到逾時才會失敗，那段時間輸入列是鎖著的
+  if (typeof navigator !== "undefined" && navigator && navigator.onLine === false) {
+    aiPushCard(aiRetryCard("目前沒有網路連線，連上之後按「再試一次」。", text));
+    renderAssistant();
+    return;
+  }
   const mentions = aiMentionsOf(text);
   aiBusy = true;
   renderAssistant();
-  let r = null, status = 0;
+  let r = null, status = 0, timedOut = false;
   try {
     const resp = await fetch(`${aiRouteUrl}/v1/route`, {
       method: "POST",
@@ -22475,33 +22569,45 @@ async function assistantSend(raw) {
         context: { tab: "ai", mentions, watch_count: (watchlistRows || []).length,
                    has_holdings: holdingEntries().length > 0, fr_enabled: !!frEnabled },
       }),
+      // 沒有逾時的話，Worker 或 gate 卡住時輸入列會一直鎖著（使用者只能關掉 App）
+      signal: typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(AI_ROUTE_TIMEOUT_MS) : undefined,
     });
     status = resp.status;
     r = await resp.json().catch(() => null);
-  } catch { r = null; }
+  } catch (e) { r = null; timedOut = !!e && (e.name === "TimeoutError" || e.name === "AbortError"); }
   aiBusy = false;
   if (status === 200 && r) await aiHandleResponse(r, text);
-  else aiHandleError(status, r);
+  else aiHandleError(status, r, text, timedOut);
   aiAfterRun();
 }
 
-function aiHandleError(status, r) {
+// 送不出去的那一句帶一顆「再試一次」：網路與伺服器的錯多半是一時的，重打一遍是使用者的事就太累了
+function aiRetryCard(msg, text) {
+  const t = String(text || "").trim();
+  return { text: msg, muted: true, chips: t ? [{ label: "再試一次", act: "retry", data: { text: t } }] : [] };
+}
+
+function aiHandleError(status, r, text, timedOut) {
   if (status === 426 && handleUpdateRequired(r)) return;
-  const msg = status === 401 ? "登入後才能使用助手。"
-    : status === 503 ? "助手尚未啟用。"
-    : status === 429 || status === 400 ? String((r && r.error) || "請再試一次。")
-    : "助手暫時無法使用，請再試一次。";
-  aiPushCard({ text: msg, muted: true });
+  if (status === 401) { aiPushCard({ text: "登入後才能使用助手。", muted: true }); return; }
+  if (status === 503) { aiPushCard({ text: "助手尚未啟用。", muted: true }); return; }
+  // 429＝今天的次數用完、400＝句子太長：再送一次也是同一個答案，不給「再試一次」
+  if (status === 429 || status === 400) { aiPushCard({ text: String((r && r.error) || "請再試一次。"), muted: true }); return; }
+  aiPushCard(aiRetryCard(timedOut ? `等了 ${AI_ROUTE_TIMEOUT_MS / 1000} 秒還沒有回應。` : "助手暫時無法使用。", text));
 }
 
 async function aiHandleResponse(r, text) {
   trackActivity("assistant", { intent: String(r.intent || ""), decision: String(r.decision || "") });
+  if (r.log_id) {   // 「不是我要的」按下去時要給的其他候選（只留最近 50 句）
+    _aiCands.set(r.log_id, { intent: String(r.intent || ""), cands: r.candidates || [], slots: r.slots || {}, text });
+    if (_aiCands.size > 50) _aiCands.delete(_aiCands.keys().next().value);
+  }
   if (r.decision === "refuse" || r.decision === "fallback") {
     // 答不出來的（範圍外、聽不懂、買賣建議）：固定句照舊，後面接「交給你自己的 AI」的籤。
     // 買賣建議那一句**我們還是不答**——卡上仍然是「本服務不提供買賣建議」，只是多給一條他自己的路；
     // 問題走剪貼簿、由他自己貼上，我們不代送也看不到回答（Howard 2026-10-18：答不出來的就引導給 AI）。
-    // 只有分類器自己壞掉（r.code）不給這條路——那一句八成是我們做得到的，再試一次就好。
-    const card = !r.code ? aiHandoffCard(text, r.say, (r.slots || {}).stock) : { text: r.say || AI_FALLBACK, muted: true };
+    // 只有分類器自己壞掉（r.code）不給這條路——那一句八成是我們做得到的，再試一次就好（給「再試一次」）。
+    const card = !r.code ? aiHandoffCard(text, r.say, (r.slots || {}).stock) : aiRetryCard(r.say || AI_FALLBACK, text);
     aiPushCard(Object.assign(card, { log_id: r.log_id }));
     return;
   }
@@ -22513,9 +22619,14 @@ async function aiHandleResponse(r, text) {
   if (r.decision === "clarify") {
     let chips;
     if (r.clarify_kind === "stock") {
-      // 要股票卻沒說是哪一檔：自選股當籤，點了＝Worker 已分好的類別＋槽位加上那一檔，本機直接做（不再送一次）
+      // 要股票卻沒說是哪一檔：10 分鐘內剛問過一檔就沿用（「那支撐呢」），卡上寫「沿用剛才的…」＋「換一檔」
       const intent = String(r.intent || "");
-      chips = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId).slice(0, 8)
+      if (aiCarryStock(intent, r.slots || {}, { text })) {
+        await aiRun(intent, r.slots || {}, { log_id: r.log_id, say: r.say, args: (r.action && r.action.args) || null, text });
+        return;
+      }
+      // 沒得沿用：最近問過的、持股、自選股當籤，點了＝Worker 已分好的類別＋槽位加上那一檔，本機直接做（不再送一次）
+      chips = aiStockChoices()
         .map(sid => ({ label: aiStockName(sid), act: "run",
                        data: { intent, slots: Object.assign({}, r.slots || {}, { stock: sid }), log_id: r.log_id, text: `${aiStockName(sid)} ${text}` } }));
     } else {
@@ -22538,14 +22649,28 @@ async function aiRun(intent, slots, opts) {
   const fn = spec ? spec[0] : "";
   const h = ASSISTANT_ACTIONS[fn];
   if (!h) { aiPushCard({ text: "這個動作這一版還沒接上。", muted: true }); return; }
-  const args = Object.assign({}, spec ? spec[1] : {}, (opts && opts.args) || {}, slots || {});
+  slots = Object.assign({}, slots || {});
+  const carried = aiCarryStock(intent, slots, opts);   // 「那支撐呢」：沿用剛才那一檔
+  if (carried) slots.stock = carried;
+  delete slots._noCarry;
+  const args = Object.assign({}, spec ? spec[1] : {}, (opts && opts.args) || {}, slots);
   let card = null;
-  _aiCurrent = { intent, slots: slots || {}, log_id: (opts && opts.log_id) || null, text: String((opts && opts.text) || "") };
+  _aiCurrent = { intent, slots, log_id: (opts && opts.log_id) || null, text: String((opts && opts.text) || "") };
   aiBusy = true; renderAssistant();
   if (AI_RULE_INTENTS.has(intent)) await aiEnsureRules();   // 進階訊號的那幾類：先確定手上那一份是真的
-  try { card = await h(slots || {}, args, opts || {}); }
+  try { card = await h(slots, args, opts || {}); }
   catch (e) { console.error("assistant action failed:", fn, e); card = { text: "這個動作剛才沒有成功，請再試一次。", muted: true }; }
   finally { aiBusy = false; }
+  const sid = isStockId(String(slots.stock || "")) ? String(slots.stock) : "";
+  if (sid) aiNoteStock(sid);
+  if (card && sid && !card.failed && !card.muted) {
+    if (carried) {
+      card.carried = sid;
+      card.chips = (card.chips || []).concat([{ label: "換一檔", act: "run",
+        data: { intent, slots: Object.assign({}, slots, { stock: null, _noCarry: true }), text: String((opts && opts.text) || "換一檔") } }]);
+    }
+    if (!card._id) aiAddFollowups(card, intent, sid);
+  }
   if (card) { card.log_id = card.log_id || (opts && opts.log_id) || null; aiPushCard(card, card._id); }
   // 確認卡：executed 等按了主鍵／取消才回寫；其餘現在就算執行過
   if (card && card._id && aiPending[card._id]) aiPending[card._id].log_id = opts && opts.log_id;
@@ -22562,15 +22687,87 @@ const AI_STOCK_HINT = {
   basic_signal_set: "的基礎訊號", holdings_set: "的持股設定", watch_remove: "移除", share_stock: "分享給好友",
 };
 function aiNeedStock() {
-  const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId).slice(0, 8);
+  const sids = aiStockChoices();
   const cur = _aiCurrent;
   const hint = AI_STOCK_HINT[cur.intent] || "";
   // 籤帶這一類＋原本的槽位＋那一檔，本機直接做；對話裡那一句用使用者原句接股票名（沒有原句才用提示語）
   const chip = sid => ({ label: aiStockName(sid), act: "run",
     data: { intent: cur.intent, slots: Object.assign({}, cur.slots, { stock: sid }), log_id: cur.log_id,
             text: cur.text ? `${aiStockName(sid)} ${cur.text}` : `${aiStockName(sid)}${hint}` } });
-  return { head: "要查哪一檔？", text: sids.length ? "點一檔，或打股票名稱或代號。" : "打股票名稱或代號，例如「台積電」或「2330」。",
+  const own = (watchlistRows || []).length || holdingEntries().length;
+  return { head: "要查哪一檔？", text: own ? "點一檔，或打股票名稱或代號。" : "打股票名稱或代號，或先點一檔試試：",
            chips: sids.map(chip) };
+}
+
+// 「要查哪一檔」的籤：最近問過的在前，接著持股、自選股、好友分享的（同一檔只出現一次）；
+// 一檔都沒有的新帳號給幾檔常見的，讓第一次用的人點得下去（不是推薦，只是例子）
+const AI_EXAMPLE_SIDS = ["2330", "2317", "2454", "0050"];
+function aiStockChoices() {
+  const seen = new Set(), out = [];
+  const add = s => { s = String(s || "").trim(); if (isStockId(s) && !seen.has(s)) { seen.add(s); out.push(s); } };
+  _aiRecentSids.forEach(add);
+  holdingEntries().forEach(h => add(h.sid));
+  (watchlistRows || []).forEach(w => add(w.stock_id));
+  sharedInSids().forEach(add);
+  if (!out.length) AI_EXAMPLE_SIDS.filter(s => universe[s]).forEach(add);
+  return out.slice(0, 8);
+}
+
+// 問過的那一檔：追問沿用（_aiLast）＋反問籤排前面（_aiRecentSids）
+function aiNoteStock(sid) {
+  _aiLast = { sid, at: Date.now() };
+  _aiRecentSids = [sid].concat(_aiRecentSids.filter(s => s !== sid)).slice(0, 5);
+}
+
+// 追問沿用（「台積電支撐在哪」→「那站上月線了嗎」）：句子裡沒有股票、10 分鐘內剛問過一檔。
+// 一定要指一檔才做得了的那幾類一律沿用（不然只能反問）；整份清單也答得出來的那幾類（今天的訊號、事件、評分…），
+// 要句子裡指著它（那／它／這檔）而且沒有在講整份（我的／全部／自選…）才沿用。寫入類照樣先出確認卡，股票名寫在卡上。
+const AI_NEED_ONE = new Set(["quote", "levels", "ma_position", "signals_history", "kline",
+                             "price_target_set", "holdings_set", "watch_add", "watch_remove"]);
+const AI_CARRY_RE = /它|這檔|那檔|這支|那支|這一檔|那一檔|同一檔|剛剛那|剛才那/;
+const AI_WHOLE_RE = /我的|全部|所有|自選|每一檔|哪些|哪幾檔|誰/;
+// 寫入類的「自選」「持股」是動作的對象（「加進自選」），不是在講整份；只有全部／所有才算
+const AI_WHOLE_WRITE_RE = /全部|所有|每一檔|哪些|哪幾檔/;
+const AI_CARRY_WRITES = new Set(["price_target_set", "holdings_set", "watch_add", "watch_remove"]);
+function aiCarryStock(intent, slots, opts) {
+  if ((slots && slots.stock) || (slots && slots._noCarry) || !_aiLast.sid || Date.now() - _aiLast.at > AI_CARRY_MS) return "";
+  if (!AI_STOCK_HINT[intent] && !AI_NEED_ONE.has(intent)) return "";
+  const said = String((opts && opts.text) || "");
+  if ((AI_CARRY_WRITES.has(intent) ? AI_WHOLE_WRITE_RE : AI_WHOLE_RE).test(said)) return "";
+  if (AI_NEED_ONE.has(intent) || AI_CARRY_RE.test(said)) return _aiLast.sid;
+  return "";
+}
+
+// 「接著問」：個股的答案卡底下兩三個下一步，點了本機直接做——看完報價順手看關卡、看完均線順手設通知。
+// 只加在答案卡（確認卡、失敗、已經有兩顆以上籤的不加）；設通知那一顆走 rule_create，照樣先出確認卡。
+const AI_FOLLOWUPS = {
+  quote: ["levels", "ma_position", "price_target_set"],
+  levels: ["ma_position", "price_target_set", "kline"],
+  ma_position: ["levels", "ma_rule", "kline"],
+  signals_today: ["signals_history", "levels"],
+  signals_history: ["signals_today", "events"],
+  events: ["quote", "levels"],
+  score: ["levels", "events"],
+};
+function aiFollowupChip(kind, sid) {
+  const name = aiStockName(sid);
+  const run = (label, intent, extra) => ({ label, act: "run", data: { intent, slots: Object.assign({ stock: sid }, extra || {}), text: label } });
+  if (kind === "levels") return run(`${name}支撐在哪`, "levels");
+  if (kind === "ma_position") return run(`${name}站上月線了嗎`, "ma_position");
+  if (kind === "price_target_set") return run(`${name}的到價提醒`, "price_target_set");
+  if (kind === "kline") return run(`看${name}的 K 線`, "kline");
+  if (kind === "quote") return run(`${name}收盤多少`, "quote");
+  if (kind === "signals_today") return run(`${name}今天有訊號嗎`, "signals_today");
+  if (kind === "signals_history") return run(`${name}最近有哪些訊號`, "signals_history");
+  if (kind === "events") return run(`${name}有什麼資料`, "events");
+  if (kind === "ma_rule") return run(`${name}跌破月線通知我`, "rule_create", { cond_type: "price_vs_ma", params: { period: 20, dir: "down" }, params_defaults: {} });
+  return null;
+}
+function aiAddFollowups(card, intent, sid) {
+  const kinds = AI_FOLLOWUPS[intent];
+  const have = card.chips || [];
+  if (!kinds || !isStockId(sid) || have.length >= 2) return;
+  card.chips = have.concat(kinds.map(k => aiFollowupChip(k, sid)).filter(Boolean)).slice(0, 4);
 }
 
 // ── 訊號種類（目錄 slot_resolvers.signal_kind，與雷達同一組 key）─────────────────
@@ -22848,6 +23045,7 @@ async function aiImageChosen(input) {
   const all = input && input.files ? Array.from(input.files) : [];
   if (!all.length || aiBusy) return;
   const files = all.slice(0, AI_IMG_MAX_FILES);
+  aiRestoreLog();
   aiSkipPending();
   aiLog.push({ kind: "user", text: files.length > 1 ? `［持股截圖 ${files.length} 張］` : "［持股截圖］" });
   if (!state.accessToken) { aiPushCard({ text: "登入後才能使用助手。", muted: true }); renderAssistant(); return; }
