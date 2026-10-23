@@ -2114,23 +2114,37 @@ html.home-simple-only #home-filter { display: none !important; }
 .ai-note { font-size: 0.8rem; color: var(--text-muted); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .ai-typing { color: var(--text-muted); font-size: 1.1rem; padding: 2px 6px; letter-spacing: 2px; }
 .ai-typing.is-note { font-size: 0.9rem; letter-spacing: 0; }
-/* 輸入列：貼在底部導覽上方（sticky），對話長了也看得到 */
+/* 輸入列：貼在底部導覽上方（sticky），對話長了也看得到。
+   2026-10-23 起是一整條膠囊（.ai-bar）：截圖鈕縮成框內左邊的圖示、輸入框沒有自己的框、右邊一顆圓鍵；
+   焦點紫框畫在整條上（:focus-within）。 */
 .ai-composer { position: sticky; bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 6px); z-index: 5;
-	display: flex; gap: 8px; align-items: center; padding: 10px 0 8px; margin: auto 0 0;
+	padding: 10px 0 8px; margin: auto 0 0;
 	background: linear-gradient(transparent, var(--bg-0) 30%); }
-.ai-input { flex: 1; min-width: 0; height: 52px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface);
-	color: var(--text-0); padding: 0 14px; font-size: 1rem; }
+.ai-bar { display: flex; align-items: center; gap: 2px; min-height: 52px; padding: 5px 6px 5px 4px;
+	border-radius: 26px; border: 1px solid var(--border); background: var(--surface); }
+.ai-bar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.18); }
+.ai-input { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent;
+	color: var(--text-0); padding: 0 6px; font-size: 1rem; }
 .ai-input::placeholder { color: var(--text-muted); }
-.ai-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.18); }
-.ai-send { width: 52px; height: 52px; flex: 0 0 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
-	border: 1px solid var(--accent-2); background: var(--accent-2); color: #1a1300; cursor: pointer; }
+.ai-input:focus { outline: none; }
+/* 右邊那顆：有字＝金色實心送出（主要動作）；空白＝麥克風（觸控）或暗掉的送出（桌機），都不搶眼 */
+.ai-send { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+	border: 0; background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color .15s, color .15s; }
 .ai-send .ic { width: 22px; height: 22px; }
+.ai-send[data-mode="mic"] { color: var(--text-1); }
+.ai-composer.has-text .ai-send { background: var(--accent-2); color: #1a1300; }
 .ai-send:disabled, .ai-input:disabled { opacity: 0.55; }
-/* 持股截圖鈕（第二十六節）：與送出鍵同一個尺寸，但是空心——它是附帶的入口，送出才是主要動作 */
-.ai-attach { width: 52px; height: 52px; flex: 0 0 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
-	border: 1px solid var(--border); background: var(--surface); color: var(--text-1); cursor: pointer; }
+/* 持股截圖鈕（第二十六節）：框內左邊的圖示，沒有自己的框——它是附帶的入口，送出才是主要動作 */
+.ai-attach { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+	border: 0; background: transparent; color: var(--text-1); cursor: pointer; }
 .ai-attach .ic { width: 22px; height: 22px; }
 .ai-attach:disabled { opacity: 0.55; }
+/* 點了麥克風：提示麥克風在鍵盤上（五秒後自己收起，打了字也收） */
+.ai-mic-hint { position: absolute; right: 4px; bottom: calc(100% - 4px); padding: 6px 12px; border-radius: 10px;
+	background: var(--surface); border: 1px solid var(--border); color: var(--text-1); font-size: 0.85rem;
+	display: flex; align-items: center; gap: 4px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); }
+.ai-mic-hint[hidden] { display: none; }
+.ai-mic-hint .ic { width: 15px; height: 15px; }
 
 /* 「自選設定」：底部導覽拿掉自選分頁之後，這是加／刪自選股、設定價位與通知的唯一入口，
    所以不再是一條細連結，而是看得見的按鈕（紫框實底、字級比清單標題還大一點）。 */
