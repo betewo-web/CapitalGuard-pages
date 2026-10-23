@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="433">
+  <meta name="app-version" content="434">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=433" rel="stylesheet">
+  <link href="watchlist.css?v=434" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -22006,7 +22006,10 @@ function aiCardHtml(c) {
     ? (_aiWrong.has(c.log_id) || c.wrongDone ? `<span class="ai-wrong is-done">已記下，謝謝</span>`
        : `<button type="button" class="ai-wrong" data-ai-act="wrong" data-ai-data="${escapeHtml(JSON.stringify({ log_id: c.log_id }))}">不是我要的</button>`)
     : "";
-  const meta = wrong ? `<div class="ai-meta">${wrong}</div>` : "";
+  // 「分享」（第七輪）：有標題、有資料列的答案卡才有——確認卡、反問、固定句沒有可以傳的內容
+  const shareable = c._k && c.head && (c.rows || []).length && !c.muted && !c._id && !c.failed;
+  const share = shareable ? `<button type="button" class="ai-wrong ai-share" data-ai-act="sharecard" data-ai-data="${escapeHtml(JSON.stringify({ k: c._k }))}">分享</button>` : "";
+  const meta = wrong || share ? `<div class="ai-meta">${share}${wrong}</div>` : "";
   // admin 才看得到的一行診斷（Howard 2026-10-18：卡上沒名單時，遠端看不到手機的狀態，問一句就能回報）
   const diag = aiIsAdmin && c.diag ? `<div class="ai-meta">${escapeHtml(c.diag)}</div>` : "";
   return `<div class="ai-card${c.muted ? " is-muted" : ""}">${head}${sub}<div class="ai-card-body">${rows}${body}${chips}</div>${actions}${meta}${diag}</div>`;
@@ -22065,6 +22068,7 @@ function aiIntroChips() {
 // 對話裡存的是卡片的「規格」不是 HTML：畫面每次重畫時才組，所以「不是我要的」按過、確認卡變結果卡，
 // 都只要改規格再重畫
 function aiPushCard(c, id) {
+  if (c && !c._k) c._k = "k" + (++_aiCardSeq);   // 卡號：卡上的「分享」找得到是哪一張（第七輪）
   aiLog.push({ kind: "card", spec: c, id: id || null });
   if (aiLog.length > AI_LOG_MAX) aiLog.splice(0, aiLog.length - AI_LOG_MAX);
 }
@@ -22192,6 +22196,35 @@ function aiSkipPending() {
       : { text: "已略過（你送了新的一句）。", muted: true });
     aiOutcome(spec.log_id, null, false);
   }
+}
+
+// ── 答案卡分享成文字（第七輪，2026-10-23）：手機的分享面板（LINE、訊息…），沒有就複製。
+// 卡上的資料原樣（標題、副標、每一列），最後一行寫明這是公開資料的整理、不是建議，接官網網址。
+// 按鍵本身就是使用者手勢（navigator.share 要在點擊裡發起）。
+function aiCardText(c) {
+  const plain = v => String(v == null ? "" : v).replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+  const lines = [plain(c.head)];
+  if (c.sub) lines.push(plain(c.sub));
+  for (const r of c.rows || []) lines.push(`・${plain(r.label)}：${plain(r.value)}${r.note ? `（${plain(r.note)}）` : ""}`);
+  if (c.text) lines.push(plain(c.text));
+  lines.push("— CapitalGuard-股市雷達整理的公開資料，不是投資建議");
+  return lines.filter(Boolean).join("\n");
+}
+async function aiShareCard(k) {
+  const m = aiLog.find(x => x.kind === "card" && x.spec && x.spec._k === k);
+  if (!m) return;
+  const text = aiCardText(m.spec);
+  const url = `${SITE_BASE_URL}?ref=assistant`;
+  trackActivity("assistant_share", { via: navigator.share ? "share" : "copy" });
+  try {
+    if (navigator.share) { await navigator.share({ title: String(m.spec.head || "股市雷達"), text, url }); return; }
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    aiPushCard({ text: "已複製這張卡的內容，貼給朋友就可以。", muted: true });
+  } catch (e) {
+    if (e && e.name === "AbortError") return;   // 自己取消分享
+    aiPushCard({ text: "沒有分享成功，可以長按卡片自己複製。", muted: true });
+  }
+  renderAssistant();
 }
 
 // ── 復原（第六輪，2026-10-23）：寫入之後的結果卡上一顆「復原」，按了把剛才那一筆改回去（只能按一次）。
@@ -22468,6 +22501,7 @@ function aiAct(act, data) {
   if (act === "open") { if (data._collapse) aiCollapseConfirm(String(data._collapse)); aiOpen(data); renderAssistant(); return; }
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "undo") { aiRunUndo(String(data.id || "")); return; }   // 剛才那一筆寫入改回去（第六輪）
+  if (act === "sharecard") { aiShareCard(String(data.k || "")); return; }   // 把這張卡傳給朋友（手機的分享面板；第七輪）
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
   if (act === "wrong") { aiMarkWrong(String(data.log_id || "")); return; }
   if (act === "ai") { askAiHandoffPick(data); return; }   // 交給使用者自己的 AI：這一下就把問題複製起來
@@ -23716,9 +23750,13 @@ const ASSISTANT_ACTIONS = {
       if (!scope) return aiScopeAsk(slots, kindTxt, opts);
       if (scope === "market") return ASSISTANT_ACTIONS.assistantMarketSignals(Object.assign({}, slots, { scope: "market" }), args, opts);
     }
-    // 整份自選股＋好友分享的：每檔一列（今天幾則），有訊號的排前面；不跳頁，看完再決定要開哪一檔
-    const sids = aiSignalSids();
-    if (!sids.length) return { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
+    // 整份自選股＋好友分享的：每檔一列（今天幾則），有訊號的排前面；不跳頁，看完再決定要開哪一檔。
+    // 「好友分享給我的股票今天有訊號嗎」（shared_only，第七輪）：只看分享股
+    const sids = slots.shared_only ? [...new Set(sharedInSids().filter(isStockId))] : aiSignalSids();
+    if (!sids.length) {
+      return slots.shared_only ? { text: "現在沒有好友分享給你的股票。", actions: [{ label: "去分享分頁 ›", act: "open", data: { tab: "friends" } }] }
+                               : { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
+    }
     const shared = new Set(sharedInSids());
     let rows = sids.map(s => ({ sid: s, n: sigsOf(s).length })).sort((a, b) => b.n - a.n).slice(0, 12)
       .map(x => ({ label: aiStockName(x.sid), value: x.n ? `${x.n} 則` : "—", note: shared.has(x.sid) ? "好友分享" : x.sid, act: "open", data: { sid: x.sid, tab: "radar" } }));
@@ -23731,7 +23769,8 @@ const ASSISTANT_ACTIONS = {
     const day = aiSessionDayTxt();
     const diag = aiSignalDiag(sids, wanted || [], ((typeof marketPayload !== "undefined" && marketPayload && marketPayload.pulse) || {}).kinds || []);
     if (!hot) trackActivity("assistant_diag", { kind: String(slots.kind || ""), diag });
-    return { head: wanted ? `${day}${kindTxt}的自選股` : `${day}的訊號`, sub: hot ? `${hot} 檔有${kindTxt}訊號` : `${day}還沒有${kindTxt}訊號`, rows,
+    return { head: slots.shared_only ? `好友分享的股票${day}的訊號` : wanted ? `${day}${kindTxt}的自選股` : `${day}的訊號`,
+             sub: hot ? `${hot} 檔有${kindTxt}訊號` : `${day}還沒有${kindTxt}訊號`, rows,
              actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }],
              diag: aiIsAdmin ? diag : "" };
   },
@@ -24370,9 +24409,22 @@ const ASSISTANT_ACTIONS = {
     const goBtn = { label: "去分享分頁 ›", act: "open", data: { tab: "friends" } };
     const fail = r => { if (!r || typeof r !== "object" || r === FR_RPC_MISSING) throw new Error("分享功能暫時無法使用"); if (r.error) throw new Error(FR_ERRORS[r.error] || r.error); return r; };
     if (action === "list") {
-      const rows = out.slice(0, 5).map(s => ({ label: aiStockName(String(s.stock_id)), value: "我分享的", note: s.live === false ? "已結束" : "進行中", act: "open", data: { tab: "friends" } }))
-        .concat(inc.slice(0, 5).map(s => ({ label: aiStockName(String(s.stock_id)), value: `${s.owner_name || "好友"} 分享的`, note: s.status === "accepted" ? "已接受" : s.status === "pending" ? "等你回應" : String(s.status || ""), act: "open", data: { tab: "friends" } })));
-      return rows.length ? { head: "分享", rows, actions: [goBtn] } : { text: "還沒有任何分享。", actions: [goBtn] };
+      // 「Emma 分享了哪些給我」：句子裡（或籤帶回來的）好友名字，只列他分享給我的（第七輪）
+      const said0 = String((opts && opts.text) || "");
+      const who = String(slots.from || "") || [...new Set(inc.map(s => String(s.from_name || "")).filter(Boolean))].sort((a, b) => b.length - a.length).find(n => said0.includes(n)) || "";
+      const incoming = who ? inc.filter(s => String(s.from_name || "") === who) : inc;
+      // 誰分享的寫 from_name（以前讀 owner_name，那個欄位不存在，一律寫成「好友」）；接受了的寫今天幾則訊號
+      const sigN = sid0 => aiTodayEntries(sid0).length;
+      const rows = (who ? [] : out.slice(0, 5).map(s => ({ label: aiStockName(String(s.stock_id)), value: "我分享的", note: s.live === false ? "已結束" : "進行中", act: "open", data: { tab: "friends" } })))
+        .concat(incoming.slice(0, who ? 10 : 5).map(s => {
+          const sid0 = String(s.stock_id);
+          const st = s.status === "accepted" ? (s.live === false ? "已結束" : sigN(sid0) ? `今天 ${sigN(sid0)} 則訊號` : "已接受")
+            : s.status === "pending" ? "等你回應" : String(s.status || "");
+          return { label: aiStockName(sid0), value: `${s.from_name || "好友"} 分享的`, note: st,
+                   act: "open", data: s.status === "accepted" && s.live !== false ? { sid: sid0, tab: "radar" } : { tab: "friends" } };
+        }));
+      if (who && !rows.length) return { text: `${who} 目前沒有分享股票給你。`, actions: [goBtn] };
+      return rows.length ? { head: who ? `${who} 分享給你的` : "分享", rows, actions: [goBtn] } : { text: "還沒有任何分享。", actions: [goBtn] };
     }
     if (action === "stop") {
       const s = out.find(x => String(x.stock_id) === sid && x.live !== false);
@@ -24387,7 +24439,14 @@ const ASSISTANT_ACTIONS = {
       return aiConfirmCard({ head: ok ? "接受分享？" : "不接受分享？",
         rows: [{ label: "股票", value: aiStockName(String(s.stock_id)), note: "" }, { label: "來自", value: String(s.owner_name || "好友"), note: "" }],
         mainLabel: ok ? "接受" : "不接受",
-        run: async () => { fail(await frRpc("share_respond", { p_share_id: s.share_id, p_accept: ok })); await syncStockLists({ social: true }); return { text: ok ? `已接受 ${aiStockName(String(s.stock_id))} 的分享。` : "已回覆不接受。" }; } });
+        run: async () => {
+          fail(await frRpc("share_respond", { p_share_id: s.share_id, p_accept: ok }));
+          await syncStockLists({ social: true });
+          const sid0 = String(s.stock_id), nm = aiStockName(sid0);
+          return ok ? { text: `已接受 ${nm} 的分享。`, actions: [aiOpenBtn(sid0, "radar")],
+                        chips: [{ label: `${nm}今天有訊號嗎`, act: "run", data: { intent: "signals_today", slots: { stock: sid0 }, text: `${nm}今天有訊號嗎` } }] }
+                    : { text: "已回覆不接受。" };
+        } });
     }
     if (action === "optout") { aiNav(() => switchTab("friends")); return { text: "「不再接收」在分享分頁那一則上。" }; }
     if (!sid) return aiNeedStock();
@@ -24403,11 +24462,14 @@ const ASSISTANT_ACTIONS = {
         data: { intent: "share_stock", slots: { stock: sid, action: "share", friend_id: f.user_id }, text: `把${name}分享給${f.name}` } })) };
     }
     const f = hits[0];
+    // 期限（第七輪）：「分享 30 天」→ 到那一天的最後一刻（台北時間），與分享分頁的「終止日期」同一個算法
+    const until = aiExpiryDate(slots.duration);
+    const expires = until ? new Date(`${until}T23:59:59+08:00`).toISOString() : null;
     return aiConfirmCard({
-      head: "分享股票？", rows: [{ label: "股票", value: `${name} ${sid}`, note: "" }, { label: "給", value: String(f.name || ""), note: "不設期限" }],
+      head: "分享股票？", rows: [{ label: "股票", value: `${name} ${sid}`, note: "" }, { label: "給", value: String(f.name || ""), note: until ? `到 ${mmdd(until)} 止` : "不設期限" }],
       mainLabel: "分享",
       run: async () => {
-        const r = await frRpc("share_create", { p_stock_id: sid, p_friends: [f.user_id], p_groups: [], p_expires_at: null });
+        const r = await frRpc("share_create", { p_stock_id: sid, p_friends: [f.user_id], p_groups: [], p_expires_at: expires });
         if (r && r.error === "already_shared") return { text: `${name} 已經在分享中，到分享分頁那一則上增減對象。`, failed: true, actions: [goBtn] };
         fail(r);
         await frReloadShares().catch(() => {});
@@ -24453,7 +24515,11 @@ const ASSISTANT_ACTIONS = {
     if (action === "invite") return { text: "把邀請連結傳給朋友：", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
     const friends = (frState && frState.friends) || [];
     if (!friends.length) return { text: "還沒有好友。", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
-    return { head: `好友 ${friends.length} 位`, rows: friends.slice(0, 10).map(f => ({ label: String(f.name || ""), value: "", note: String(f.tag || ""), act: "open", data: { tab: "friends" } })), actions: [goBtn] };
+    // 點一位好友＝他分享給我的那幾檔（第七輪）
+    return { head: `好友 ${friends.length} 位`, sub: "點一位看他分享給你的股票",
+             rows: friends.slice(0, 10).map(f => ({ label: String(f.name || ""), value: "", note: String(f.tag || ""), act: "run",
+               data: { intent: "share_stock", slots: { action: "list", from: String(f.name || "") }, text: `${f.name} 分享了哪些給我` } })),
+             actions: [goBtn] };
   },
   assistantUiSettings(slots) {
     if (slots.font) { setAppFontSize(slots.font); return { text: `字體已改成${{ base: "標準", large: "大", xlarge: "最大" }[slots.font] || slots.font}。` }; }
@@ -24509,8 +24575,12 @@ const ASSISTANT_ACTIONS = {
     if (f.indScore != null) rows.push({ label: "族群強度", value: `${f.indScore}`, note: `${f.ind}・上漲 ${f.indUp}%` });
     if (f.v20) rows.push({ label: "20 日均量", value: `${Math.round(f.v20).toLocaleString()} 張`, note: "" });
     if (rows.length <= 1 && !f.price) return aiNoData({ head: `${f.name} ${sid}`, text: "拿不到這一檔的資料（全市場關卡檔與報價都沒有）。", actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")] });
+    const chips = f.mine ? [] : [aiAddChip(sid)];
+    if (frEnabled && ((frState && frState.friends) || []).length) {   // 有好友：這一檔分享給他（第七輪；確認卡照舊）
+      chips.push({ label: `分享${f.name}給好友`, act: "run", data: { intent: "share_stock", slots: { stock: sid, action: "share" }, text: `把${f.name}分享給好友` } });
+    }
     return { head: `${f.name} ${sid}`, sub: [f.ind, f.mine ? "" : "不在自選股"].filter(Boolean).join("・"), rows,
-             actions: [aiOpenBtn(sid, f.mine ? "radar" : "kline", f.mine ? "開個股字卡 ›" : "開 K 線 ›")], chips: f.mine ? [] : [aiAddChip(sid)] };
+             actions: [aiOpenBtn(sid, f.mine ? "radar" : "kline", f.mine ? "開個股字卡 ›" : "開 K 線 ›")], chips };
   },
   // 並排比較（第五輪）：兩三檔的資料排成一張表——只並排，不比好壞（哪一檔比較好是 advice，那一類拒答）
   async assistantCompare(slots) {
