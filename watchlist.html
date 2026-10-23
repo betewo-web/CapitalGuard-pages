@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="431">
+  <meta name="app-version" content="432">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=431" rel="stylesheet">
+  <link href="watchlist.css?v=432" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -21837,6 +21837,8 @@ const AI_INTENTS = {
   watch_list:       ["assistantWatchList", {}],
   holdings:         ["assistantHoldings", {}],
   daily_brief:      ["assistantDailyBrief", {}],
+  stock_overview:   ["assistantStockOverview", {}],
+  compare:          ["assistantCompare", {}],
   inbox:            ["assistantInbox", {}],
   watch_add:        ["assistantWatchAdd", {}],
   watch_remove:     ["assistantWatchRemove", {}],
@@ -22721,6 +22723,7 @@ const AI_STOCK_HINT = {
   quote: "現在多少錢", levels: "支撐在哪", ma_position: "站上月線了嗎", signals_today: "今天有訊號嗎", signals_history: "這週有哪些訊號",
   events: "有什麼資料", score: "評分多少", holdings: "的持股", kline: "的 K 線", price_target_set: "的到價提醒",
   basic_signal_set: "的基礎訊號", holdings_set: "的持股設定", watch_remove: "移除", share_stock: "分享給好友",
+  stock_overview: "整理一下", compare: "跟誰比較",
 };
 function aiNeedStock() {
   const sids = aiStockChoices();
@@ -22777,7 +22780,7 @@ function aiCarryStock(intent, slots, opts) {
 // 「接著問」：個股的答案卡底下兩三個下一步，點了本機直接做——看完報價順手看關卡、看完均線順手設通知。
 // 只加在答案卡（確認卡、失敗、已經有兩顆以上籤的不加）；設通知那一顆走 rule_create，照樣先出確認卡。
 const AI_FOLLOWUPS = {
-  quote: ["levels", "ma_position", "price_target_set"],
+  quote: ["levels", "ma_position", "price_target_set", "stock_overview"],
   levels: ["ma_position", "price_target_set", "kline"],
   ma_position: ["levels", "ma_rule", "kline"],
   signals_today: ["signals_history", "levels"],
@@ -22792,6 +22795,7 @@ function aiFollowupChip(kind, sid) {
   if (kind === "ma_position") return run(`${name}站上月線了嗎`, "ma_position");
   if (kind === "price_target_set") return run(`${name}的到價提醒`, "price_target_set");
   if (kind === "kline") return run(`看${name}的 K 線`, "kline");
+  if (kind === "stock_overview") return run(`${name}整理一下`, "stock_overview");
   if (kind === "quote") return run(`${name}收盤多少`, "quote");
   if (kind === "signals_today") return run(`${name}今天有訊號嗎`, "signals_today");
   if (kind === "signals_history") return run(`${name}最近有哪些訊號`, "signals_history");
@@ -22970,6 +22974,31 @@ function aiScopeAsk(slots, label, opts) {
                    { label: "我的自選股", act: "run", data: { intent: "signals_today", slots: { kind: slots.kind, scope: "mine" }, text: said ? `自選股 ${said}` : `自選股${label}的` } }] };
 }
 const AI_DIR_TXT = { 1: "漲", 0: "平", "-1": "跌" };
+// ── 一檔的全貌與並排比較（第五輪，2026-10-23）───────────────────────────────────
+// 一檔的資料一次拿齊：收盤、漲跌、關卡、均線位置、52 週、今天的訊號、族群強度、20 日均量。
+// 全是既有的那幾份（報價、盤中關卡、全市場關卡檔、全市場索引、市場強度），不多打任何一支 API。
+async function aiStockFacts(sid) {
+  const [ml, mt, mp] = await Promise.all([aiMarketLevels(), aiMarketToday(), aiMarketPayload().catch(() => null)]);
+  const m = (ml && ml.stocks && ml.stocks[sid]) || null;
+  const q = getQuote(sid) || getCloseQuote(sid);
+  const price = q && q.price > 0 ? Number(q.price) : (m && m.c > 0 ? Number(m.c) : null);
+  const mine = aiSignalSids().includes(sid);
+  let lv = nearestLevels(sid, price);
+  if (lv.support == null && lv.resistance == null && m) lv = _nearestFromLevels({ support: m.s, resistance: m.r }, price);
+  const maPos = p => { const v = Number(((m && m.ma) || {})[`MA${p}`]); return v > 0 && price ? (price - v) / v * 100 : null; };
+  const today = mine ? aiTodayEntries(sid).map(e => String(e.title || aiKindLabel(e.key) || ""))
+                     : (mt && aiTodayIsCurrent(mt) ? aiTodaySignalsOf(mt, sid).map(h => aiKindLabel(h.key)) : []);
+  const ind = String((universe[sid] || {}).i || "");
+  const indRow = mp ? (msView(mp).industries || []).find(x => x.ind === ind) : null;
+  return { sid, name: aiStockName(sid), mine, price, chg: q && q.changePct != null ? Number(q.changePct) : null,
+           day: q && q.tradeDate ? String(q.tradeDate).slice(5).replace("-", "/") : (ml && ml.date ? String(ml.date).slice(5).replace("-", "/") : ""),
+           lv, ma20: maPos(20), ma60: maPos(60), h52: m && m.h52 != null ? Number(m.h52) : null, l52: m && m.l52 != null ? Number(m.l52) : null,
+           v20: m && m.v20 != null ? Number(m.v20) : null, today, ind: aiIndustryOf(sid), indScore: indRow ? Number(indRow.score) : null,
+           indUp: indRow ? Number(indRow.up_pct) : null };
+}
+const aiPosTxt = d => d == null ? "—" : Math.abs(d) < 0.05 ? "貼線" : d > 0 ? `上方 ${fmtPct(d)}%` : `下方 ${fmtPct(d)}%`;
+const aiFromHigh = f => f.h52 && f.price ? `離高點 ${f.price >= f.h52 ? "0" : "−" + fmtPct((f.h52 - f.price) / f.h52 * 100)}%` : "";
+
 // 一檔的產業（universe 的 i）：沒有的寫「其他」，ETF 一律「ETF」
 function aiIndustryOf(sid) { return isEtfId(sid) ? "ETF" : String((universe[sid] || {}).i || "") || "其他"; }
 
@@ -23693,6 +23722,13 @@ const ASSISTANT_ACTIONS = {
     const day = q.tradeDate ? q.tradeDate.slice(5).replace("-", "/") : "";
     rows.push({ label: "收盤", value: fmtPrice(q.price), note: day });
     if (q.changePct != null) rows.push({ label: "漲跌幅", value: fmtChgHtml(q.changePct), html: true, note: day ? `${day} 收盤` : "" });
+    // 52 週區間與離高點多遠（全市場關卡檔；第五輪）、族群強度（市場強度已經載過才寫）
+    const ml52 = await aiMarketLevels();
+    const m52 = ml52 && ml52.stocks && ml52.stocks[sid];
+    if (m52 && m52.h52 && m52.l52) rows.push({ label: "52 週", value: `${fmtPrice(m52.l52)}～${fmtPrice(m52.h52)}`, note: aiFromHigh({ h52: Number(m52.h52), price: Number(q.price) }) });
+    const ind = String((universe[sid] || {}).i || "");
+    const indRow = typeof marketPayload !== "undefined" && marketPayload ? (msView(marketPayload).industries || []).find(x => x.ind === ind) : null;
+    if (indRow) rows.push({ label: "族群強度", value: `${Number(indRow.score)}`, note: `${ind}・上漲 ${Number(indRow.up_pct)}%` });
     return {
       head: `${aiStockName(sid)} ${sid}`, sub: "",
       rows, actions: [aiOpenBtn(sid, "radar")],
@@ -23708,7 +23744,14 @@ const ASSISTANT_ACTIONS = {
     const rows = [];
     if (lv.support != null) rows.push({ label: "支撐", value: fmtPrice(lv.support), note: `距 ${fmtPct(lv.supPct)}%` });
     if (lv.resistance != null) rows.push({ label: "壓力", value: fmtPrice(lv.resistance), note: `距 ${fmtPct(lv.resPct)}%` });
-    if (rows.length) return { head: `${aiStockName(sid)} ${sid}`, sub: price ? `收盤 ${fmtPrice(price)}` : "", rows, actions: [aiOpenBtn(sid, "radar")] };
+    if (rows.length) {
+      // 自選股這一條路以前只有支撐與壓力：均線與 52 週也是關卡（第五輪），讀全市場關卡檔
+      const mlx = await aiMarketLevels();
+      const mx = mlx && mlx.stocks && mlx.stocks[sid];
+      if (mx && mx.ma && mx.ma.MA20 != null) rows.push({ label: "月線", value: fmtPrice(mx.ma.MA20), note: mx.ma.MA60 != null ? `季線 ${fmtPrice(mx.ma.MA60)}` : "" });
+      if (mx && mx.h52 != null) rows.push({ label: "52 週", value: `${fmtPrice(mx.l52)}～${fmtPrice(mx.h52)}`, note: "" });
+      return { head: `${aiStockName(sid)} ${sid}`, sub: price ? `收盤 ${fmtPrice(price)}` : "", rows, actions: [aiOpenBtn(sid, "radar")] };
+    }
     // 不在自選股（或關卡還沒載）：全市場關卡檔（日線算的，每天 06:15 更新；第十八節）
     const ml = await aiMarketLevels();
     const m = ml && ml.stocks && ml.stocks[sid];
@@ -23998,6 +24041,12 @@ const ASSISTANT_ACTIONS = {
     }
     const sids = aiSignalSids();
     if (!sids.length) return { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
+    if (slots.sector) {   // 「我的自選股裡半導體有哪些」（第五輪）：族群表的鍵是產業名的字首
+      const hit = sids.filter(s => String((universe[s] || {}).i || "").includes(String(slots.sector)));
+      return { head: `自選股裡的${slots.sector}`, sub: hit.length ? `${hit.length}／${sids.length} 檔` : "",
+               text: hit.length ? "" : `自選股裡沒有${slots.sector}的股票。`,
+               rows: hit.slice(0, 20).map(s => ({ label: aiStockName(s), value: s, note: sharedSet.has(s) ? "好友分享" : "", act: "open", data: { sid: s, tab: "radar" } })) };
+    }
     if (slots.by_industry) {   // 「我的自選股有哪些產業」（第三輪）
       const groups = new Map();
       for (const s of sids) { const ind = aiIndustryOf(s); groups.set(ind, (groups.get(ind) || []).concat([s])); }
@@ -24359,6 +24408,71 @@ const ASSISTANT_ACTIONS = {
     const card = { text: opts.say || "請直接問那個名詞，例如「什麼是支撐」。", muted: !opts.say };
     if (opts.say && slots.term) card.chips = aiGlossaryTry(slots.term);   // 學到的名詞用在自己的股票上（第四輪）
     return card;
+  },
+  // 一檔的全貌（第五輪）：「台積電整理一下」「鴻海現在怎麼樣」——一張卡看完，每一列點了是那一項的完整答案
+  async assistantStockOverview(slots) {
+    const sid = slots.stock;
+    if (!sid) return aiNeedStock();
+    const f = await aiStockFacts(sid);
+    const go = (intent, extra, label) => ({ act: "run", data: { intent, slots: Object.assign({ stock: sid }, extra || {}), text: label } });
+    const rows = [];
+    if (f.price) rows.push(Object.assign({ label: "收盤", html: true, note: f.day,
+      value: f.chg != null ? `${escapeHtml(fmtPrice(f.price))}　${fmtChgHtml(f.chg)}` : escapeHtml(fmtPrice(f.price)) }, go("quote", {}, `${f.name}收盤多少`)));
+    // 支撐與壓力各一列（併成一列在 390px 寬會折成三行）
+    if (f.lv.support != null) rows.push(Object.assign({ label: "支撐", value: fmtPrice(f.lv.support), note: `距 ${fmtPct(f.lv.supPct)}%` }, go("levels", {}, `${f.name}支撐在哪`)));
+    if (f.lv.resistance != null) rows.push(Object.assign({ label: "壓力", value: fmtPrice(f.lv.resistance), note: `距 ${fmtPct(f.lv.resPct)}%` }, go("levels", {}, `${f.name}壓力在哪`)));
+    if (f.ma20 != null || f.ma60 != null) rows.push(Object.assign({ label: "均線", value: `月線${aiPosTxt(f.ma20)}`, note: `季線${aiPosTxt(f.ma60)}` },
+      go("ma_position", { periods: [20, 60] }, `${f.name}站上月線了嗎`)));
+    if (f.h52 && f.l52) rows.push({ label: "52 週", value: `${fmtPrice(f.l52)}～${fmtPrice(f.h52)}`, note: aiFromHigh(f) });
+    rows.push(Object.assign({ label: "今天的訊號", value: f.today.length ? `${f.today.length} 則` : "沒有", note: f.today.slice(0, 2).join("、") },
+      go("signals_today", {}, `${f.name}今天有訊號嗎`)));
+    if (!stockEvents[sid]) await loadStockEvents([sid]).catch(() => {});
+    const todayKey = taipeiDateKey(new Date());
+    const next = (stockEvents[sid] || []).filter(e => String(e.event_date || "") > todayKey).sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)))[0];
+    if (next) rows.push(Object.assign({ label: "下一個日程", value: String(next.title || "").slice(0, 16), note: mmdd(next.event_date) },
+      go("events", { horizon: "upcoming" }, `${f.name}接下來有什麼日程`)));
+    const h = holdingBySid().get(sid);
+    if (h && Number(h.shares) > 0) rows.push(Object.assign({ label: "持股", value: fmtLots(Number(h.shares)), note: Number(h.cost) > 0 ? `成本 ${fmtPrice(Number(h.cost))}` : "" },
+      go("holdings", {}, `${f.name}的持股`)));
+    const row = aiRowOf(sid);
+    const tg = row ? [["target_price_low", "跌到"], ["target_price_high", "漲到"]].filter(([k]) => row[k] != null && row[k] !== "").map(([k, w]) => `${w} ${fmtPrice(row[k])}`) : [];
+    if (tg.length) rows.push(Object.assign({ label: "到價提醒", value: tg.join("、"), note: "" }, go("price_target_set", {}, `${f.name}的到價提醒`)));
+    if (f.indScore != null) rows.push({ label: "族群強度", value: `${f.indScore}`, note: `${f.ind}・上漲 ${f.indUp}%` });
+    if (f.v20) rows.push({ label: "20 日均量", value: `${Math.round(f.v20).toLocaleString()} 張`, note: "" });
+    if (rows.length <= 1 && !f.price) return aiNoData({ head: `${f.name} ${sid}`, text: "拿不到這一檔的資料（全市場關卡檔與報價都沒有）。", actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")] });
+    return { head: `${f.name} ${sid}`, sub: [f.ind, f.mine ? "" : "不在自選股"].filter(Boolean).join("・"), rows,
+             actions: [aiOpenBtn(sid, f.mine ? "radar" : "kline", f.mine ? "開個股字卡 ›" : "開 K 線 ›")], chips: f.mine ? [] : [aiAddChip(sid)] };
+  },
+  // 並排比較（第五輪）：兩三檔的資料排成一張表——只並排，不比好壞（哪一檔比較好是 advice，那一類拒答）
+  async assistantCompare(slots) {
+    const many = aiMultiStocks(slots) || (slots.stock ? [String(slots.stock)] : []);
+    if (many.length < 2) {
+      const first = many[0];
+      const others = aiStockChoices().filter(s => s !== first).slice(0, 6);
+      return { head: first ? `${aiStockName(first)}要跟哪一檔比？` : "要比較哪兩檔？", text: "點一檔，或打「台積電和聯發科比較」。",
+               chips: first ? others.map(s => ({ label: aiStockName(s), act: "run",
+                 data: { intent: "compare", slots: { stock: first }, text: `${aiStockName(first)}和${aiStockName(s)}比較` } })) : [] };
+    }
+    const facts = await Promise.all(many.slice(0, 3).map(aiStockFacts));
+    const cell = v => `<td>${v}</td>`;
+    const line = (label, fn) => `<tr><th>${escapeHtml(label)}</th>${facts.map(f => cell(fn(f))).join("")}</tr>`;
+    const esc = v => escapeHtml(String(v));
+    const head = `<tr><th></th>${facts.map(f => `<th><button type="button" class="ai-cmp-name" data-ai-act="run" data-ai-data="${escapeHtml(JSON.stringify({ intent: "stock_overview", slots: { stock: f.sid }, text: `${f.name}整理一下` }))}">${esc(f.name)}</button></th>`).join("")}</tr>`;
+    const body = [
+      line("收盤", f => f.price ? esc(fmtPrice(f.price)) : "—"),
+      line("漲跌幅", f => f.chg != null ? fmtChgHtml(f.chg) : "—"),
+      line("月線", f => esc(aiPosTxt(f.ma20))),
+      line("季線", f => esc(aiPosTxt(f.ma60))),
+      line("距支撐", f => f.lv.supPct != null ? esc(`${fmtPct(f.lv.supPct)}%`) : "—"),
+      line("距壓力", f => f.lv.resPct != null ? esc(`${fmtPct(f.lv.resPct)}%`) : "—"),
+      line("52 週", f => esc(aiFromHigh(f).replace("離高點 ", "") || "—")),
+      line("今天的訊號", f => esc(f.today.length ? `${f.today.length} 則` : "—")),
+      line("族群強度", f => f.indScore != null ? esc(f.indScore) : "—"),
+    ].join("");
+    const notMine = facts.filter(f => !f.mine);
+    return { head: facts.map(f => f.name).join(" vs "), sub: "只並排資料，不比好壞・點名字看那一檔的全貌",
+             bodyHtml: `<table class="ai-cmp"><thead>${head}</thead><tbody>${body}</tbody></table>`,
+             chips: notMine.slice(0, 2).map(f => Object.assign(aiAddChip(f.sid), { label: `${f.name}加進自選` })) };
   },
   // 今天的重點（第四輪）：一張卡把今天跟「我」有關的事整理在一起，每一列點了就是那一類的完整答案（本機直接做）。
   // 也是每天第一次打開助手時自動出的那一張。「這週回顧」是同一類的 period=week。

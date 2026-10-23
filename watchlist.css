@@ -2079,6 +2079,13 @@ html.home-simple-only #home-filter { display: none !important; }
 .ai-card-head { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1.04rem; color: var(--text-0); }
 .ai-card-head .ic { color: var(--accent); width: 18px; height: 18px; flex: 0 0 auto; }
 .ai-card-sub { color: var(--text-muted); font-size: 0.86rem; margin-top: 2px; }
+/* 並排比較（第五輪）：兩三檔一欄一檔，數字靠右對齊；欄名是按鍵（點了看那一檔的全貌） */
+.ai-cmp { width: 100%; border-collapse: collapse; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+.ai-cmp th, .ai-cmp td { padding: 6px 4px; border-top: 1px solid var(--border); text-align: right; }
+.ai-cmp thead th { border-top: none; }
+.ai-cmp tbody th { text-align: left; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.ai-cmp-name { background: none; border: none; padding: 0; color: var(--text-0); font: inherit; font-weight: 700;
+	text-decoration: underline dotted; cursor: pointer; }
 /* 追問沿用了剛才那一檔（「那支撐呢」）：小字寫在副標下面，同一張卡有「換一檔」籤 */
 .ai-card-ctx { color: var(--text-muted); font-size: 0.8rem; margin-top: 2px; }
 .ai-card-body { margin-top: 8px; color: var(--text-1); font-size: 0.96rem; line-height: 1.55; }
