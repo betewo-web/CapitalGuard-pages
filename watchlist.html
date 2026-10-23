@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="425">
+  <meta name="app-version" content="426">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=425" rel="stylesheet">
+  <link href="watchlist.css?v=426" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -21817,6 +21817,7 @@ function aiSkipPending() {
     if (spec.busy) continue;
     delete aiPending[id];
     // 截圖匯入的卡：讀出來的那幾列留著（那是答案），只收掉按鍵與選項
+    if (spec.plan) spec.closed = true;
     aiReplaceCard(id, spec.plan
       ? Object.assign(aiImportView(id, spec), { chips: [], actions: [], muted: true, sub: "已略過（你送了新的一句）" })
       : { text: "已略過（你送了新的一句）。", muted: true });
@@ -22068,7 +22069,8 @@ function aiAct(act, data) {
   if (act === "send") { assistantSend(String(data.text || "")); return; }
   if (act === "run") { aiRunChip(data); return; }
   if (act === "image") { aiPickImage(); return; }                          // 選檔要使用者的點擊：卡上的「選擇截圖」就是那一下
-  if (act === "imptoggle") { aiImportToggle(String(data.id || ""), String(data.mode || "missing")); return; }   // 截圖匯入的三個選項   // 籤上已帶類別＋槽位：本機直接做，不再送 Worker 分類（第十五節 A3）
+  if (act === "imptoggle") { aiImportToggle(String(data.id || ""), String(data.mode || "missing")); return; }   // 截圖匯入的三個選項
+  if (act === "impchoose") { aiImportChoose(String(data.id || ""), String(data.mode || "same")); return; }   // 截圖匯入：同一個帳戶／另一個帳戶   // 籤上已帶類別＋槽位：本機直接做，不再送 Worker 分類（第十五節 A3）
   if (act === "open") { if (data._collapse) aiCollapseConfirm(String(data._collapse)); aiOpen(data); renderAssistant(); return; }
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
@@ -22656,7 +22658,9 @@ function aiImportCard(resp, meta) {
   const id = "ac" + (++_aiCardSeq);
   const spec = {
     plan, meta: meta || null, removeMissing: false, addMode: false, oddReplace: false, head: "從截圖更新持股？",
+    stage: plan.items.some(i => i.cur) ? "ask" : "confirm",   // 有記過的股票：先問是同一個帳戶還是另一個帳戶
     run: async () => {
+      if (spec.stage === "ask") return { text: "先選這張截圖是同一個帳戶還是另一個帳戶，再套用。", muted: true, failed: true };
       let done = 0, removed = 0, stop = "";
       const failed = [];
       let added = 0;
@@ -22683,7 +22687,7 @@ function aiImportCard(resp, meta) {
     },
   };
   const card = aiImportView(id, spec);   // 「讀了 3 張、1 張之前讀過」寫在 text 裡
-  if (!card.actions.length && !card.chips.length) return card;   // 跟現在一樣、也沒有選項可改：答案卡就好
+  if (!card.actions.length && !(card.chips || []).length) return card;   // 跟現在一樣、也沒有選項可改：答案卡就好
   aiPending[id] = spec;
   return Object.assign(card, { _id: id });
 }
@@ -22706,7 +22710,75 @@ function _importEffect(i, spec) {
   return { op: { kind: "set", shares: i.shares, price: i.avg }, shares: i.shares, avg: i.avg, status: i.status };
 }
 
+// 卡上那一句「讀了 3 張、1 張之前讀過、重疊 1 列只算一次」（詢問與確認兩張卡共用）
+function _importHowText(spec) {
+  const m = spec.meta || {};
+  const how = [m.files > 1 ? `讀了 ${m.files} 張截圖` : "", m.cached ? `${m.cached} 張之前讀過，直接用上次的結果` : "",
+               m.dup ? `${m.dup} 張重複，略過` : "", m.overlap ? `重疊的 ${m.overlap} 列只算一次` : "",
+               m.failed ? `${m.failed} 張沒讀到` : "", m.notHoldings ? `${m.notHoldings} 張不是持股清單` : "",
+               m.skipped ? `一次最多 ${AI_IMG_MAX_FILES} 張，後面 ${m.skipped} 張沒讀` : ""].filter(Boolean);
+  return how.length ? `${how.join("，")}。` : "";
+}
+
+// 截圖裡有已經記過的股票：先問清楚，再出確認卡（Howard 2026-10-23：原本只有一顆小籤「另一個帳戶…」，
+// 預設又是以截圖為準——使用者沒看到那顆籤，另一個帳戶的持股就被蓋掉了）。
+// 每一檔並排寫「已記錄」「截圖」，兩個選項各自寫出那幾檔會變成什麼；兩邊一模一樣時標出「看起來是重複上傳」並建議同一個帳戶。
+// 選項是兩顆整寬的鍵（卡底那一排鍵是固定高度，放不下兩行說明）。
+function aiImportAskView(id, spec) {
+  const items = spec.plan.items;
+  const dup = items.filter(i => i.cur);
+  const fresh = items.filter(i => !i.cur && !i.skipped).length;
+  const asSame = i => _importEffect(i, Object.assign({}, spec, { addMode: false }));
+  const asAdd = i => _importEffect(i, Object.assign({}, spec, { addMode: true }));
+  const identical = dup.every(i => asSame(i).status === "same");
+  const hold = (s, c) => `${Number(s).toLocaleString()} 股・均價 ${c != null ? fmtPrice(c) : "未填"}`;
+  const show = dup.slice(0, 6);
+  const blocks = show.map(i => `<div class="ai-dup">
+      <div class="ai-dup-name">${escapeHtml(aiStockName(i.sid))}<span>${escapeHtml(i.sid)}</span>${asSame(i).status === "same" ? "<em>截圖跟已記錄一模一樣</em>" : ""}</div>
+      <div class="ai-dup-row"><i>已記錄</i><b>${escapeHtml(hold(i.cur.shares, i.cur.cost))}</b></div>
+      <div class="ai-dup-row"><i>截圖</i><b>${escapeHtml(hold(i.shares, i.avg))}</b></div>
+    </div>`).join("");
+  // 兩個選項各自的結果：三檔以內逐檔寫，多了寫檔數
+  const summary = (fn, verb) => {
+    const eff = dup.map(i => [i, fn(i)]);
+    if (dup.length <= 3) {
+      return eff.map(([i, e]) => `${aiStockName(i.sid)} ${e.status === "same" ? "不變" : `${verb} ${hold(e.shares, e.avg)}`}`).join("；");
+    }
+    const same = eff.filter(([, e]) => e.status === "same").length;
+    return `${dup.length - same} 檔${verb}${same ? `、${same} 檔不變` : ""}`;
+  };
+  const choice = (mode, title, detail, rec) => spec.closed ? "" :
+    `<button type="button" class="ai-choice${rec ? " is-rec" : ""}" data-ai-act="impchoose" data-ai-data="${escapeHtml(JSON.stringify({ id, mode }))}">
+       <b>${escapeHtml(title)}${rec ? "（看起來是這個）" : ""}</b><span>${escapeHtml(detail)}</span></button>`;
+  const lead = identical
+    ? `這 ${dup.length} 檔跟已記錄的一模一樣，看起來是同一個帳戶重複上傳。`
+    : "截圖是同一個帳戶最新的樣子，就以截圖為準；是另一個帳戶的持股，就把兩邊加起來。";
+  const bodyHtml = `<p>${escapeHtml(_importHowText(spec) + lead)}</p>${blocks}`
+    + (dup.length > show.length ? `<p>還有 ${dup.length - show.length} 檔也記過。</p>` : "")
+    + (fresh ? `<p>另外 ${fresh} 檔是新的，兩種選擇都會新增。</p>` : "")
+    + (spec.closed ? "" : `<div class="ai-choices">
+        ${choice("same", "同一個帳戶，不重複加", `以截圖為準：${summary(asSame, "改成")}`, identical)}
+        ${choice("add", "另一個帳戶，加上去", `兩邊相加：${summary(asAdd, "加總")}`, false)}
+      </div>`);
+  return {
+    head: `截圖裡有 ${dup.length} 檔你已經記過了`,
+    sub: spec.closed ? "已略過（你送了新的一句）" : "先確認：這張截圖跟之前記的，是同一個帳戶，還是另一個帳戶？",
+    bodyHtml,
+    actions: spec.closed ? [] : [{ label: "取消", act: "cancel", data: { id } }],
+  };
+}
+
+function aiImportChoose(id, mode) {
+  const spec = aiPending[id];
+  if (!spec || spec.busy || !spec.plan) return;
+  spec.addMode = mode === "add";
+  spec.stage = "confirm";
+  aiReplaceCard(id, Object.assign(aiImportView(id, spec), { log_id: spec.log_id || null }));
+  renderAssistant();
+}
+
 function aiImportView(id, spec) {
+  if (spec.stage === "ask") return aiImportAskView(id, spec);   // 有記過的：先問同一個帳戶還是另一個帳戶
   const { items, unknown, missing } = spec.plan;
   const eff = items.map(i => _importEffect(i, spec));
   const removeMissing = spec.removeMissing && !spec.addMode;   // 另一個帳戶的截圖不該刪掉這個帳戶的持股
@@ -22726,19 +22798,16 @@ function aiImportView(id, spec) {
   }).concat(del.map(sid => ({ label: `${aiStockName(sid)} ${sid}`, value: "刪除持股", note: "截圖裡沒有" })));
   const parts = [["新增", count("new")], ["更新", count("update") + count("odd")], ["加上去", count("add")], ["不變", count("same")]]
     .filter(p => p[1]).map(p => `${p[0]} ${p[1]}`);
-  const m = spec.meta || {};
-  const how = [m.files > 1 ? `讀了 ${m.files} 張截圖` : "", m.cached ? `${m.cached} 張之前讀過，直接用上次的結果` : "",
-               m.dup ? `${m.dup} 張重複，略過` : "", m.overlap ? `重疊的 ${m.overlap} 列只算一次` : "",
-               m.failed ? `${m.failed} 張沒讀到` : "", m.notHoldings ? `${m.notHoldings} 張不是持股清單` : "",
-               m.skipped ? `一次最多 ${AI_IMG_MAX_FILES} 張，後面 ${m.skipped} 張沒讀` : ""].filter(Boolean);
-  const text = (how.length ? `${how.join("，")}。` : "")
-    + (spec.addMode ? "另一個帳戶：已經有的股票把截圖的股數加上去，均價加權。" : "")
+  const text = _importHowText(spec)
+    + (items.some(i => i.cur)
+       ? (spec.addMode ? "你選了「另一個帳戶」：已經記過的那幾檔把截圖的股數加上去，均價加權。"
+                       : "你選了「同一個帳戶」：已經記過的那幾檔以截圖為準，不重複加。") : "")
     + (unknown.length ? `認不出：${unknown.slice(0, 5).join("、")}${unknown.length > 5 ? ` 等 ${unknown.length} 列` : ""}（不套用）。` : "")
     + "截圖不會保存；讀出來的結果記在這支手機上，同一張圖再選不必重新辨識。";
   // 三個選項：已經有的股票「另一個帳戶 → 加上去」、只有零股那一列「取代整股」、截圖裡沒有的「也刪掉」
   const held = items.filter(i => i.cur).length;
   const chips = [];
-  if (held) chips.push({ label: spec.addMode ? "以截圖為準（同一個帳戶）" : `另一個帳戶：重複的 ${held} 檔股數加上去`,
+  if (held) chips.push({ label: spec.addMode ? "改成：同一個帳戶（以截圖為準）" : "改成：另一個帳戶（加上去）",
                          act: "imptoggle", data: { id, mode: "add" } });
   if (!spec.addMode && items.some(i => i.odd)) chips.push({ label: spec.oddReplace ? "零股加回原本的整股" : "零股改成取代原本的整股",
                                                             act: "imptoggle", data: { id, mode: "odd" } });

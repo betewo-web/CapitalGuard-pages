@@ -2108,6 +2108,22 @@ html.home-simple-only #home-filter { display: none !important; }
 .ai-chip { padding: 9px 13px; border-radius: 999px; border: 1px solid rgba(139, 124, 255, 0.45); background: rgba(139, 124, 255, 0.12);
 	color: var(--text-0); font-size: 0.92rem; line-height: 1.2; cursor: pointer; }
 .ai-chip.is-hot { border-color: var(--sig-orange); background: rgba(255, 159, 67, 0.14); }
+/* 截圖匯入：已經記過的那幾檔並排比（已記錄／截圖），兩個選項是整寬的鍵、各自寫出會變成什麼（ASSISTANT.md 第二十六節）。
+   建議的那一個用主要動作的金框——只有兩邊一模一樣（看起來是重複上傳）時才有建議 */
+.ai-dup { padding: 8px 0; border-top: 1px solid var(--border); }
+.ai-dup-name { color: var(--text-0); font-weight: 700; }
+.ai-dup-name span { margin-left: 6px; color: var(--text-muted); font-weight: 500; font-size: 0.86rem; }
+.ai-dup-name em { margin-left: 8px; font-style: normal; font-size: 0.78rem; color: var(--sig-orange); }
+.ai-dup-row { display: flex; gap: 10px; margin-top: 2px; font-size: 0.9rem; }
+.ai-dup-row i { flex: 0 0 3.6em; font-style: normal; color: var(--text-muted); }
+.ai-dup-row b { color: var(--text-0); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ai-choices { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.ai-choice { display: block; width: 100%; padding: 10px 12px; border: 1px solid rgba(139, 124, 255, 0.45); border-radius: 12px;
+	background: rgba(139, 124, 255, 0.1); color: var(--text-0); text-align: left; cursor: pointer; }
+.ai-choice b { display: block; font-size: 1rem; font-weight: 700; }
+.ai-choice span { display: block; margin-top: 3px; font-size: 0.84rem; line-height: 1.45; color: var(--text-1); }
+.ai-choice.is-rec { border-color: var(--accent-2); background: rgba(245, 197, 66, 0.1); }
+.ai-choice:active { transform: scale(0.99); }
 .ai-intro ul { margin: 6px 0 0; padding-left: 1.1em; }
 .ai-intro ol { margin: 6px 0 0; padding-left: 1.4em; }
 .ai-intro li { margin: 3px 0; }
