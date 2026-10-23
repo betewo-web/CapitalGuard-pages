@@ -2957,6 +2957,53 @@ html.home-simple-only #home-filter { display: none !important; }
 .obs-chg-v { font-size: 14.4px; line-height: 1.55; color: var(--text-0); }
 .obs-chg-sub { margin-top: 2px; font-size: 13.2px; color: var(--text-muted); }
 
+/* 個股檔案（OBSERVATION.md 第七節）：波動程度／成交量／和大盤比，近 30／90／180 天三欄並排。
+   和大盤比那張圖：這檔＝品牌紫實線、大盤＝灰色虛線當參考（dataviz validate_palette：兩條在色盲模擬下
+   ΔE 15.8；灰色是刻意的「背景」那一條，虛線＋圖例＋線尾的數字是第二種辨識方式）。
+   0% 與各段起點是一像素實線（不用虛線，虛線留給大盤那一條）。 */
+/* 名稱一欄 31%、三段等寬：長的名稱自己換行，不把近 180 天擠出卡片。
+   .obs-tbl 的規則寫在後面（名稱不換行），所以這裡用 .obs-tbl.prof-tbl 蓋過去 */
+.obs-tbl.prof-tbl { table-layout: fixed; }
+.obs-tbl.prof-tbl thead th:first-child, .obs-tbl.prof-tbl tbody th { width: 31%; }
+.obs-tbl.prof-tbl thead th, .obs-tbl.prof-tbl td { white-space: nowrap; }
+.obs-tbl.prof-tbl thead th i { font-size: 11.5px; }
+.obs-tbl.prof-tbl tbody th { white-space: normal; line-height: 1.35; }
+.obs-tbl.prof-tbl td { font-variant-numeric: tabular-nums; }
+.obs-tbl.prof-tbl td i { display: block; font-style: normal; font-size: 12px; color: var(--text-muted); }
+.obs-rel-keys { display: flex; flex-wrap: wrap; gap: 4px 16px; max-width: 400px; margin: 4px auto 0; font-size: 13px; color: var(--text-1); }
+.obs-rel-key { display: inline-flex; align-items: center; gap: 6px; }
+.obs-rel-key i, .obs-rel-tip-row i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--accent); }
+.obs-rel-key.is-mkt i, .obs-rel-tip-row.is-mkt i { border-top: 2px dashed var(--text-muted); }
+.obs-rel-wrap { position: relative; max-width: 400px; margin: 0 auto; }
+.obs-rel-chart { margin: 0 0 6px; touch-action: pan-y; outline: none; }
+.obs-rel-chart:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.obs-rel-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.obs-rel-line.is-stock { stroke: var(--accent); }
+.obs-rel-line.is-mkt { stroke: var(--text-muted); stroke-dasharray: 5 3; }
+.obs-rel-zero, .obs-rel-guide { stroke: rgba(146, 146, 163, 0.3); stroke-width: 1; }
+.obs-rel-cross { stroke: var(--text-1); stroke-width: 1; }
+.obs-rel-dot { stroke: rgb(9, 16, 31); stroke-width: 2; }
+.obs-rel-dot.is-stock { fill: var(--accent); }
+.obs-rel-dot.is-mkt { fill: var(--text-muted); }
+.obs-rel-tick { fill: var(--text-muted); font-size: 11px; }
+.obs-rel-end { fill: var(--text-0); font-size: 12px; font-weight: 700; }
+.obs-rel-end.is-mkt { fill: var(--text-1); font-weight: 600; }
+.obs-rel-tip {
+	position: absolute;
+	top: 0;
+	padding: 6px 9px;
+	border: 1px solid rgba(146, 146, 163, 0.3);
+	border-radius: 8px;
+	background: rgba(23, 23, 36, 0.96);
+	font-size: 12.8px;
+	color: var(--text-1);
+	white-space: nowrap;
+	pointer-events: none;
+}
+.obs-rel-tip-day { margin-bottom: 2px; color: var(--text-muted); }
+.obs-rel-tip-row { display: flex; align-items: center; gap: 6px; }
+.obs-rel-tip-row b { color: var(--text-0); font-weight: 700; }
+
 /* ④ 常出現的訊號：一種一列，可以點（點了下面換成那一種出現之後） */
 .obs-freq {
 	display: grid;

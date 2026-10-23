@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="426">
+  <meta name="app-version" content="427">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=426" rel="stylesheet">
+  <link href="watchlist.css?v=427" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1714,10 +1714,12 @@
 
         <!-- 分頁二：觀察紀錄（OBSERVATION.md，2026-10-23 Howard「像信用監控一樣追蹤股票」）——
              這一檔自己的長期紀錄。由上而下：加入自選以來／你設定的價位／最近的變化（#obs-top）→
+             個股檔案：波動程度／成交量／和大盤比，近 30／90／180 天並排（#obs-prof，第二輪「像個人財務管理」）→
              過去一年常出現的訊號／出現之後（#obs-bottom）→ 近 10 個交易日每天的明細（一天一列，純清單不是按鈕，rtlDaysHtml）。
              長期的統計是後端從開放資料日 K 算好的，跟著 ohlc/<股號>.json 一起來（obs 那一格，renderObservation） -->
         <div class="rtl-pane" id="rtl-pane-history" style="display:none">
           <div id="obs-top"></div>
+          <div id="obs-prof"></div>
           <div id="obs-bottom"></div>
           <div class="obs-sec obs-days">
             <div class="rtl-history-head">近 <span id="rtl-history-n"></span> 個交易日<span class="k">，每天各發生過什麼</span></div>
@@ -11828,6 +11830,8 @@ function _mdOf(dateKey) {
 // 用字的界線（COMPLIANCE.md 第 12 條，test_observation_tab 會掃這一段）：只寫紀錄、次數、中位數與範圍，
 // 不寫推論那一類的字；最後一句「這是這檔股票過去的紀錄，不代表之後的走勢」。
 const OBS_FORMAT = 1;          // 與 analysis/observation.OBS_VERSION 同號：格式換了，舊版 App 就不畫（不會畫錯）
+const PROF_FORMAT = 1;         // 個股檔案（prof 那一格）：與 analysis/stock_profile.PROFILE_VERSION 同號
+const PROF_WINDOWS = [30, 90, 180];   // 近幾天（日曆天），同後端 WINDOWS
 const OBS_YEAR = 250;          // 「過去一年」＝250 個交易日（同後端 YEAR）
 const OBS_FREQ_SHOW = 8;       // 常出現的訊號先列幾種，其餘收在「其他 N 種」
 const OBS_STATS_MIN = 3;       // 出現之後少於 3 次就只列每一次，不給次數統計
@@ -11847,13 +11851,17 @@ function obsSignalName(key, obs, short = false) {
   return OBS_EXTRA_LABELS[key] || AUTO_SIGNAL_LABELS[key] || key;
 }
 
-// 日 K 檔（{sid, d, b, obs}）：fetchOhlcJson 拿到就記在 _ohlcJsonMem。obs 的格式不是這一版認得的就當沒有
+// 日 K 檔（{sid, d, b, obs, prof}）：fetchOhlcJson 拿到就記在 _ohlcJsonMem。obs／prof 的格式不是這一版認得的就當沒有
+// （prof 是 2026-10-23 第二輪加的：生產機換版之前的檔沒有它，個股檔案那三段就不出現，其餘照舊）
 function _obsData(sid) {
   let json;
   try { json = _ohlcJsonMem[sid]; } catch { return null; }   // 開機最早期、宣告之前就被叫到：當作還沒載
   if (!json || !Array.isArray(json.b) || !json.b.length) return null;
   const obs = json.obs && json.obs.v === OBS_FORMAT ? json.obs : null;
-  return { bars: json.b, obs };
+  const p = json.prof;
+  const prof = p && p.v === PROF_FORMAT && Array.isArray(p.w) && p.w.length
+    && p.w.every(w => PROF_WINDOWS.includes(w.d) && w.b >= 0 && w.b < json.b.length) ? p : null;
+  return { bars: json.b, obs, prof };
 }
 
 // [YYYYMMDD, …] → "YYYY-MM-DD"
@@ -12074,6 +12082,260 @@ function obsChangesHtml(d) {
   return `<div class="obs-sec"><div class="obs-head">最近的變化<span class="k">，和這檔自己過去一年比</span></div>${lead}${rows.join("")}</div>`;
 }
 
+// ── 個股檔案：近 30／90／180 天並排（OBSERVATION.md 第七節）────────────────────────────────────
+// 2026-10-23 第二輪 Howard：「像個人財務管理一樣建立個股歷史檔案（Monarch Money、YNAB）……幫使用者逐漸認識
+// 個股的特性，而不是每次都從頭研究」。記帳軟體的兩個做法：同一個數字三段期間並排（近 30 天跟近 180 天
+// 擺在一起，就看得出最近跟平常一不一樣），以及跟一個基準比（大盤＝發行量加權股價指數）。
+// 數字全部是後端算好的（analysis/stock_profile.py，日 K 檔的 prof 那一格）；放量／爆量／量縮幾天拿 obs.h 數，
+// 跟「常出現的訊號」同一份判定。這裡只排版、把它寫成句子：只寫幾 %、幾張、幾天，不分高低等級。
+const PROF_VOL_KEYS = ["volume_vs_ma:above", "volume_spike", "volume_vs_ma:below"];   // 成交量那一段數幾天的三種
+const PROF_SAME = 0.2;         // 近 30 天跟最長那一段差不到兩成，寫「差不多」
+let _profChart = null;         // 和大盤比那張圖：滑過去／方向鍵時讀的序列與座標（每次重畫更新）
+
+function _profPct2(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? `${n.toFixed(2)}%` : "—";
+}
+
+// 張數：一萬張以上寫「萬」（與 K 線那一頁的量同一種寫法）
+function _profLots(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n >= 10000 ? `${(n / 10000).toFixed(1)}萬` : n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+
+// 句子裡的張數：「2.4萬張」「850 張」
+function _profLotsText(v) {
+  return `${_profLots(v)}${Number(v) >= 10000 ? "" : " "}張`;
+}
+
+// 中間一半的範圍：上緣過一萬就兩頭都用「萬」（1.0–1.7萬），三欄並排才放得下
+function _profRange(q, unit = "") {
+  if (!Array.isArray(q)) return null;
+  const [a, b] = q.map(Number);
+  if (b >= 10000) return `${(a / 10000).toFixed(1)}–${(b / 10000).toFixed(1)}萬${unit}`;
+  return `${_profLots(a)}–${_profLots(b)}${unit ? ` ${unit}` : ""}`;
+}
+
+// 短的那一段跟長的那一段比：差兩成以上才說大小，其餘「差不多」（只是兩個數字的比較）
+function _profCompare(a, b, days, more = "大", less = "小") {
+  const r = Number(a) / Number(b);
+  if (!Number.isFinite(r) || !(Number(b) > 0)) return "";
+  if (r >= 1 + PROF_SAME) return `比近 ${days} 天${more}`;
+  if (r <= 1 - PROF_SAME) return `比近 ${days} 天${less}`;
+  return `跟近 ${days} 天差不多`;
+}
+
+// 三段期間並排的表：一列一個數字，每一段都沒有的那一列不畫（例如沒有大盤指數）
+function _profTable(d, rows) {
+  const ws = d.prof.w;
+  const head = ws.map(w => {
+    const from = w.cut && d.bars[w.b] ? `${_mdOf(_obsDay(d.bars[w.b]))} 起，` : "";
+    return `<th>近 ${w.d} 天<i>${escapeHtml(from)}${_obsInt(w.n)} 個交易日</i></th>`;
+  }).join("");
+  const body = rows.map(([label, f]) => {
+    const cells = ws.map(w => f(w));
+    if (cells.every(c => c === null || c === undefined)) return "";
+    return `<tr><th>${label}</th>${cells.map(c => `<td>${c === null || c === undefined ? "—" : c}</td>`).join("")}</tr>`;
+  }).join("");
+  return `<table class="obs-tbl prof-tbl"><thead><tr><th></th>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+// 某一段換過價格單位、或上市還不到那麼久：寫在最後（數字從哪一天起算）
+function _profCutNote(d) {
+  const cut = d.prof.w.find(w => w.cut);
+  if (!cut || !d.bars[cut.b]) return "";
+  const day = _mdOf(_obsDay(d.bars[cut.b]));
+  return cut.cut === "seg"
+    ? `<div class="obs-note">${escapeHtml(day)} 收盤價跟前一天差超過一成（減資、分割這一類），價格單位不同，個股檔案從那天起算。</div>`
+    : `<div class="obs-note">${escapeHtml(day)} 才有第一個收盤，個股檔案從那天起算。</div>`;
+}
+
+// 個股檔案・波動程度：每天收盤對前一天漲跌的幅度（不分漲跌，取平均）
+function profVolatilityHtml(d) {
+  const ws = d.prof.w, s = ws[0], l = ws[ws.length - 1];
+  const lead = [];
+  if (Number(l.ma) > 0) {
+    lead.push(`近 ${l.d} 天平均每天漲跌 <b>${_profPct2(l.av)}</b>，大盤同一段 ${_profPct2(l.ma)}，`
+      + `是大盤的 <b>${(Number(l.av) / Number(l.ma)).toFixed(1)} 倍</b>。`);
+  } else {
+    lead.push(`近 ${l.d} 天平均每天漲跌 <b>${_profPct2(l.av)}</b>。`);
+  }
+  if (ws.length > 1) lead.push(`近 ${s.d} 天 ${_profPct2(s.av)}，${_profCompare(s.av, l.av, l.d)}。`);
+  const day = i => d.bars[i] ? `<i>${escapeHtml(_mdOf(_obsDay(d.bars[i])))}</i>` : "";
+  const table = _profTable(d, [
+    ["平均每天漲跌", w => _profPct2(w.av)],
+    ["大盤同一段", w => Number(w.ma) > 0 ? _profPct2(w.ma) : null],
+    ["單日漲最多", w => w.up ? `<b class="${plClass(w.up[0])}">${_obsPct(w.up[0])}</b>${day(w.up[1])}` : null],
+    ["單日跌最多", w => w.dn ? `<b class="${plClass(w.dn[0])}">${_obsPct(w.dn[0])}</b>${day(w.dn[1])}` : null],
+    ["收漲／收跌（天）", w => `${_obsInt(w.nu)}／${_obsInt(w.nd)}`],
+  ]);
+  return `<div class="obs-sec"><div class="obs-head">波動程度<span class="k">，近 ${ws.map(w => w.d).join("／")} 天並排</span></div>`
+    + `<div class="obs-lead">${lead.join("")}</div>${table}`
+    + `<div class="obs-note">「平均每天漲跌」是每天收盤對前一天的漲跌幅度，不分漲跌取平均。</div></div>`;
+}
+
+// 個股檔案・成交量：一般的日子幾張、中間一半的日子落在哪、收漲與收跌那幾天各多少、放量／爆量／量縮幾天
+function profVolumeHtml(d) {
+  const ws = d.prof.w, s = ws[0], l = ws[ws.length - 1], obs = d.obs;
+  const lead = [`近 ${l.d} 天一般的日子每天約 <b>${_profLotsText(l.vm)}</b>`
+    + (Array.isArray(l.vq) ? `，一半的日子在 ${_profRange(l.vq, "張")}之間。` : "。")];
+  if (ws.length > 1) lead.push(`近 ${s.d} 天約 ${_profLotsText(s.vm)}，${_profCompare(s.vm, l.vm, l.d, "多", "少")}。`);
+  const rows = [
+    ["一般的日子", w => _profLots(w.vm)],
+    ["中間一半", w => _profRange(w.vq)],
+    ["收漲那幾天", w => w.vu === null || w.vu === undefined ? null : _profLots(w.vu)],
+    ["收跌那幾天", w => w.vd === null || w.vd === undefined ? null : _profLots(w.vd)],
+  ];
+  if (obs) {
+    for (const key of PROF_VOL_KEYS) {
+      const idx = Array.isArray((obs.h || {})[key]) ? obs.h[key] : [];
+      rows.push([`${escapeHtml(obsSignalName(key, obs, true))}（天）`, w => `${idx.filter(i => i > w.b).length}`]);
+    }
+  }
+  return `<div class="obs-sec"><div class="obs-head">成交量<span class="k">，每天幾張（一般的日子＝中位數）</span></div>`
+    + `<div class="obs-lead">${lead.join("")}</div>${_profTable(d, rows)}</div>`;
+}
+
+// 和大盤比那張圖：最長那一段（近 180 天）從同一天起算，這檔（實線）與大盤（灰色虛線，當參考）各漲跌多少。
+// 一條 y 軸（兩條都是「從基準那天起 %」），0% 一條細線，較短的兩段在起點畫一條細的直線。
+function obsRelChartSvg(d) {
+  const p = d.prof, mi = Number(p.mi), mc = p.mc;
+  _profChart = null;
+  if (!Array.isArray(mc) || !(mi >= 0) || !d.bars[mi] || !(Number(mc[0]) > 0)) return "";
+  const base = Number(d.bars[mi][4]), m0 = Number(mc[0]);
+  const days = [], st = [], mk = [];
+  for (let t = mi; t < d.bars.length; t++) {
+    days.push(_obsDay(d.bars[t]));
+    st.push((Number(d.bars[t][4]) / base - 1) * 100);
+    const m = Number(mc[t - mi]);
+    mk.push(m > 0 ? (m / m0 - 1) * 100 : null);
+  }
+  const n = st.length;
+  if (n < 5) return "";
+  const vals = st.concat(mk.filter(v => v !== null), [0]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = Math.max((hi - lo) * 0.12, 0.5);
+  lo -= pad; hi += pad;
+  const W = 320, H = 156, X0 = 4, X1 = 252, Y0 = 18, Y1 = H - 22;
+  const x = i => X0 + (X1 - X0) * i / (n - 1);
+  const y = v => Y0 + (Y1 - Y0) * (hi - v) / (hi - lo);
+  const path = arr => {
+    let out = "", pen = false;
+    arr.forEach((v, i) => {
+      if (v === null) { pen = false; return; }
+      out += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+      pen = true;
+    });
+    return out;
+  };
+  const guides = p.w.slice(0, -1).map(w => {
+    const gx = x(w.b - mi);
+    return `<line class="obs-rel-guide" x1="${gx.toFixed(1)}" x2="${gx.toFixed(1)}" y1="${Y0 - 4}" y2="${Y1}"/>`
+      + `<text class="obs-rel-tick" x="${(gx + 3).toFixed(1)}" y="${Y0 - 6}">近 ${w.d} 天</text>`;
+  }).join("");
+  const lastM = mk[n - 1];
+  const ends = [{ v: st[n - 1], cls: "is-stock" }].concat(lastM === null ? [] : [{ v: lastM, cls: "is-mkt" }]);
+  // 兩條線的終點靠太近，數字會疊在一起：那就不寫在線尾（數字在下面的表裡，滑過去也看得到）
+  const apart = ends.length < 2 || Math.abs(y(ends[0].v) - y(ends[1].v)) >= 14;
+  const endText = apart ? ends.map(e => `<text class="obs-rel-end ${e.cls}" x="${X1 + 8}" y="${(y(e.v) + 4).toFixed(1)}">${_obsPct(e.v)}</text>`).join("") : "";
+  const dots = ends.map(e => `<circle class="obs-rel-dot ${e.cls}" cx="${x(n - 1).toFixed(1)}" cy="${y(e.v).toFixed(1)}" r="4"/>`).join("");
+  const zeroLbl = apart && ends.some(e => Math.abs(y(e.v) - y(0)) < 14) ? ""
+    : `<text class="obs-rel-tick" x="${X1 + 8}" y="${(y(0) + 4).toFixed(1)}">0%</text>`;
+  const axis = `<text class="obs-rel-tick" x="${X0}" y="${H - 6}">${escapeHtml(_mdOf(days[0]))}</text>`
+    + `<text class="obs-rel-tick" x="${X1}" y="${H - 6}" text-anchor="end">${escapeHtml(_mdOf(days[n - 1]))}</text>${zeroLbl}`;
+  _profChart = { days, st, mk, W, X0, X1, n, at: null };
+  const label = `近 ${p.w[p.w.length - 1].d} 天，這檔與大盤從 ${_mdOf(days[0])} 起算的漲跌`;
+  return `<div class="obs-rel-keys"><span class="obs-rel-key is-stock"><i></i>這檔</span>`
+    + `<span class="obs-rel-key is-mkt"><i></i>大盤（加權指數）</span></div>`
+    + `<div class="obs-rel-wrap" id="obs-rel">`
+    + `<svg class="obs-chart obs-rel-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(label)}" tabindex="0"`
+    + ` onpointerdown="obsRelHover(event)" onpointermove="obsRelHover(event)" onpointerleave="obsRelHover(null)"`
+    + ` onfocus="obsRelKey(null)" onblur="obsRelHover(null)" onkeydown="obsRelKey(event)">`
+    + `<line class="obs-rel-zero" x1="${X0}" x2="${X1}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}"/>${guides}`
+    + `<path class="obs-rel-line is-mkt" d="${path(mk)}"/><path class="obs-rel-line is-stock" d="${path(st)}"/>`
+    + `<line class="obs-rel-cross" x1="0" x2="0" y1="${Y0 - 4}" y2="${Y1}" style="display:none"/>`
+    + `${dots}${endText}${axis}</svg><div class="obs-rel-tip" hidden></div></div>`;
+}
+
+// 滑過圖（或方向鍵）：一條直線對到最近的那一天，提示框寫那天兩條各是多少。文字用 textContent 填
+function obsRelHover(ev, idx = null) {
+  const c = _profChart, wrap = document.getElementById("obs-rel");
+  if (!c || !wrap) return;
+  const svg = wrap.querySelector("svg"), tip = wrap.querySelector(".obs-rel-tip"), cross = wrap.querySelector(".obs-rel-cross");
+  if (!svg || !tip || !cross) return;
+  if (ev === null && idx === null) { tip.hidden = true; cross.style.display = "none"; return; }
+  const box = svg.getBoundingClientRect();
+  let i = idx;
+  if (i === null) {
+    const vx = (ev.clientX - box.left) / (box.width || 1) * c.W;
+    i = Math.round((vx - c.X0) / (c.X1 - c.X0) * (c.n - 1));
+  }
+  i = Math.max(0, Math.min(c.n - 1, i));
+  c.at = i;
+  const cx = c.X0 + (c.X1 - c.X0) * i / (c.n - 1);
+  cross.setAttribute("x1", cx.toFixed(1));
+  cross.setAttribute("x2", cx.toFixed(1));
+  cross.style.display = "";
+  tip.textContent = "";
+  const head = document.createElement("div");
+  head.className = "obs-rel-tip-day";
+  head.textContent = `${_mdOf(c.days[i])}（${_weekdayZh(c.days[i])}）`;
+  tip.appendChild(head);
+  for (const [cls, name, v] of [["is-stock", "這檔", c.st[i]], ["is-mkt", "大盤", c.mk[i]]]) {
+    const row = document.createElement("div");
+    row.className = `obs-rel-tip-row ${cls}`;
+    const key = document.createElement("i");
+    const val = document.createElement("b");
+    val.textContent = v === null ? "—" : _obsPct(v);
+    row.append(key, val, document.createTextNode(` ${name}`));
+    tip.appendChild(row);
+  }
+  tip.hidden = false;
+  const px = cx / c.W * box.width, tw = tip.offsetWidth || 120;
+  tip.style.left = `${Math.max(0, Math.min(box.width - tw, px - tw / 2))}px`;
+}
+
+// 鍵盤：圖拿到焦點先停在最後一天，左右鍵一天一天走
+function obsRelKey(ev) {
+  const c = _profChart;
+  if (!c) return;
+  if (ev === null) { obsRelHover(null, c.n - 1); return; }
+  const step = ev.key === "ArrowLeft" ? -1 : ev.key === "ArrowRight" ? 1 : 0;
+  if (!step) return;
+  ev.preventDefault();
+  obsRelHover(null, (c.at === null ? c.n - 1 : c.at) + step);
+}
+
+// 個股檔案・和大盤比：同一段期間收盤的漲跌（大盤用同兩天的收盤指數）
+function profMarketHtml(d) {
+  const ws = d.prof.w.filter(w => Number.isFinite(Number(w.mr)));
+  if (!ws.length) return "";
+  const diff = w => Number(w.r) - Number(w.mr);
+  const say = w => {
+    const g = diff(w);
+    const tail = Math.abs(g) < 0.05 ? "跟大盤差不多" : `比大盤${g > 0 ? "高" : "低"} ${Math.abs(g).toFixed(1)} 個百分點`;
+    return `近 ${w.d} 天這檔 <b class="${plClass(w.r)}">${_obsPct(w.r)}</b>、大盤 ${_obsPct(w.mr)}，${tail}。`;
+  };
+  const lead = [say(ws[ws.length - 1])].concat(ws.length > 1 ? [say(ws[0])] : []);
+  const table = _profTable(d, [
+    ["這檔", w => `<b class="${plClass(w.r)}">${_obsPct(w.r)}</b>`],
+    ["大盤", w => Number.isFinite(Number(w.mr)) ? `<b class="${plClass(w.mr)}">${_obsPct(w.mr)}</b>` : null],
+    ["相差（百分點）", w => Number.isFinite(Number(w.mr)) ? _obsPct(diff(w)).replace("%", "") : null],
+    ["每天漲跌高於大盤（天）", w => w.bn ? `${_obsInt(w.bt)}／${_obsInt(w.bn)}` : null],
+  ]);
+  return `<div class="obs-sec"><div class="obs-head">和大盤比<span class="k">，同一段期間收盤的漲跌</span></div>`
+    + `<div class="obs-lead">${lead.join("")}</div>${obsRelChartSvg(d)}${table}`
+    + `<div class="obs-note">大盤是臺灣證券交易所的發行量加權股價指數；上櫃股票也是跟它比。`
+    + `「每天漲跌高於大盤」是這檔的漲跌比大盤同一天高的天數。</div></div>`;
+}
+
+function obsProfileHtml(d) {
+  _profChart = null;
+  if (!d || !d.prof) return "";
+  return profVolatilityHtml(d) + profVolumeHtml(d) + profMarketHtml(d) + _profCutNote(d);
+}
+
 // ④ 常出現的訊號：過去一年（250 個交易日）依每天收盤判斷，每一種出現幾天。點一列＝下面「出現之後」換成那一種
 function _obsFreqRows(d) {
   const obs = d.obs, n = d.bars.length, from = Math.max(0, n - OBS_YEAR);
@@ -12183,13 +12445,15 @@ function obsFootHtml() {
 // 字卡重畫時跟著畫（renderRadarTimeline 的最後）。日 K 檔還沒載就先載、載到了整張重畫一次
 function renderObservation(sid) {
   const topEl = document.getElementById("obs-top"), botEl = document.getElementById("obs-bottom");
+  const profEl = document.getElementById("obs-prof");
   if (!topEl || !botEl || !sid) return;
   if (_obsSid !== sid) { _obsSid = sid; _obsKey = null; _obsSplit = "all"; }
   const d = _obsData(sid);
   if (!d) ensureOhlcCloses(sid).then(fresh => { if (fresh) refreshRadarTimelineIfOpen(); }).catch(() => {});
   const wl = watchlistRows.find(w => String(w.stock_id || "").trim() === sid) || null;
   _obsSetHtml(topEl, obsSinceHtml(wl, d) + obsTargetsHtml(sid, wl, d) + obsChangesHtml(d));
-  _obsSetHtml(botEl, obsFreqHtml(d) + obsAfterHtml(d) + (d && d.obs ? obsFootHtml() : ""));
+  if (profEl) _obsSetHtml(profEl, obsProfileHtml(d));
+  _obsSetHtml(botEl, obsFreqHtml(d) + obsAfterHtml(d) + (d && (d.obs || d.prof) ? obsFootHtml() : ""));
 }
 
 // 內容沒變就不動 DOM：盤中每 5 秒重畫一次，整段換掉會讓展開的「其他 N 種」收回去、畫面閃一下
