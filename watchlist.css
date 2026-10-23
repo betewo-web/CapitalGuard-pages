@@ -2113,6 +2113,7 @@ html.home-simple-only #home-filter { display: none !important; }
 .ai-intro li { margin: 3px 0; }
 .ai-note { font-size: 0.8rem; color: var(--text-muted); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .ai-typing { color: var(--text-muted); font-size: 1.1rem; padding: 2px 6px; letter-spacing: 2px; }
+.ai-typing.is-note { font-size: 0.9rem; letter-spacing: 0; }
 /* 輸入列：貼在底部導覽上方（sticky），對話長了也看得到 */
 .ai-composer { position: sticky; bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 6px); z-index: 5;
 	display: flex; gap: 8px; align-items: center; padding: 10px 0 8px; margin: auto 0 0;
@@ -2125,6 +2126,11 @@ html.home-simple-only #home-filter { display: none !important; }
 	border: 1px solid var(--accent-2); background: var(--accent-2); color: #1a1300; cursor: pointer; }
 .ai-send .ic { width: 22px; height: 22px; }
 .ai-send:disabled, .ai-input:disabled { opacity: 0.55; }
+/* 持股截圖鈕（第二十六節）：與送出鍵同一個尺寸，但是空心——它是附帶的入口，送出才是主要動作 */
+.ai-attach { width: 52px; height: 52px; flex: 0 0 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
+	border: 1px solid var(--border); background: var(--surface); color: var(--text-1); cursor: pointer; }
+.ai-attach .ic { width: 22px; height: 22px; }
+.ai-attach:disabled { opacity: 0.55; }
 
 /* 「自選設定」：底部導覽拿掉自選分頁之後，這是加／刪自選股、設定價位與通知的唯一入口，
    所以不再是一條細連結，而是看得見的按鈕（紫框實底、字級比清單標題還大一點）。 */
@@ -2293,7 +2299,8 @@ html.home-simple-only #home-filter { display: none !important; }
    一個主數字（總市值）、一排三格 KPI、每一檔一列（市值、張數／股數、損益、佔比細條）。
    主數字用比例字寬（大字用 tabular 會鬆），列裡要對齊的數字才用 tabular-nums。
    佔比細條是單一色相：軌道是同一個紫的淡色、填色是品牌紫——它講的是「多少」，不是「哪一檔」。 */
-.hd-title { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.hd-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 0.6rem; }
+.hd-title-acts { display: inline-flex; gap: 0.4rem; margin-left: auto; }
 .hd-add-btn { display: inline-flex; align-items: center; gap: 0.3rem; flex: 0 0 auto;
 	padding: 0.45rem 0.85rem; border: 1px solid var(--accent); border-radius: 999px;
 	background: rgba(139, 124, 255, 0.18); color: var(--text-0); font-size: 0.9rem; font-weight: 700; cursor: pointer; }
