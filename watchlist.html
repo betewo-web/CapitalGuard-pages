@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="435">
+  <meta name="app-version" content="436">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=435" rel="stylesheet">
+  <link href="watchlist.css?v=436" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -676,11 +676,15 @@
              一整條膠囊（2026-10-23）：截圖鈕縮成框內左邊的圖示，右邊一顆圓的送出鍵——空白時暗、有字變金色（.has-text）。 -->
         <form class="ai-composer" id="ai-composer" autocomplete="off" onsubmit="return assistantSubmit(event)">
           <!-- 持股截圖（ASSISTANT.md 第二十六節）：券商 App 的庫存截圖 → 讀出股票、股數、均價 → 確認後更新持股 -->
+          <!-- 打字時的建議、輸入框空著時的最近問過與釘選（第九輪）；籤與對話裡的同一套，由 aiBindOnce 分派 -->
+          <div class="ai-chips ai-suggest" id="ai-suggest" hidden></div>
+          <div class="ai-count" id="ai-count" hidden></div>
           <div class="ai-bar">
             <button type="button" class="ai-attach" id="ai-attach" onclick="aiPickImage()" aria-label="上傳持股截圖" title="上傳持股截圖"><i data-icon="photo"></i></button>
             <input type="file" id="ai-file" accept="image/*" multiple hidden onchange="aiImageChosen(this)">
             <input class="ai-input" id="ai-input" type="text" maxlength="200" enterkeyhint="send"
-                   placeholder="輸入問題或指令…" aria-label="對助手說" oninput="aiComposerSync()" onkeydown="aiInputKey(event)">
+                   placeholder="輸入問題或指令…" aria-label="對助手說" oninput="aiComposerSync()" onkeydown="aiInputKey(event)"
+                   onfocus="aiSuggestSync()" onblur="setTimeout(aiSuggestSync, 200)" onpaste="aiInputPaste(event)">
             <button type="submit" class="ai-send" id="ai-send" aria-label="送出"><i data-icon="aisend"></i></button>
           </div>
         </form>
@@ -21912,6 +21916,7 @@ function _aiNameVariants() {
   return names.concat([...bare].filter(x => x[1]));
 }
 function aiMentionsOf(text) {
+  text = String(text || "").replace(/臺/g, "台");   // 「臺積電」「臺泥」也認得（第九輪）
   const n = Object.keys(universe).length;
   if (!_aiNames || _aiNamesN !== n) {
     _aiNames = _aiNameVariants().sort((a, b) => b[0].length - a[0].length);
@@ -22029,7 +22034,10 @@ function aiCardHtml(c) {
   // 「分享」（第七輪）：有標題、有資料列的答案卡才有——確認卡、反問、固定句沒有可以傳的內容
   const shareable = c._k && c.head && (c.rows || []).length && !c.muted && !c._id && !c.failed;
   const share = shareable ? `<button type="button" class="ai-wrong ai-share" data-ai-act="sharecard" data-ai-data="${escapeHtml(JSON.stringify({ k: c._k }))}">分享</button>` : "";
-  const meta = wrong || share ? `<div class="ai-meta">${share}${wrong}</div>` : "";
+  // 「釘選」（第九輪）：這一句放到輸入框的建議裡，下次點一下就問
+  const pinned = c._q && aiPins().some(p => p.text === c._q.text);
+  const pin = c._k && c._q ? `<button type="button" class="ai-wrong ai-pin" data-ai-act="pin" data-ai-data="${escapeHtml(JSON.stringify({ k: c._k }))}">${pinned ? "取消釘選" : "釘選"}</button>` : "";
+  const meta = wrong || share || pin ? `<div class="ai-meta">${pin}${share}${wrong}</div>` : "";
   // admin 才看得到的一行診斷（Howard 2026-10-18：卡上沒名單時，遠端看不到手機的狀態，問一句就能回報）
   const diag = aiIsAdmin && c.diag ? `<div class="ai-meta">${escapeHtml(c.diag)}</div>` : "";
   return `<div class="ai-card${c.muted ? " is-muted" : ""}">${head}${sub}<div class="ai-card-body">${rows}${body}${chips}</div>${actions}${meta}${diag}</div>`;
@@ -22110,7 +22118,7 @@ function aiSaveLog() {
   if (!key || _aiRestored !== key) return;   // 還沒還原過就存＝把上一次的對話蓋掉
   try {
     if (!aiLog.length) { localStorage.removeItem(key); return; }
-    localStorage.setItem(key, JSON.stringify({ v: 1, at: Date.now(), log: aiLog, recent: _aiRecentSids }));
+    localStorage.setItem(key, JSON.stringify({ v: 1, at: Date.now(), log: aiLog, recent: _aiRecentSids, qs: _aiRecentQs }));
   } catch { /* 空間滿了或被關掉：這一次就不存，對話照常 */ }
 }
 let _aiRestored = "";
@@ -22125,6 +22133,7 @@ function aiRestoreLog() {
     aiLog = raw.log.filter(m => m && (m.kind === "user" ? typeof m.text === "string" : m.kind === "card" && m.spec && typeof m.spec === "object"))
       .slice(-AI_LOG_MAX).map(aiRestoreEntry);
     _aiRecentSids = (Array.isArray(raw.recent) ? raw.recent : []).map(String).filter(isStockId).slice(0, 5);
+    _aiRecentQs = (Array.isArray(raw.qs) ? raw.qs : []).filter(q => q && q.text && AI_INTENTS[q.intent]).slice(0, 8);
   } catch { aiLog = []; }
 }
 function aiRestoreEntry(m) {
@@ -22510,6 +22519,21 @@ function aiBindOnce() {
     try { data = JSON.parse(el.dataset.aiData || "{}"); } catch { data = {}; }
     aiAct(el.dataset.aiAct, data);
   });
+  // 輸入列上方的建議籤（第九輪）：同一套分派；點了把輸入框清掉（那一句已經變成籤送出去了）
+  const sug = document.getElementById("ai-suggest");
+  if (sug) {
+    sug.addEventListener("mousedown", e => e.preventDefault());   // 不讓輸入框失焦（失焦會把建議收掉）
+    sug.addEventListener("click", e => {
+      const el = e.target.closest("[data-ai-act]");
+      if (!el) return;
+      let data = {};
+      try { data = JSON.parse(el.dataset.aiData || "{}"); } catch { data = {}; }
+      const inp = document.getElementById("ai-input");
+      if (inp) inp.value = "";
+      aiAct(el.dataset.aiAct, data);
+      aiComposerSync();
+    });
+  }
 }
 
 function aiAct(act, data) {
@@ -22522,6 +22546,7 @@ function aiAct(act, data) {
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "undo") { aiRunUndo(String(data.id || "")); return; }   // 剛才那一筆寫入改回去（第六輪）
   if (act === "sharecard") { aiShareCard(String(data.k || "")); return; }   // 把這張卡傳給朋友（手機的分享面板；第七輪）
+  if (act === "pin") { aiTogglePin(String(data.k || "")); return; }   // 這一句釘到輸入框的建議裡（第九輪）
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
   if (act === "wrong") { aiMarkWrong(String(data.log_id || "")); return; }
   if (act === "ai") { askAiHandoffPick(data); return; }   // 交給使用者自己的 AI：這一下就把問題複製起來
@@ -22645,6 +22670,108 @@ function aiComposerSync() {
   const inp = document.getElementById("ai-input");
   const form = document.getElementById("ai-composer");
   if (inp && form) form.classList.toggle("has-text", !!inp.value.trim());
+  aiSuggestSync();
+  aiCountSync();
+}
+
+// ── 輸入體驗（第九輪，2026-10-24）──────────────────────────────────────────
+// 打字時：認得出一檔（「台積」）就給三個最常問的；輸入框空著而且在打字：釘選的與最近問過的。
+// 全是本機直接做的籤（類別與槽位都知道了，不必再送 Jev）。
+const AI_COUNT_SHOW = 150;   // 超過這個字數才顯示還剩幾字
+function aiSuggestChips(v, focused) {
+  if (v) {
+    const m = v.length <= 12 ? aiMentionsOf(v) : [];
+    if (m.length !== 1) return [];
+    const sid = m[0].sid, n = aiStockName(sid);
+    return [[`${n}整理一下`, "stock_overview"], [`${n}支撐在哪`, "levels"], [`${n}今天有訊號嗎`, "signals_today"]]
+      .map(([label, intent]) => ({ label, act: "run", data: { intent, slots: { stock: sid }, text: label }, _clear: true }));
+  }
+  if (!focused) return [];
+  const seen = new Set();
+  return aiPins().map(q => Object.assign({}, q, { pin: true })).concat(_aiRecentQs)
+    .filter(q => q && q.text && !seen.has(q.text) && seen.add(q.text)).slice(0, 5)
+    .map(q => ({ label: q.pin ? `📌 ${q.text}` : q.text, act: "run", data: { intent: q.intent, slots: q.slots || {}, text: q.text } }));
+}
+function aiSuggestSync() {
+  const box = document.getElementById("ai-suggest");
+  const inp = document.getElementById("ai-input");
+  if (!box || !inp) return;
+  const chips = aiBusy ? [] : aiSuggestChips(inp.value.trim(), document.activeElement === inp);
+  box.hidden = !chips.length;
+  box.innerHTML = chips.map(aiChipHtml).join("");
+}
+function aiCountSync(note) {
+  const el = document.getElementById("ai-count");
+  const inp = document.getElementById("ai-input");
+  if (!el || !inp) return;
+  const n = inp.value.length;
+  const msg = note || (n >= AI_COUNT_SHOW ? `還剩 ${Math.max(0, AI_MAX_CHARS - n)} 字` : "");
+  el.hidden = !msg;
+  el.textContent = msg;
+}
+// 貼上一大段：輸入框最多收 AI_MAX_CHARS 字（maxlength 會默默截掉），講出來
+function aiInputPaste(ev) {
+  const t = ev && (ev.clipboardData || window.clipboardData) ? (ev.clipboardData || window.clipboardData).getData("text") : "";
+  if (t && t.length > AI_MAX_CHARS) {
+    aiCountSync(`只收前 ${AI_MAX_CHARS} 字，太長的話分成幾句問`);
+    setTimeout(() => aiCountSync(), 4000);
+  }
+}
+
+// 最近問過的（有答案的那幾句：類別、槽位都記著，點了本機直接做）與釘選的（帳號一份、最多 AI_PIN_MAX 句）
+const AI_PIN_MAX = 4;
+let _aiRecentQs = [];
+function aiNoteQuestion(q) {
+  if (!q || !q.text || !AI_INTENTS[q.intent] || /^［/.test(q.text)) return;
+  _aiRecentQs = [{ text: q.text, intent: q.intent, slots: q.slots || {} }].concat(_aiRecentQs.filter(x => x.text !== q.text)).slice(0, 8);
+}
+function aiPins() {
+  try { return JSON.parse(localStorage.getItem(`cg-ai-pins:${state.userId}`) || "[]").filter(q => q && q.text && AI_INTENTS[q.intent]); }
+  catch { return []; }
+}
+function aiTogglePin(k) {
+  const m = aiLog.find(x => x.kind === "card" && x.spec && x.spec._k === k);
+  const q = m && m.spec._q;
+  if (!q) return;
+  let pins = aiPins();
+  const had = pins.some(p => p.text === q.text);
+  pins = had ? pins.filter(p => p.text !== q.text) : [q].concat(pins).slice(0, AI_PIN_MAX);
+  try { localStorage.setItem(`cg-ai-pins:${state.userId}`, JSON.stringify(pins)); } catch { return; }
+  trackActivity("assistant_pin", { on: !had });
+  renderAssistant();
+}
+
+// 只打一個股票名稱（或代號、英文名）：那一檔的全貌，本機直接做——不叫 Jev、不算次數
+function aiBareStock(text) {
+  const t = String(text || "").normalize("NFKC").replace(/臺/g, "台").replace(/[\s?？!！。．.,，]/g, "");
+  if (!t || t.length > 12) return "";
+  const m = aiMentionsOf(t);
+  if (m.length !== 1) return "";
+  const sid = m[0].sid;
+  const name = String((universe[sid] || {}).n || "");
+  const forms = new Set([sid, name, name.replace(/(?:\*)?(?:-KY|-DR|-創)?\*?$/, "")].concat(
+    Object.entries(AI_STOCK_ALIASES).filter(([, s]) => s === sid).map(([a]) => a)).map(x => x.toLowerCase()));
+  return forms.has(t.toLowerCase()) ? sid : "";
+}
+
+// 打錯一個字的股票名（語音的同音字「天玉」→「天鈺」）：句子開頭那兩三個字，與某個名稱只差一個字就列出來（最多三檔）
+function aiFuzzyStocks(text) {
+  const t = String(text || "").replace(/臺/g, "台").replace(/^[\s把幫我請]+/, "");
+  if (!_aiNames) aiMentionsOf("");
+  const out = [];
+  for (const len of [4, 3, 2]) {
+    const head = t.slice(0, len);
+    if (head.length < len || /[^\u4e00-\u9fff]/.test(head)) continue;
+    for (const [name, sid] of _aiNames) {
+      if (name.length !== len || out.includes(sid)) continue;
+      let diff = 0;
+      for (let i = 0; i < len; i++) if (name[i] !== head[i]) diff += 1;
+      if (diff === 1) out.push(sid);
+      if (out.length >= 3) return out;
+    }
+    if (out.length) return out;
+  }
+  return out;
 }
 
 // ── 送出 ─────────────────────────────────────────────────────────
@@ -22667,6 +22794,13 @@ async function assistantSend(raw) {
   aiLog.push({ kind: "user", text });
   if (!state.accessToken) { aiPushCard({ text: "登入後才能使用助手。", muted: true }); renderAssistant(); return; }
   if (!aiRouteUrl || !aiEnabled) { aiPushCard({ text: "助手尚未啟用。", muted: true }); renderAssistant(); return; }
+  const bare = aiBareStock(text);   // 只打一個股票名稱＝那一檔的全貌（第九輪）：不叫 Jev、不算次數
+  if (bare) {
+    trackActivity("assistant", { intent: "stock_overview", decision: "bare" });
+    await aiRun("stock_overview", { stock: bare }, { text });
+    aiAfterRun();
+    return;
+  }
   // 沒有網路就不送：fetch 要等到逾時才會失敗，那段時間輸入列是鎖著的
   if (typeof navigator !== "undefined" && navigator && navigator.onLine === false) {
     aiPushCard(aiRetryCard("目前沒有網路連線，連上之後按「再試一次」。", text));
@@ -22744,8 +22878,10 @@ async function aiHandleResponse(r, text) {
         await aiRun(intent, r.slots || {}, { log_id: r.log_id, say: r.say, args: (r.action && r.action.args) || null, text });
         return;
       }
-      // 沒得沿用：最近問過的、持股、自選股當籤，點了＝Worker 已分好的類別＋槽位加上那一檔，本機直接做（不再送一次）
-      chips = aiStockChoices()
+      // 沒得沿用：打錯一個字的先猜（第九輪），再來是最近問過的、持股、自選股當籤，點了＝Worker 已分好的類別＋槽位加上那一檔，本機直接做（不再送一次）
+      const guess = aiFuzzyStocks(text);
+      if (guess.length) r = Object.assign({}, r, { say: `你是不是要找：${guess.map(aiStockName).join("、")}？` });
+      chips = guess.concat(aiStockChoices().filter(s => !guess.includes(s))).slice(0, 8)
         .map(sid => ({ label: aiStockName(sid), act: "run",
                        data: { intent, slots: Object.assign({}, r.slots || {}, { stock: sid }), log_id: r.log_id, text: `${aiStockName(sid)} ${text}` } }));
     } else {
@@ -22782,6 +22918,11 @@ async function aiRun(intent, slots, opts) {
   finally { aiBusy = false; }
   const sid = isStockId(String(slots.stock || "")) ? String(slots.stock) : "";
   if (sid) aiNoteStock(sid);
+  const said = String((opts && opts.text) || "").trim();
+  if (card && said && !card.failed && !card._id) {   // 有答案的那一句：記進「最近問過」，卡上留來源（釘選用；第九輪）
+    card._q = { text: said, intent, slots: Object.assign({}, slots) };
+    aiNoteQuestion(card._q);
+  }
   if (card && sid && !card.failed && !card.muted) {
     if (carried) {
       card.carried = sid;
@@ -22815,6 +22956,11 @@ function aiNeedStock() {
     data: { intent: cur.intent, slots: Object.assign({}, cur.slots, { stock: sid }), log_id: cur.log_id,
             text: cur.text ? `${aiStockName(sid)} ${cur.text}` : `${aiStockName(sid)}${hint}` } });
   const own = (watchlistRows || []).length || holdingEntries().length;
+  const guess = aiFuzzyStocks(cur.text);   // 「天玉」→ 天鈺（第九輪）
+  if (guess.length) {
+    return { head: `你是不是要找：${guess.map(aiStockName).join("、")}？`, text: "點一個，或重打股票名稱或代號。",
+             chips: guess.concat(sids.filter(s => !guess.includes(s))).slice(0, 8).map(chip) };
+  }
   return { head: "要查哪一檔？", text: own ? "點一檔，或打股票名稱或代號。" : "打股票名稱或代號，或先點一檔試試：",
            chips: sids.map(chip) };
 }

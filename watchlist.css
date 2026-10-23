@@ -2086,6 +2086,13 @@ html.home-simple-only #home-filter { display: none !important; }
 .ai-cmp tbody th { text-align: left; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
 .ai-cmp-name { background: none; border: none; padding: 0; color: var(--text-0); font: inherit; font-weight: 700;
 	text-decoration: underline dotted; cursor: pointer; }
+/* 第九輪：輸入列上方的建議籤（一排可以橫捲）與字數提示 */
+/* 兩個 class 才蓋得過後面那條通用的 .ai-chips（flex-wrap: wrap）*/
+.ai-chips.ai-suggest { flex-wrap: nowrap; overflow-x: auto; margin: 0 0 8px; padding-bottom: 2px; scrollbar-width: none; }
+.ai-suggest::-webkit-scrollbar { display: none; }
+.ai-suggest .ai-chip { flex: 0 0 auto; white-space: nowrap; }
+.ai-count { font-size: 0.78rem; color: var(--sig-orange); text-align: right; margin: 0 6px 4px; }
+.ai-pin + .ai-share, .ai-pin + .ai-wrong { margin-left: 10px; }
 /* 第八輪：導覽上的小點（今天的重點還沒看；橘＝唯一的強調色，不是數字所以不用紅底）、標題列的次數、字卡的「問助手」 */
 .bn-badge.bn-dot { min-width: 8px; width: 8px; height: 8px; padding: 0; top: 6px; left: calc(50% + 10px); background: var(--sig-orange); }
 .ai-quota { margin-left: auto; color: var(--sig-orange); font-size: 0.8rem; }
