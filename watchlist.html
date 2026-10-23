@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="420">
+  <meta name="app-version" content="422">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=420" rel="stylesheet">
+  <link href="watchlist.css?v=422" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -671,7 +671,7 @@
         <form class="ai-composer" id="ai-composer" autocomplete="off" onsubmit="return assistantSubmit(event)">
           <!-- 持股截圖（ASSISTANT.md 第二十六節）：券商 App 的庫存截圖 → 讀出股票、股數、均價 → 確認後更新持股 -->
           <button type="button" class="ai-attach" id="ai-attach" onclick="aiPickImage()" aria-label="上傳持股截圖" title="上傳持股截圖"><i data-icon="photo"></i></button>
-          <input type="file" id="ai-file" accept="image/*" hidden onchange="aiImageChosen(this)">
+          <input type="file" id="ai-file" accept="image/*" multiple hidden onchange="aiImageChosen(this)">
           <input class="ai-input" id="ai-input" type="text" maxlength="200" enterkeyhint="send"
                  placeholder="輸入問題或指令…" aria-label="對助手說">
           <button type="submit" class="ai-send" id="ai-send" aria-label="送出"><i data-icon="aisend"></i></button>
@@ -10017,10 +10017,11 @@ function holdingImportPlan(rows) {
     if (!(shares > 0)) continue;
     const sid = _importResolveStock(r.code, r.name);
     if (!sid) { unknown.push(String(r.name || r.code || "").trim() || "（沒有名稱）"); continue; }
-    const m = merged.get(sid) || { sid, shares: 0, value: 0, unitGuessed: false };
+    const m = merged.get(sid) || { sid, shares: 0, value: 0, unitGuessed: false, allOdd: true };
     m.shares += shares;
     m.value += shares * avg;
     if (!checked) m.unitGuessed = true;
+    if (!/零股/.test(String(r.name || ""))) m.allOdd = false;   // 「台積電(零股)」那一列
     merged.set(sid, m);
   }
   const held = holdingBySid();
@@ -10030,11 +10031,39 @@ function holdingImportPlan(rows) {
     const h = held.get(m.sid);
     const cur = h ? { shares: Number(h.shares) || 0, cost: Number(h.cost) > 0 ? Number(h.cost) : null } : null;
     const same = !!cur && cur.shares === m.shares && cur.cost != null && Math.abs(cur.cost - avg) < 0.005;
-    return { sid: m.sid, shares: m.shares, avg, cur, unitGuessed: m.unitGuessed,
+    // 只有零股那一列、原本又有整股（整股那一列在另一張截圖）：預設保留原本的整股、零股換成截圖的。
+    // 整股部分用原本的均價加權；總股數跟原本一樣就當作沒變（同一張再傳一次不會一直改均價）
+    let odd = null;
+    if (m.allOdd && cur && cur.shares >= SHARES_PER_LOT) {
+      const whole = Math.floor(cur.shares / SHARES_PER_LOT) * SHARES_PER_LOT;
+      const total = whole + m.shares;
+      odd = { shares: total, same: total === cur.shares,
+              avg: cur.cost != null ? Math.round((whole * cur.cost + m.value) / total * 10000) / 10000 : null };
+    }
+    return { sid: m.sid, shares: m.shares, avg, cur, unitGuessed: m.unitGuessed, odd,
              status: !cur ? "new" : same ? "same" : "update", inWatch: watched.has(m.sid) };
   });
   const seen = new Set(items.map(i => i.sid));
   return { items, unknown, missing: [...held.keys()].filter(s => !seen.has(s)) };
+}
+
+// 好幾張截圖的列合成一份（Howard 2026-10-23：一頁截不完的持股）。捲動截圖常常上下重疊一兩列——
+// 代號（沒有就名稱）、數量、單位、均價全部一樣的列只算一次；不一樣的照樣全收（整股與零股兩列在
+// holdingImportPlan 裡相加）。同一張圖裡模型重複抄了一列也一併去掉。回 { rows, dropped }
+function mergeShotRows(pages) {
+  const seen = new Set();
+  const rows = [];
+  let dropped = 0;
+  for (const page of pages || []) {
+    for (const r of page || []) {
+      const who = String((r && r.code) || "").trim().toUpperCase() || normalizeNameForSearch(String((r && r.name) || ""));
+      const key = `${who}|${Number(r && r.quantity)}|${r && r.unit}|${Number(r && r.avg_price)}`;
+      if (seen.has(key)) { dropped += 1; continue; }
+      seen.add(key);
+      rows.push(r);
+    }
+  }
+  return { rows, dropped };
 }
 
 function _importResolveStock(code, name) {
@@ -21363,7 +21392,10 @@ function aiSkipPending() {
     const spec = aiPending[id];
     if (spec.busy) continue;
     delete aiPending[id];
-    aiReplaceCard(id, { text: "已略過（你送了新的一句）。", muted: true });
+    // 截圖匯入的卡：讀出來的那幾列留著（那是答案），只收掉按鍵與選項
+    aiReplaceCard(id, spec.plan
+      ? Object.assign(aiImportView(id, spec), { chips: [], actions: [], muted: true, sub: "已略過（你送了新的一句）" })
+      : { text: "已略過（你送了新的一句）。", muted: true });
     aiOutcome(spec.log_id, null, false);
   }
 }
@@ -21612,7 +21644,7 @@ function aiAct(act, data) {
   if (act === "send") { assistantSend(String(data.text || "")); return; }
   if (act === "run") { aiRunChip(data); return; }
   if (act === "image") { aiPickImage(); return; }                          // 選檔要使用者的點擊：卡上的「選擇截圖」就是那一下
-  if (act === "imptoggle") { aiImportToggle(String(data.id || "")); return; }   // 截圖匯入：要不要也刪掉截圖裡沒有的   // 籤上已帶類別＋槽位：本機直接做，不再送 Worker 分類（第十五節 A3）
+  if (act === "imptoggle") { aiImportToggle(String(data.id || ""), String(data.mode || "missing")); return; }   // 截圖匯入的三個選項   // 籤上已帶類別＋槽位：本機直接做，不再送 Worker 分類（第十五節 A3）
   if (act === "open") { if (data._collapse) aiCollapseConfirm(String(data._collapse)); aiOpen(data); renderAssistant(); return; }
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
@@ -22058,22 +22090,42 @@ async function aiShrinkImage(file) {
   } finally { im.done(); }
 }
 
-async function aiImageChosen(input) {
-  const file = input && input.files && input.files[0];
-  if (!file || aiBusy) return;
-  aiSkipPending();
-  aiLog.push({ kind: "user", text: "［持股截圖］" });
-  if (!state.accessToken) { aiPushCard({ text: "登入後才能使用助手。", muted: true }); renderAssistant(); return; }
-  if (!aiRouteUrl || !aiEnabled) { aiPushCard({ text: "助手尚未啟用。", muted: true }); renderAssistant(); return; }
-  if (brokerHoldings.length > 0) {
-    aiPushCard({ text: "持股由券商同步，股數以券商為準，不用另外匯入截圖。", muted: true });
-    renderAssistant();
-    return;
-  }
-  aiBusy = true;
-  aiBusyNote = "讀取截圖中，約 10–30 秒…";
-  renderAssistant();
-  let r = null, status = 0, note = "";
+// 一次可以選好幾張（持股多到一頁截不完，Howard 2026-10-23）：一張一張送、結果合在一起出一張確認卡。
+// 同一張圖（檔案內容一模一樣）讀過就不再送雲端：手機上記著上次讀出來的列（只有列，沒有圖），30 天、最多 30 張。
+// 同一次選了兩張一樣的，第二張直接略過。
+const AI_IMG_MAX_FILES = 5;
+const AI_SHOT_CACHE_DAYS = 30;
+const AI_SHOT_CACHE_MAX = 30;
+
+async function _aiFileHash(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    const d = await crypto.subtle.digest("SHA-256", buf);
+    return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+  } catch { return null; }   // 沒有 crypto.subtle（非 https）：不快取，照樣辨識
+}
+// 鍵帶帳號：同一支手機換了帳號，讀不到別人的持股
+function _aiShotKey(hash) { return `shot:${state.userId}:${hash}`; }
+async function _aiShotCacheGet(hash) {
+  if (!hash) return null;
+  const v = await _reportCacheGet(_aiShotKey(hash)).catch(() => null);
+  return v && Date.now() - Number(v.at || 0) < AI_SHOT_CACHE_DAYS * 86400000 ? v : null;
+}
+async function _aiShotCachePut(hash, data) {
+  if (!hash) return;
+  const idxKey = `shot-index:${state.userId}`;
+  const idx = ((await _reportCacheGet(idxKey).catch(() => null)) || []).filter(h => h !== hash);
+  idx.push(hash);
+  for (const old of idx.splice(0, Math.max(0, idx.length - AI_SHOT_CACHE_MAX))) _reportCacheDelete(_aiShotKey(old)).catch(() => {});
+  await _reportCachePut(_aiShotKey(hash), Object.assign({ at: Date.now() }, data)).catch(() => {});
+  await _reportCachePut(idxKey, idx).catch(() => {});
+}
+
+// 一張圖 → {is_holdings, rows, cached} 或 {error}
+async function _aiReadShot(file, hash) {
+  const hit = await _aiShotCacheGet(hash);
+  if (hit) return { is_holdings: !!hit.is_holdings, rows: hit.rows || [], cached: true };
+  let r = null, status = 0;
   try {
     const image = await aiShrinkImage(file);
     const resp = await fetch(`${aiRouteUrl}/v1/holdings-image`, {
@@ -22085,32 +22137,74 @@ async function aiImageChosen(input) {
     status = resp.status;
     r = await resp.json().catch(() => null);
   } catch (e) {
-    note = e && e.name === "TimeoutError" ? "辨識太久了，再試一次。" : "讀不到這張圖片，換一張截圖試試。";
+    return { error: e && e.name === "TimeoutError" ? "辨識太久了" : "讀不到這張圖片" };
+  }
+  if (status === 426) return { error: "update", resp: r };
+  if (status !== 200 || !r) return { error: String((r && r.error) || "截圖辨識暫時無法使用"), status };
+  const out = { is_holdings: !!r.is_holdings, rows: Array.isArray(r.rows) ? r.rows : [], log_id: r.log_id || null };
+  _aiShotCachePut(hash, { is_holdings: out.is_holdings, rows: out.rows }).catch(() => {});   // 讀成功才記；失敗的下次再試
+  return out;
+}
+
+async function aiImageChosen(input) {
+  const all = input && input.files ? Array.from(input.files) : [];
+  if (!all.length || aiBusy) return;
+  const files = all.slice(0, AI_IMG_MAX_FILES);
+  aiSkipPending();
+  aiLog.push({ kind: "user", text: files.length > 1 ? `［持股截圖 ${files.length} 張］` : "［持股截圖］" });
+  if (!state.accessToken) { aiPushCard({ text: "登入後才能使用助手。", muted: true }); renderAssistant(); return; }
+  if (!aiRouteUrl || !aiEnabled) { aiPushCard({ text: "助手尚未啟用。", muted: true }); renderAssistant(); return; }
+  if (brokerHoldings.length > 0) {
+    aiPushCard({ text: "持股由券商同步，股數以券商為準，不用另外匯入截圖。", muted: true });
+    renderAssistant();
+    return;
+  }
+  aiBusy = true;
+  const pages = [], seen = new Set();
+  let dup = 0, cached = 0, logId = null;
+  for (let i = 0; i < files.length; i++) {
+    aiBusyNote = files.length > 1 ? `讀取截圖 ${i + 1}／${files.length}，每張約 10–30 秒…` : "讀取截圖中，約 10–30 秒…";
+    renderAssistant();
+    const hash = await _aiFileHash(files[i]);
+    if (hash && seen.has(hash)) { dup += 1; continue; }   // 同一次選了兩張一樣的
+    if (hash) seen.add(hash);
+    const p = await _aiReadShot(files[i], hash);
+    if (p.error === "update") { aiBusy = false; aiBusyNote = ""; handleUpdateRequired(p.resp); aiAfterRun(); return; }
+    if (p.cached) cached += 1;
+    if (p.log_id && !logId) logId = p.log_id;
+    pages.push(p);
   }
   aiBusy = false;
   aiBusyNote = "";
-  trackActivity("holding_import", { ok: status === 200 ? 1 : 0, rows: r && Array.isArray(r.rows) ? r.rows.length : 0 });
-  if (status === 200 && r) {
-    const card = aiImportCard(r);
-    card.log_id = r.log_id || null;
-    if (card._id && aiPending[card._id]) aiPending[card._id].log_id = r.log_id || null;
-    aiPushCard(card, card._id);
-  } else if (!(status === 426 && handleUpdateRequired(r))) {
-    aiPushCard({ text: note || String((r && r.error) || "截圖辨識暫時無法使用，請再試一次。"), muted: true,
-                 actions: [{ label: "再選一張", act: "image" }] });
+  const ok = pages.filter(p => !p.error && p.is_holdings);
+  const failed = pages.filter(p => p.error).length;
+  trackActivity("holding_import", { ok: ok.length, files: files.length, cached, failed });
+  if (!ok.length) {
+    const why = pages.length && pages.every(p => p.error) ? `${pages[0].error}，再試一次。` : "";
+    aiPushCard(why ? { text: why, muted: true, actions: [{ label: "再選一張", act: "image" }] }
+                   : aiImportCard({ is_holdings: false, rows: [] }));
+    aiAfterRun();
+    return;
   }
+  const merged = mergeShotRows(ok.map(p => p.rows));
+  const card = aiImportCard({ is_holdings: merged.rows.length > 0, rows: merged.rows },
+                            { files: files.length, skipped: all.length - files.length, dup, cached, failed,
+                              notHoldings: pages.length - ok.length - failed, overlap: merged.dropped });
+  card.log_id = logId;
+  if (card._id && aiPending[card._id]) aiPending[card._id].log_id = logId;
+  aiPushCard(card, card._id);
   aiAfterRun();
 }
 
 // 「我要上傳截圖更新持股」：選檔要使用者自己按，所以回一顆鍵
 function aiImageAskCard() {
   return { head: "從截圖更新持股",
-           text: "選一張券商 App 的「庫存」或「未實現損益」截圖，我會讀出股票、股數與均價，給你確認後才更新。截圖只用來辨識這一次，沒有保存。",
+           text: "選券商 App 的「庫存」或「未實現損益」截圖（一頁截不完可以一次選好幾張），我會讀出股票、股數與均價，給你確認後才更新。截圖不會保存。",
            actions: [{ label: "選擇截圖", act: "image", main: true }] };
 }
 
 // 確認卡：一檔一列（新增／更新／不變），認不出的另外寫；截圖裡沒有的現有持股預設不動，籤可以改成「也刪掉」
-function aiImportCard(resp) {
+function aiImportCard(resp, meta) {
   const rows = Array.isArray(resp && resp.rows) ? resp.rows : [];
   if (!resp || !resp.is_holdings || !rows.length) {
     return { text: "這張圖看起來不是持股清單。請截券商 App 的「庫存」或「未實現損益」那一頁再試；也可以直接跟我說「我有 2 張台積電成本 900」。",
@@ -22129,65 +22223,105 @@ function aiImportCard(resp) {
   }
   const id = "ac" + (++_aiCardSeq);
   const spec = {
-    plan, removeMissing: false, head: "從截圖更新持股？",
+    plan, meta: meta || null, removeMissing: false, addMode: false, oddReplace: false, head: "從截圖更新持股？",
     run: async () => {
       let done = 0, removed = 0, stop = "";
       const failed = [];
+      let added = 0;
       for (const it of plan.items) {
-        if (it.status === "same" || it.skipped || stop) continue;
+        const eff = _importEffect(it, spec);   // 卡上寫的就是這裡寫的（選項在按下去那一刻的樣子）
+        if (!eff.op || it.skipped || stop) continue;
         const sid = it.sid;
         try {
           if (!aiRowOf(sid) && !(await aiAddStockById(sid))) { failed.push(aiStockName(sid)); continue; }
-          const res = await applyHoldingChange(sid, { kind: "set", shares: it.shares, price: it.avg });
-          if (res.error) failed.push(aiStockName(sid)); else done += 1;
+          const res = await applyHoldingChange(sid, eff.op);
+          if (res.error) failed.push(aiStockName(sid)); else { done += 1; if (eff.status === "add") added += 1; }
         } catch (e) {
           if (isLimitError(e, "watchlist")) stop = aiLimitLabel("watchlist");
           else failed.push(aiStockName(sid));
         }
       }
-      for (const sid of spec.removeMissing ? plan.missing : []) {
+      for (const sid of spec.removeMissing && !spec.addMode ? plan.missing : []) {
         const res = await applyHoldingChange(sid, { kind: "delete" }).catch(() => ({ error: "x" }));
         if (res.error) failed.push(aiStockName(sid)); else removed += 1;
       }
-      const text = `已從截圖更新 ${done} 檔持股${removed ? `，刪掉 ${removed} 檔` : ""}。`
+      const text = `已從截圖更新 ${done} 檔持股${added ? `（其中 ${added} 檔加到原本的股數上）` : ""}${removed ? `，刪掉 ${removed} 檔` : ""}。`
         + (failed.length ? `沒成功：${failed.join("、")}。` : "") + (stop ? `${stop}，後面的沒有套用。` : "");
       return { text, failed: !done && !removed, actions: [{ label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }] };
     },
   };
-  const card = aiImportView(id, spec);
-  if (!card.actions.length && !plan.missing.length) return card;   // 跟現在一樣、也沒有要刪的：答案卡就好
+  const card = aiImportView(id, spec);   // 「讀了 3 張、1 張之前讀過」寫在 text 裡
+  if (!card.actions.length && !card.chips.length) return card;   // 跟現在一樣、也沒有選項可改：答案卡就好
   aiPending[id] = spec;
   return Object.assign(card, { _id: id });
 }
 
+// 一檔在目前的選項下要怎麼寫（確認卡與 run() 共用，卡上寫的就是會寫進去的）：
+//   另一個帳戶（addMode）：已經有的那幾檔把截圖的股數加上去、均價加權——與手動「買進」同一個算法（holdingNext buy）
+//   只有零股那一列（i.odd）：原本的整股留著、零股換成截圖的；同一張再傳一次結果一樣（不會一直加）
+//   其餘：以截圖為準（set）
+function _importEffect(i, spec) {
+  if (spec.addMode && i.cur) {
+    const op = { kind: "buy", shares: i.shares, price: i.avg };
+    const n = holdingNext(i.cur, op);
+    return { op, shares: n.shares, avg: n.cost, status: "add" };
+  }
+  if (i.odd && !spec.oddReplace) {
+    if (i.odd.same) return { op: null, shares: i.cur.shares, avg: i.cur.cost, status: "same" };
+    return { op: { kind: "set", shares: i.odd.shares, price: i.odd.avg }, shares: i.odd.shares, avg: i.odd.avg, status: "odd" };
+  }
+  if (i.status === "same") return { op: null, shares: i.shares, avg: i.avg, status: "same" };
+  return { op: { kind: "set", shares: i.shares, price: i.avg }, shares: i.shares, avg: i.avg, status: i.status };
+}
+
 function aiImportView(id, spec) {
   const { items, unknown, missing } = spec.plan;
-  const apply = items.filter(i => i.status !== "same" && !i.skipped);
-  const del = spec.removeMissing ? missing : [];
-  const n = apply.length + del.length;
-  const count = s => items.filter(i => i.status === s).length;
-  const rows = items.map(i => {
+  const eff = items.map(i => _importEffect(i, spec));
+  const removeMissing = spec.removeMissing && !spec.addMode;   // 另一個帳戶的截圖不該刪掉這個帳戶的持股
+  const del = removeMissing ? missing : [];
+  const n = eff.filter((e, k) => e.op && !items[k].skipped).length + del.length;
+  const count = s => eff.filter(e => e.status === s).length;
+  const rows = items.map((i, k) => {
+    const e = eff[k];
     let note = i.skipped ? "自選股額度不夠，不套用"
-      : i.status === "new" ? (i.inWatch ? "新增" : "新增・會加入自選")
-      : i.status === "same" ? "不變"
+      : e.status === "new" ? (i.inWatch ? "新增" : "新增・會加入自選")
+      : e.status === "same" ? "不變"
+      : e.status === "add" ? `原本 ${fmtLots(i.cur.shares)}＋${fmtLots(i.shares)}`
+      : e.status === "odd" ? `只有零股這一列：原本的整股留著，零股換成 ${i.shares.toLocaleString()} 股`
       : `原本 ${fmtLots(i.cur.shares)}${i.cur.cost != null ? `・${fmtPrice(i.cur.cost)}` : ""}`;
-    if (i.unitGuessed && i.status !== "same") note += "・張／股照欄位名稱判斷，請核對";
-    return { label: `${aiStockName(i.sid)} ${i.sid}`, value: `${fmtLots(i.shares)}・均價 ${fmtPrice(i.avg)}`, note };
+    if (i.unitGuessed && e.status !== "same") note += "・張／股照欄位名稱判斷，請核對";
+    return { label: `${aiStockName(i.sid)} ${i.sid}`, value: `${fmtLots(e.shares)}・均價 ${e.avg != null ? fmtPrice(e.avg) : "未填"}`, note };
   }).concat(del.map(sid => ({ label: `${aiStockName(sid)} ${sid}`, value: "刪除持股", note: "截圖裡沒有" })));
-  const parts = [["新增", count("new")], ["更新", count("update")], ["不變", count("same")]].filter(p => p[1]).map(p => `${p[0]} ${p[1]}`);
-  const text = (unknown.length ? `認不出：${unknown.slice(0, 5).join("、")}${unknown.length > 5 ? ` 等 ${unknown.length} 列` : ""}（不套用）。` : "")
-    + "截圖只用來辨識這一次，沒有保存。";
-  const chips = missing.length
-    ? [{ label: spec.removeMissing ? `保留截圖裡沒有的 ${missing.length} 檔` : `也刪掉截圖裡沒有的 ${missing.length} 檔`, act: "imptoggle", data: { id } }]
-    : [];
+  const parts = [["新增", count("new")], ["更新", count("update") + count("odd")], ["加上去", count("add")], ["不變", count("same")]]
+    .filter(p => p[1]).map(p => `${p[0]} ${p[1]}`);
+  const m = spec.meta || {};
+  const how = [m.files > 1 ? `讀了 ${m.files} 張截圖` : "", m.cached ? `${m.cached} 張之前讀過，直接用上次的結果` : "",
+               m.dup ? `${m.dup} 張重複，略過` : "", m.overlap ? `重疊的 ${m.overlap} 列只算一次` : "",
+               m.failed ? `${m.failed} 張沒讀到` : "", m.notHoldings ? `${m.notHoldings} 張不是持股清單` : "",
+               m.skipped ? `一次最多 ${AI_IMG_MAX_FILES} 張，後面 ${m.skipped} 張沒讀` : ""].filter(Boolean);
+  const text = (how.length ? `${how.join("，")}。` : "")
+    + (spec.addMode ? "另一個帳戶：已經有的股票把截圖的股數加上去，均價加權。" : "")
+    + (unknown.length ? `認不出：${unknown.slice(0, 5).join("、")}${unknown.length > 5 ? ` 等 ${unknown.length} 列` : ""}（不套用）。` : "")
+    + "截圖不會保存；讀出來的結果記在這支手機上，同一張圖再選不必重新辨識。";
+  // 三個選項：已經有的股票「另一個帳戶 → 加上去」、只有零股那一列「取代整股」、截圖裡沒有的「也刪掉」
+  const held = items.filter(i => i.cur).length;
+  const chips = [];
+  if (held) chips.push({ label: spec.addMode ? "以截圖為準（同一個帳戶）" : `另一個帳戶：重複的 ${held} 檔股數加上去`,
+                         act: "imptoggle", data: { id, mode: "add" } });
+  if (!spec.addMode && items.some(i => i.odd)) chips.push({ label: spec.oddReplace ? "零股加回原本的整股" : "零股改成取代原本的整股",
+                                                            act: "imptoggle", data: { id, mode: "odd" } });
+  if (!spec.addMode && missing.length) chips.push({ label: removeMissing ? `保留截圖裡沒有的 ${missing.length} 檔` : `也刪掉截圖裡沒有的 ${missing.length} 檔`,
+                                                    act: "imptoggle", data: { id, mode: "missing" } });
   const actions = n ? [{ label: `套用 ${n} 檔`, act: "confirm", data: { id }, main: true }, { label: "取消", act: "cancel", data: { id } }] : [];
   return { head: n ? spec.head : "持股和截圖一樣", sub: `認出 ${items.length} 檔：${parts.join("、")}`, rows, text, chips, actions };
 }
 
-function aiImportToggle(id) {
+function aiImportToggle(id, mode) {
   const spec = aiPending[id];
   if (!spec || spec.busy || !spec.plan) return;
-  spec.removeMissing = !spec.removeMissing;
+  if (mode === "add") spec.addMode = !spec.addMode;
+  else if (mode === "odd") spec.oddReplace = !spec.oddReplace;
+  else spec.removeMissing = !spec.removeMissing;
   aiReplaceCard(id, Object.assign(aiImportView(id, spec), { log_id: spec.log_id || null }));
   renderAssistant();
 }
