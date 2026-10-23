@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="423">
+  <meta name="app-version" content="424">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=423" rel="stylesheet">
+  <link href="watchlist.css?v=424" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -659,8 +659,8 @@
          程式代號 ai、函式前綴 ai／assistant；畫面文字「助手」（Howard 2026-10-16）。
          分類在 Cloudflare Worker（Jev 決策模型），執行是 App 既有的函式（白名單 ASSISTANT_ACTIONS）；
          這一頁不產生自由文字——答案卡用記憶體裡的資料套樣板、名詞與拒答是固定句（COMPLIANCE.md 第 6 條）。
-         語音：手機鍵盤自己的麥克風在這個輸入框就能用（第七節 C 案）。輸入列右邊那顆鍵在觸控裝置、空白時是麥克風——
-         點了只聚焦輸入框、提示用鍵盤的麥克風說話，不自己錄音；打了字變成送出（第七節的設計稿，2026-10-23 Howard）。 -->
+         語音：手機鍵盤自己的麥克風在這個輸入框就能用，不另外畫麥克風鍵（第七節 C 案）——
+         按了不能直接錄音的鍵就不要畫（Howard 2026-10-23，v423 畫過一版「點了叫出鍵盤＋提示」，v424 拿掉）。 -->
     <section id="view-ai" class="app-view">
       <!-- 2026-10-17 晚起是底部導覽最左邊那一格（與統計／通知同一層），不再掛「股票」頁的分頁列 -->
       <div class="view-head">
@@ -669,17 +669,15 @@
       <div class="ai-view">
         <div class="ai-log" id="ai-log" role="log" aria-live="polite"></div>
         <!-- 送出後鎖住直到回應（一句話一次）；Enter／鍵盤的「送出」都走 submit。
-             一整條膠囊（2026-10-23）：截圖鈕縮成框內左邊的圖示，右邊一顆圓鍵——空白＝麥克風（只在觸控裝置）、有字＝送出。
-             那顆鍵是 type="button"：表單裡只剩一個文字欄，Enter 照樣送出（隱式送出），點麥克風才不會送出空字串。 -->
+             一整條膠囊（2026-10-23）：截圖鈕縮成框內左邊的圖示，右邊一顆圓的送出鍵——空白時暗、有字變金色（.has-text）。 -->
         <form class="ai-composer" id="ai-composer" autocomplete="off" onsubmit="return assistantSubmit(event)">
-          <div class="ai-mic-hint" id="ai-mic-hint" role="status" hidden>點鍵盤上的 <i data-icon="mic"></i> 就能用說的</div>
           <!-- 持股截圖（ASSISTANT.md 第二十六節）：券商 App 的庫存截圖 → 讀出股票、股數、均價 → 確認後更新持股 -->
           <div class="ai-bar">
             <button type="button" class="ai-attach" id="ai-attach" onclick="aiPickImage()" aria-label="上傳持股截圖" title="上傳持股截圖"><i data-icon="photo"></i></button>
             <input type="file" id="ai-file" accept="image/*" multiple hidden onchange="aiImageChosen(this)">
             <input class="ai-input" id="ai-input" type="text" maxlength="200" enterkeyhint="send"
                    placeholder="輸入問題或指令…" aria-label="對助手說" oninput="aiComposerSync()">
-            <button type="button" class="ai-send" id="ai-send" aria-label="送出" onclick="aiActionTap()"><i data-icon="aisend"></i></button>
+            <button type="submit" class="ai-send" id="ai-send" aria-label="送出"><i data-icon="aisend"></i></button>
           </div>
         </form>
       </div>
@@ -2196,7 +2194,6 @@ const ICON_CAMERA  = _svg('<path d="M2.4 5.6h2.3l1-1.6h4.6l1 1.6h2.3v7H2.4z"/><c
 const ICON_IMAGE   = _svg('<rect x="2.4" y="3" width="11.2" height="10" rx="1.6"/><circle cx="5.8" cy="6.4" r="1.1"/><path d="M2.8 11.6 6.4 8.6l2.4 2 2-1.6 2.6 2.4"/>', 14);
 const ICON_AI     = _svg('<path d="M6 2.4 7 5.3l2.9 1L7 7.3l-1 2.9-1-2.9-2.9-1 2.9-1z"/><path d="M11.5 8.6l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z"/>');
 const ICON_AI_SEND = _svg('<path d="M8 13.5V3"/><path d="M3.5 7.5 8 3l4.5 4.5"/>');   // 助手的送出鍵（向上箭頭；ICON_SEND 已被對話框用掉）
-const ICON_MIC     = _svg('<rect x="5.8" y="1.8" width="4.4" height="7.6" rx="2.2"/><path d="M3.6 7.6a4.4 4.4 0 0 0 8.8 0"/><path d="M8 12v2.2"/>');   // 助手輸入列空白時的那顆鍵
 
 // 靜態圖示：這段 script 排在這些節點之後，直接填即可，不必等 DOMContentLoaded
 {
@@ -2211,7 +2208,7 @@ const ICON_MIC     = _svg('<rect x="5.8" y="1.8" width="4.4" height="7.6" rx="2.
                           news: ICON_EVENTS, calendar: ICON_CAL, moon: ICON_MOON, gear: ICON_GEAR,
                           filter: ICON_FILTER, friends: ICON_FRIENDS,
                           radar: ICON_RADAR, wallet: ICON_WALLET, share: ICON_SHARE,
-                          plus: ICON_PLUS, feedback: ICON_FEEDBACK, ai: ICON_AI, aisend: ICON_AI_SEND, mic: ICON_MIC, photo: ICON_IMAGE };
+                          plus: ICON_PLUS, feedback: ICON_FEEDBACK, ai: ICON_AI, aisend: ICON_AI_SEND, photo: ICON_IMAGE };
   document.querySelectorAll("[data-icon]").forEach(el => {
     const ic = ICONS_BY_NAME[el.dataset.icon];
     if (ic) el.innerHTML = ic;
@@ -21754,49 +21751,11 @@ function aiOutcome(logId, picked, executed) {
   sbRpc("assistant_log_outcome", { p_log: logId, p_picked: picked, p_executed: executed }, state.accessToken).catch(() => {});
 }
 
-// ── 輸入列右邊那顆鍵：空白＝麥克風、有字＝送出 ─────────────────────
-// 麥克風只在觸控裝置：那是手機鍵盤自己的聽寫（第七節 C 案），桌機的鍵盤沒有那顆，空白時就是暗掉的送出鍵。
-function aiMicMode() {
-  const inp = document.getElementById("ai-input");
-  const empty = !inp || !inp.value.trim();
-  return empty && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-}
-
+// 送出鍵空白時暗、有字變金色（.has-text）；送出清空輸入框後也要跟著暗回去
 function aiComposerSync() {
   const inp = document.getElementById("ai-input");
-  const btn = document.getElementById("ai-send");
   const form = document.getElementById("ai-composer");
-  if (!inp || !btn) return;
-  const hasText = !!inp.value.trim();
-  const mic = aiMicMode();
-  if (btn.dataset.mode !== (mic ? "mic" : "send")) {
-    btn.dataset.mode = mic ? "mic" : "send";
-    btn.innerHTML = mic ? ICON_MIC : ICON_AI_SEND;
-    btn.setAttribute("aria-label", mic ? "用說的" : "送出");
-  }
-  if (form) form.classList.toggle("has-text", hasText);
-  if (hasText) aiMicHint(false);
-}
-
-let _aiMicHintTimer = null;
-function aiMicHint(show) {
-  const el = document.getElementById("ai-mic-hint");
-  if (!el) return;
-  clearTimeout(_aiMicHintTimer);
-  el.hidden = !show;
-  if (show) _aiMicHintTimer = setTimeout(() => { el.hidden = true; }, 5000);
-}
-
-function aiActionTap() {
-  if (aiBusy) return;
-  if (aiMicMode()) {
-    // 不自己錄音：把鍵盤叫出來（focus 要在這一下點擊裡做，iOS 才肯彈鍵盤），告訴他麥克風在鍵盤上
-    const inp = document.getElementById("ai-input");
-    if (inp) inp.focus();
-    aiMicHint(true);
-    return;
-  }
-  assistantSubmit(null);
+  if (inp && form) form.classList.toggle("has-text", !!inp.value.trim());
 }
 
 // ── 送出 ─────────────────────────────────────────────────────────
@@ -21805,7 +21764,6 @@ function assistantSubmit(ev) {
   const inp = document.getElementById("ai-input");
   const text = inp ? inp.value : "";
   if (inp) inp.value = "";
-  aiMicHint(false);
   aiComposerSync();
   assistantSend(text);
   return false;
