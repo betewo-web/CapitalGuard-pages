@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="436">
+  <meta name="app-version" content="437">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=436" rel="stylesheet">
+  <link href="watchlist.css?v=437" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -22065,6 +22065,7 @@ function aiIntroHtml(withChips) {
       <li>加 「把聯發科加進自選」</li>
       <li>設 「跌到 900 提醒我」、「${AI_RULE_EXAMPLE}」、「盯台積電 30 天，跌 10% 通知我」</li>
       <li>記 「我買了 2 張台積電 成本 900」、「賣掉 1 張鴻海」，或按輸入列左邊的圖片鈕上傳券商的庫存截圖</li>
+      <li>看 「台積電整理一下」、「台積電和聯發科比較」、「今天有什麼重點」</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
       <div class="ai-note">只整理與解釋公開資料，不提供買賣建議。用鍵盤上的麥克風也可以說話。</div></div>`,
     chips: withChips ? aiIntroChips() : [],
@@ -22113,12 +22114,16 @@ function aiReplaceCard(id, c) {
 // 還原時收成「已失效」；其餘的卡原樣，籤與鍵都還按得動。登出時刪掉（logout）：裡面有問過哪幾檔、持股的數字。
 function _aiStoreKey() { return state.userId ? `cg-ai-log:${state.userId}` : ""; }
 const AI_LIVE_ACTS = new Set(["confirm", "cancel", "impchoose", "imptoggle"]);
+let _aiSavedSig = "";   // 上次存進去的內容：renderAssistant 一次對話會叫好幾次，內容沒變就不重寫（第十輪）
 function aiSaveLog() {
   const key = _aiStoreKey();
   if (!key || _aiRestored !== key) return;   // 還沒還原過就存＝把上一次的對話蓋掉
   try {
-    if (!aiLog.length) { localStorage.removeItem(key); return; }
+    if (!aiLog.length) { localStorage.removeItem(key); _aiSavedSig = ""; return; }
+    const body = JSON.stringify({ log: aiLog, recent: _aiRecentSids, qs: _aiRecentQs });
+    if (body === _aiSavedSig) return;
     localStorage.setItem(key, JSON.stringify({ v: 1, at: Date.now(), log: aiLog, recent: _aiRecentSids, qs: _aiRecentQs }));
+    _aiSavedSig = body;
   } catch { /* 空間滿了或被關掉：這一次就不存，對話照常 */ }
 }
 let _aiRestored = "";
@@ -22810,6 +22815,9 @@ async function assistantSend(raw) {
   const mentions = aiMentionsOf(text);
   aiBusy = true;
   renderAssistant();
+  // 等超過 3 秒：三個點換成一句話（第十輪）——網路慢的時候，三個點看起來像當掉
+  const AI_SLOW_NOTE = "還在想…（網路慢的時候會多等幾秒）";
+  const slow = setTimeout(() => { if (aiBusy && !aiBusyNote) { aiBusyNote = AI_SLOW_NOTE; renderAssistant(); } }, 3000);
   let r = null, status = 0, timedOut = false;
   try {
     const resp = await fetch(`${aiRouteUrl}/v1/route`, {
@@ -22826,6 +22834,8 @@ async function assistantSend(raw) {
     status = resp.status;
     r = await resp.json().catch(() => null);
   } catch (e) { r = null; timedOut = !!e && (e.name === "TimeoutError" || e.name === "AbortError"); }
+  clearTimeout(slow);
+  if (aiBusyNote === AI_SLOW_NOTE) aiBusyNote = "";
   aiBusy = false;
   if (status === 200 && r) await aiHandleResponse(r, text);
   else aiHandleError(status, r, text, timedOut);
@@ -22833,9 +22843,12 @@ async function assistantSend(raw) {
 }
 
 // 送不出去的那一句帶一顆「再試一次」：網路與伺服器的錯多半是一時的，重打一遍是使用者的事就太累了
+// 第二顆「回報這個問題」（第十輪）：一直送不出去的時候，原句與狀況帶進意見回饋（按送出才會寄）
 function aiRetryCard(msg, text) {
   const t = String(text || "").trim();
-  return { text: msg, muted: true, chips: t ? [{ label: "再試一次", act: "retry", data: { text: t } }] : [] };
+  const report = { label: "回報這個問題", act: "run",
+                   data: { intent: "feedback", slots: { text: `助手送不出去：「${t.slice(0, 80)}」（${msg}）` }, text: "回報這個問題" } };
+  return { text: msg, muted: true, chips: t ? [{ label: "再試一次", act: "retry", data: { text: t } }, report] : [] };
 }
 
 function aiHandleError(status, r, text, timedOut) {
@@ -24836,7 +24849,7 @@ const ASSISTANT_ACTIONS = {
     ].join("");
     const notMine = facts.filter(f => !f.mine);
     return { head: facts.map(f => f.name).join(" vs "), sub: "只並排資料，不比好壞・點名字看那一檔的全貌",
-             bodyHtml: `<table class="ai-cmp"><thead>${head}</thead><tbody>${body}</tbody></table>`,
+             bodyHtml: `<div class="ai-cmp-wrap"><table class="ai-cmp"><thead>${head}</thead><tbody>${body}</tbody></table></div>`,
              chips: notMine.slice(0, 2).map(f => Object.assign(aiAddChip(f.sid), { label: `${f.name}加進自選` })) };
   },
   // 今天的重點（第四輪）：一張卡把今天跟「我」有關的事整理在一起，每一列點了就是那一類的完整答案（本機直接做）。

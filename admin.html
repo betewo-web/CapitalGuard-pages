@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="436">
+  <meta name="app-version" content="437">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -268,6 +268,9 @@
     <div class="card span-12" id="c-feedback"></div>
     <!-- 助手：最近的句子與標注（ASSISTANT.md 第十五節 A1）——golden data 的回收迴圈 -->
     <div class="card span-12" id="c-assistant"></div>
+    <!-- 助手（第十輪）：最近 100 句裡重複問的、每一類被問幾次與「不是我要的」比例——看哪一類最常用、哪一類最常答錯 -->
+    <div class="card span-6" id="c-assistant-hot"></div>
+    <div class="card span-6" id="c-assistant-intents"></div>
   </div>
 
   <h2 class="sec">事件與系統 <small>盤後事件產出、資料表與管線狀態</small></h2>
@@ -1183,9 +1186,38 @@ function renderAssistantLog() {
   });
   const wrongN = _aiRows.filter(r => r.picked === "wrong").length;
   const labeled = _aiRows.filter(r => r.label).length;
+  renderAssistantSummary();
   tableCard("c-assistant", "助手：最近 100 句",
     `信心低的排前面；「不是我要的」${fmtInt(wrongN)} 句、已標注 ${fmtInt(labeled)} 句。標了類別的句子不會被保留期清掉，assistant_eval.py --harvest 匯成目錄例句`,
     ["時間", "句子", "Jev 分到（前三）", "決策", "信心", "其實該是"], rows, "還沒有人用過助手");
+}
+
+// 熱門問題與每一類的統計（第十輪）：都從同一份「最近 100 句」算，不多打一支 RPC
+function renderAssistantSummary() {
+  const il = k => ASSISTANT_INTENT_LABELS[k] || k || "";
+  const norm = t => String(t || "").replace(/\s+/g, "");
+  const freq = new Map();
+  for (const r of _aiRows) {
+    const k = norm(r.text);
+    if (!k || k.startsWith("[")) continue;   // 「[持股截圖] N 列」不是句子
+    const g = freq.get(k) || { text: r.text, n: 0, intent: r.intent };
+    g.n += 1;
+    freq.set(k, g);
+  }
+  const hot = [...freq.values()].filter(g => g.n > 1).sort((a, b) => b.n - a.n).slice(0, 10);
+  tableCard("c-assistant-hot", "助手：重複問的句子", "最近 100 句裡出現兩次以上的", ["句子", "次數"],
+    hot.map(g => `<tr><td>${escapeHtml(g.text)}<br><small style="opacity:.7">${escapeHtml(il(g.intent))}</small></td><td class="num">${fmtInt(g.n)}</td></tr>`),
+    "還沒有重複問的句子");
+  const by = new Map();
+  for (const r of _aiRows) {
+    const g = by.get(r.intent) || { n: 0, wrong: 0 };
+    g.n += 1;
+    if (r.picked === "wrong") g.wrong += 1;
+    by.set(r.intent, g);
+  }
+  const rows = [...by].sort((a, b) => b[1].n - a[1].n).map(([k, g]) =>
+    `<tr><td>${escapeHtml(il(k))}</td><td class="num">${fmtInt(g.n)}</td><td class="num">${g.wrong ? `${fmtInt(g.wrong)}（${Math.round(g.wrong / g.n * 100)}%）` : "—"}</td></tr>`);
+  tableCard("c-assistant-intents", "助手：各類別", "最近 100 句；「不是我要的」多的那一類，criteria 或例句該補", ["類別", "句數", "不是我要的"], rows, "還沒有人用過助手");
 }
 
 async function assistantLabel(id, intent) {

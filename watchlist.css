@@ -2080,7 +2080,9 @@ html.home-simple-only #home-filter { display: none !important; }
 .ai-card-head .ic { color: var(--accent); width: 18px; height: 18px; flex: 0 0 auto; }
 .ai-card-sub { color: var(--text-muted); font-size: 0.86rem; margin-top: 2px; }
 /* 並排比較（第五輪）：兩三檔一欄一檔，數字靠右對齊；欄名是按鍵（點了看那一檔的全貌） */
-.ai-cmp { width: 100%; border-collapse: collapse; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+/* 大字體（特大）時三欄放不下：表格本身可以橫捲，卡片不被撐寬（第十輪） */
+.ai-cmp-wrap { overflow-x: auto; margin: 0 -2px; }
+.ai-cmp { width: 100%; border-collapse: collapse; font-size: 0.9rem; font-variant-numeric: tabular-nums; min-width: 300px; }
 .ai-cmp th, .ai-cmp td { padding: 6px 4px; border-top: 1px solid var(--border); text-align: right; }
 .ai-cmp thead th { border-top: none; }
 .ai-cmp tbody th { text-align: left; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
