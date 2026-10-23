@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="432">
+  <meta name="app-version" content="433">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=432" rel="stylesheet">
+  <link href="watchlist.css?v=433" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -22105,7 +22105,7 @@ function aiRestoreLog() {
 }
 function aiRestoreEntry(m) {
   if (m.kind !== "card") return m;
-  const s = m.spec;
+  const s = Object.assign({}, m.spec, { chips: (m.spec.chips || []).filter(c => !c || c.act !== "undo") });   // 復原鍵的函式沒存下來
   const acts = (s.actions || []).concat(s.chips || []);
   const live = acts.some(a => a && AI_LIVE_ACTS.has(a.act)) || /data-ai-act="(?:confirm|cancel|impchoose|imptoggle)"/.test(String(s.bodyHtml || ""));
   if (!live) return { kind: "card", spec: s, id: null };
@@ -22192,6 +22192,31 @@ function aiSkipPending() {
       : { text: "已略過（你送了新的一句）。", muted: true });
     aiOutcome(spec.log_id, null, false);
   }
+}
+
+// ── 復原（第六輪，2026-10-23）：寫入之後的結果卡上一顆「復原」，按了把剛才那一筆改回去（只能按一次）。
+// 復原走的也是既有的寫入函式（updateAlert／sbPatch／applyHoldingChange／removeStock／insertRuleTemplates／sbDelete），
+// 不另開路徑。函式存不進對話：App 重開之後那顆鍵就不在了（aiRestoreEntry 把它拿掉）。
+const aiUndo = {};
+function aiUndoChip(fn) {
+  const id = "u" + (++_aiCardSeq);
+  aiUndo[id] = fn;
+  return { label: "復原", act: "undo", data: { id } };
+}
+async function aiRunUndo(id) {
+  const fn = aiUndo[id];
+  if (!fn || aiBusy) return;
+  delete aiUndo[id];
+  for (const m of aiLog) {
+    if (m.kind === "card" && m.spec && m.spec.chips) m.spec.chips = m.spec.chips.filter(c => !(c && c.act === "undo" && c.data && c.data.id === id));
+  }
+  aiBusy = true; renderAssistant();
+  let msg;
+  try { msg = await fn(); } catch (e) { console.error("assistant undo failed:", e); msg = `沒有復原成功：${String((e && e.message) || e).slice(0, 80)}`; }
+  aiBusy = false;
+  aiPushCard({ text: msg || "已復原。", muted: true });
+  trackActivity("assistant_undo", {});
+  renderAssistant();
 }
 
 // 「改一下」：卡收成一行、主鍵不再能按（第十五節 B2）；寫入在打開的面板裡完成，不會重複
@@ -22442,6 +22467,7 @@ function aiAct(act, data) {
   if (act === "impchoose") { aiImportChoose(String(data.id || ""), String(data.mode || "same")); return; }   // 截圖匯入：同一個帳戶／另一個帳戶   // 籤上已帶類別＋槽位：本機直接做，不再送 Worker 分類（第十五節 A3）
   if (act === "open") { if (data._collapse) aiCollapseConfirm(String(data._collapse)); aiOpen(data); renderAssistant(); return; }
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
+  if (act === "undo") { aiRunUndo(String(data.id || "")); return; }   // 剛才那一筆寫入改回去（第六輪）
   if (act === "cancel") { aiCancelConfirm(String(data.id || "")); return; }
   if (act === "wrong") { aiMarkWrong(String(data.log_id || "")); return; }
   if (act === "ai") { askAiHandoffPick(data); return; }   // 交給使用者自己的 AI：這一下就把問題複製起來
@@ -23109,6 +23135,15 @@ function aiMultiStocks(slots) {
   if (sids.length < 2 || (slots && slots.stock && !sids.includes(String(slots.stock)))) return null;
   return sids;
 }
+// 加進自選之後：接著設到價提醒、記錄持股（第六輪），最後一顆是復原（拿掉剛加的）
+function aiAfterAddChips(sid) {
+  const name = aiStockName(sid);
+  const run = (label, intent, slots) => ({ label, act: "run", data: { intent, slots, text: label } });
+  return [run(`設${name}的到價提醒`, "price_target_set", { stock: sid }),
+          run(`記錄${name}的持股`, "holdings_set", { stock: sid, hold_action: "set" }),
+          aiUndoChip(async () => { const r = aiRowOf(sid); if (r) await removeStock(r.id, false); return `已把 ${name} 從自選股拿掉。`; })];
+}
+
 function aiWatchAddMany(sids) {
   const have = new Set((watchlistRows || []).map(w => String(w.stock_id || "").trim()));
   const todo = sids.filter(s => !have.has(s));
@@ -23121,10 +23156,27 @@ function aiWatchAddMany(sids) {
     head: `加入 ${fit.length} 檔自選股？`, sub: `自選股 ${aiWatchUsage()}，加入後 +${fit.length}`, rows, mainLabel: `加入 ${fit.length} 檔`,
     run: async () => {
       for (const s of fit) await aiAddStockById(s);
-      return { text: `已加入 ${fit.map(aiStockName).join("、")}，基礎訊號預設全開。` };
+      return { text: `已加入 ${fit.map(aiStockName).join("、")}，基礎訊號預設全開。`,
+               chips: [aiUndoChip(async () => {
+                 for (const s of fit) { const r = aiRowOf(s); if (r) await removeStock(r.id, false); }
+                 return `已把剛加的 ${fit.length} 檔拿掉。`;
+               })] };
     },
   });
 }
+// 移除自選股的復原：加回去（與 addStock 同一條），再把原本那一列的訊號開關、到價、持股寫回去（同一條 PATCH）
+async function aiRestoreWatchRow(sid, keep) {
+  const r = await aiAddStockById(sid);
+  if (!r) throw new Error("加回自選股後找不到那一列");
+  const back = {};
+  for (const f of ALERT_FIELDS.concat(["target_price_low", "target_price_high", "shares", "avg_cost"])) {
+    if (keep[f] !== undefined && keep[f] !== r[f]) back[f] = keep[f];
+  }
+  if (Object.keys(back).length) { await sbPatch("watchlist", { "id": `eq.${r.id}` }, back, state.accessToken); Object.assign(r, back); }
+  renderCurrentTab();
+  return `已把 ${aiStockName(sid)} 加回自選股（訊號開關、到價與持股照原本的）。`;
+}
+
 function aiWatchRemoveMany(sids) {
   const items = sids.map(s => ({ s, row: aiRowOf(s) }));
   const del = items.filter(x => x.row);
@@ -23134,8 +23186,10 @@ function aiWatchRemoveMany(sids) {
   return aiConfirmCard({
     head: `移除 ${del.length} 檔自選股？`, rows, mainLabel: `移除 ${del.length} 檔`,
     run: async () => {
+      const keep = del.map(x => [x.s, Object.assign({}, x.row)]);
       for (const x of del) await removeStock(x.row.id, false);
-      return { text: `已移除 ${del.map(x => aiStockName(x.s)).join("、")}。` };
+      return { text: `已移除 ${del.map(x => aiStockName(x.s)).join("、")}。`,
+               chips: [aiUndoChip(async () => { for (const [s, k] of keep) await aiRestoreWatchRow(s, k); return `已把 ${keep.length} 檔加回自選股。`; })] };
     },
   });
 }
@@ -24234,7 +24288,22 @@ const ASSISTANT_ACTIONS = {
           await refreshRules().catch(() => {});
           const left = aiRuleRoom();   // 刪掉就空出格子：把現在還能設幾條講出來（第二十節的收尾）
           const room2 = action === "delete" && left !== null ? `現在還能設 ${left} 條。` : "";
-          return { text: `已${verb} ${targets.length} 條進階訊號。${room2}`, actions: [rulesBtn] };
+          const undo = aiUndoChip(async () => {
+            if (action === "delete") {   // 刪掉的用同一組條件重建（新的一條；原本關著的建好再關掉）
+              const had = new Set((alertRules || []).map(x => x.id));
+              for (const r of targets) await insertRuleTemplates([{ name: r.name, conditions: r.conditions }], r.stock_id || null);
+              await refreshRules().catch(() => {});
+              for (const r of targets.filter(x => !x.enabled)) {
+                const fresh = (alertRules || []).find(x => !had.has(x.id) && x.name === r.name && String(x.stock_id || "") === String(r.stock_id || ""));
+                if (fresh) await sbPatch("alert_rules", { id: `eq.${fresh.id}` }, { enabled: false }, state.accessToken);
+              }
+            } else {
+              for (const r of targets) await sbPatch("alert_rules", { id: `eq.${r.id}` }, { enabled: !!r.enabled }, state.accessToken);
+            }
+            await refreshRules().catch(() => {});
+            return action === "delete" ? `已把 ${targets.length} 條進階訊號建回來。` : `已把 ${targets.length} 條進階訊號改回原本的開關。`;
+          });
+          return { text: `已${verb} ${targets.length} 條進階訊號。${room2}`, actions: [rulesBtn], chips: [undo] };
         },
       });
     }
@@ -24566,7 +24635,10 @@ const ASSISTANT_ACTIONS = {
       rows: [{ label: "股票", value: `${name} ${sid}`, note: universe[sid]?.i || "" },
              { label: "自選股", value: aiWatchUsage(), note: "加入後 +1" }],
       mainLabel: "加入",
-      run: async () => { await aiAddStockById(sid); return { text: `已加入 ${name}，基礎訊號預設全開。`, actions: [aiOpenBtn(sid, "radar")] }; },
+      run: async () => {
+        await aiAddStockById(sid);
+        return { text: `已加入 ${name}，基礎訊號預設全開。`, actions: [aiOpenBtn(sid, "radar")], chips: aiAfterAddChips(sid) };
+      },
     });
   },
   assistantWatchRemove(slots) {
@@ -24586,7 +24658,11 @@ const ASSISTANT_ACTIONS = {
     if (Number(row.shares) > 0) rows.push({ label: "持股紀錄", value: `${Number(row.shares).toLocaleString()} 股`, note: "會一起消失" });
     return aiConfirmCard({
       head: "移除自選股？", rows, mainLabel: "移除",
-      run: async () => { await removeStock(row.id, false); return { text: `已移除 ${name}。` }; },
+      run: async () => {
+        const keep = Object.assign({}, row);
+        await removeStock(row.id, false);
+        return { text: `已移除 ${name}。`, chips: [aiUndoChip(() => aiRestoreWatchRow(sid, keep))] };
+      },
     });
   },
   assistantPriceTargetSet(slots) {
@@ -24675,6 +24751,12 @@ const ASSISTANT_ACTIONS = {
     if (patch.target_price_low != null) rows.push({ label: "跌到", value: fmtPrice(patch.target_price_low), note: [pct(patch.target_price_low), old(row, "target_price_low")].filter(Boolean).join(" · ") });
     if (patch.target_price_high != null) rows.push({ label: "漲到", value: fmtPrice(patch.target_price_high), note: [pct(patch.target_price_high), old(row, "target_price_high")].filter(Boolean).join(" · ") });
     if (!row && aiWatchFull()) return aiLimitCard("watchlist");
+    // 價位已經在收盤價的另一邊（跌到 1100、收盤 1080）：盤中一碰到就成立——卡上先講（第六輪）
+    if (cur && patch.target_price_low != null && patch.target_price_low >= cur) {
+      rows.push({ label: "注意", value: "收盤已經在下方", note: "一碰到就通知" });
+    } else if (cur && patch.target_price_high != null && patch.target_price_high <= cur) {
+      rows.push({ label: "注意", value: "收盤已經在上方", note: "一碰到就通知" });
+    }
     const desc = Object.entries(patch).map(([f, v]) => `${f === "target_price_low" ? "跌到" : "漲到"} ${fmtPrice(v)}`).join("、");
     return aiConfirmCard({
       head: row ? "設定到價提醒？" : "加入並設定到價提醒？",
@@ -24684,10 +24766,19 @@ const ASSISTANT_ACTIONS = {
       run: async () => {
         const r = row || await aiAddStockById(sid);
         if (!r) throw new Error("加入自選股後找不到那一列");
+        const before = Object.fromEntries(Object.keys(patch).map(f => [f, r[f] == null || r[f] === "" ? null : r[f]]));
         for (const [f, v] of Object.entries(patch)) { await updateAlert(r.id, f, v, false); r[f] = v; }
         queuePushPromptAfterSignal();
         renderCurrentTab();
-        return { text: `已設定：${name} ${desc} 時通知。`, actions: [aiOpenBtn(sid, "radar")] };
+        const has = f => r[f] != null && r[f] !== "";
+        const other = has("target_price_low") && !has("target_price_high") ? "漲到" : has("target_price_high") && !has("target_price_low") ? "跌到" : "";
+        const chips = [aiUndoChip(async () => {
+          for (const [f, v] of Object.entries(before)) { await updateAlert(r.id, f, v, false); r[f] = v; }
+          renderCurrentTab();
+          return `已把 ${name} 的到價提醒改回原本的。`;
+        })];
+        if (other) chips.unshift({ label: `也設${other}的價位 ›`, act: "open", data: { alert: r.id } });   // 只設了一邊：另一邊直接開面板
+        return { text: `已設定：${name} ${desc} 時通知。`, actions: [aiOpenBtn(sid, "radar")], chips };
       },
     });
   },
@@ -24710,13 +24801,16 @@ const ASSISTANT_ACTIONS = {
     const on = slots.on;
     const sid = slots.stock;
     const row = sid ? aiRowOf(sid) : null;
-    if (sid && !row) {
+    // 「台積電和鴻海的爆量通知打開」：句子裡的那幾檔（在自選股裡的）一次改（第六輪）
+    const many = field && on !== undefined && on !== null ? aiMultiStocks(slots) : null;
+    const manyRows = many ? many.map(aiRowOf).filter(Boolean) : null;
+    if (sid && !row && !(manyRows && manyRows.length)) {
       if (aiWatchFull()) return aiLimitCard("watchlist");
       return aiConfirmCard({ head: "加入並打開基礎訊號設定？", sub: `${aiStockName(sid)} 不在自選股，會先加入`,
         rows: [{ label: "股票", value: `${aiStockName(sid)} ${sid}`, note: "" }], mainLabel: "加入並打開",
         run: async () => { const r = await aiAddStockById(sid); if (r) aiNav(() => openAlertSettings(r.id)); return { text: `已加入 ${aiStockName(sid)}，基礎訊號面板已打開。` }; } });
     }
-    const targets = row ? [row] : (watchlistRows || []);
+    const targets = manyRows && manyRows.length ? manyRows : row ? [row] : (watchlistRows || []);
     if (!targets.length) { aiNav(() => focusAddStock()); return { text: "還沒有自選股，已打開設定頁的新增。" }; }
     const fields = field ? [field] : ALERT_FIELDS.slice();
     if (on === undefined || on === null) {   // 問句：回現狀，附上改的籤
@@ -24727,8 +24821,11 @@ const ASSISTANT_ACTIONS = {
         data: { intent: "basic_signal_set", slots: Object.assign({ basic_field: field, on: v }, row ? { stock: sid } : {}), text: `${who}的${aiFieldLabel(field)}通知${v ? "打開" : "關掉"}` } });
       return { head: `${aiFieldLabel(field)}通知`, rows, chips: [onOff(true), onOff(false)] };
     }
-    if (row && field && !!row[field] === !!on) return { text: `${aiStockName(sid)} 的${aiFieldLabel(field)}通知已經是${on ? "開" : "關"}的。` };
-    const rows = [{ label: "對象", value: row ? `${aiStockName(sid)} ${sid}` : `全部 ${targets.length} 檔`, note: "" },
+    if (!manyRows && row && field && !!row[field] === !!on) return { text: `${aiStockName(sid)} 的${aiFieldLabel(field)}通知已經是${on ? "開" : "關"}的。` };
+    const skipped = many ? many.filter(s => !aiRowOf(s)) : [];
+    const rows = [{ label: "對象", value: manyRows && manyRows.length ? manyRows.map(r => aiStockName(String(r.stock_id).trim())).join("、")
+                                         : row ? `${aiStockName(sid)} ${sid}` : `全部 ${targets.length} 檔`,
+                    note: skipped.length ? `${skipped.map(aiStockName).join("、")}不在自選股，略過` : "" },
                   { label: "訊號", value: field ? aiFieldLabel(field) : `全部 ${fields.length} 項`, note: "" },
                   { label: "改成", value: on ? "開" : "關", note: row && field ? `目前 ${row[field] ? "開" : "關"}` : "" }];
     return aiConfirmCard({
@@ -24737,12 +24834,19 @@ const ASSISTANT_ACTIONS = {
       run: async () => {
         const patch = {};
         fields.forEach(f => { patch[f] = !!on; });
+        const before = targets.map(r => [r, Object.fromEntries(fields.map(f => [f, !!r[f]]))]);
         for (const r of targets) { await sbPatch("watchlist", { "id": `eq.${r.id}` }, patch, state.accessToken); Object.assign(r, patch); }
         const shared = targets.filter(r => frLiveShareOf(String(r.stock_id).trim())).length;
         if (shared) frReload().catch(() => {});
         if (on) queuePushPromptAfterSignal();
         renderCurrentTab();
-        return { text: `已${on ? "打開" : "關掉"}${field ? aiFieldLabel(field) : "全部基礎訊號"}（${targets.length} 檔${shared ? `，${shared} 檔已同步給好友` : ""}）。` };
+        return { text: `已${on ? "打開" : "關掉"}${field ? aiFieldLabel(field) : "全部基礎訊號"}（${targets.length} 檔${shared ? `，${shared} 檔已同步給好友` : ""}）。`,
+                 chips: [aiUndoChip(async () => {
+                   for (const [r, old] of before) { await sbPatch("watchlist", { "id": `eq.${r.id}` }, old, state.accessToken); Object.assign(r, old); }
+                   if (shared) frReload().catch(() => {});
+                   renderCurrentTab();
+                   return "已把基礎訊號改回原本的。";
+                 })] };
       },
     });
   },
@@ -24808,20 +24912,36 @@ const ASSISTANT_ACTIONS = {
     if (until) rows.push({ label: "期限", value: `到 ${mmdd(until)} 止`, note: "那一天過完自動刪除" });
     if (once) rows.push({ label: "通知次數", value: "一次", note: "通知後自動刪除" });
     rows.push({ label: "進階訊號", value: `${(alertRules || []).length}／${planLimitOf("alert_rules") ?? "—"}`, note: "建立後 +1" });
-    return aiConfirmCard({
+    // 已經有一條一樣的（同一檔、同一種條件、同一組參數；期限與基準價不算）：寫出來，主鍵改成「還是建立」（第六輪）
+    const condSig = c => JSON.stringify(Object.entries(c || {}).filter(([k]) => !["expires_on", "once", "base", "base_date"].includes(k)).sort());
+    const dup = (alertRules || []).find(r => String(r.stock_id || "") === String(sid || "") && (r.conditions || []).length === 1 && condSig(r.conditions[0]) === condSig(cond));
+    if (dup) rows.unshift({ label: "已經有一條", value: ruleLabelOf(dup), note: dup.enabled ? "開著" : "關著" });
+    const card = aiConfirmCard({
       head: sid && !aiRowOf(sid) ? "加入並建立進階訊號？" : "建立進階訊號？",
       sub: sid && !aiRowOf(sid) ? `${name} 不在自選股，會先加入` : "",
-      rows, mainLabel: "建立",
+      rows, mainLabel: dup ? "還是建立" : "建立",
       alt: { label: "改一下", act: "open", data: { rules: true, prefill: { name: desc.slice(0, 60), stock_id: sid, cond } } },
       run: async () => {
         if (sid && !aiRowOf(sid)) await aiAddStockById(sid);
+        const had = new Set((alertRules || []).map(r => r.id));
         const { limitHit } = await insertRuleTemplates([{ name: desc.slice(0, 60), conditions: [cond] }], sid);
         if (limitHit) return aiLimitCard("alert_rules");
         await refreshRules().catch(() => {});
         queuePushPromptAfterSignal();
-        return { text: `已建立進階訊號：${desc}（${sid ? name : "全部自選股"}）。`, actions: [{ label: "看進階訊號 ›", act: "open", data: { rules: true } }] };
+        const made = (alertRules || []).find(r => !had.has(r.id) && r.name === desc.slice(0, 60));
+        const left = aiRuleRoom();   // 建好之後還能設幾條（第六輪）
+        return { text: `已建立進階訊號：${desc}（${sid ? name : "全部自選股"}）。${left !== null ? `現在還能設 ${left} 條。` : ""}`,
+                 actions: [{ label: "看進階訊號 ›", act: "open", data: { rules: true } }],
+                 chips: made ? [aiUndoChip(async () => {
+                   await sbDelete("alert_rules", { id: `eq.${made.id}` }, state.accessToken);
+                   await refreshRules().catch(() => {});
+                   return "已刪掉剛建的那一條進階訊號。";
+                 })] : [] };
       },
     });
+    // 一樣的那一條是關著的：多給一顆「打開那一條」（不必多建一條）
+    if (dup && !dup.enabled) card.chips = [{ label: "打開原本那一條", act: "run", data: { intent: "rule_manage", slots: { action: "on", rule_id: dup.id }, text: `把「${ruleLabelOf(dup)}」打開` } }];
+    return card;
   },
   // 持股的寫入（Howard 2026-10-22：持股頁的每一個操作助手都要能直接做）：
   // 買進／賣出／刪除／改股數／改成本。做哪一件是 Worker 抽的 hold_action 槽位（關鍵字表），數字是 shares／avg_cost；
@@ -24913,12 +25033,20 @@ const ASSISTANT_ACTIONS = {
         if (!r) throw new Error("加入自選股後找不到那一列");
         const res = await applyHoldingChange(sid, op);
         if (res.error) return { text: res.error, muted: true, failed: true };
+        // 復原＝寫回原本的股數與成本（同一條 applyHoldingChange；原本沒有就刪掉）
+        const holdUndo = () => aiUndoChip(async () => {
+          const back = cur.shares > 0 ? { kind: "set", shares: cur.shares, price: cur.cost, clearCost: cur.cost == null } : { kind: "delete" };
+          const r2 = await applyHoldingChange(sid, back);
+          if (r2 && r2.error) throw new Error(r2.error);
+          return `已把 ${name} 的持股改回原本的${cur.shares > 0 ? `（${fmtLots(cur.shares)}）` : ""}。`;
+        });
         if (res.removed) {
           return { text: `已把${name}從持股移除（股數歸零）。它仍在自選股裡，訊號照常。`,
-                   actions: [{ label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }] };
+                   actions: [{ label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }], chips: [holdUndo()] };
         }
         return { text: `已記錄：${name} 現在 ${fmtLots(res.shares)}${res.cost != null ? `、平均成本 ${fmtPrice(res.cost)}` : ""}。`,
-                 actions: [detailBtn, { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }] };
+                 actions: [detailBtn, { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }],
+                 chips: [{ label: "我的持股", act: "run", data: { intent: "holdings", slots: {}, text: "我的持股" } }, holdUndo()] };
       },
     });
   },
