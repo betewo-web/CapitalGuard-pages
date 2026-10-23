@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="434">
+  <meta name="app-version" content="435">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=434" rel="stylesheet">
+  <link href="watchlist.css?v=435" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -666,6 +666,8 @@
       <div class="view-head">
         <h2 class="view-title"><i data-icon="ai"></i>助手</h2>
         <!-- 對話留在這支手機上（重開 App 還在），這顆清掉；有對話時才出現 -->
+        <!-- 今天還能問幾次：剩不多（AI_QUOTA_SHOW 以下）才出現（第八輪） -->
+        <span class="ai-quota" id="ai-quota" hidden></span>
         <button type="button" class="btn btn-sm btn-outline-light" id="ai-clear" onclick="aiClearLog()" hidden>清除對話</button>
       </div>
       <div class="ai-view">
@@ -862,6 +864,8 @@
   <!-- 助手是最左邊那一格（Howard 2026-10-17 晚）：原本是「股票」頁的第四分頁，入口太深 -->
   <button class="bottom-nav-item" data-tab="ai" onclick="switchTab('ai')">
     <span class="bn-icon" data-icon="ai"></span><span>助手</span>
+    <!-- 今天的重點還沒看：一個點（不是數字）；打開助手就消失（第八輪） -->
+    <span class="bn-badge bn-dot" id="ai-badge"></span>
   </button>
   <!-- 「首頁」2026-10-17 改名「股票」（Howard）：盤中／盤後／設定三個分頁都是股票的事 -->
   <button class="bottom-nav-item" data-tab="home" onclick="switchTab('home')">
@@ -1581,6 +1585,7 @@
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-rx-radar-btn" style="display:none" onclick="rxOpenRadarFromDetail()">查看盤中雷達</button>
         <button type="button" class="btn btn-sm btn-outline-light" id="alert-history-rx-summary-btn" style="display:none" onclick="rxOpenSummary()">我收到的回饋</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-view-stock-btn" style="display:none" onclick="openStockFromDetail()">📈 查看股票</button>
+        <button type="button" class="btn btn-sm btn-outline-light" id="alert-history-ask-btn" style="display:none" onclick="aiAskFromDetail()">問助手</button>
         <button type="button" class="btn btn-sm btn-outline-light" id="alert-history-settings-btn" style="display:none" onclick="openSettingsFromDetail()">調整通知設定</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-report-btn" style="display:none" onclick="openDailyReportFromHistory()">開啟分析報告</button>
         <button type="button" class="btn btn-sm btn-outline-danger" id="alert-history-stop-rule-btn" style="display:none" onclick="stopRuleFromDetail()">停用此規則</button>
@@ -1697,6 +1702,8 @@
                     onclick="switchStockCardTab('history')">觀察紀錄</button>
             <button type="button" class="rtl-tab" id="rtl-tab-kline" role="tab"
                     onclick="switchStockCardTab('kline')">看 K 線</button>
+            <!-- 問助手（第八輪）：這一檔的全貌，關掉字卡、切到助手、本機直接做 -->
+            <button type="button" class="rtl-tab rtl-ask" onclick="aiAskAbout(radarTimelineSid, 'stock_overview', aiStockName(radarTimelineSid) + '整理一下')">問助手</button>
           </div>
         </div>
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>
@@ -2020,7 +2027,11 @@ function _trackForegroundSpan() {
 }
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { _trackForegroundSpan(); flushActivity(); }
-  else _foregroundSince = Date.now();
+  else {
+    _foregroundSince = Date.now();
+    // PWA 常常開著過夜：回到前景時，助手開著就補出今天的重點、沒開著就在導覽上點一個點（第八輪）
+    try { aiMaybeAutoCards(); aiUpdateNavDot(); } catch (e) { console.error("assistant foreground failed:", e); }
+  }
 });
 // 關掉分頁／重新整理：pagehide 是三個平台唯一都會送的那一個（iOS 不送 unload）
 window.addEventListener("pagehide", () => { _trackForegroundSpan(); flushActivity(); });
@@ -5170,6 +5181,8 @@ async function showMain() {
   loadAdminFlag();
 
   await loadWatchlist();
+  if (aiConsumeAskParam()) _alertJumpedThisBoot = true;   // ?ask=：直接問一句（第八輪），這次不疊推薦視窗
+  aiUpdateNavDot();
   // 從金流結帳頁導回（OrderResultURL）：只顯示狀態，開通與否以 webhook 為準
   const payResult = new URLSearchParams(location.search).get("pay");
   if (payResult === "done" || payResult === "failed") {
@@ -8724,6 +8737,7 @@ function openInboxDetail(rowId) {
   const sid = String(row.stock_id || "").trim();
   const wl = sid ? watchlistRows.find(w => String(w.stock_id).trim() === sid) : null;
   document.getElementById("alert-history-view-stock-btn").style.display = sid ? "inline-flex" : "none";
+  document.getElementById("alert-history-ask-btn").style.display = sid ? "inline-flex" : "none";   // 這一檔今天的訊號，交給助手（第八輪）
   document.getElementById("alert-history-settings-btn").style.display = wl ? "inline-flex" : "none";
 
   // 體驗期結束／降級之後，通知匣裡還留著體驗期間那幾則「每日分析報告」。按鈕照舊寫
@@ -9079,6 +9093,7 @@ function renderHome() {
            <div class="hec-title">還沒有自選股</div>
            <button type="button" class="btn-cta-lg" onclick="focusAddStock()">＋ 新增自選股</button>
            <div class="hec-sub">加入之後，這裡會顯示每一檔今天有沒有事。</div>
+           <button type="button" class="hold-link" onclick="aiAskAbout('', 'daily_brief', '從哪裡開始')">或問助手怎麼開始 ›</button>
          </div>${exampleHtml}${watchSeedStripHtml("home")}`
       // 篩選造成的空白：example 一定是空的（它要求 homeFilter === "mine"）
       : `<div class="home-tile-empty">${HOME_FILTER_EMPTY[homeFilter] || HOME_FILTER_EMPTY.mine}</div>`;
@@ -15467,7 +15482,9 @@ function renderHoldings() {
         <div class="hd-kpi"><span class="hd-kpi-label">未實現損益</span><b class="hd-kpi-val ${s.pl != null ? plClass(s.pl) : ""}">${s.pl != null ? escapeHtml(fmtSignedMoney(s.pl)) : "—"}</b>${plSub}</div>
         <div class="hd-kpi hd-kpi-wide"><span class="hd-kpi-label">持股</span><b class="hd-kpi-val">${s.n} 檔・${escapeHtml(lots ? `${lots.toLocaleString()} 張${odd ? ` ${odd.toLocaleString()} 股` : ""}` : `${odd.toLocaleString()} 股`)}</b><span class="hd-kpi-sub">共 ${escapeHtml(s.shares.toLocaleString())} 股</span></div>
       </div>
-    </div>`;
+    </div>
+    <button type="button" class="hold-link hd-ask" onclick="aiAskAbout('', 'holdings', '我的持股哪一檔賺最多', { rank: 'gain' })">問助手：哪一檔賺最多、集中在哪些產業 ›</button>`;
+  // ↑ 問助手（第八輪）：哪一檔賺最多、集中在哪些產業——持股頁看不到的排序與分組，助手答得出來
   list.innerHTML = s.items.map(it => {
     const w = it.weight;
     const pl = it.plPct != null
@@ -21958,6 +21975,9 @@ function renderAssistant() {
   if (attach) attach.disabled = aiBusy;
   const clr = document.getElementById("ai-clear");
   if (clr) clr.hidden = !aiLog.length || aiBusy;
+  if (input && !input.value) input.placeholder = aiPlaceholder();   // 第八輪
+  aiQuotaSync();
+  aiUpdateNavDot();
   aiComposerSync();
   aiSaveLog();
   if (aiLog.length && currentTab === "ai") {
@@ -22695,6 +22715,7 @@ function aiHandleError(status, r, text, timedOut) {
 
 async function aiHandleResponse(r, text) {
   trackActivity("assistant", { intent: String(r.intent || ""), decision: String(r.decision || "") });
+  if (r.quota && typeof r.quota === "object") _aiQuota = r.quota;   // 今天用了幾次（第八輪）
   if (r.log_id) {   // 「不是我要的」按下去時要給的其他候選（只留最近 50 句）
     _aiCands.set(r.log_id, { intent: String(r.intent || ""), cands: r.candidates || [], slots: r.slots || {}, text });
     if (_aiCands.size > 50) _aiCands.delete(_aiCands.keys().next().value);
@@ -23067,6 +23088,64 @@ function aiAddChip(sid) {
   return { label: "加進自選股", act: "run", data: { intent: "watch_add", slots: { stock: sid }, text: `把${aiStockName(sid)}加進自選股` } };
 }
 
+// ── 從別的地方進助手（第八輪，2026-10-23）──────────────────────────────────────
+// 個股字卡、通知詳情、持股頁、首頁空狀態的「問助手」：關掉開著的視窗、切到助手、本機直接做那一類（不叫 Jev）
+function aiAskAbout(sid, intent, text, extra) {
+  if (!AI_INTENTS[intent]) return;
+  document.querySelectorAll(".modal.show").forEach(m => { try { bootstrap.Modal.getInstance(m)?.hide(); } catch { /* 沒有實例就算了 */ } });
+  switchTab("ai");
+  const slots = Object.assign(sid ? { stock: String(sid) } : {}, extra || {});
+  trackActivity("assistant_ask_from", { intent });
+  setTimeout(() => aiRunChip({ intent, slots, text: String(text || "") }), 350);
+}
+function aiAskFromDetail() {
+  const sid = String((detailRow && detailRow.stock_id) || "").trim();
+  if (isStockId(sid)) aiAskAbout(sid, "signals_today", `${aiStockName(sid)}今天有訊號嗎`);
+}
+// ?ask=（LINE 圖文選單、官網、推播都可以帶）：打開 App 直接問那一句。只是把字送進助手——
+// 寫入照樣要按確認卡，網址上的字替人做不了任何事。用完從網址拿掉（重新整理不會再問一次）
+function aiConsumeAskParam() {
+  const qs = new URLSearchParams(location.search);
+  if (!qs.has("ask")) return false;
+  const ask = String(qs.get("ask") || "").normalize("NFKC").trim().slice(0, AI_MAX_CHARS);
+  qs.delete("ask");
+  const q = qs.toString();
+  history.replaceState(null, "", location.pathname + (q ? `?${q}` : "") + "#ai");
+  if (!ask) return false;
+  switchTab("ai");
+  trackActivity("assistant_ask_from", { intent: "url" });
+  assistantSend(ask);
+  return true;
+}
+// 導覽上的小點：今天的重點還沒出過（助手開著就不必點）
+function aiUpdateNavDot() {
+  const el = document.getElementById("ai-badge");
+  if (!el) return;
+  let unseen = false;
+  try { unseen = !!state.userId && aiEnabled && currentTab !== "ai" && localStorage.getItem(`cg-ai-brief:${state.userId}`) !== taipeiDateKey(new Date()); } catch { unseen = false; }
+  el.style.display = unseen ? "block" : "none";
+}
+// 今天還能問幾次（Worker 的 quota）：剩 AI_QUOTA_SHOW 次以下才寫在標題列——平常不打擾
+const AI_QUOTA_SHOW = 20;
+let _aiQuota = null;
+function aiQuotaSync() {
+  const el = document.getElementById("ai-quota");
+  if (!el) return;
+  const left = _aiQuota ? Math.max(0, Number(_aiQuota.limit) - Number(_aiQuota.used)) : null;
+  el.hidden = !(left !== null && left <= AI_QUOTA_SHOW);
+  el.textContent = left === 0 ? "今天的次數用完了" : `今天還能問 ${left} 次`;
+}
+// 輸入框的提示字：跟著狀態換一句例子（沒有自選股教加自選、有持股教問持股…），每送一句換下一句
+function aiPlaceholder() {
+  const sid = aiStockChoices()[0];
+  const name = sid ? aiStockName(sid) : "台積電";
+  const list = ["輸入問題或指令…", `試試：${name}整理一下`, "試試：今天有什麼重點"];
+  if (holdingEntries().length) list.push("試試：我的持股哪一檔賺最多");
+  else list.push(`試試：我買了 2 張${name} 成本 900`);
+  list.push(`試試：盯${name} 30 天，跌 10% 通知我`);
+  return list[Math.floor(aiLog.filter(m => m.kind === "user").length) % list.length];
+}
+
 // ── 每天回來看的理由（第四輪，2026-10-23）──────────────────────────────────────
 // 每天第一次打開助手：自動出「今天的重點」（本機組、不叫 Jev、不算次數）；這一版第一次打開：新功能卡（一個版本一次）。
 // 兩個都記在 localStorage（帳號一份），清不掉也不會壞——最多就是多出一次。
@@ -23086,6 +23165,7 @@ function aiMaybeAutoCards() {
     if (localStorage.getItem(bk) !== today) { localStorage.setItem(bk, today); brief = true; }
     if (ver >= AI_WHATS_NEW.since && Number(localStorage.getItem(nk) || 0) < AI_WHATS_NEW.since) { localStorage.setItem(nk, String(ver)); news = !!aiLog.length; }
   } catch { return; }
+  aiUpdateNavDot();
   if (news) aiPushCard(aiWhatsNewCard());   // 第一次用助手的人看的是說明卡，不另外出新功能卡
   if (brief) { trackActivity("assistant", { intent: "daily_brief", decision: "auto" }); aiRun("daily_brief", { auto: true }, { text: "" }).then(aiAfterRun); }
 }
