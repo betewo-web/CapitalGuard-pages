@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="429">
+  <meta name="app-version" content="430">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=429" rel="stylesheet">
+  <link href="watchlist.css?v=430" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -21871,14 +21871,30 @@ function aiStockName(sid) {
   return getPreferredStockName(sid, universe[sid]?.n) || universe[sid]?.n || sid;
 }
 
-// 句子裡的股票：代號直接比對；名稱取最長命中；都沒有才試「前兩字」簡稱（台積→台積電），唯一才算。
+// 句子裡的股票：代號直接比對；英文名與暱稱（AI_STOCK_ALIASES）；名稱取最長命中；都沒有才試「前兩字」簡稱（台積→台積電），唯一才算。
 // 帶單位或跟在「到／於／成本／均價」後面的數字先剝掉（「跌到 2330」「2000 張」「均價 1101」不是代號）。
-// 與 assistant_eval.py 的 resolve_stocks 同一套規則，Worker 不自己認（名單在這裡、不必搬過去）。
+// 與 assistant_eval.py 的 resolve_stocks 同一套規則（別名表它從這裡讀），Worker 不自己認（名單在這裡、不必搬過去）。
+// 一句最多認 AI_MENTIONS_MAX 檔（「把台積電、聯發科、鴻海加進自選」；第三輪）。
+const AI_MENTIONS_MAX = 5;
+// 英文名與常見暱稱（第三輪）：universe 只有中文名，「TSMC」「發哥」以前認不出來。只收唯一指向一檔的說法（JSON，assistant_eval.py 會讀）
+const AI_STOCK_ALIASES = {"TSMC": "2330", "護國神山": "2330", "MediaTek": "2454", "MTK": "2454", "發哥": "2454",
+  "Foxconn": "2317", "Hon Hai": "2317", "UMC": "2303", "Quanta": "2382", "ASUS": "2357", "Acer": "2353",
+  "Largan": "3008", "Yageo": "2327", "Delta": "2308", "Fubon": "2881", "CTBC": "2891", "台灣50": "0050"};
+// 名稱的尾巴（國巨*、世芯-KY、華德動能-創、-DR）沒有人會打：去掉之後是唯一的、又不是別檔的名字，就也收
+function _aiNameVariants() {
+  const names = Object.entries(universe).map(([sid, v]) => [String(v?.n || ""), sid]).filter(x => x[0]);
+  const taken = new Set(names.map(x => x[0]));
+  const bare = new Map();
+  for (const [name, sid] of names) {
+    const b = name.replace(/(?:\*)?(?:-KY|-DR|-創)?\*?$/, "");
+    if (b !== name && b.length >= 2 && !taken.has(b)) bare.set(b, bare.has(b) ? null : sid);
+  }
+  return names.concat([...bare].filter(x => x[1]));
+}
 function aiMentionsOf(text) {
   const n = Object.keys(universe).length;
   if (!_aiNames || _aiNamesN !== n) {
-    _aiNames = Object.entries(universe).map(([sid, v]) => [String(v?.n || ""), sid]).filter(x => x[0])
-      .sort((a, b) => b[0].length - a[0].length);
+    _aiNames = _aiNameVariants().sort((a, b) => b[0].length - a[0].length);
     _aiNamesN = n;
   }
   const found = [], seen = new Set();
@@ -21892,8 +21908,16 @@ function aiMentionsOf(text) {
     }
   }
   let rest = String(text || "");
+  for (const [alias, sid] of Object.entries(AI_STOCK_ALIASES).sort((a, b) => b[0].length - a[0].length)) {
+    if (seen.has(sid) || !universe[sid]) continue;
+    const latin = /^[A-Za-z]/.test(alias);
+    const re = latin ? new RegExp(`(^|[^A-Za-z])${alias}(?![A-Za-z])`, "gi") : null;
+    if (latin ? !re.test(rest) : !rest.includes(alias)) continue;
+    seen.add(sid); found.push({ sid, name: String(universe[sid].n || "") });
+    rest = latin ? rest.replace(re, "$1 ") : rest.split(alias).join(" ");
+  }
   for (const [name, sid] of _aiNames) {
-    if (rest.includes(name) && !seen.has(sid)) { seen.add(sid); found.push({ sid, name }); rest = rest.split(name).join(" "); }
+    if (rest.includes(name) && !seen.has(sid)) { seen.add(sid); found.push({ sid, name: String(universe[sid]?.n || name) }); rest = rest.split(name).join(" "); }
   }
   if (!found.length) {
     const byPrefix = new Map();
@@ -21901,13 +21925,14 @@ function aiMentionsOf(text) {
       if (name.length < 3) continue;
       const p = name.slice(0, 2);
       if (!byPrefix.has(p)) byPrefix.set(p, []);
-      byPrefix.get(p).push([name, sid]);
+      // 同一檔的「世芯-KY」與「世芯」算一個（不然字首「世芯」會被當成有兩檔、縮寫認不出來）
+      if (!byPrefix.get(p).some(x => x[1] === sid)) byPrefix.get(p).push([name, sid]);
     }
     for (const [p, items] of byPrefix) {
-      if (items.length === 1 && rest.includes(p)) { found.push({ sid: items[0][1], name: items[0][0] }); break; }
+      if (items.length === 1 && rest.includes(p)) { found.push({ sid: items[0][1], name: String(universe[items[0][1]]?.n || items[0][0]) }); break; }
     }
   }
-  return found.slice(0, 3);
+  return found.slice(0, AI_MENTIONS_MAX);
 }
 
 // ── 畫面 ─────────────────────────────────────────────────────────
@@ -22935,9 +22960,68 @@ function aiScopeAsk(slots, label, opts) {
                    { label: "我的自選股", act: "run", data: { intent: "signals_today", slots: { kind: slots.kind, scope: "mine" }, text: said ? `自選股 ${said}` : `自選股${label}的` } }] };
 }
 const AI_DIR_TXT = { 1: "漲", 0: "平", "-1": "跌" };
+// 一檔的產業（universe 的 i）：沒有的寫「其他」，ETF 一律「ETF」
+function aiIndustryOf(sid) { return isEtfId(sid) ? "ETF" : String((universe[sid] || {}).i || "") || "其他"; }
+
 // 不在自選股的那一檔：卡上多一顆「加進自選股」籤（走既有的確認卡）
 function aiAddChip(sid) {
   return { label: "加進自選股", act: "run", data: { intent: "watch_add", slots: { stock: sid }, text: `把${aiStockName(sid)}加進自選股` } };
+}
+
+// ── 相對日期（第三輪）：Worker 抽的是寫法（{ago} 或 {week, wd}），這裡換成台北的哪一天（YYYY-MM-DD）。
+// 一週從週一開始；「星期五」沒說哪一週＝最近過去的那個星期五（今天就是星期五就是今天）。
+function aiDayKey(day) {
+  if (!day || typeof day !== "object") return "";
+  const d = new Date(`${taipeiDateKey(new Date())}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return "";
+  if (day.ago != null) { d.setUTCDate(d.getUTCDate() - Math.max(0, Math.min(60, Number(day.ago) || 0))); return taipeiDateKey(d); }
+  const wd = Number(day.wd);
+  if (!(wd >= 1 && wd <= 7)) return "";
+  const cur = d.getUTCDay() || 7;
+  let back = cur - wd - Number(day.week || 0) * 7;
+  if (!Number(day.week) && back < 0) back += 7;
+  d.setUTCDate(d.getUTCDate() - back);
+  return taipeiDateKey(d);
+}
+
+// 一句話講了好幾檔（第三輪）：「把台積電、聯發科、鴻海加進自選」「台積電和鴻海多少」。股票是手機端認的
+// （Worker 只把第一檔當 stock），所以這裡拿原句再認一次；不到兩檔回 null，照單一檔的路走
+function aiMultiStocks(slots) {
+  const said = String((_aiCurrent && _aiCurrent.text) || "");
+  if (!said) return null;
+  const sids = aiMentionsOf(said).map(m => m.sid);
+  if (sids.length < 2 || (slots && slots.stock && !sids.includes(String(slots.stock)))) return null;
+  return sids;
+}
+function aiWatchAddMany(sids) {
+  const have = new Set((watchlistRows || []).map(w => String(w.stock_id || "").trim()));
+  const todo = sids.filter(s => !have.has(s));
+  if (!todo.length) return { text: `${sids.map(aiStockName).join("、")} 都已經在自選股裡。` };
+  const room = planState.ready && planState.plan ? Math.max(0, planState.plan.watch_limit - (watchlistRows.length + frSlotsExtra())) : todo.length;
+  if (room <= 0) return aiLimitCard("watchlist");
+  const fit = todo.slice(0, room);
+  const rows = sids.map(s => ({ label: aiStockName(s), value: s, note: have.has(s) ? "已在自選股" : fit.includes(s) ? "會加入" : "額度放不下" }));
+  return aiConfirmCard({
+    head: `加入 ${fit.length} 檔自選股？`, sub: `自選股 ${aiWatchUsage()}，加入後 +${fit.length}`, rows, mainLabel: `加入 ${fit.length} 檔`,
+    run: async () => {
+      for (const s of fit) await aiAddStockById(s);
+      return { text: `已加入 ${fit.map(aiStockName).join("、")}，基礎訊號預設全開。` };
+    },
+  });
+}
+function aiWatchRemoveMany(sids) {
+  const items = sids.map(s => ({ s, row: aiRowOf(s) }));
+  const del = items.filter(x => x.row);
+  if (!del.length) return { text: `${sids.map(aiStockName).join("、")} 都不在自選股裡。`, muted: true };
+  const rows = items.map(x => ({ label: aiStockName(x.s), value: x.s,
+                                 note: !x.row ? "不在自選股" : Number(x.row.shares) > 0 ? "持股紀錄會一起消失" : "會移除" }));
+  return aiConfirmCard({
+    head: `移除 ${del.length} 檔自選股？`, rows, mainLabel: `移除 ${del.length} 檔`,
+    run: async () => {
+      for (const x of del) await removeStock(x.row.id, false);
+      return { text: `已移除 ${del.map(x => aiStockName(x.s)).join("、")}。` };
+    },
+  });
 }
 
 // ── 沒指定股票時列整份（第二輪，2026-10-23）──────────────────────────────────────
@@ -22954,8 +23038,8 @@ function aiListRow(sid, intent, value, note, extra) {
 function aiListMore(shown, total, what) {
   return total > shown ? `還有 ${total - shown} 檔沒列出來${what ? `（${what}）` : ""}。` : "";
 }
-async function aiListQuotes() {
-  const sids = aiSignalSids();
+async function aiListQuotes(only) {
+  const sids = only || aiSignalSids();
   if (!sids.length) return aiNeedStock();
   let ml = null;
   const rows = [];
@@ -22973,11 +23057,11 @@ async function aiListQuotes() {
   }
   if (!rows.length) return aiNeedStock();
   const shown = rows.slice(0, 15);
-  return { head: "自選股的收盤價", sub: `${shown.length}／${sids.length} 檔・點一檔看細節`, rows: shown,
+  return { head: only ? "這幾檔的收盤價" : "自選股的收盤價", sub: `${shown.length}／${sids.length} 檔・點一檔看細節`, rows: shown,
            text: aiListMore(shown.length, rows.length), actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
 }
-async function aiListLevels() {
-  const sids = aiSignalSids();
+async function aiListLevels(only) {
+  const sids = only || aiSignalSids();
   if (!sids.length) return aiNeedStock();
   let ml = null;
   const items = [];
@@ -22999,15 +23083,15 @@ async function aiListLevels() {
   const rows = items.slice(0, 12).map(({ s, lv, toSup }) => aiListRow(s, "levels",
     toSup ? `支撐 ${fmtPrice(lv.support)}` : `壓力 ${fmtPrice(lv.resistance)}`,
     `距 ${fmtPct(toSup ? lv.supPct : lv.resPct)}%`));
-  return { head: "自選股的支撐與壓力", sub: `離關卡近的在前・${rows.length}／${sids.length} 檔`, rows,
+  return { head: only ? "這幾檔的支撐與壓力" : "自選股的支撐與壓力", sub: `離關卡近的在前・${rows.length}／${sids.length} 檔`, rows,
            text: aiListMore(rows.length, items.length) };
 }
-async function aiListMa(slots) {
-  const sids = aiSignalSids();
+async function aiListMa(slots, only) {
+  const sids = only || aiSignalSids();
   if (!sids.length) return aiNeedStock();
   const asked = (Array.isArray(slots.periods) ? slots.periods : []).map(Number).filter(p => AI_MA_NAME[p]);
   const periods = (asked.length ? asked : AI_MA_DEFAULT).slice(0, 2);
-  const ml = await aiMarketLevels();
+  const [ml, mt] = await Promise.all([aiMarketLevels(), aiMarketToday()]);
   const cnt = periods.map(() => ({ up: 0, down: 0 }));
   const rows = [];
   for (const s of sids) {
@@ -23015,18 +23099,28 @@ async function aiListMa(slots) {
     const q = getQuote(s) || getCloseQuote(s);
     const price = q && q.price > 0 ? Number(q.price) : (m && m.c > 0 ? Number(m.c) : null);
     if (!m || !(price > 0)) continue;
+    let firstDir = null;
     const parts = periods.map((p, i) => {
       const v = Number((m.ma || {})[`MA${p}`]);
       if (!(v > 0)) return `${AI_MA_NAME[p]} —`;
       const d = (price - v) / v * 100;
       if (d >= 0) cnt[i].up += 1; else cnt[i].down += 1;
+      if (i === 0) firstDir = d >= 0 ? "up" : "down";
       return `${AI_MA_NAME[p]}${Math.abs(d) < 0.05 ? "貼線" : d > 0 ? `上方 ${fmtPct(d)}%` : `下方 ${fmtPct(d)}%`}`;
     });
-    rows.push(aiListRow(s, "ma_position", parts[0], parts[1] || "", { slots: { periods } }));
+    // 「跌破月線的有哪些」（ma_dir，第三輪）：只列第一條線的那一邊
+    if (slots.ma_dir && firstDir !== slots.ma_dir) continue;
+    // 今天穿越了第一條線的，寫出幾點（「現在在上方」與「今天才站上」不一樣）
+    const cx = aiMaCrossesToday(s, mt).find(c => c.period === periods[0]);
+    rows.push(aiListRow(s, "ma_position", parts[0], [parts[1] || "", cx ? `${cx.at} ${cx.up ? "站上" : "跌破"}` : ""].filter(Boolean).join("・"), { slots: { periods } }));
   }
-  if (!rows.length) return aiNoData({ text: "拿不到自選股的均線（全市場關卡檔還沒載到）。" });
+  const side = slots.ma_dir ? `${AI_MA_NAME[periods[0]]}${slots.ma_dir === "down" ? "下方" : "上方"}` : "";
+  if (!rows.length) {
+    return side ? { head: `${side}的${only ? "股票" : "自選股"}`, text: `現在沒有在${side}的。` }
+                : aiNoData({ text: "拿不到自選股的均線（全市場關卡檔還沒載到）。" });
+  }
   const shown = rows.slice(0, 15);
-  return { head: `自選股與${periods.map(p => AI_MA_NAME[p]).join("、")}`,
+  return { head: side ? `${side}的${only ? "股票" : "自選股"}` : `${only ? "這幾檔" : "自選股"}與${periods.map(p => AI_MA_NAME[p]).join("、")}`,
            sub: periods.map((p, i) => `${AI_MA_NAME[p]}之上 ${cnt[i].up}・之下 ${cnt[i].down}`).join("；") + (ml && ml.date ? `（均線以 ${String(ml.date).slice(5).replace("-", "/")} 的日線算）` : ""),
            rows: shown, text: aiListMore(shown.length, rows.length) };
 }
@@ -23462,6 +23556,8 @@ const ASSISTANT_ACTIONS = {
   },
   async assistantQuote(slots) {
     const sid = slots.stock;
+    const many = aiMultiStocks(slots);   // 「台積電和鴻海多少」：只列那幾檔（第三輪）
+    if (many) return aiListQuotes(many);
     if (!sid) return aiListQuotes();   // 沒說哪一檔：自選股每一檔的收盤（第二輪）
     const q = getQuote(sid) || getCloseQuote(sid);
     if (!q) {
@@ -23500,6 +23596,8 @@ const ASSISTANT_ACTIONS = {
   },
   async assistantLevels(slots) {
     const sid = slots.stock;
+    const many = aiMultiStocks(slots);
+    if (many) return aiListLevels(many);
     if (!sid) return aiListLevels();   // 沒說哪一檔：每一檔離支撐／壓力多遠，近的在前（第二輪）
     const price = (getQuote(sid) || getCloseQuote(sid) || {}).price;
     const lv = nearestLevels(sid, price);
@@ -23526,6 +23624,8 @@ const ASSISTANT_ACTIONS = {
     // 「聯發科是否站上月線、季線」（Howard 2026-10-18）：任何一檔都答——均線值讀全市場關卡檔（日線到上一個交易日），
     // 價格用盤中報價（自選股／好友分享的），沒有就關卡檔的最後收盤；今天穿越了的寫時刻（故事列或全市場索引）
     const sid = slots.stock;
+    const many = aiMultiStocks(slots);
+    if (many) return aiListMa(slots, many);
     if (!sid) return aiListMa(slots);   // 「哪些站上月線」：每一檔對均線在上方還是下方（第二輪）
     const name = aiStockName(sid);
     const asked = (Array.isArray(slots.periods) ? slots.periods : []).map(Number).filter(p => AI_MA_NAME[p]);
@@ -23578,15 +23678,19 @@ const ASSISTANT_ACTIONS = {
     const labelOf = k => SIGNAL_LABEL_MAP[k] || AUTO_SIGNAL_LABELS[k] || String(k || "");
     // 問某一天（Worker 的 date 槽位是「MM-DD」）：有那一天就列那一天的每一則；沒有就說只有最近幾天，再列近 10 天
     let missDay = "";
-    if (/^\d{2}-\d{2}$/.test(String(slots.date || ""))) {
-      const key = Object.keys(hist).sort().reverse().find(d => d.slice(5) === slots.date);
+    const fullDay = slots.day ? aiDayKey(slots.day) : "";   // 「昨天」「上週五」（第三輪）
+    const wantMd = String(slots.date || "") || fullDay.slice(5);
+    if (/^\d{2}-\d{2}$/.test(wantMd)) {
+      const key = Object.keys(hist).sort().reverse().find(d => d.slice(5) === wantMd);
       if (key) {
         const sigs = (hist[key] && hist[key].signals) || [];
         return { head: `${name} ${sid}`, sub: `${_mdOf(key)}（${_weekdayZh(key)}）${sigs.length ? ` ${sigs.length} 則訊號` : "沒有訊號"}`,
                  rows: sigs.map(s => ({ label: labelOf(s.kind), value: "", note: String(s.at || "") })),
                  actions: [aiOpenBtn(sid, "history", "看觀察紀錄 ›")] };
       }
-      missDay = `${String(slots.date).replace("-", "/")} 沒有紀錄（這裡有最近 ${dates.length} 個交易日）`;
+      const wd = fullDay ? new Date(`${fullDay}T12:00:00Z`).getUTCDay() : -1;
+      missDay = wd === 0 || wd === 6 ? `${wantMd.replace("-", "/")}（${_weekdayZh(fullDay)}）沒有開盤`
+        : `${wantMd.replace("-", "/")} 沒有紀錄（這裡有最近 ${dates.length} 個交易日）`;
     }
     const rows = dates.map(d => {
       const sigs = (hist[d] && hist[d].signals) || [];
@@ -23790,6 +23894,14 @@ const ASSISTANT_ACTIONS = {
     }
     const sids = aiSignalSids();
     if (!sids.length) return { text: "還沒有自選股。", actions: [{ label: "去設定頁新增 ›", act: "open", data: { tab: "watch" } }] };
+    if (slots.by_industry) {   // 「我的自選股有哪些產業」（第三輪）
+      const groups = new Map();
+      for (const s of sids) { const ind = aiIndustryOf(s); groups.set(ind, (groups.get(ind) || []).concat([s])); }
+      const list = [...groups].sort((a, b) => b[1].length - a[1].length);
+      return { head: "自選股的產業", sub: `${sids.length} 檔・${list.length} 個產業`,
+               rows: list.slice(0, 15).map(([ind, ss]) => ({ label: ind, value: `${ss.length} 檔`, note: ss.slice(0, 3).map(aiStockName).join("、") + (ss.length > 3 ? "…" : "") })),
+               actions: [{ label: "去設定頁管理 ›", act: "open", data: { tab: "watch" } }] };
+    }
     const rows = sids.slice(0, 20).map(s => ({ label: aiStockName(s), value: s, note: sharedSet.has(s) ? "好友分享" : "",
                                                act: "open", data: { sid: s, tab: "radar" } }));
     const more = sids.length - rows.length;
@@ -23840,18 +23952,47 @@ const ASSISTANT_ACTIONS = {
     if (!s.n) {
       return { text: "還沒有持股紀錄。在持股頁按「新增持股」，或直接跟我說「我有 2 張台積電成本 900」。", actions: [addBtn, pageBtn] };
     }
+    if (slots.by_industry) {   // 「我的持股集中在哪些產業」（第三輪）：依收盤市值分組
+      const groups = new Map();
+      for (const it of s.items) {
+        const ind = aiIndustryOf(it.sid);
+        const g = groups.get(ind) || { ind, n: 0, value: 0 };
+        g.n += 1;
+        if (it.value != null) g.value += it.value;
+        groups.set(ind, g);
+      }
+      const total = [...groups.values()].reduce((a, g) => a + g.value, 0);
+      const list = [...groups.values()].sort((a, b) => (b.value - a.value) || (b.n - a.n));
+      return { head: "持股的產業分布", sub: `${s.n} 檔・${dateTxt}`,
+               rows: list.slice(0, 12).map(g => ({ label: g.ind, value: `${g.n} 檔`, note: total > 0 ? `佔 ${(g.value / total * 100).toFixed(1)}%` : "" })),
+               actions: [pageBtn] };
+    }
+    // 「哪一檔賺最多／賠最多／佔比最大」（第三輪）：照那個排，第一名寫在內文
+    let items = s.items.slice(), rankTxt = "";
+    if (slots.rank === "gain" || slots.rank === "loss") {
+      const up = slots.rank === "gain";
+      const withPl = items.filter(it => it.plPct != null).sort((a, b) => up ? b.plPct - a.plPct : a.plPct - b.plPct);
+      items = withPl.concat(items.filter(it => it.plPct == null));
+      const top = withPl[0];
+      rankTxt = !top ? "填了平均成本才排得出賺賠。"
+        : up ? `${top.plPct > 0 ? "" : "目前沒有賺錢的持股；"}報酬率最高的是 ${top.name}（${fmtSignedPct(top.plPct)}）。`
+             : `${top.plPct < 0 ? "" : "目前沒有賠錢的持股；"}報酬率最低的是 ${top.name}（${fmtSignedPct(top.plPct)}）。`;
+    } else if (slots.rank === "weight") {
+      items.sort((a, b) => (b.weight ?? -1) - (a.weight ?? -1));
+      if (items[0] && items[0].weight != null) rankTxt = `佔比最大的是 ${items[0].name}（${items[0].weight.toFixed(1)}%）。`;
+    }
     const rows = [
       { label: "總市值", value: s.value != null ? `${fmtMoney(s.value)} 元` : "—", note: s.priced < s.n ? `${s.n - s.priced} 檔沒有收盤價` : "" },
       { label: "投入成本", value: s.cost != null ? `${fmtMoney(s.cost)} 元` : "—", note: s.withPl && s.withPl < s.n ? `${s.withPl}／${s.n} 檔有成本` : "" },
       { label: "未實現損益", value: plHtml(s.pl, "填了平均成本才算得出來"), html: true, note: s.plPct != null ? fmtSignedPct(s.plPct) : "" },
-    ].concat(s.items.slice(0, 10).map(it => ({
+    ].concat(items.slice(0, 10).map(it => ({
       label: it.name, value: fmtLots(it.shares),
       note: [it.value != null ? `市值 ${fmtMoney(it.value)}` : "沒有收盤價", it.plPct != null ? fmtSignedPct(it.plPct) : ""].filter(Boolean).join("・"),
       act: "open", data: { holdings: it.sid },
     })));
     const more = s.n - Math.min(10, s.n);
     return { head: "我的持股", sub: `${s.n} 檔・${fmtLots(s.shares)}・${dateTxt}`, rows,
-             text: more > 0 ? `還有 ${more} 檔沒列出來，在持股頁看得到全部。` : "", actions: [pageBtn, addBtn] };
+             text: rankTxt + (more > 0 ? `還有 ${more} 檔沒列出來，在持股頁看得到全部。` : ""), actions: [pageBtn, addBtn] };
   },
   switchTab(slots, args) {
     const tab = String(args.tab || "home");
@@ -23964,9 +24105,10 @@ const ASSISTANT_ACTIONS = {
   assistantInbox(slots) {
     const only = isStockId(String((slots && slots.stock) || "")) ? String(slots.stock) : "";
     const all = (inboxRows || []).filter(r => !only || String(r.stock_id || "").trim() === only);
-    let list = all.filter(r => isToday(r.sent_at));
-    let dayTxt = "今天";
-    if (!list.length && all.length) {
+    const wantMd = String(slots.date || "") || (slots.day ? aiDayKey(slots.day).slice(5) : "");   // 「昨天的通知」（第三輪）
+    let list = wantMd ? all.filter(r => taipeiDateKey(r.sent_at).slice(5) === wantMd) : all.filter(r => isToday(r.sent_at));
+    let dayTxt = wantMd ? wantMd.replace("-", "/") : "今天";
+    if (!wantMd && !list.length && all.length) {
       const lastDay = all.map(r => taipeiDateKey(r.sent_at)).filter(Boolean).sort().reverse()[0];
       if (lastDay) { list = all.filter(r => taipeiDateKey(r.sent_at) === lastDay); dayTxt = `${_mdOf(lastDay)}（${_weekdayZh(lastDay)}）`; }
     }
@@ -23975,7 +24117,8 @@ const ASSISTANT_ACTIONS = {
       return { label: aiStockName(sid) || "系統", value: _titleWithoutSid(String(r.title || ""), sid), note: fmtTime(r.sent_at),
                act: "open", data: isStockId(sid) ? { sid, tab: "radar" } : { tab: "inbox" } };
     });
-    const sub = !list.length ? (only ? "最近沒有這一檔的通知" : "還沒有通知")
+    const sub = wantMd ? (list.length ? `${dayTxt} ${list.length} 則` : `${dayTxt} 沒有${only ? "這一檔的" : ""}通知`)
+      : !list.length ? (only ? "最近沒有這一檔的通知" : "還沒有通知")
       : dayTxt === "今天" ? `今天 ${list.length} 則` : `今天還沒有；最近一次是 ${dayTxt}，${list.length} 則`;
     return { head: only ? `${aiStockName(only)} 的通知` : "通知", sub, rows,
              actions: [{ label: "打開通知 ›", act: "open", data: { tab: "inbox" } }] };
@@ -24136,6 +24279,8 @@ const ASSISTANT_ACTIONS = {
   // ── 寫入類（Phase 3，第十四節 B）：填好 → 確認卡 → 既有的寫入函式 ─────────────
   // 「兩段合一張」：要寫的那一檔不在自選股時，確認卡直接寫「加入並…？」，主鍵一次做兩件事。
   assistantWatchAdd(slots) {
+    const many = aiMultiStocks(slots);   // 「把台積電、聯發科、鴻海加進自選」：一張確認卡（第三輪）
+    if (many) return aiWatchAddMany(many);
     const sid = slots.stock;
     if (!sid) { aiNav(() => focusAddStock()); return { text: "已打開設定頁的新增：打股票名稱或代號，按「新增」。" }; }
     const name = aiStockName(sid);
@@ -24150,6 +24295,8 @@ const ASSISTANT_ACTIONS = {
     });
   },
   assistantWatchRemove(slots) {
+    const many = aiMultiStocks(slots);
+    if (many) return aiWatchRemoveMany(many);
     const sid = slots.stock;
     if (!sid) return aiNeedStock();
     const name = aiStockName(sid);
