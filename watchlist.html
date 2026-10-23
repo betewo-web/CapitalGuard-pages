@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="428">
+  <meta name="app-version" content="429">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=428" rel="stylesheet">
+  <link href="watchlist.css?v=429" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -22621,7 +22621,8 @@ async function aiHandleResponse(r, text) {
     if (r.clarify_kind === "stock") {
       // 要股票卻沒說是哪一檔：10 分鐘內剛問過一檔就沿用（「那支撐呢」），卡上寫「沿用剛才的…」＋「換一檔」
       const intent = String(r.intent || "");
-      if (aiCarryStock(intent, r.slots || {}, { text })) {
+      const listable = AI_LIST_INTENTS.has(intent) && !(r.slots || {}).price && !(r.slots || {}).clear;
+      if (aiCarryStock(intent, r.slots || {}, { text }) || listable) {
         await aiRun(intent, r.slots || {}, { log_id: r.log_id, say: r.say, args: (r.action && r.action.args) || null, text });
         return;
       }
@@ -22666,7 +22667,7 @@ async function aiRun(intent, slots, opts) {
   if (card && sid && !card.failed && !card.muted) {
     if (carried) {
       card.carried = sid;
-      card.chips = (card.chips || []).concat([{ label: "換一檔", act: "run",
+      card.chips = (card.chips || []).concat([{ label: AI_LIST_INTENTS.has(intent) && !slots.price ? "看全部自選股" : "換一檔", act: "run",
         data: { intent, slots: Object.assign({}, slots, { stock: null, _noCarry: true }), text: String((opts && opts.text) || "換一檔") } }]);
     }
     if (!card._id) aiAddFollowups(card, intent, sid);
@@ -22937,6 +22938,124 @@ const AI_DIR_TXT = { 1: "漲", 0: "平", "-1": "跌" };
 // 不在自選股的那一檔：卡上多一顆「加進自選股」籤（走既有的確認卡）
 function aiAddChip(sid) {
   return { label: "加進自選股", act: "run", data: { intent: "watch_add", slots: { stock: sid }, text: `把${aiStockName(sid)}加進自選股` } };
+}
+
+// ── 沒指定股票時列整份（第二輪，2026-10-23）──────────────────────────────────────
+// 「支撐在哪」「哪些站上月線」「我設了哪些到價提醒」「現在多少」沒說哪一檔、也沒得沿用：與其反問，
+// 不如把自選股與好友分享的每一檔列出來——每一列可以點，點了就是那一檔的同一個問題（本機直接做）。
+// 到價提醒的清單只有自選股（價位設在自選股那一列上）。一檔都沒有才退回反問。
+const AI_LIST_INTENTS = new Set(["quote", "levels", "ma_position", "price_target_set"]);
+const AI_TARGET_NEAR_PCT = 3;   // 到價提醒「快到了」：離收盤價 3% 以內
+function aiListRow(sid, intent, value, note, extra) {
+  return { label: aiStockName(sid), value, note, html: !!(extra && extra.html), act: "run",
+           data: { intent, slots: Object.assign({ stock: sid }, (extra && extra.slots) || {}),
+                   text: `${aiStockName(sid)}${AI_STOCK_HINT[intent] || ""}` } };
+}
+function aiListMore(shown, total, what) {
+  return total > shown ? `還有 ${total - shown} 檔沒列出來${what ? `（${what}）` : ""}。` : "";
+}
+async function aiListQuotes() {
+  const sids = aiSignalSids();
+  if (!sids.length) return aiNeedStock();
+  let ml = null;
+  const rows = [];
+  for (const s of sids) {
+    const q = getQuote(s) || getCloseQuote(s);
+    if (q && q.price > 0) {
+      const day = q.tradeDate ? String(q.tradeDate).slice(5).replace("-", "/") : "";
+      rows.push(aiListRow(s, "quote", q.changePct != null ? `${escapeHtml(fmtPrice(q.price))}　${fmtChgHtml(q.changePct)}` : escapeHtml(fmtPrice(q.price)),
+                          day, { html: true }));
+      continue;
+    }
+    ml = ml || await aiMarketLevels();   // 還沒有報價的那幾檔（剛加入、好友分享的）：全市場關卡檔的最後收盤
+    const m = ml && ml.stocks && ml.stocks[s];
+    if (m && m.c > 0) rows.push(aiListRow(s, "quote", escapeHtml(fmtPrice(m.c)), ml.date ? String(ml.date).slice(5).replace("-", "/") : "", { html: true }));
+  }
+  if (!rows.length) return aiNeedStock();
+  const shown = rows.slice(0, 15);
+  return { head: "自選股的收盤價", sub: `${shown.length}／${sids.length} 檔・點一檔看細節`, rows: shown,
+           text: aiListMore(shown.length, rows.length), actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
+}
+async function aiListLevels() {
+  const sids = aiSignalSids();
+  if (!sids.length) return aiNeedStock();
+  let ml = null;
+  const items = [];
+  for (const s of sids) {
+    const price = (getQuote(s) || getCloseQuote(s) || {}).price;
+    let lv = nearestLevels(s, price);
+    if (lv.support == null && lv.resistance == null) {   // 盤中關卡只有自選股有：其餘讀全市場關卡檔（日線算的）
+      ml = ml || await aiMarketLevels();
+      const m = ml && ml.stocks && ml.stocks[s];
+      if (m) lv = _nearestFromLevels({ support: m.s, resistance: m.r }, price > 0 ? price : Number(m.c));
+    }
+    if (lv.support == null && lv.resistance == null) continue;
+    const sup = lv.supPct != null ? Math.abs(lv.supPct) : Infinity, res = lv.resPct != null ? Math.abs(lv.resPct) : Infinity;
+    items.push({ s, lv, near: Math.min(sup, res), toSup: sup <= res });
+  }
+  if (!items.length) return aiNeedStock();
+  items.sort((a, b) => a.near - b.near);
+  // 一列只寫比較近的那一個關卡（390px 寬兩個都寫會折成兩行）；兩個都要看就點進去
+  const rows = items.slice(0, 12).map(({ s, lv, toSup }) => aiListRow(s, "levels",
+    toSup ? `支撐 ${fmtPrice(lv.support)}` : `壓力 ${fmtPrice(lv.resistance)}`,
+    `距 ${fmtPct(toSup ? lv.supPct : lv.resPct)}%`));
+  return { head: "自選股的支撐與壓力", sub: `離關卡近的在前・${rows.length}／${sids.length} 檔`, rows,
+           text: aiListMore(rows.length, items.length) };
+}
+async function aiListMa(slots) {
+  const sids = aiSignalSids();
+  if (!sids.length) return aiNeedStock();
+  const asked = (Array.isArray(slots.periods) ? slots.periods : []).map(Number).filter(p => AI_MA_NAME[p]);
+  const periods = (asked.length ? asked : AI_MA_DEFAULT).slice(0, 2);
+  const ml = await aiMarketLevels();
+  const cnt = periods.map(() => ({ up: 0, down: 0 }));
+  const rows = [];
+  for (const s of sids) {
+    const m = ml && ml.stocks && ml.stocks[s];
+    const q = getQuote(s) || getCloseQuote(s);
+    const price = q && q.price > 0 ? Number(q.price) : (m && m.c > 0 ? Number(m.c) : null);
+    if (!m || !(price > 0)) continue;
+    const parts = periods.map((p, i) => {
+      const v = Number((m.ma || {})[`MA${p}`]);
+      if (!(v > 0)) return `${AI_MA_NAME[p]} —`;
+      const d = (price - v) / v * 100;
+      if (d >= 0) cnt[i].up += 1; else cnt[i].down += 1;
+      return `${AI_MA_NAME[p]}${Math.abs(d) < 0.05 ? "貼線" : d > 0 ? `上方 ${fmtPct(d)}%` : `下方 ${fmtPct(d)}%`}`;
+    });
+    rows.push(aiListRow(s, "ma_position", parts[0], parts[1] || "", { slots: { periods } }));
+  }
+  if (!rows.length) return aiNoData({ text: "拿不到自選股的均線（全市場關卡檔還沒載到）。" });
+  const shown = rows.slice(0, 15);
+  return { head: `自選股與${periods.map(p => AI_MA_NAME[p]).join("、")}`,
+           sub: periods.map((p, i) => `${AI_MA_NAME[p]}之上 ${cnt[i].up}・之下 ${cnt[i].down}`).join("；") + (ml && ml.date ? `（均線以 ${String(ml.date).slice(5).replace("-", "/")} 的日線算）` : ""),
+           rows: shown, text: aiListMore(shown.length, rows.length) };
+}
+function aiListTargets() {
+  const withT = (watchlistRows || []).filter(r => ["target_price_low", "target_price_high"].some(f => r[f] != null && r[f] !== ""));
+  if (!withT.length) {
+    const first = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).find(isStockId);
+    return { head: "到價提醒", text: "還沒有設到價提醒。跟我說「台積電跌到 900 提醒我」就能設。",
+             chips: first ? [{ label: `設${aiStockName(first)}的到價提醒`, act: "run", data: { intent: "price_target_set", slots: { stock: first }, text: `${aiStockName(first)}的到價提醒` } }] : [] };
+  }
+  const items = [];
+  for (const r of withT) {
+    const sid = String(r.stock_id || "").trim();
+    const q = aiQuoteOf(sid);
+    const cur = q && q.price > 0 ? Number(q.price) : null;
+    for (const [f, word] of [["target_price_low", "跌到"], ["target_price_high", "漲到"]]) {
+      if (r[f] == null || r[f] === "") continue;
+      const v = Number(r[f]);
+      const away = cur ? (v - cur) / cur * 100 : null;
+      items.push({ sid, id: r.id, word, v, away, near: away != null && Math.abs(away) <= AI_TARGET_NEAR_PCT });
+    }
+  }
+  items.sort((a, b) => (Number(b.near) - Number(a.near)) || (Math.abs(a.away ?? 999) - Math.abs(b.away ?? 999)));
+  const rows = items.slice(0, 12).map(x => ({ label: aiStockName(x.sid), value: `${x.word} ${fmtPrice(x.v)}`,
+    note: x.away == null ? "" : `${x.near ? "快到了・" : ""}距 ${x.away < 0 ? "−" : "+"}${fmtPct(x.away)}%`, act: "open", data: { alert: x.id } }));
+  const nearN = items.filter(x => x.near).length;
+  return { head: `到價提醒 ${items.length} 個`, sub: nearN ? `${nearN} 個離收盤價 ${AI_TARGET_NEAR_PCT}% 以內，排在最前面` : "離收盤價近的在前",
+           rows, text: items.length > rows.length ? `還有 ${items.length - rows.length} 個沒列出來。` : "",
+           actions: [{ label: "基礎訊號面板 ›", act: "open", data: { alert: ALERT_SCOPE_ALL } }] };
 }
 
 // ── 持股截圖（第二十六節，Howard 2026-10-23）────────────────────────────────────────
@@ -23343,7 +23462,7 @@ const ASSISTANT_ACTIONS = {
   },
   async assistantQuote(slots) {
     const sid = slots.stock;
-    if (!sid) return aiNeedStock();
+    if (!sid) return aiListQuotes();   // 沒說哪一檔：自選股每一檔的收盤（第二輪）
     const q = getQuote(sid) || getCloseQuote(sid);
     if (!q) {
       // 沒有盤中報價（不在自選股、或剛加入）：今天的方向走全市場索引、收盤與漲跌幅走 FinMind 日線、昨收走關卡檔（第十八節）
@@ -23381,7 +23500,7 @@ const ASSISTANT_ACTIONS = {
   },
   async assistantLevels(slots) {
     const sid = slots.stock;
-    if (!sid) return aiNeedStock();
+    if (!sid) return aiListLevels();   // 沒說哪一檔：每一檔離支撐／壓力多遠，近的在前（第二輪）
     const price = (getQuote(sid) || getCloseQuote(sid) || {}).price;
     const lv = nearestLevels(sid, price);
     const rows = [];
@@ -23407,7 +23526,7 @@ const ASSISTANT_ACTIONS = {
     // 「聯發科是否站上月線、季線」（Howard 2026-10-18）：任何一檔都答——均線值讀全市場關卡檔（日線到上一個交易日），
     // 價格用盤中報價（自選股／好友分享的），沒有就關卡檔的最後收盤；今天穿越了的寫時刻（故事列或全市場索引）
     const sid = slots.stock;
-    if (!sid) return aiNeedStock();
+    if (!sid) return aiListMa(slots);   // 「哪些站上月線」：每一檔對均線在上方還是下方（第二輪）
     const name = aiStockName(sid);
     const asked = (Array.isArray(slots.periods) ? slots.periods : []).map(Number).filter(p => AI_MA_NAME[p]);
     const periods = asked.length ? asked : AI_MA_DEFAULT;
@@ -23457,13 +23576,25 @@ const ASSISTANT_ACTIONS = {
       return aiNoData({ head: `${name} ${sid}`, text: "這裡拿不到紀錄，已直接打開字卡的觀察紀錄。" });
     }
     const labelOf = k => SIGNAL_LABEL_MAP[k] || AUTO_SIGNAL_LABELS[k] || String(k || "");
+    // 問某一天（Worker 的 date 槽位是「MM-DD」）：有那一天就列那一天的每一則；沒有就說只有最近幾天，再列近 10 天
+    let missDay = "";
+    if (/^\d{2}-\d{2}$/.test(String(slots.date || ""))) {
+      const key = Object.keys(hist).sort().reverse().find(d => d.slice(5) === slots.date);
+      if (key) {
+        const sigs = (hist[key] && hist[key].signals) || [];
+        return { head: `${name} ${sid}`, sub: `${_mdOf(key)}（${_weekdayZh(key)}）${sigs.length ? ` ${sigs.length} 則訊號` : "沒有訊號"}`,
+                 rows: sigs.map(s => ({ label: labelOf(s.kind), value: "", note: String(s.at || "") })),
+                 actions: [aiOpenBtn(sid, "history", "看觀察紀錄 ›")] };
+      }
+      missDay = `${String(slots.date).replace("-", "/")} 沒有紀錄（這裡有最近 ${dates.length} 個交易日）`;
+    }
     const rows = dates.map(d => {
       const sigs = (hist[d] && hist[d].signals) || [];
       const names = [...new Set(sigs.map(s => labelOf(s.kind)))].slice(0, 2).join("、");
       return { label: `${_mdOf(d)}（${_weekdayZh(d)}）`, value: sigs.length ? `${sigs.length} 則` : "—", note: names, act: "open", data: { sid, tab: "history" } };
     });
     const total = dates.reduce((n, d) => n + (((hist[d] && hist[d].signals) || []).length), 0);
-    return { head: `${name} ${sid}`, sub: `近 ${dates.length} 個交易日 ${total} 則訊號`, rows, actions: [aiOpenBtn(sid, "history", "看觀察紀錄 ›")] };
+    return { head: `${name} ${sid}`, sub: missDay || `近 ${dates.length} 個交易日 ${total} 則訊號`, rows, actions: [aiOpenBtn(sid, "history", "看觀察紀錄 ›")] };
   },
   async assistantEvents(slots) {
     const sid = slots.stock || null;
@@ -23483,8 +23614,10 @@ const ASSISTANT_ACTIONS = {
       const rows = evs.slice(0, 6).map(e => ({ label: typeLabel(e.event_type), value: String(e.title || "").slice(0, 28), note: String(e.event_date || ""), act: "open", data: { events: sid } }));
       return { head: `${aiStockName(sid)} ${sid}`, sub: `${evs.length} 筆資料`, rows, actions: [{ label: "開資料清單 ›", act: "open", data: { events: sid } }] };
     }
-    // 整份自選股：接下來的日程（除權息、法說…）或今天的資料
-    const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(isStockId);
+    // 整份自選股＋好友分享的：接下來的日程（除權息、法說…）或今天的資料。分享股的事件不一定載過——先載再答
+    const sids = aiSignalSids();
+    const missing = sids.filter(s => !stockEvents[s]);
+    if (missing.length) await loadStockEvents(missing).catch(() => {});
     let all = [];
     for (const s of sids) for (const e of (stockEvents[s] || [])) all.push({ ...e, sid: s });
     if (slots.event_type) all = all.filter(e => e.event_type === slots.event_type);
@@ -23815,22 +23948,36 @@ const ASSISTANT_ACTIONS = {
     const room = aiRuleRoom();
     const full = room !== null && room <= 0;
     if (!rules.length) return full ? aiLimitCard("alert_rules") : { text: "還沒有進階訊號。", actions: [rulesBtn] };
-    const rows = rules.slice(0, 10).map(r => ({
-      label: ruleLabelOf(r), value: r.enabled ? "開" : "關",
-      note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股", act: "open", data: { rules: true } }));
+    const rows = rules.slice(0, 10).map(r => {
+      const until = ruleExpiresOn(r.conditions), once = ruleIsOnce(r.conditions);
+      return { label: ruleLabelOf(r), value: r.enabled ? "開" : "關",
+               note: [r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股", until ? `到 ${mmdd(until)} 止` : "", once ? "通知一次" : ""].filter(Boolean).join("・"),
+               act: "open", data: { rules: true } };
+    });
     return { head: `進階訊號 ${rules.length}／${planLimitOf("alert_rules") ?? "—"}`,
              sub: room === null ? "" : full ? aiLimitLabel("alert_rules", true) : `還能設 ${room} 條`,
              rows, text: full ? aiLimitWayOut("alert_rules") : "",
              actions: full ? [aiManageBtn("alert_rules"), aiPlanBtn("alert_rules")] : [rulesBtn] };
   },
-  assistantInbox() {
-    const today = (inboxRows || []).filter(r => isToday(r.sent_at));
-    const rows = today.slice(0, 5).map(r => {
+  // 通知（第二輪）：「台積電今天有什麼通知」只列那一檔（以前 stock 槽位沒用到、列的是全部）；
+  // 今天還沒有（週末、開盤前）就給最近一個有通知的那一天，不要只回一句「今天還沒有」
+  assistantInbox(slots) {
+    const only = isStockId(String((slots && slots.stock) || "")) ? String(slots.stock) : "";
+    const all = (inboxRows || []).filter(r => !only || String(r.stock_id || "").trim() === only);
+    let list = all.filter(r => isToday(r.sent_at));
+    let dayTxt = "今天";
+    if (!list.length && all.length) {
+      const lastDay = all.map(r => taipeiDateKey(r.sent_at)).filter(Boolean).sort().reverse()[0];
+      if (lastDay) { list = all.filter(r => taipeiDateKey(r.sent_at) === lastDay); dayTxt = `${_mdOf(lastDay)}（${_weekdayZh(lastDay)}）`; }
+    }
+    const rows = list.slice(0, only ? 8 : 5).map(r => {
       const sid = String(r.stock_id || "").trim();
       return { label: aiStockName(sid) || "系統", value: _titleWithoutSid(String(r.title || ""), sid), note: fmtTime(r.sent_at),
                act: "open", data: isStockId(sid) ? { sid, tab: "radar" } : { tab: "inbox" } };
     });
-    return { head: "通知", sub: today.length ? `今天 ${today.length} 則` : "今天還沒有通知", rows,
+    const sub = !list.length ? (only ? "最近沒有這一檔的通知" : "還沒有通知")
+      : dayTxt === "今天" ? `今天 ${list.length} 則` : `今天還沒有；最近一次是 ${dayTxt}，${list.length} 則`;
+    return { head: only ? `${aiStockName(only)} 的通知` : "通知", sub, rows,
              actions: [{ label: "打開通知 ›", act: "open", data: { tab: "inbox" } }] };
   },
   fbOpen() { fbOpen(null); return { text: "已打開意見回饋。" }; },
@@ -24022,7 +24169,8 @@ const ASSISTANT_ACTIONS = {
   },
   assistantPriceTargetSet(slots) {
     const sid = slots.stock;
-    if (!sid) return aiNeedStock();
+    // 「我設了哪些到價提醒」：沒有股票也沒有價位＝問清單；有價位沒股票才要問是哪一檔
+    if (!sid) return Number(slots.price) > 0 || slots.clear ? aiNeedStock() : aiListTargets();
     if (slots.clear) {   // 取消到價提醒：兩個價位都清掉
       const row = aiRowOf(sid);
       const name0 = aiStockName(sid);
