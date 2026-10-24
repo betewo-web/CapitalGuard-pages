@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="443">
+  <meta name="app-version" content="444">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=443" rel="stylesheet">
+  <link href="watchlist.css?v=444" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -21881,6 +21881,7 @@ const AI_INTENTS = {
   system_status:    ["assistantSystemStatus", {}],
   glossary:         ["assistantGlossary", {}],
   help:             ["assistantHelp", {}],
+  note:             ["assistantNote", {}],
   feedback:         ["assistantFeedback", {}],
   friend:           ["assistantFriend", {}],
   ui_settings:      ["assistantUiSettings", {}],
@@ -22033,8 +22034,8 @@ function aiCardHtml(c) {
   const rows = (c.rows || []).map(r => {
     const inner = `<b>${escapeHtml(r.label)}</b><span class="ai-val">${r.html ? r.value : escapeHtml(r.value ?? "")}</span><i>${escapeHtml(r.note ?? "")}</i>`;
     return r.act
-      ? `<button type="button" class="ai-row is-link" data-ai-act="${escapeHtml(r.act)}" data-ai-data="${escapeHtml(JSON.stringify(r.data || {}))}">${inner}</button>`
-      : `<div class="ai-row">${inner}</div>`;
+      ? `<button type="button" class="ai-row is-link${r.cls ? ` ${escapeHtml(r.cls)}` : ""}" data-ai-act="${escapeHtml(r.act)}" data-ai-data="${escapeHtml(JSON.stringify(r.data || {}))}">${inner}</button>`
+      : `<div class="ai-row${r.cls ? ` ${escapeHtml(r.cls)}` : ""}">${inner}</div>`;
   }).join("");
   const body = c.text ? `<p>${escapeHtml(c.text)}</p>` : (c.bodyHtml || "");
   const chips = c.chips && c.chips.length ? `<div class="ai-chips">${c.chips.map(aiChipHtml).join("")}</div>` : "";
@@ -22052,7 +22053,9 @@ function aiCardHtml(c) {
   // 「釘選」（第九輪）：這一句放到輸入框的建議裡，下次點一下就問
   const pinned = c._q && aiPins().some(p => p.text === c._q.text);
   const pin = c._k && c._q ? `<button type="button" class="ai-wrong ai-pin" data-ai-act="pin" data-ai-data="${escapeHtml(JSON.stringify({ k: c._k }))}">${pinned ? "取消釘選" : "釘選"}</button>` : "";
-  const meta = wrong || share || pin ? `<div class="ai-meta">${pin}${share}${wrong}</div>` : "";
+  // 「複製」（第十七輪）：貼到自己的記事本或對話裡；按過變成「已複製」
+  const copy = shareable ? `<button type="button" class="ai-wrong ai-copy" data-ai-act="copy" data-ai-data="${escapeHtml(JSON.stringify({ k: c._k }))}">${c._copied ? "已複製" : "複製"}</button>` : "";
+  const meta = wrong || share || pin ? `<div class="ai-meta">${pin}${share}${copy}${wrong}</div>` : "";
   // admin 才看得到的一行診斷（Howard 2026-10-18：卡上沒名單時，遠端看不到手機的狀態，問一句就能回報）
   const diag = aiIsAdmin && c.diag ? `<div class="ai-meta">${escapeHtml(c.diag)}</div>` : "";
   return `<div class="ai-card${c.muted ? " is-muted" : ""}">${head}${sub}<div class="ai-card-body">${rows}${body}${chips}</div>${actions}${meta}${diag}</div>`;
@@ -22084,6 +22087,7 @@ function aiIntroHtml(withChips) {
       <li>記 「我買了 2 張台積電 成本 900」、「賣掉 1 張鴻海」，或按輸入列左邊的圖片鈕上傳券商的庫存截圖</li>
       <li>看 「台積電整理一下」、「台積電和聯發科比較」、「今天有什麼重點」</li>
       <li>算 「2 張台積電值多少」、「台積電漲停價」、「900 買的台積電要多少才回本」</li>
+      <li>筆記 「記一下：台積電等法說會」、「提醒我明天看鴻海」、「我的筆記」</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
       <div class="ai-note">只整理與解釋公開資料，不提供買賣建議。用鍵盤上的麥克風也可以說話。</div></div>`,
     chips,
@@ -22275,6 +22279,18 @@ function aiCardText(c) {
   if (c.text) lines.push(plain(c.text));
   lines.push("— CapitalGuard-股市雷達整理的公開資料，不是投資建議");
   return lines.filter(Boolean).join("\n");
+}
+async function aiCopyCard(k) {
+  const m = aiLog.find(x => x.kind === "card" && x.spec && x.spec._k === k);
+  if (!m) return;
+  try {
+    await navigator.clipboard.writeText(aiCardText(m.spec));
+    m.spec._copied = true;
+    trackActivity("assistant_copy", {});
+  } catch {
+    aiPushCard({ text: "沒有複製成功，可以長按卡片自己選取。", muted: true });
+  }
+  renderAssistant();
 }
 async function aiShareCard(k) {
   const m = aiLog.find(x => x.kind === "card" && x.spec && x.spec._k === k);
@@ -22475,6 +22491,66 @@ function aiRowOf(sid) {
 }
 function aiQuoteOf(sid) { return getQuote(sid) || getCloseQuote(sid) || null; }
 
+// ── 筆記（第十七輪）────────────────────────────────────────────────────
+// 存在這支手機（cg-ai-notes:<user>）：沒有伺服器那一份，換手機就沒有。到期的那天放進重點卡（不是推播）
+const AI_NOTE_MAX = 100, AI_NOTE_CHARS = 200;
+function aiNotesKey() { return `cg-ai-notes:${state.userId || ""}`; }
+function aiNotes() {
+  try {
+    const v = JSON.parse(localStorage.getItem(aiNotesKey()) || "[]");
+    return Array.isArray(v) ? v.filter(n => n && n.id && n.text) : [];
+  } catch { return []; }
+}
+function aiSaveNotes(list) {
+  try { localStorage.setItem(aiNotesKey(), JSON.stringify(list.slice(0, AI_NOTE_MAX))); return true; } catch { return false; }
+}
+// 「明天」「3 天後」「下週一」「10/30」→ 台北的 YYYY-MM-DD；過了的月日算明年、這週已經過了的那天算下週
+function aiDueDate(due, now) {
+  if (!due || typeof due !== "object") return null;
+  const today = taipeiDateKey(now || new Date());
+  const base = new Date(`${today}T12:00:00Z`);
+  const add = n => { const d = new Date(base); d.setUTCDate(d.getUTCDate() + n); return taipeiDateKey(d); };
+  if (/^\d{2}-\d{2}$/.test(String(due.date || ""))) { const y = Number(today.slice(0, 4)); const d = `${y}-${due.date}`; return d >= today ? d : `${y + 1}-${due.date}`; }
+  if (Number.isFinite(Number(due.ahead)) && due.ahead !== undefined) return add(Math.max(0, Math.min(365, Number(due.ahead))));
+  if (due.wd) {
+    let n = (Number(due.week) || 0) * 7 + Number(due.wd) - (base.getUTCDay() || 7);
+    if (n < 0) n += 7;
+    return add(n);
+  }
+  return null;
+}
+function aiNoteList(list, head, today, forDelete) {
+  const rows = list.slice(0, 20).map(x => Object.assign({
+    label: x.sid ? aiStockName(x.sid) : "筆記", value: x.text, cls: "ai-note-row",
+    note: x.due ? aiDateWithCountdown(x.due, today) : mmdd(taipeiDateKey(new Date(x.at))),
+  }, forDelete ? { act: "run", data: { intent: "note", slots: { note_action: "delete", id: x.id }, text: "刪掉這則筆記" } }
+               : x.sid ? { act: "run", data: { intent: "stock_overview", slots: { stock: x.sid }, text: `${aiStockName(x.sid)}整理一下` } } : {}));
+  return { head, sub: forDelete ? "" : `${list.length} 則・只存在這支手機`, rows,
+           chips: forDelete ? [] : [{ label: "刪筆記", act: "run", data: { intent: "note", slots: { note_action: "delete" }, text: "刪筆記" } }] };
+}
+// 連續第幾天（第十七輪）：記最近 60 個有來的日子；週末沒來不算中斷
+function aiVisitDays() {
+  try { const v = JSON.parse(localStorage.getItem(`cg-ai-days:${state.userId}`) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function aiNoteVisit(today) {
+  const days = aiVisitDays();
+  if (days[0] === today) return;
+  try { localStorage.setItem(`cg-ai-days:${state.userId}`, JSON.stringify([today].concat(days.filter(d => d !== today)).slice(0, 60))); } catch { /* 存不了就不算 */ }
+}
+function aiStreak(today) {
+  const seen = new Set(aiVisitDays());
+  if (!seen.has(today)) return 0;
+  let n = 0;
+  const d = new Date(`${today}T12:00:00Z`);
+  for (let i = 0; i < 60; i++) {
+    const k = taipeiDateKey(d), wd = d.getUTCDay();
+    if (seen.has(k)) n += 1;
+    else if (wd !== 0 && wd !== 6) break;
+    d.setUTCDate(d.getUTCDate() - 1);
+  }
+  return n;
+}
+
 // ── 試算（第十六輪）────────────────────────────────────────────────────
 // 價格：最近一個收盤（盤中成交價不送到裝置）；不在自選股就讀全市場關卡檔的收盤
 const AI_FEE_RATE = 0.001425, AI_FEE_MIN = 20;
@@ -22617,6 +22693,7 @@ function aiAct(act, data) {
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
   if (act === "undo") { aiRunUndo(String(data.id || "")); return; }   // 剛才那一筆寫入改回去（第六輪）
   if (act === "sharecard") { aiShareCard(String(data.k || "")); return; }   // 把這張卡傳給朋友（手機的分享面板；第七輪）
+  if (act === "copy") { aiCopyCard(String(data.k || "")); return; }   // 這張卡的文字複製起來（第十七輪）
   if (act === "pin") { aiTogglePin(String(data.k || "")); return; }   // 這一句釘到輸入框的建議裡（第九輪）
   if (act === "gloss") { assistantSend(String(data.text || "")); return; }   // 訊號名稱點了就解釋：名詞的固定句在目錄裡，經 Worker（第十四輪）
   if (act === "tour") { aiTour(); return; }   // 新手導覽（第十四輪）
@@ -23422,6 +23499,7 @@ function aiSelfHelp() {
                   run("設", "到價提醒、基礎與進階訊號", `例：${n}的到價提醒`, "price_target_set", { stock: sid }, `${n}的到價提醒`),
                   run("記", "持股、券商截圖", "例：我的持股", "holdings", {}, "我的持股"),
                   run("算", "市值、漲跌停、手續費、回本", `例：${n}漲停價多少`, "calc", { stock: sid, calc: "limit" }, `${n}漲停價多少`),
+                  run("筆記", "記下要看的事，那天放進重點", "例：我的筆記", "note", { note_action: "list" }, "我的筆記"),
                   run("整理", "今天的重點、這週回顧、明天", "例：今天有什麼重點", "daily_brief", {}, "今天有什麼重點"),
                   { label: "問", value: "名詞與算法", note: "例：什麼是逼近壓力", act: "gloss", data: { text: "什麼是逼近壓力" } },
                   { label: "不做", value: "買賣建議、走勢研判", note: "這類問題可以交給你自己的 AI" }] };
@@ -23472,6 +23550,10 @@ async function aiTomorrowBrief() {
   const missing = sids.filter(s => !stockEvents[s]);
   if (missing.length) await loadStockEvents(missing).catch(() => {});
   const rows = [];
+  for (const n of aiNotes().filter(x => x.due === tmr)) {   // 自己記的、明天要看的（第十七輪）
+    rows.push({ label: n.sid ? aiStockName(n.sid) : "你記的", value: n.text.slice(0, 24), note: "筆記", cls: "ai-note-row",
+                act: "run", data: { intent: "note", slots: { note_action: "list" }, text: "我的筆記" } });
+  }
   for (const s of sids) for (const e of (stockEvents[s] || [])) {
     if (String(e.event_date || "") === tmr) rows.push({ label: aiStockName(s), value: String(e.title || "").slice(0, 20), note: "日程", act: "open", data: { events: s } });
   }
@@ -23481,7 +23563,7 @@ async function aiTomorrowBrief() {
   for (const x of aiNearTargets()) rows.push({ label: aiStockName(x.sid), value: `${x.word} ${fmtPrice(x.v)}`, note: `距 ${x.away < 0 ? "−" : "+"}${fmtPct(x.away)}%`, act: "open", data: { alert: x.id } });
   const closed = wd === 0 || wd === 6;
   return { head: label, sub: closed ? "明天休市" : rows.length ? `${rows.length} 件事` : "",
-           rows: rows.slice(0, 12), text: rows.length ? "" : closed ? "明天休市，接下來的日程問「下週有什麼日程」。" : "明天沒有日程、沒有快到的價位，也沒有到期的進階訊號。" };
+           rows: rows.slice(0, 12), text: rows.length ? "" : closed ? "明天休市，接下來的日程問「下週有什麼日程」。" : "明天沒有日程、沒有快到的價位、沒有到期的進階訊號，也沒有記著要看的事。" };
 }
 
 // 延長到哪一天（第十二輪）：「到 12 月 31 日」（今年過了就是明年）、「到月底／年底」、「再 30 天」（從原本的期限往後算，沒有就從今天）
@@ -23640,6 +23722,7 @@ function aiMaybeAutoCards() {
     const seenKey = `cg-ai-seen:${state.userId}`;
     since = localStorage.getItem(seenKey) || "";
     localStorage.setItem(seenKey, today);
+    aiNoteVisit(today);   // 連續第幾天（第十七輪）
     const off = localStorage.getItem(`cg-ai-brief-off:${state.userId}`) === "1";   // 「不要每天自動出重點」（第十三輪）
     if (!off && localStorage.getItem(bk) !== today) { localStorage.setItem(bk, today); brief = true; }
     if (ver >= AI_WHATS_NEW.since && Number(localStorage.getItem(nk) || 0) < AI_WHATS_NEW.since) { localStorage.setItem(nk, String(ver)); news = !!aiLog.length; }
@@ -25297,6 +25380,9 @@ const ASSISTANT_ACTIONS = {
     const row = aiRowOf(sid);
     const tg = row ? [["target_price_low", "跌到"], ["target_price_high", "漲到"]].filter(([k]) => row[k] != null && row[k] !== "").map(([k, w]) => `${w} ${fmtPrice(row[k])}`) : [];
     if (tg.length) rows.push(Object.assign({ label: "到價提醒", value: tg.join("、"), note: "" }, go("price_target_set", {}, `${f.name}的到價提醒`)));
+    const mine = aiNotes().filter(n => n.sid === sid);   // 自己記的（第十七輪）
+    if (mine.length) rows.push(Object.assign({ label: "筆記", value: mine[0].text.slice(0, 24), cls: "ai-note-row", note: mine.length > 1 ? `共 ${mine.length} 則` : mmdd(taipeiDateKey(new Date(mine[0].at))) },
+      go("note", { note_action: "list" }, `${f.name}的筆記`)));
     if (f.indScore != null) rows.push({ label: "族群強度", value: `${f.indScore}`, note: `${f.ind}・上漲 ${f.indUp}%` });
     if (f.v20) rows.push({ label: "20 日均量", value: `${Math.round(f.v20).toLocaleString()} 張`, note: "" });
     if (rows.length <= 1 && !f.price) return aiNoData({ head: `${f.name} ${sid}`, text: "拿不到這一檔的資料（全市場關卡檔與報價都沒有）。", actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")] });
@@ -25410,6 +25496,12 @@ const ASSISTANT_ACTIONS = {
       rows.push(Object.assign({ label: "全市場", value: `漲 ${dirs.filter(v => v === 1).length}・跌 ${dirs.filter(v => v === -1).length}`,
                                 note: `平 ${dirs.filter(v => v === 0).length}` }, go("movers", { direction: "any" }, "自選股今天的漲跌")));
     }
+    // 自己記的、今天要看的（第十七輪）：放最上面，點了是筆記
+    const dueToday = aiNotes().filter(n => n.due === today);
+    if (dueToday.length) {
+      rows.unshift(Object.assign({ label: "你記的", value: dueToday[0].text.slice(0, 24), cls: "ai-note-row",
+                                   note: dueToday.length > 1 ? `還有 ${dueToday.length - 1} 則` : "今天" }, go("note", { note_action: "list" }, "我的筆記")));
+    }
     // 很久沒來（第十三輪）：上次來是 3 天以上前，多一列這幾天的訊號數，點了是這週回顧
     const sinceDays = slots.since ? Math.round((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${slots.since}T12:00:00Z`)) / 86400000) : 0;
     if (sinceDays >= 3) {
@@ -25428,7 +25520,8 @@ const ASSISTANT_ACTIONS = {
       actions.push({ label: "啟用通知", act: "push", data: {}, main: true });
     }
     const head = phase === "pre" ? "開盤前的重點" : phase === "post" ? "今天收盤的重點" : phase === "weekend" ? "週末的重點" : `${day}的重點`;
-    return { head, sub: `${aiGreeting()}・點一列看完整的`, rows, actions,
+    const streak = aiStreak(today);
+    return { head, sub: `${aiGreeting()}${streak >= 2 ? `・連續第 ${streak} 天` : ""}・點一列看完整的`, rows, actions,
              chips: [{ label: "這週的回顧", act: "run", data: { intent: "daily_brief", slots: { period: "week" }, text: "這週的回顧" } },
                      { label: "明天有什麼要注意的", act: "run", data: { intent: "daily_brief", slots: { period: "tomorrow" }, text: "明天有什麼要注意的" } }] };
   },
@@ -25571,6 +25664,56 @@ const ASSISTANT_ACTIONS = {
                    run(`1 張${name}的手續費`, { calc: "fee", shares: SHARES_PER_LOT })];
     if (held && cost) chips.push(run(`${name}要多少才回本`, { calc: "breakeven" }));
     return { head, sub: "要算哪一種？", rows: [closeRow], chips };
+  },
+  // ── 筆記（第十七輪）：只存在這支手機；記下直接做（有復原），刪掉先出確認卡
+  assistantNote(slots) {
+    const notes = aiNotes();
+    const sid = slots.stock ? String(slots.stock) : null;
+    const act = slots.note_action || (slots.note_text ? "add" : "list");
+    const listChip = { label: "我的筆記", act: "run", data: { intent: "note", slots: { note_action: "list" }, text: "我的筆記" } };
+    const today = taipeiDateKey(new Date());
+    if (act === "add") {
+      const text = String(slots.note_text || "").trim().slice(0, AI_NOTE_CHARS);
+      if (!text) return { text: "要記什麼？例如「記一下：台積電等法說會」。" };
+      if (notes.length >= AI_NOTE_MAX) return { text: `筆記最多 ${AI_NOTE_MAX} 則，先刪掉幾則舊的。`, chips: [listChip] };
+      const due = aiDueDate(slots.due);
+      const n = { id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, sid, text, at: new Date().toISOString(), due };
+      if (!aiSaveNotes([n].concat(notes))) return { text: "這支手機沒辦法存筆記（私密瀏覽或儲存空間被關掉）。", muted: true };
+      trackActivity("assistant_note", { op: "add", due: !!due, stock: !!sid });
+      const rows = [{ label: sid ? aiStockName(sid) : "筆記", value: text, note: "", cls: "ai-note-row" }];
+      if (due) rows.push({ label: "那一天", value: aiDateWithCountdown(due, today), note: "放進當天的重點" });
+      return { head: "記下了", sub: "只存在這支手機", rows,
+               chips: [aiUndoChip(() => { aiSaveNotes(aiNotes().filter(x => x.id !== n.id)); return "已拿掉剛才那一則筆記。"; }), listChip] };
+    }
+    if (act === "delete") {
+      const id = slots.id ? String(slots.id) : "";
+      const target = id ? notes.filter(x => x.id === id) : sid ? notes.filter(x => x.sid === sid) : slots.all ? notes : [];
+      if (!target.length) {
+        if (!notes.length) return { text: "還沒有筆記。", muted: true };
+        return Object.assign(aiNoteList(notes, "要刪哪一則？點一則就刪", today, true), { chips: [{ label: "全部刪掉", act: "run", data: { intent: "note", slots: { note_action: "delete", all: true }, text: "筆記全部刪掉" } }] });
+      }
+      const ids = new Set(target.map(x => x.id));
+      return aiConfirmCard({
+        head: `刪掉 ${target.length} 則筆記？`,
+        rows: target.slice(0, 5).map(x => ({ label: x.sid ? aiStockName(x.sid) : "筆記", value: x.text, note: "", cls: "ai-note-row" })),
+        mainLabel: "刪掉",
+        run: async () => {
+          const keep = aiNotes();
+          aiSaveNotes(keep.filter(x => !ids.has(x.id)));
+          trackActivity("assistant_note", { op: "delete", n: target.length });
+          return { text: `已刪掉 ${target.length} 則筆記。`, chips: [aiUndoChip(() => { aiSaveNotes(keep); return "筆記放回去了。"; })] };
+        },
+      });
+    }
+    const q = String(slots.q || "").trim();
+    const list = notes.filter(x => (!sid || x.sid === sid) && (!q || x.text.includes(q)));
+    if (!list.length) {
+      return { text: sid ? `${aiStockName(sid)}還沒有筆記。說「記一下：${aiStockName(sid)}…」就會記下來。`
+                         : q ? `沒有寫到「${q}」的筆記。` : "還沒有筆記。說「記一下：…」就會記下來（只存在這支手機）；「提醒我明天看鴻海」會在那天放進重點。",
+               chips: notes.length ? [listChip] : [] };
+    }
+    const head = sid ? `${aiStockName(sid)}的筆記` : q ? `寫到「${q}」的筆記` : "我的筆記";
+    return aiNoteList(list, head, today, false);
   },
   // 拒答與範圍外：固定句照舊，後面接「交給你自己的 AI」的籤（第十七節）
   assistantRefuse(slots, args, opts) {
