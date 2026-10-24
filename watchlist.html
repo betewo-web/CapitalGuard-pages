@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="438">
+  <meta name="app-version" content="439">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=438" rel="stylesheet">
+  <link href="watchlist.css?v=439" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -23239,6 +23239,57 @@ async function aiStockFacts(sid) {
 const aiPosTxt = d => d == null ? "—" : Math.abs(d) < 0.05 ? "貼線" : d > 0 ? `上方 ${fmtPct(d)}%` : `下方 ${fmtPct(d)}%`;
 const aiFromHigh = f => f.h52 && f.price ? `離高點 ${f.price >= f.h52 ? "0" : "−" + fmtPct((f.h52 - f.price) / f.h52 * 100)}%` : "";
 
+// 延長到哪一天（第十二輪）：「到 12 月 31 日」（今年過了就是明年）、「到月底／年底」、「再 30 天」（從原本的期限往後算，沒有就從今天）
+function aiExtendTo(slots, cur) {
+  const today = taipeiDateKey(new Date());
+  const u = String(slots.until || "");
+  if (u === "month_end") { const d = new Date(`${today.slice(0, 7)}-01T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return taipeiDateKey(d); }
+  if (u === "year_end") return `${today.slice(0, 4)}-12-31`;
+  if (/^\d{2}-\d{2}$/.test(u)) { const y = Number(today.slice(0, 4)); return `${u < today.slice(5) ? y + 1 : y}-${u}`; }
+  const dur = slots.duration || null;
+  if (!dur) return "";
+  const base = cur && cur >= today ? cur : today;
+  const days = Number(dur.days) || 0, sessions = Number(dur.sessions) || 0;
+  const d = new Date(`${base}T12:00:00Z`);
+  if (days > 0) d.setUTCDate(d.getUTCDate() + Math.min(days, 730));
+  else { let left = Math.min(sessions, 500); while (left > 0) { d.setUTCDate(d.getUTCDate() + 1); const w = d.getUTCDay(); if (w >= 1 && w <= 5) left--; } }
+  return days > 0 || sessions > 0 ? taipeiDateKey(d) : "";
+}
+// 到價提醒全部取消（第十二輪）：每一個價位與 updateAlert 同一條，復原寫回原本的
+function aiClearAllTargets() {
+  const items = [];
+  for (const r of watchlistRows || []) for (const f of ["target_price_low", "target_price_high"]) if (r[f] != null && r[f] !== "") items.push([r, f, r[f]]);
+  if (!items.length) return { text: "沒有設任何到價提醒。" };
+  return aiConfirmCard({ head: `取消全部 ${items.length} 個到價提醒？`,
+    rows: items.slice(0, 12).map(([r, f, v]) => ({ label: aiStockName(String(r.stock_id).trim()), value: `${f === "target_price_low" ? "跌到" : "漲到"} ${fmtPrice(v)}`, note: "會清掉" })),
+    mainLabel: "全部清掉",
+    run: async () => {
+      for (const [r, f] of items) { await updateAlert(r.id, f, null, false); r[f] = null; }
+      renderCurrentTab();
+      return { text: `已取消 ${items.length} 個到價提醒。`, chips: [aiUndoChip(async () => {
+        for (const [r, f, v] of items) { await updateAlert(r.id, f, v, false); r[f] = v; }
+        renderCurrentTab();
+        return `已把 ${items.length} 個到價提醒設回去。`;
+      })] };
+    } });
+}
+// 持股全部清空（第十二輪）：每一檔走 applyHoldingChange delete（與持股頁的刪除同一條）；自選股與訊號不動
+function aiClearAllHoldings() {
+  if (brokerHoldings.length > 0) return { text: "持股由券商同步，股數以券商為準，這裡不能清空。", muted: true };
+  const items = [...holdingBySid().values()].filter(h => Number(h.shares) > 0).map(h => ({ sid: h.sid, shares: Number(h.shares), cost: Number(h.cost) > 0 ? Number(h.cost) : null }));
+  if (!items.length) return { text: "還沒有持股紀錄。" };
+  return aiConfirmCard({ head: `清空全部 ${items.length} 檔持股紀錄？`, sub: "只刪持股的股數與成本，自選股與訊號照常",
+    rows: items.slice(0, 12).map(h => ({ label: aiStockName(h.sid), value: fmtLots(h.shares), note: h.cost != null ? `成本 ${fmtPrice(h.cost)}` : "" })),
+    mainLabel: "全部清空",
+    run: async () => {
+      for (const h of items) await applyHoldingChange(h.sid, { kind: "delete" });
+      return { text: `已清空 ${items.length} 檔持股紀錄。`, chips: [aiUndoChip(async () => {
+        for (const h of items) await applyHoldingChange(h.sid, { kind: "set", shares: h.shares, price: h.cost, clearCost: h.cost == null });
+        return `已把 ${items.length} 檔持股記回去。`;
+      })] };
+    } });
+}
+
 // 「11/01・還有 8 天」（第十一輪）：日程那幾張卡共用；過去的日子只寫日期
 function aiDateWithCountdown(date, today) {
   const d = String(date || "");
@@ -24641,6 +24692,63 @@ const ASSISTANT_ACTIONS = {
         },
       });
     }
+    // 延長期限／拿掉期限／改名（第十二輪）：改的是那一條的 conditions（期限放在條件的 JSON 裡）或 name，
+    // 與編輯器存檔同一條 sbPatch("alert_rules")；每一種都能復原
+    if (action === "extend" || action === "noexpire" || action === "rename") {
+      if (!rules.length) return { text: "還沒有進階訊號。", actions: [rulesBtn] };
+      const which = String(slots.which || "").trim();
+      const hits = slots.rule_id != null ? rules.filter(r => String(r.id) === String(slots.rule_id))
+        : which ? rules.filter(r => String(r.name || "").includes(which) || (r.conditions || []).some(c => describeCondition(c).includes(which)))
+        : rules;
+      const verb = { extend: "延長", noexpire: "拿掉期限", rename: "改名" }[action];
+      if (hits.length !== 1) {
+        const pool = hits.length ? hits : rules;
+        return { head: hits.length ? `要${verb}哪一條？` : `找不到「${which}」這一條，要${verb}哪一條？`,
+                 chips: pool.slice(0, 8).map(r => ({ label: ruleLabelOf(r), act: "run",
+                   data: { intent: "rule_manage", slots: Object.assign({}, slots, { rule_id: r.id, which: "" }), text: `${ruleLabelOf(r)}${verb}` } })) };
+      }
+      const r = hits[0], label = ruleLabelOf(r), cur = ruleExpiresOn(r.conditions);
+      const patchConds = until => (r.conditions || []).map(c => { const n = Object.assign({}, c); if (until) n.expires_on = until; else delete n.expires_on; return n; });
+      const undoTo = old => aiUndoChip(async () => {
+        await sbPatch("alert_rules", { id: `eq.${r.id}` }, old, state.accessToken);
+        await refreshRules().catch(() => {});
+        return `已把「${label}」改回原本的。`;
+      });
+      if (action === "rename") {
+        const nm = String(slots.new_name || "").trim().slice(0, 60);
+        if (!nm) return { head: `「${label}」要改成什麼名字？`, text: "例如「把跌破月線那條改名叫月線警報」。" };
+        return aiConfirmCard({ head: "改名？", rows: [{ label: "原本", value: label, note: "" }, { label: "改成", value: nm, note: "" }], mainLabel: "改名",
+          run: async () => {
+            await sbPatch("alert_rules", { id: `eq.${r.id}` }, { name: nm }, state.accessToken);
+            await refreshRules().catch(() => {});
+            return { text: `已改名為「${nm}」。`, actions: [rulesBtn], chips: [undoTo({ name: r.name })] };
+          } });
+      }
+      if (action === "noexpire") {
+        if (!cur) return { text: `「${label}」本來就沒有期限。` };
+        return aiConfirmCard({ head: "拿掉期限？", rows: [{ label: "規則", value: label, note: "" }, { label: "期限", value: `原本到 ${mmdd(cur)} 止`, note: "改成一直盯" }], mainLabel: "拿掉期限",
+          run: async () => {
+            await sbPatch("alert_rules", { id: `eq.${r.id}` }, { conditions: patchConds("") }, state.accessToken);
+            await refreshRules().catch(() => {});
+            return { text: `「${label}」不再有期限。`, actions: [rulesBtn], chips: [undoTo({ conditions: r.conditions })] };
+          } });
+      }
+      const until = aiExtendTo(slots, cur);
+      if (!until) {
+        const run = (lb, s) => ({ label: lb, act: "run", data: { intent: "rule_manage", slots: Object.assign({ action: "extend", rule_id: r.id }, s), text: `${label}${lb}` } });
+        return { head: `「${label}」要延長到什麼時候？`, sub: cur ? `現在到 ${mmdd(cur)} 止` : "現在沒有期限",
+                 chips: [run("再 7 天", { duration: { days: 7 } }), run("再 30 天", { duration: { days: 30 } }), run("到月底", { until: "month_end" }), run("到年底", { until: "year_end" })] };
+      }
+      if (until < taipeiDateKey(new Date())) return { text: `${mmdd(until)} 已經過了，要選今天以後的日期。`, muted: true };
+      return aiConfirmCard({ head: "延長期限？", rows: [{ label: "規則", value: label, note: "" },
+                                                   { label: "期限", value: `到 ${until.slice(0, 4) !== taipeiDateKey(new Date()).slice(0, 4) ? until : mmdd(until)} 止`, note: cur ? `原本到 ${mmdd(cur)}` : "原本沒有期限" }],
+        mainLabel: "延長",
+        run: async () => {
+          await sbPatch("alert_rules", { id: `eq.${r.id}` }, { conditions: patchConds(until) }, state.accessToken);
+          await refreshRules().catch(() => {});
+          return { text: `「${label}」延長到 ${mmdd(until)}。`, actions: [rulesBtn], chips: [undoTo({ conditions: r.conditions })] };
+        } });
+    }
     // 「我有哪些進階訊號」「還能設幾條」：副標寫還剩幾條，滿了就寫上限＋出路（第二十節）
     const room = aiRuleRoom();
     const full = room !== null && room <= 0;
@@ -24659,6 +24767,13 @@ const ASSISTANT_ACTIONS = {
   // 通知（第二輪）：「台積電今天有什麼通知」只列那一檔（以前 stock 槽位沒用到、列的是全部）；
   // 今天還沒有（週末、開盤前）就給最近一個有通知的那一天，不要只回一句「今天還沒有」
   assistantInbox(slots) {
+    // 「通知都看過了」（第十二輪）：與通知頁的「全部已讀」同一支 markAllRead
+    if (slots.action === "read_all") {
+      const unread = (inboxRows || []).filter(r => !r.read_at).length;
+      if (!unread) return { text: "通知都已經是已讀了。" };
+      return aiConfirmCard({ head: "全部標為已讀？", rows: [{ label: "未讀", value: `${unread} 則`, note: "通知不會被刪掉" }], mainLabel: "全部已讀",
+        run: async () => { await markAllRead(); return { text: `已把 ${unread} 則通知標為已讀。`, actions: [{ label: "打開通知 ›", act: "open", data: { tab: "inbox" } }] }; } });
+    }
     const only = isStockId(String((slots && slots.stock) || "")) ? String(slots.stock) : "";
     const all = (inboxRows || []).filter(r => !only || String(r.stock_id || "").trim() === only);
     const wantMd = String(slots.date || "") || (slots.day ? aiDayKey(slots.day).slice(5) : "");   // 「昨天的通知」（第三輪）
@@ -24680,8 +24795,23 @@ const ASSISTANT_ACTIONS = {
              actions: [{ label: "打開通知 ›", act: "open", data: { tab: "inbox" } }] };
   },
   fbOpen() { fbOpen(null); return { text: "已打開意見回饋。" }; },
-  assistantPushSetup(slots) {
+  async assistantPushSetup(slots) {
     const perm = (typeof Notification !== "undefined" && Notification.permission) || "default";
+    // 「送一則測試通知給我」（第十二輪）：本機跳一則（不經伺服器），只是確認這支手機的通知是通的
+    if (slots.test) {
+      if (perm !== "granted") return { head: "測試通知", text: perm === "denied" ? "瀏覽器把通知擋掉了：到手機設定裡允許這個網站的通知，再回來試一次。" : "先允許通知，才收得到測試的那一則。",
+                                       actions: perm === "denied" ? [] : [{ label: "啟用通知", act: "push", data: {}, main: true }] };
+      try {
+        const reg = await _swReadyOrNull();   // 直接 await .ready 在註冊失敗時永遠不回來（test_onboarding 釘住），助手會一直卡在處理中
+        if (!reg || typeof reg.showNotification !== "function") throw new Error("no service worker");
+        await reg.showNotification("CapitalGuard-股市雷達", { body: "測試通知：收到這一則，代表這支手機的通知是開著的。", tag: "assistant-test" });
+      } catch (e) {
+        return { head: "測試通知", text: "這個瀏覽器沒辦法在這裡跳通知；安裝到主畫面之後再試一次。", muted: true };
+      }
+      trackActivity("push_test", {});
+      return { head: "測試通知", text: `已送出一則測試通知${_pushSubscribed ? "" : "（推播訂閱還沒開，盤中的訊號仍收不到）"}。沒看到的話，檢查手機的通知設定有沒有允許這個 App。`,
+               actions: _pushSubscribed ? [] : [{ label: "啟用通知", act: "push", data: {}, main: true }] };
+    }
     const rows = [{ label: "瀏覽器權限", value: perm === "granted" ? "已允許" : perm === "denied" ? "被拒絕" : "尚未詢問", note: "" },
                   { label: "推播訂閱", value: _pushSubscribed ? "已訂閱" : "未訂閱", note: "" }];
     if (slots.on === false) {
@@ -24743,7 +24873,21 @@ const ASSISTANT_ACTIONS = {
                     : { text: "已回覆不接受。" };
         } });
     }
-    if (action === "optout") { aiNav(() => switchTab("friends")); return { text: "「不再接收」在分享分頁那一則上。" }; }
+    // 「鴻海的分享不要再收了」（第十二輪）：與分享分頁那一顆「不再接收這檔」同一支 RPC。
+    // 它擋的是「這位好友的這一檔」——以後他再分享這一檔也不會收到，要恢復在分享分頁的「不再接收」清單
+    if (action === "optout") {
+      const cand = inc.filter(x => x.status === "accepted" && x.live !== false && (!sid || String(x.stock_id) === sid));
+      if (!cand.length) return { text: sid ? `沒有好友正在分享${name}給你。` : "沒有正在接收的好友分享。", actions: [goBtn] };
+      if (cand.length > 1) {
+        return { head: "不再接收哪一則？", chips: cand.slice(0, 8).map(x => ({ label: `${x.from_name || "好友"}：${aiStockName(String(x.stock_id))}`, act: "run",
+          data: { intent: "share_stock", slots: { stock: String(x.stock_id), action: "optout", share_id: x.share_id }, text: `${aiStockName(String(x.stock_id))}的分享不要再收了` } })) };
+      }
+      const s = slots.share_id ? (cand.find(x => x.share_id === slots.share_id) || cand[0]) : cand[0];
+      const nm = aiStockName(String(s.stock_id));
+      return aiConfirmCard({ head: "不再接收這一則分享？", text: "以後這位好友再分享這一檔，你也不會收到；要恢復到分享分頁的「不再接收」清單。",
+        rows: [{ label: "股票", value: nm, note: "" }, { label: "來自", value: String(s.from_name || "好友"), note: "" }], mainLabel: "不再接收",
+        run: async () => { fail(await frRpc("share_optout", { p_share_id: s.share_id })); await syncStockLists({ social: true }); return { text: `以後不再接收 ${s.from_name || "好友"} 分享的${nm}。`, actions: [goBtn] }; } });
+    }
     if (!sid) return aiNeedStock();
     const friends = (frState && frState.friends) || [];
     if (!friends.length) return { text: "還沒有好友，先邀請朋友。", actions: [{ label: "邀請朋友", act: "invite", data: {}, main: true }] };
@@ -25046,6 +25190,7 @@ const ASSISTANT_ACTIONS = {
   assistantPriceTargetSet(slots) {
     const sid = slots.stock;
     // 「我設了哪些到價提醒」：沒有股票也沒有價位＝問清單；有價位沒股票才要問是哪一檔
+    if (!sid && slots.clear && slots.all) return aiClearAllTargets();   // 「到價提醒全部取消」（第十二輪）
     if (!sid) return Number(slots.price) > 0 || slots.clear ? aiNeedStock() : aiListTargets();
     if (slots.clear) {   // 取消到價提醒：兩個價位都清掉
       const row = aiRowOf(sid);
@@ -25327,6 +25472,7 @@ const ASSISTANT_ACTIONS = {
   // 缺一格只問那一格（賣出沒說多少 → 全部／1 張兩顆籤）；什麼數字都沒有就直接開那一檔的面板（第十四節的三條原則）。
   assistantHoldingsSet(slots) {
     if (slots.from_image) return aiImageAskCard();   // 「我要上傳庫存截圖更新持股」（第二十六節）
+    if (!slots.stock && slots.all && slots.hold_action === "delete") return aiClearAllHoldings();   // 「持股全部刪掉」（第十二輪）
     const sid = slots.stock;
     if (!sid) return aiNeedStock();
     const name = aiStockName(sid);
