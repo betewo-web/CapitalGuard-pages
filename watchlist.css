@@ -2130,6 +2130,7 @@ html.home-simple-only #home-filter { display: none !important; }
 /* 答案卡的「分享」（第七輪）：與「不是我要的」同一排，它在前面靠右，後面那一顆緊跟著 */
 .ai-share + .ai-wrong { margin-left: 10px; }
 .ai-share + .ai-copy, .ai-copy + .ai-wrong { margin-left: 10px; }
+.ai-copy + .ai-keep, .ai-keep + .ai-wrong { margin-left: 10px; }
 /* 筆記那一列：內容是自己寫的一句話，靠左、可以折行（第十七輪） */
 .ai-row.ai-note-row .ai-val { text-align: left; }
 .ai-row.ai-note-row i { white-space: normal; text-align: right; }
@@ -2183,6 +2184,18 @@ html.home-simple-only #home-filter { display: none !important; }
 	border: 0; background: transparent; color: var(--text-1); cursor: pointer; }
 .ai-attach .ic { width: 22px; height: 22px; }
 .ai-attach:disabled { opacity: 0.55; }
+/* 答案卡的時間與「再查一次」（第十九輪）：時間靠左，其他鍵照舊靠右；鍵多了（最多七顆）就折到第二行 */
+.ai-meta { flex-wrap: wrap; row-gap: 4px; }
+.ai-time { margin-right: auto; font-variant-numeric: tabular-nums; }
+.ai-time + .ai-wrong { margin-left: 0; }
+.ai-again + .ai-pin, .ai-again + .ai-share { margin-left: 10px; }
+/* 標題的股票點了看那一檔（第十九輪） */
+.ai-head-link { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.ai-head-link::after { content: " ›"; color: var(--text-muted); font-weight: 400; }
+/* 往上捲很遠時的「↓ 最新」（第十九輪） */
+.ai-jump { position: fixed; right: 16px; bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 76px); z-index: 6;
+	border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; background: var(--bg-1); color: var(--text-0);
+	font-size: 0.86rem; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); cursor: pointer; }
 
 /* 「自選設定」：底部導覽拿掉自選分頁之後，這是加／刪自選股、設定價位與通知的唯一入口，
    所以不再是一條細連結，而是看得見的按鈕（紫框實底、字級比清單標題還大一點）。 */

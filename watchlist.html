@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="445">
+  <meta name="app-version" content="446">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=445" rel="stylesheet">
+  <link href="watchlist.css?v=446" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -668,10 +668,13 @@
         <!-- 對話留在這支手機上（重開 App 還在），這顆清掉；有對話時才出現 -->
         <!-- 今天還能問幾次：剩不多（AI_QUOTA_SHOW 以下）才出現（第八輪） -->
         <span class="ai-quota" id="ai-quota" hidden></span>
+        <button type="button" class="btn btn-sm btn-outline-light" id="ai-copylog" onclick="aiCopyLog()" hidden>複製對話</button>
         <button type="button" class="btn btn-sm btn-outline-light" id="ai-clear" onclick="aiClearLog()" hidden>清除對話</button>
       </div>
       <div class="ai-view">
         <div class="ai-log" id="ai-log" role="log" aria-live="polite"></div>
+        <!-- 往上捲很遠時出現（第十九輪）：一下回到最新那一張 -->
+        <button type="button" class="ai-jump" id="ai-jump" onclick="aiJumpLatest()" hidden>↓ 最新</button>
         <!-- 送出後鎖住直到回應（一句話一次）；Enter／鍵盤的「送出」都走 submit。
              一整條膠囊（2026-10-23）：截圖鈕縮成框內左邊的圖示，右邊一顆圓的送出鍵——空白時暗、有字變金色（.has-text）。 -->
         <form class="ai-composer" id="ai-composer" autocomplete="off" onsubmit="return assistantSubmit(event)">
@@ -21988,6 +21991,8 @@ function renderAssistant() {
   if (attach) attach.disabled = aiBusy;
   const clr = document.getElementById("ai-clear");
   if (clr) clr.hidden = !aiLog.length || aiBusy;
+  const cpl = document.getElementById("ai-copylog");
+  if (cpl) cpl.hidden = !aiLog.length || aiBusy;
   if (input && !input.value) input.placeholder = aiPlaceholder();   // 第八輪
   aiQuotaSync();
   aiUpdateNavDot();
@@ -22022,7 +22027,16 @@ function aiCardHtml(c) {
   const prefs = aiPrefs();
   // 不顯示代號（第十五輪）：標題「台積電 2330 的持股」→「台積電 的持股」；代號仍在資料裡，只是不畫
   const headTxt = prefs.hideCode ? String(c.head || "").replace(/ (?:\d{4}|00\d{2,4}[A-Z]?)(?= |$)/, "") : c.head;
-  const head = headTxt ? `<div class="ai-card-head">${ICON_AI}${escapeHtml(headTxt)}</div>` : "";
+  // 標題是一檔股票（「台積電 2330」開頭）：點了看那一檔（第十九輪）——全貌卡本身點了開個股字卡；確認卡與灰字卡不做
+  const headSid = !c._id && !c.muted ? (String(c.head || "").match(/^\S+ (\d{4}|00\d{2,4}[A-Z]?)(?= |$)/) || [])[1] : "";
+  const headLink = headSid && isStockId(headSid)
+    ? (c._q && c._q.intent === "stock_overview" ? { act: "open", data: { sid: headSid, tab: "radar" } }
+                                               : { act: "run", data: { intent: "stock_overview", slots: { stock: headSid }, text: `${aiStockName(headSid)}整理一下` } })
+    : null;
+  const headInner = headLink
+    ? `<button type="button" class="ai-head-link" data-ai-act="${headLink.act}" data-ai-data="${escapeHtml(JSON.stringify(headLink.data))}">${escapeHtml(headTxt)}</button>`
+    : escapeHtml(headTxt);
+  const head = headTxt ? `<div class="ai-card-head">${ICON_AI}${headInner}</div>` : "";
   // 簡短模式（第十五輪）：清單類卡只畫前 AI_SHORT_ROWS 列，確認卡不截（要寫的每一格都要看得到）
   const allRows = c.rows || [];
   const cut = prefs.short && !c._id && allRows.length > AI_SHORT_ROWS;
@@ -22055,7 +22069,13 @@ function aiCardHtml(c) {
   const pin = c._k && c._q ? `<button type="button" class="ai-wrong ai-pin" data-ai-act="pin" data-ai-data="${escapeHtml(JSON.stringify({ k: c._k }))}">${pinned ? "取消釘選" : "釘選"}</button>` : "";
   // 「複製」（第十七輪）：貼到自己的記事本或對話裡；按過變成「已複製」
   const copy = shareable ? `<button type="button" class="ai-wrong ai-copy" data-ai-act="copy" data-ai-data="${escapeHtml(JSON.stringify({ k: c._k }))}">${c._copied ? "已複製" : "複製"}</button>` : "";
-  const meta = wrong || share || pin ? `<div class="ai-meta">${pin}${share}${copy}${wrong}</div>` : "";
+  // 答案卡的時間（第十九輪）：今天的寫幾點幾分，之前的連日期；超過 AI_STALE_MS 的資料卡多一顆「再查一次」
+  const time = shareable && c._at ? `<span class="ai-time">${escapeHtml(fmtTime(c._at, taipeiDateKey(new Date(c._at)) !== taipeiDateKey(new Date())))}</span>` : "";
+  const again = shareable && c._q && c._at && Date.now() - c._at > AI_STALE_MS
+    ? `<button type="button" class="ai-wrong ai-again" data-ai-act="run" data-ai-data="${escapeHtml(JSON.stringify({ intent: c._q.intent, slots: c._q.slots || {}, text: c._q.text }))}">再查一次</button>` : "";
+  // 「存筆記」（第十九輪）：這張卡的標題與前三列記成一則筆記（有股票就掛在那一檔），按過變「已存」
+  const keep = shareable ? `<button type="button" class="ai-wrong ai-keep" data-ai-act="keepnote" data-ai-data="${escapeHtml(JSON.stringify({ k: c._k }))}">${c._kept ? "已存" : "存筆記"}</button>` : "";
+  const meta = wrong || share || pin ? `<div class="ai-meta">${time}${again}${pin}${share}${copy}${keep}${wrong}</div>` : "";
   // admin 才看得到的一行診斷（Howard 2026-10-18：卡上沒名單時，遠端看不到手機的狀態，問一句就能回報）
   const diag = aiIsAdmin && c.diag ? `<div class="ai-meta">${escapeHtml(c.diag)}</div>` : "";
   return `<div class="ai-card${c.muted ? " is-muted" : ""}">${head}${sub}<div class="ai-card-body">${rows}${body}${chips}</div>${actions}${meta}${diag}</div>`;
@@ -22132,6 +22152,7 @@ const AI_HABIT_CHIP = {
 // 都只要改規格再重畫
 function aiPushCard(c, id) {
   if (c && !c._k) c._k = "k" + (++_aiCardSeq);   // 卡號：卡上的「分享」找得到是哪一張（第七輪）
+  if (c && !c._at) c._at = Date.now();             // 這張卡是什麼時候的（第十九輪）
   aiLog.push({ kind: "card", spec: c, id: id || null });
   if (aiLog.length > AI_LOG_MAX) aiLog.splice(0, aiLog.length - AI_LOG_MAX);
 }
@@ -22186,6 +22207,22 @@ function aiRestoreEntry(m) {
   return { kind: "card", id: null, spec: { head: s.head, sub: "已失效（App 重新開過），要做請再說一次", rows: s.rows, muted: true } };
 }
 // 「清除對話」（標題列右邊）：只清這支手機上的對話；assistant_log 照舊（那是分類的紀錄，不是對話）
+// 整段對話複製起來（第十九輪）：每張卡同一段文字，免責只放最後一次
+async function aiCopyLog() {
+  if (!aiLog.length) return;
+  const DISC = "— CapitalGuard-股市雷達整理的公開資料，不是投資建議";
+  const text = aiLog.map(m => m.kind === "user" ? `我：${m.text}` : aiCardText(m.spec).split("\n").filter(l => l !== DISC).join("\n"))
+    .filter(Boolean).join("\n\n") + `\n${DISC}`;
+  const btn = document.getElementById("ai-copylog");
+  try {
+    await navigator.clipboard.writeText(text);
+    trackActivity("assistant_copy", { all: true });
+    if (btn) { btn.textContent = "已複製"; setTimeout(() => { btn.textContent = "複製對話"; }, 1500); }
+  } catch {
+    if (btn) { btn.textContent = "沒複製成功"; setTimeout(() => { btn.textContent = "複製對話"; }, 1500); }
+  }
+  return text;
+}
 function aiClearLog() {
   if (aiBusy) return;
   aiLog = []; aiPending = {}; _aiLast = { sid: "", at: 0 };
@@ -22279,6 +22316,23 @@ function aiCardText(c) {
   if (c.text) lines.push(plain(c.text));
   lines.push("— CapitalGuard-股市雷達整理的公開資料，不是投資建議");
   return lines.filter(Boolean).join("\n");
+}
+function aiKeepCardNote(k) {
+  const m = aiLog.find(x => x.kind === "card" && x.spec && x.spec._k === k);
+  if (!m || m.spec._kept) return;
+  const c = m.spec;
+  const plain = v => String(v == null ? "" : v).replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  const sid = (String(c.head || "").match(/^\S+ (\d{4}|00\d{2,4}[A-Z]?)(?= |$)/) || [])[1] || null;
+  const body = (c.rows || []).slice(0, 3).map(r => `${plain(r.label)} ${plain(r.value)}`.trim()).filter(Boolean).join("、");
+  const text = `${plain(c.head)}${body ? `：${body}` : ""}`.slice(0, AI_NOTE_CHARS);
+  const notes = aiNotes();
+  if (notes.length >= AI_NOTE_MAX || !aiSaveNotes([{ id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, sid, text, at: new Date().toISOString(), due: null }].concat(notes))) {
+    aiPushCard({ text: notes.length >= AI_NOTE_MAX ? `筆記最多 ${AI_NOTE_MAX} 則，先刪掉幾則舊的。` : "這支手機沒辦法存筆記（私密瀏覽或儲存空間被關掉）。", muted: true });
+  } else {
+    c._kept = true;
+    trackActivity("assistant_note", { op: "card" });
+  }
+  renderAssistant();
 }
 async function aiCopyCard(k) {
   const m = aiLog.find(x => x.kind === "card" && x.spec && x.spec._k === k);
@@ -22702,6 +22756,41 @@ function aiStreak(today) {
 // ── 試算（第十六輪）────────────────────────────────────────────────────
 // 價格：最近一個收盤（盤中成交價不送到裝置）；不在自選股就讀全市場關卡檔的收盤
 const AI_FEE_RATE = 0.001425, AI_FEE_MIN = 20;
+const AI_STALE_MS = 10 * 60000;   // 資料卡超過 10 分鐘多一顆「再查一次」（第十九輪）
+let _aiOfflineText = "";          // 沒網路時打的那一句：連上之後提醒一次（第十九輪）
+
+// ── 輸入與介面（第十九輪）────────────────────────────────────────────────
+// 往上捲很遠（離底部超過一個半畫面）才出現「↓ 最新」
+function aiJumpSync() {
+  const b = document.getElementById("ai-jump");
+  if (!b) return;
+  const far = document.documentElement.scrollHeight - (window.scrollY + window.innerHeight) > window.innerHeight * 1.5;
+  b.hidden = !(currentTab === "ai" && aiLog.length && far);
+}
+function aiJumpLatest() {
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+  const b = document.getElementById("ai-jump");
+  if (b) b.hidden = true;
+}
+// 連上網路了：剛才沒送出去的那一句給一顆鍵（只提醒一次）
+function aiOnline() {
+  const text = _aiOfflineText;
+  _aiOfflineText = "";
+  if (!text || currentTab !== "ai") return;
+  // 同一張「再試一次」卡（送 Worker 的籤只留名詞與再試一次兩處）：只有第一顆用得到，回報那一顆拿掉
+  const card = aiRetryCard(`連上網路了，剛才那一句「${text.length > 14 ? `${text.slice(0, 14)}…` : text}」可以送出了。`, text);
+  card.chips = card.chips.slice(0, 1);
+  aiPushCard(card);
+  renderAssistant();
+}
+// 桌機：在別的地方按「/」直接跳到助手的輸入框
+function aiSlashKey(ev) {
+  if (!ev || ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey || currentTab !== "ai") return;
+  const tag = String((ev.target && ev.target.tagName) || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || (ev.target && ev.target.isContentEditable)) return;
+  const inp = document.getElementById("ai-input");
+  if (inp && !inp.disabled) { ev.preventDefault(); inp.focus(); }
+}
 async function aiCalcBase(sid) {
   const q = aiQuoteOf(sid);
   if (q && Number(q.price) > 0) return { price: Number(q.price), day: q.tradeDate ? String(q.tradeDate).slice(5).replace("-", "/") : "" };
@@ -22807,6 +22896,12 @@ function aiBindOnce() {
   const log = document.getElementById("ai-log");
   if (!log || log.dataset.aiBound) return;
   log.dataset.aiBound = "1";
+  // 捲動（↓ 最新）、連線恢復、桌機的「/」（第十九輪）
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("scroll", aiJumpSync, { passive: true });
+    window.addEventListener("online", aiOnline);
+  }
+  if (typeof document.addEventListener === "function") document.addEventListener("keydown", aiSlashKey);
   log.addEventListener("click", e => {
     const el = e.target.closest("[data-ai-act]");
     if (!el || !log.contains(el)) return;
@@ -22842,6 +22937,7 @@ function aiAct(act, data) {
   if (act === "undo") { aiRunUndo(String(data.id || "")); return; }   // 剛才那一筆寫入改回去（第六輪）
   if (act === "sharecard") { aiShareCard(String(data.k || "")); return; }   // 把這張卡傳給朋友（手機的分享面板；第七輪）
   if (act === "copy") { aiCopyCard(String(data.k || "")); return; }   // 這張卡的文字複製起來（第十七輪）
+  if (act === "keepnote") { aiKeepCardNote(String(data.k || "")); return; }   // 這張卡存成一則筆記（第十九輪）
   if (act === "pin") { aiTogglePin(String(data.k || "")); return; }   // 這一句釘到輸入框的建議裡（第九輪）
   if (act === "gloss") { assistantSend(String(data.text || "")); return; }   // 訊號名稱點了就解釋：名詞的固定句在目錄裡，經 Worker（第十四輪）
   if (act === "tour") { aiTour(); return; }   // 新手導覽（第十四輪）
@@ -22953,6 +23049,9 @@ function aiOutcome(logId, picked, executed) {
 
 // 桌機：輸入框空著時按 ↑ 叫回上一句（打錯一個字不用整句重打）
 function aiInputKey(ev) {
+  if (ev && ev.key === "Escape" && !ev.isComposing && ev.target && ev.target.value) {   // Esc 清空（第十九輪）
+    ev.preventDefault(); ev.target.value = ""; aiComposerSync(); return;
+  }
   if (!ev || ev.key !== "ArrowUp" || ev.isComposing) return;
   const inp = ev.target;
   if (!inp || inp.value) return;
@@ -23101,6 +23200,7 @@ async function assistantSend(raw) {
   }
   // 沒有網路就不送：fetch 要等到逾時才會失敗，那段時間輸入列是鎖著的
   if (typeof navigator !== "undefined" && navigator && navigator.onLine === false) {
+    _aiOfflineText = text;   // 連上之後提醒一次（第十九輪）
     aiPushCard(aiRetryCard("目前沒有網路連線，連上之後按「再試一次」。", text));
     renderAssistant();
     return;
@@ -23847,17 +23947,19 @@ function aiPlaceholder() {
   if (holdingEntries().length) list.push("試試：我的持股哪一檔賺最多");
   else list.push(`試試：我買了 2 張${name} 成本 900`);
   list.push(`試試：盯${name} 30 天，跌 10% 通知我`);
+  list.push(`試試：${name}漲停價多少`, `試試：${name}這週漲多少`, "試試：記一下：月底檢查持股");   // 第十六～十八輪
   return list[Math.floor(aiLog.filter(m => m.kind === "user").length) % list.length];
 }
 
 // ── 每天回來看的理由（第四輪，2026-10-23）──────────────────────────────────────
 // 每天第一次打開助手：自動出「今天的重點」（本機組、不叫 Jev、不算次數）；這一版第一次打開：新功能卡（一個版本一次）。
 // 兩個都記在 localStorage（帳號一份），清不掉也不會壞——最多就是多出一次。
-const AI_WHATS_NEW = { since: 431, items: [
-  ["今天的重點", "訊號、持股、快到的價位、日程一張卡", "daily_brief", {}],
-  ["一句話好幾檔", "「把台積電、聯發科加進自選」", "", null],
-  ["昨天、上週五", "「台積電昨天有什麼訊號」", "", null],
-  ["持股排序與產業", "「我的持股哪一檔賺最多」", "holdings", { rank: "gain" }],
+// 第十九輪（v446）換成第二個一百項：試算、筆記、一段時間、助手的設定
+const AI_WHATS_NEW = { since: 446, items: [
+  ["試算", "「2 張台積電值多少」「台積電漲停價」「900 買的要多少才回本」", "", null],
+  ["筆記", "「記一下：台積電等法說會」「提醒我明天看鴻海」，那天放進重點", "note", { note_action: "list" }],
+  ["一段時間", "「台積電這週漲多少」「自選股這週誰漲最多」", "movers", { span: { week: 0 }, direction: "up", top: true }],
+  ["助手的設定", "回答短一點、不顯示代號、叫我…", "ui_settings", { assistant: true }],
 ] };
 function aiMaybeAutoCards() {
   if (currentTab !== "ai" || !state.userId || aiBusy || !aiEnabled || !planState.ready) return;
