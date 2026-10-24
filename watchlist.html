@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="451">
+  <meta name="app-version" content="452">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=451" rel="stylesheet">
+  <link href="watchlist.css?v=452" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5132,6 +5132,7 @@ async function showMain() {
   document.getElementById("nav-refresh-btn").style.display = "inline-flex";
   document.body.classList.add("has-bottom-nav");
   document.getElementById("bottom-nav").style.display = "flex";
+  syncBottomNavViewport();   // 開 App 時畫面可能已經是放大的（上一輪留下來的縮放）
   // 好友（第四格）：問一次後端這個帳號能不能用，不能就讓那一格繼續藏著。
   // 不 await——它只決定一顆導覽鈕要不要出現，不該擋住整個登入流程。
   initFriendsTab().catch(() => {});
@@ -5647,6 +5648,51 @@ window.addEventListener("hashchange", () => {
   const tab = (location.hash || "").replace("#", "");
   if (APP_TABS.includes(tab) && tab !== currentTab && state.userId) switchTab(tab, true);
 });
+
+// ── 底部導覽貼在「看得見的那一塊」底部（2026-10-24 Howard 回報）─────────────────
+// position:fixed 貼的是 layout viewport，不是使用者看得見的那一塊（visual viewport）。
+// 手機上兩者常常不一樣：
+//   * 頁面被放大（放大的來源已經在 .ai-input 那邊修掉，但使用者自己兩指放大、
+//     連點兩下放大一樣會進這個狀態）→ 看得見的範圍變窄變矮，導覽列最右邊那一格
+//     先掉出畫面，再捲動整條都離開看得見的範圍；
+//   * Android Chrome 的網址列收合、鍵盤彈出 → 只有 visual viewport 變矮。
+// 所以把兩者的差額補成一個 transform：橫向位移、縱向位移、放大倍率各補一份，
+// 看起來就跟沒放大時一樣貼在畫面底部。桌機（兩者一致）不套用任何 transform，
+// 版面與原來一模一樣。
+// 鍵盤是例外：那時候導覽本來就該讓位給鍵盤（Chrome 會把輸入框捲到鍵盤上方），
+// 硬把它抬到鍵盤上面會壓住輸入框。所以「沒放大、而且矮得超過 NAV_VV_LIFT_MAX」
+// 一律不動——網址列收合約 56px，鍵盤至少 250px，中間差距很大，分得開。
+const NAV_VV_LIFT_MAX = 180;
+let _navVvQueued = false;
+function syncBottomNavViewport() {
+  const nav = document.getElementById("bottom-nav");
+  const vv = window.visualViewport;
+  if (!nav || !vv) return;
+  const root = document.documentElement;
+  const scale = vv.scale > 0 ? vv.scale : 1;
+  const zoomed = scale > 1.01;
+  let dy = root.clientHeight - (vv.offsetTop + vv.height);
+  if (!(dy > 0.5) || (!zoomed && dy > NAV_VV_LIFT_MAX)) dy = 0;
+  const dx = vv.offsetLeft > 0.5 ? vv.offsetLeft : 0;
+  if (!zoomed && !dx && !dy) { nav.style.width = ""; nav.style.transform = ""; return; }
+  // 放大時：寬度給 vv.width * scale，再 scale(1/scale) 縮回去——算出來的實體寬度
+  // 正好是看得見的寬度，而且字與圖示的大小跟沒放大時一樣（不會變成一條巨大的導覽）。
+  nav.style.width = zoomed ? `${Math.round(vv.width * scale)}px` : "";
+  nav.style.transform = `translate(${Math.round(dx)}px, ${-Math.round(dy)}px)`
+    + (zoomed ? ` scale(${(1 / scale).toFixed(4)})` : "");
+}
+function _navVvSync() {
+  if (_navVvQueued) return;
+  _navVvQueued = true;
+  requestAnimationFrame(() => { _navVvQueued = false; syncBottomNavViewport(); });
+}
+if (window.visualViewport) {
+  // resize＝網址列收合／鍵盤／放大倍率變了；scroll＝放大後平移看得見的那一塊
+  window.visualViewport.addEventListener("resize", _navVvSync);
+  window.visualViewport.addEventListener("scroll", _navVvSync);
+}
+// 轉向之後尺寸要等瀏覽器自己排完才問得到正確的值
+window.addEventListener("orientationchange", () => setTimeout(syncBottomNavViewport, 300));
 
 function renderCurrentTab() {
   if (!currentTab) return;

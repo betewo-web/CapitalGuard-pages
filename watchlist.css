@@ -1607,6 +1607,9 @@ body.modal-blocking .modal-backdrop.show {
 	border-top: 1px solid var(--border);
 	backdrop-filter: blur(14px);
 	-webkit-backdrop-filter: blur(14px);
+	/* syncBottomNavViewport() 會在放大時補一個 translate＋scale，把整條拉回「看得見的
+	   那一塊」底部。縮放要以左下角為支點，不然預設的中心點會讓它自己再偏一次。 */
+	transform-origin: left bottom;
 }
 
 .bottom-nav-item {
@@ -2169,8 +2172,17 @@ html.home-simple-only #home-filter { display: none !important; }
 .ai-bar { display: flex; align-items: center; gap: 2px; min-height: 52px; padding: 5px 6px 5px 4px;
 	border-radius: 26px; border: 1px solid var(--border); background: var(--surface); }
 .ai-bar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.18); }
+/* 字級不可以小於 16px（2026-10-24 Howard 回報的連鎖反應的源頭）：
+   Android Chrome 與 iOS Safari 聚焦「小於 16px」的輸入框時會自己把整頁放大，
+   而放大狀態在鍵盤收起後還留著。放大之後 visual viewport 比 layout viewport 窄，
+   position:fixed 的底部導覽貼的是後者——最右邊那一格（分享）就被推出畫面右緣，
+   再往下滑整條導覽都離開看得見的範圍。助手的輸入框是全 App 唯一不在 modal 裡的
+   文字輸入框，所以只有助手那一頁踩得到。
+   1rem 在預設字級下是 14px（head 的 _fsMap.base），所以不能寫 1rem；用 max() 讓
+   「大」「特大」兩種偏好（16／18px）照舊生效，只保證不低於 16px。
+   不改 viewport 的 maximum-scale／user-scalable——那會連「使用者自己想放大」一起擋掉。 */
 .ai-input { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent;
-	color: var(--text-0); padding: 0 6px; font-size: 1rem; }
+	color: var(--text-0); padding: 0 6px; font-size: max(16px, 1rem); }
 .ai-input::placeholder { color: var(--text-muted); }
 .ai-input:focus { outline: none; }
 /* 右邊的送出鍵：有字＝金色實心（主要動作）；空白＝暗掉，不搶眼 */
