@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="444">
+  <meta name="app-version" content="445">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=444" rel="stylesheet">
+  <link href="watchlist.css?v=445" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -22491,6 +22491,154 @@ function aiRowOf(sid) {
 }
 function aiQuoteOf(sid) { return getQuote(sid) || getCloseQuote(sid) || null; }
 
+// ── 一段時間的價格（第十八輪）───────────────────────────────────────────
+// 開放資料的日 K 檔（ohlc/<股號>.json，每天 15:30 後補完；本機快取一天），一檔一個。只用收盤後的 K 棒，盤中那一根不在裡面
+async function aiBars(sid) {
+  const json = await fetchOhlcJson(sid).catch(() => null);
+  if (!json || !Array.isArray(json.b)) return null;
+  return json.b.map(b => {
+    const n = Number(b[0]);
+    return { d: `${Math.floor(n / 10000)}-${String(Math.floor(n / 100) % 100).padStart(2, "0")}-${String(n % 100).padStart(2, "0")}`,
+             o: Number(b[1]), h: Number(b[2]), l: Number(b[3]), c: Number(b[4]), v: Number(b[5]) };
+  }).filter(b => b.c > 0);
+}
+// 一段時間 → 基準（前一段最後一根）與這一段最後一根的 index；一週從週一開始
+function aiSpanRange(bars, span) {
+  if (!bars || !bars.length || !span) return null;
+  const today = taipeiDateKey(new Date());
+  const lastIdx = bars.length - 1;
+  const before = key => { let i = -1; for (let k = 0; k < bars.length && bars[k].d < key; k++) i = k; return i; };
+  if (span.days) { const n = Math.min(Number(span.days), lastIdx); return { from: lastIdx - n, to: lastIdx, label: Number(span.days) >= 250 ? "近 52 週" : `近 ${n} 個交易日` }; }
+  if (span.ytd) return { from: before(`${today.slice(0, 4)}-01-01`), to: lastIdx, label: "今年以來" };
+  const t = new Date(`${today}T12:00:00Z`);
+  if (span.month !== undefined) {
+    const first = `${today.slice(0, 7)}-01`;
+    if (Number(span.month) < 0) {
+      const p = new Date(`${first}T12:00:00Z`); p.setUTCMonth(p.getUTCMonth() - 1);
+      const pk = taipeiDateKey(p);
+      return { from: before(pk), to: before(first), label: `${Number(pk.slice(5, 7))} 月` };
+    }
+    return { from: before(first), to: lastIdx, label: "這個月" };
+  }
+  if (span.week !== undefined) {
+    const mon = new Date(t); mon.setUTCDate(mon.getUTCDate() - ((t.getUTCDay() || 7) - 1));
+    const mk = taipeiDateKey(mon);
+    if (Number(span.week) < 0) { const pm = new Date(mon); pm.setUTCDate(pm.getUTCDate() - 7); return { from: before(taipeiDateKey(pm)), to: before(mk), label: "上週" }; }
+    return { from: before(mk), to: lastIdx, label: "這週" };
+  }
+  return null;
+}
+// 同時最多 n 個請求（日 K 檔一檔一個，自選股一次幾十檔）
+async function aiPool(items, n, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]).catch(() => null); }
+  }));
+  return out;
+}
+function aiBarRows(bars, i) {
+  const b = bars[i], p = i > 0 ? bars[i - 1] : null;
+  const rows = [{ label: "收盤", value: fmtPrice(b.c), note: mmdd(b.d) }];
+  if (p) rows.push({ label: "漲跌幅", value: fmtChgHtml(aiR2((b.c - p.c) / p.c * 100)), html: true, note: `前一天 ${fmtPrice(p.c)}` });
+  rows.push({ label: "開／高／低", value: `${fmtPrice(b.o)}／${fmtPrice(b.h)}／${fmtPrice(b.l)}`, note: "" },
+            { label: "成交量", value: `${Math.round(b.v / 1000).toLocaleString()} 張`, note: "" });
+  return rows;
+}
+async function aiQuoteHistory(sid, slots) {
+  const head = `${aiStockName(sid)} ${sid}`;
+  const kOpen = aiOpenBtn(sid, "kline", "開 K 線 ›");
+  const bars = await aiBars(sid);
+  if (!bars || bars.length < 2) return aiNoData({ head, text: "拿不到這一檔的日線，沒辦法看一段時間的價格。", actions: [kOpen] });
+  const today = taipeiDateKey(new Date());
+  const lastIdx = bars.length - 1, last = bars[lastIdx];
+  // 某一天（10/15、昨天、上週五）：那天沒開市就給前一個交易日
+  if (slots.date || slots.day) {
+    let key = slots.date ? `${today.slice(0, 4)}-${slots.date}` : aiDayKey(slots.day);
+    if (slots.date && key > today) key = `${Number(today.slice(0, 4)) - 1}-${slots.date}`;
+    let i = bars.findIndex(b => b.d === key), sub = "";
+    if (i < 0) {
+      for (let k = 0; k < bars.length && bars[k].d < key; k++) i = k;
+      if (i < 0) return aiNoData({ head, text: `${mmdd(key)} 沒有這一檔的日線。`, actions: [kOpen] });
+      sub = key > last.d ? `${mmdd(key)} 還沒有收盤，最近一個是 ${mmdd(bars[i].d)}` : `${mmdd(key)} 沒有交易，前一個交易日是 ${mmdd(bars[i].d)}`;
+    }
+    return { head, sub: sub || `${mmdd(bars[i].d)}（${_weekdayZh(bars[i].d)}）`, rows: aiBarRows(bars, i), actions: [kOpen] };
+  }
+  // 連漲連跌：從最後一根往回數收盤一直比前一天高（或低）幾天
+  if (slots.streak) {
+    const dir = Math.sign(last.c - bars[lastIdx - 1].c);
+    let n = 0;
+    while (dir && lastIdx - n - 1 >= 0 && Math.sign(bars[lastIdx - n].c - bars[lastIdx - n - 1].c) === dir) n += 1;
+    const base = bars[lastIdx - n];
+    return { head, sub: `到 ${mmdd(last.d)} 收盤`, actions: [kOpen],
+             rows: dir ? [{ label: dir > 0 ? `連漲 ${n} 天` : `連跌 ${n} 天`, value: fmtChgHtml(aiR2((last.c - base.c) / base.c * 100)), html: true, note: `${fmtPrice(base.c)} → ${fmtPrice(last.c)}` },
+                          { label: "從", value: mmdd(bars[lastIdx - n + 1].d), note: `${mmdd(base.d)} 收盤起算` }]
+                        : [{ label: "最近一天", value: "平盤", note: fmtPrice(last.c) }] };
+  }
+  // 成交量：最近一天、20 日均量、是均量的幾倍
+  if (slots.volume && !slots.span) {
+    const tail = bars.slice(-20), avg = tail.reduce((a, b) => a + b.v, 0) / tail.length;
+    return { head, sub: `${mmdd(last.d)} 收盤後的資料`, actions: [kOpen],
+             rows: [{ label: "成交量", value: `${Math.round(last.v / 1000).toLocaleString()} 張`, note: mmdd(last.d) },
+                    { label: "20 日均量", value: `${Math.round(avg / 1000).toLocaleString()} 張`, note: "" },
+                    { label: "比均量", value: avg > 0 ? `${(last.v / avg).toFixed(1)} 倍` : "—", note: "" }] };
+  }
+  // 一段時間：起點（前一段最後一個收盤）到最後一個收盤，加上這一段的最高最低（用每天的最高價、最低價）
+  const r = aiSpanRange(bars, slots.span || { days: 250 });
+  if (!r || r.to < 0) return aiNoData({ head, text: "這一段時間沒有日線。", actions: [kOpen] });
+  if (r.to <= r.from) return { head, text: `${r.label}還沒有收盤（最近一個收盤是 ${mmdd(last.d)} 的 ${fmtPrice(last.c)}）。`, actions: [kOpen] };
+  const from = Math.max(0, r.from), seg = bars.slice(from + 1, r.to + 1);
+  const hi = seg.reduce((a, b) => (b.h > a.h ? b : a), seg[0]), lo = seg.reduce((a, b) => (b.l < a.l ? b : a), seg[0]);
+  const base = bars[from], end = bars[r.to];
+  const rows = [{ label: r.label, value: fmtChgHtml(aiR2((end.c - base.c) / base.c * 100)), html: true, note: `${fmtPrice(base.c)} → ${fmtPrice(end.c)}` },
+                { label: "最高", value: fmtPrice(hi.h), note: mmdd(hi.d) },
+                { label: "最低", value: fmtPrice(lo.l), note: mmdd(lo.d) }];
+  const hold = holdingBySid().get(sid);
+  if (hold && Number(hold.shares) > 0) rows.push({ label: "持股這一段", html: true, note: fmtLots(Number(hold.shares)),
+    value: `<span class="${plClass(end.c - base.c)}">${escapeHtml(fmtSignedMoney((end.c - base.c) * Number(hold.shares)))} 元</span>` });
+  if (slots.hilo) rows.push(rows.splice(0, 1)[0]);   // 問的是最高最低：那兩列放前面
+  return { head, sub: `${mmdd(bars[from + 1].d)}～${mmdd(end.d)}・${seg.length} 個交易日${r.from < 0 ? "（日線從這一天開始）" : ""}`, rows, actions: [kOpen] };
+}
+// 自選股一段時間的漲跌（第十八輪）：每一檔的日 K 檔，最多看前 20 檔
+async function aiMoversSpan(sids, slots) {
+  const list = sids.slice(0, 20);
+  const res = (await aiPool(list, 6, async s => {
+    const bars = await aiBars(s);
+    const r = bars && aiSpanRange(bars, slots.span);
+    if (!r || r.from < 0 || r.to <= r.from) return null;
+    return { s, pct: (bars[r.to].c - bars[r.from].c) / bars[r.from].c * 100, end: bars[r.to].c, label: r.label };
+  })).filter(Boolean);
+  if (!res.length) return { text: "拿不到自選股的日線，沒辦法看這一段的漲跌。", muted: true };
+  const dir = String(slots.direction || "any"), label = res[0].label;
+  let ranked = res.slice().sort((a, b) => (dir === "down" ? a.pct - b.pct : b.pct - a.pct));
+  if (dir === "up") ranked = ranked.filter(x => x.pct > 0);
+  if (dir === "down") ranked = ranked.filter(x => x.pct < 0);
+  const n = { up: res.filter(x => x.pct > 0).length, down: res.filter(x => x.pct < 0).length };
+  const head = dir === "down" ? `自選股${label}跌最多的` : dir === "up" ? `自選股${label}漲最多的` : `自選股${label}的漲跌`;
+  return { head, sub: `漲 ${n.up}・平 ${res.length - n.up - n.down}・跌 ${n.down}（以收盤計算${sids.length > list.length ? `，只看前 ${list.length} 檔` : ""}）`,
+           rows: ranked.slice(0, 12).map(x => ({ label: aiStockName(x.s), value: fmtChgHtml(aiR2(x.pct)), html: true, note: fmtPrice(x.end), act: "open", data: { sid: x.s, tab: "radar" } })),
+           text: ranked.length ? "" : `${label}沒有${dir === "down" ? "下跌" : "上漲"}的。` };
+}
+// 持股一段時間的市值變化（第十八輪）：股數 ×（這一段最後一個收盤 − 前一段最後一個收盤）
+async function aiHoldingsSpan(span) {
+  const hs = holdingEntries().filter(h => Number(h.shares) > 0).slice(0, 20);
+  const pageBtn = { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } };
+  if (!hs.length) return { text: "還沒有持股紀錄。", actions: [pageBtn] };
+  const res = (await aiPool(hs, 6, async h => {
+    const bars = await aiBars(h.sid);
+    const r = bars && aiSpanRange(bars, span);
+    if (!r || r.from < 0 || r.to <= r.from) return null;
+    const base = bars[r.from].c, end = bars[r.to].c;
+    return { h, base, end, delta: (end - base) * Number(h.shares), label: r.label };
+  })).filter(Boolean);
+  if (!res.length) return { text: "拿不到持股的日線，沒辦法算這一段的變化。", actions: [pageBtn] };
+  const total = res.reduce((a, x) => a + x.delta, 0), label = res[0].label;
+  return { head: `持股${label}的市值變化`, actions: [pageBtn],
+           sub: `合計 ${fmtSignedMoney(total)} 元・以收盤計算${res.length < hs.length ? `（${hs.length - res.length} 檔拿不到日線）` : ""}`,
+           rows: res.sort((a, b) => b.delta - a.delta).map(x => ({ label: x.h.name || aiStockName(x.h.sid), html: true,
+             value: `<span class="${plClass(x.delta)}">${escapeHtml(fmtSignedMoney(x.delta))} 元</span>`, note: fmtSignedPct((x.end - x.base) / x.base * 100) })) };
+}
+
 // ── 筆記（第十七輪）────────────────────────────────────────────────────
 // 存在這支手機（cg-ai-notes:<user>）：沒有伺服器那一份，換手機就沒有。到期的那天放進重點卡（不是推播）
 const AI_NOTE_MAX = 100, AI_NOTE_CHARS = 200;
@@ -24433,6 +24581,8 @@ const ASSISTANT_ACTIONS = {
     const many = aiMultiStocks(slots);   // 「台積電和鴻海多少」：只列那幾檔（第三輪）
     if (many) return aiListQuotes(many);
     if (!sid) return aiListQuotes();   // 沒說哪一檔：自選股每一檔的收盤（第二輪）
+    // 一段時間、連漲連跌、最高最低、成交量、某一天：讀那一檔的日 K 檔（第十八輪）
+    if (slots.span || slots.streak || slots.hilo || slots.volume || slots.date || slots.day) return aiQuoteHistory(sid, slots);
     const q = getQuote(sid) || getCloseQuote(sid);
     if (!q) {
       // 沒有盤中報價（不在自選股、或剛加入）：今天的方向走全市場索引、收盤與漲跌幅走 FinMind 日線、昨收走關卡檔（第十八節）
@@ -24778,6 +24928,7 @@ const ASSISTANT_ACTIONS = {
     const dirs = today && aiTodayIsCurrent(today) ? Object.values(today.dir || {}) : [];
     const mk = dirs.length ? { up: dirs.filter(v => v === 1).length, down: dirs.filter(v => v === -1).length, flat: dirs.filter(v => v === 0).length } : null;
     const dir = String(slots.direction || "any");
+    if (slots.span) return aiMoversSpan(sids, slots);   // 「這週誰漲最多」（第十八輪）
     // 盤中成交價與漲跌幅不送到裝置（DATA_SOURCES.md 第十三節）：清單只有方向，排不出「漲最多」
     const items = sids.map(sid => ({ sid, d: homeDirectionOf(sid) })).filter(x => x.d);
     const n = { up: items.filter(i => i.d === "up").length, down: items.filter(i => i.d === "down").length, flat: items.filter(i => i.d === "flat").length };
@@ -24844,6 +24995,7 @@ const ASSISTANT_ACTIONS = {
   // 問某一檔＝那一檔的明細。數字與持股分頁同一支（holdingsSummary／holdingValuation，收盤價試算）。
   async assistantHoldings(slots) {
     if (slots.from_image) return aiImageAskCard();   // 「幫我讀這張庫存截圖」
+    if (slots.span) return aiHoldingsSpan(slots.span);   // 「我的持股這週賺多少」（第十八輪）
     // 收盤價先補今天的（開放資料日 K，15:30 後就有；報告要到隔天 06:15）。最多等 4 秒，拿不到就用手上的
     await Promise.race([ensureHoldingCloses().catch(() => false), new Promise(r => setTimeout(r, 4000))]);
     const s = holdingsSummary();
@@ -25404,6 +25556,8 @@ const ASSISTANT_ACTIONS = {
                  data: { intent: "compare", slots: { stock: first }, text: `${aiStockName(first)}和${aiStockName(s)}比較` } })) : [] };
     }
     const facts = await Promise.all(many.slice(0, 3).map(aiStockFacts));
+    const bars = await Promise.all(facts.map(f => aiBars(f.sid)));   // 近 5 日／近 20 日（第十八輪）
+    const back = (i, n) => { const b = bars[i]; return b && b.length > n ? aiR2((b[b.length - 1].c - b[b.length - 1 - n].c) / b[b.length - 1 - n].c * 100) : null; };
     const cell = v => `<td>${v}</td>`;
     const line = (label, fn) => `<tr><th>${escapeHtml(label)}</th>${facts.map(f => cell(fn(f))).join("")}</tr>`;
     const esc = v => escapeHtml(String(v));
@@ -25411,6 +25565,8 @@ const ASSISTANT_ACTIONS = {
     const body = [
       line("收盤", f => f.price ? esc(fmtPrice(f.price)) : "—"),
       line("漲跌幅", f => f.chg != null ? fmtChgHtml(f.chg) : "—"),
+      line("近 5 日", f => { const v = back(facts.indexOf(f), 5); return v != null ? fmtChgHtml(v) : "—"; }),
+      line("近 20 日", f => { const v = back(facts.indexOf(f), 20); return v != null ? fmtChgHtml(v) : "—"; }),
       line("月線", f => esc(aiPosTxt(f.ma20))),
       line("季線", f => esc(aiPosTxt(f.ma60))),
       line("距支撐", f => f.lv.supPct != null ? esc(`${fmtPct(f.lv.supPct)}%`) : "—"),
