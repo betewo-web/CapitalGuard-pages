@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="454">
+  <meta name="app-version" content="455">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=454" rel="stylesheet">
+  <link href="watchlist.css?v=455" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -23085,6 +23085,7 @@ function aiOpen(d) {
   if (d.alert !== undefined && d.alert !== null) { openAlertSettings(d.alert); return; }
   if (d.holdings) { openHoldingsSheet(String(d.holdings), d.mode ? String(d.mode) : undefined); return; }
   if (d.holdadd !== undefined && d.holdadd !== null) { openHoldingAdd(d.holdadd === true ? null : String(d.holdadd)); return; }
+  if (d.sharedIn) { openSharedInFromLimit(); return; }   // 好友分享給我的清單（額度不夠時要移除幾檔）
   if (d.tab === "friends" && (d.fseg || d.fadd)) {   // 分享分頁直接開到「加好友」的某一格（條碼／掃描／ID／搜尋）
     switchTab("friends");
     if (d.fseg) frSwitchSeg(String(d.fseg));
@@ -24621,6 +24622,25 @@ function _importFit(plan) {
   return plan;
 }
 
+// 額度不夠沒加入的那幾檔：要講明白、但一句就好（Howard 2026-10-24）。
+// Party 選了 12 張、10 格裡 5 格是好友分享佔的，7 檔加不進去——以前只有那幾列的小字，副標還寫「新增 12」，
+// 套用完也只說「已更新 5 檔」，他以為只成功了 5 張。after＝套用完那張卡（沒有逐列的名單，名字寫在句子裡）
+function _importQuotaNote(over, after) {
+  const shared = frSlotsExtra();
+  const free = `移除用不到的自選股${shared ? "或好友分享" : ""}`;
+  if (after) {
+    const names = over.slice(0, 5).map(i => aiStockName(i.sid)).join("、") + (over.length > 5 ? ` 等 ${over.length} 檔` : "");
+    return `自選股額度已滿，${over.length} 檔沒加入：${names}。${free}，空出格子後再傳一次截圖。`;
+  }
+  const lim = planLimitOf("watchlist");
+  return `自選股額度已滿（${lim} 檔${shared ? `，含好友分享 ${shared} 檔` : ""}），${over.length} 檔加不進去。${free}就能空出格子。`;
+}
+function _importQuotaActs() {
+  const acts = [{ label: "移除自選股 ›", act: "open", data: { tab: "watch" } }];
+  if (frSlotsExtra()) acts.push({ label: "移除好友分享 ›", act: "open", data: { sharedIn: true } });
+  return acts;
+}
+
 // 確認卡：一檔一列（新增／更新／不變），認不出的另外寫；截圖裡沒有的現有持股一律不動——
 // 要不要移除，等套用完成之後再用另一張卡問（Howard 2026-10-24）
 function aiImportCard(resp, meta) {
@@ -24661,9 +24681,14 @@ function aiImportCard(resp, meta) {
           else failed.push(aiStockName(sid));
         }
       }
+      const over = spec.plan.items.filter(i => i.skipped);
       const text = `已從截圖更新 ${done} 檔持股${added ? `（其中 ${added} 檔加到原本的股數上）` : ""}。`
-        + (failed.length ? `沒成功：${failed.join("、")}。` : "") + (stop ? `${stop}，後面的沒有套用。` : "");
-      const out = { text, failed: !done, actions: [{ label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }] };
+        + (failed.length ? `沒成功：${failed.join("、")}。` : "") + (stop ? `${stop}，後面的沒有套用。` : "")
+        + (over.length ? _importQuotaNote(over, true) : "");
+      const toHold = { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } };
+      // 有檔數沒加入：出路放在主鍵的位置（移除自選股／好友分享），持股頁退成籤
+      const out = over.length ? { text, failed: !done, actions: _importQuotaActs(), chips: [toHold] }
+                              : { text, failed: !done, actions: [toHold] };
       return done ? _importMissingAsk(spec, out) : out;   // 整個流程跑完了，才問這次截圖裡都沒出現的那幾檔
     },
   };
@@ -24828,6 +24853,8 @@ function _importMissingAsk(spec, out) {
     actions: [{ label: `移除這 ${left.length} 檔持股`, act: "confirm", data: { id: mid } },
               { label: "保留", act: "cancel", data: { id: mid } },
               { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }],
+    // 主鍵被「移除／保留」佔了：額度不夠的出路退成籤（持股頁那顆已經在主鍵裡）
+    chips: spec.plan.items.some(i => i.skipped) ? _importQuotaActs() : [],
   });
 }
 
@@ -24837,7 +24864,9 @@ function aiImportView(id, spec) {
   const { items, unknown } = spec.plan;
   const eff = items.map(i => _importEffect(i, spec));
   const n = eff.filter((e, k) => e.op && !items[k].skipped).length;
-  const count = s => eff.filter(e => e.status === s).length;
+  const over = items.filter(i => i.skipped);
+  // 額度不夠的不算進「新增」：副標寫「新增 12」、按鍵卻是「套用 5 檔」，使用者會以為 12 檔都進去了
+  const count = s => eff.filter((e, k) => e.status === s && !items[k].skipped).length;
   const rows = items.map((i, k) => {
     const e = eff[k];
     let note = i.skipped ? "自選股額度不夠，不套用"
@@ -24850,13 +24879,15 @@ function aiImportView(id, spec) {
     if (i.unitGuessed && e.status !== "same") note += "・張／股照欄位名稱判斷，請核對";
     return { label: `${aiStockName(i.sid)} ${i.sid}`, value: `${fmtLots(e.shares)}・均價 ${e.avg != null ? fmtPrice(e.avg) : "未填"}`, note };
   });
-  const parts = [["新增", count("new")], ["更新", count("update") + count("odd")], ["加上去", count("add")], ["不變", count("same")]]
+  const parts = [["新增", count("new")], ["更新", count("update") + count("odd")], ["加上去", count("add")], ["不變", count("same")],
+                 ["額度不夠", over.length]]
     .filter(p => p[1]).map(p => `${p[0]} ${p[1]}`);
   const text = _importHowText(spec)
     + (items.some(i => i.cur)
        ? (spec.addMode ? "你選了「另一個帳戶」：已經記過的那幾檔把截圖的股數加上去，均價加權。"
                        : "你選了「同一個帳戶」：已經記過的那幾檔以截圖為準，不重複加。") : "")
-    + (unknown.length ? `認不出：${unknown.slice(0, 5).join("、")}${unknown.length > 5 ? ` 等 ${unknown.length} 列` : ""}（不套用）。` : "");
+    + (unknown.length ? `認不出：${unknown.slice(0, 5).join("、")}${unknown.length > 5 ? ` 等 ${unknown.length} 列` : ""}（不套用）。` : "")
+    + (over.length ? _importQuotaNote(over, false) : "");
   // 內文只寫「這一次真的發生了什麼」。預告（套用之後會再問哪幾檔、截圖不會保存、結果記在手機上）
   // 一律拿掉：還沒發生的事使用者不需要知道，要問的時候那張卡自己會出現（Howard 2026-10-24）
   // 兩個選項：已經有的股票「另一個帳戶 → 加上去」、只有零股那一列「取代整股」
@@ -24869,11 +24900,14 @@ function aiImportView(id, spec) {
   if ((spec.plan.dups || []).length) chips.push({ label: `重新選那 ${spec.plan.dups.length} 檔重複的`, act: "imptoggle", data: { id, mode: "dup" } });
   // 「之前讀過，直接用上次的結果」必須有出路：上次讀錯了，再傳同一張也只會拿回同一份錯的
   if ((spec.meta || {}).cached) chips.push({ label: "重新辨識（不要用上次的結果）", act: "impfresh", data: { id } });
-  const actions = n ? [{ label: `套用 ${n} 檔`, act: "confirm", data: { id }, main: true }, { label: "取消", act: "cancel", data: { id } }] : [];
+  // 額度不夠：能套用的還有就把出路放成籤（主鍵是套用／取消）；一檔都套用不了，出路就是主鍵
+  if (over.length && n) chips.push(..._importQuotaActs());
+  const actions = n ? [{ label: `套用 ${n} 檔`, act: "confirm", data: { id }, main: true }, { label: "取消", act: "cancel", data: { id } }]
+    : over.length ? _importQuotaActs() : [];
   // 副標要寫得出「選了幾張、哪幾張沒用上」：使用者是照張數在數的（選 12 張就預期 12 檔）
   const m = spec.meta || {};
   const left = [m.skipped ? `${m.skipped} 張沒讀` : "", (m.badPages || []).length ? `${m.badPages.length} 張沒有成本欄` : ""].filter(Boolean);
-  return { head: n ? spec.head : "持股和截圖一樣",
+  return { head: n ? spec.head : over.length ? "自選股額度已滿" : "持股和截圖一樣",
            sub: `認出 ${items.length} 檔：${parts.join("、")}${left.length ? `（${left.join("、")}）` : ""}`,
            rows, text, chips, actions };
 }
