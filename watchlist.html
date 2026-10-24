@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="449">
+  <meta name="app-version" content="450">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=449" rel="stylesheet">
+  <link href="watchlist.css?v=450" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -22197,7 +22197,7 @@ function aiReplaceCard(id, c) {
 // 存的是卡片規格（JSON）。沒按的確認卡與截圖匯入的選項存不了動作（run 是函式、選項在 aiPending），
 // 還原時收成「已失效」；其餘的卡原樣，籤與鍵都還按得動。登出時刪掉（logout）：裡面有問過哪幾檔、持股的數字。
 function _aiStoreKey() { return state.userId ? `cg-ai-log:${state.userId}` : ""; }
-const AI_LIVE_ACTS = new Set(["confirm", "cancel", "impchoose", "imptoggle", "impdup"]);
+const AI_LIVE_ACTS = new Set(["confirm", "cancel", "impchoose", "imptoggle", "impdup", "impfresh"]);
 let _aiSavedSig = "";   // 上次存進去的內容：renderAssistant 一次對話會叫好幾次，內容沒變就不重寫（第十輪）
 function aiSaveLog() {
   const key = _aiStoreKey();
@@ -22231,7 +22231,7 @@ function aiRestoreEntry(m) {
   if (m.kind !== "card") return m;
   const s = Object.assign({}, m.spec, { chips: (m.spec.chips || []).filter(c => !c || c.act !== "undo") });   // 復原鍵的函式沒存下來
   const acts = (s.actions || []).concat(s.chips || []);
-  const live = acts.some(a => a && AI_LIVE_ACTS.has(a.act)) || /data-ai-act="(?:confirm|cancel|impchoose|imptoggle|impdup)"/.test(String(s.bodyHtml || ""));
+  const live = acts.some(a => a && AI_LIVE_ACTS.has(a.act)) || /data-ai-act="(?:confirm|cancel|impchoose|imptoggle|impdup|impfresh)"/.test(String(s.bodyHtml || ""));
   if (!live) return { kind: "card", spec: s, id: null };
   return { kind: "card", id: null, spec: { head: s.head, sub: "已失效（App 重新開過），要做請再說一次", rows: s.rows, muted: true } };
 }
@@ -22961,6 +22961,7 @@ function aiAct(act, data) {
   if (act === "image") { aiPickImage(); return; }                          // 選檔要使用者的點擊：卡上的「選擇截圖」就是那一下
   if (act === "imptoggle") { aiImportToggle(String(data.id || ""), String(data.mode || "add")); return; }   // 截圖匯入的選項
   if (act === "impdup") { aiImportDupPick(String(data.id || ""), String(data.sid || ""), String(data.pick || "sum")); return; }   // 截圖匯入：同一檔讀到好幾份
+  if (act === "impfresh") { aiImportFresh(String(data.id || "")); return; }   // 截圖匯入：不要用上次的結果
   if (act === "impchoose") { aiImportChoose(String(data.id || ""), String(data.mode || "same")); return; }   // 截圖匯入：同一個帳戶／另一個帳戶   // 籤上已帶類別＋槽位：本機直接做，不再送 Worker 分類（第十五節 A3）
   if (act === "open") { if (data._collapse) aiCollapseConfirm(String(data._collapse)); aiOpen(data); renderAssistant(); return; }
   if (act === "confirm") { aiRunConfirm(String(data.id || "")); return; }
@@ -24354,6 +24355,11 @@ async function aiShrinkImage(file) {
 const AI_IMG_MAX_FILES = 20;
 const AI_SHOT_CACHE_DAYS = 30;
 const AI_SHOT_CACHE_MAX = 30;
+// 快取裡那幾列是什麼語意的版本。提示、schema、洗資料的規則改了，舊的列就不能再拿來用——
+// 2026-10-24 之前的列是舊 Worker 的產物（沒有均價的列直接被丟掉、模型還會拿現值÷股數充數），
+// 在新規則下會算出不一樣的結果。對不上就當作沒有快取，重讀一次。
+const AI_SHOT_CACHE_VER = 2;
+let _aiLastShotHashes = [];   // 這一次用到哪幾把快取鑰匙（「重新辨識」要清掉它們）
 
 async function _aiFileHash(file) {
   try {
@@ -24367,7 +24373,12 @@ function _aiShotKey(hash) { return `shot:${state.userId}:${hash}`; }
 async function _aiShotCacheGet(hash) {
   if (!hash) return null;
   const v = await _reportCacheGet(_aiShotKey(hash)).catch(() => null);
-  return v && Date.now() - Number(v.at || 0) < AI_SHOT_CACHE_DAYS * 86400000 ? v : null;
+  if (!v || Number(v.ver || 1) !== AI_SHOT_CACHE_VER) return null;   // 舊語意的列：重讀，不要沿用
+  return Date.now() - Number(v.at || 0) < AI_SHOT_CACHE_DAYS * 86400000 ? v : null;
+}
+// 這幾張不要再用上次的結果（卡上的「重新辨識」）
+async function _aiShotCacheForget(hashes) {
+  for (const h of hashes || []) await _reportCacheDelete(_aiShotKey(h)).catch(() => {});
 }
 async function _aiShotCachePut(hash, data) {
   if (!hash) return;
@@ -24375,7 +24386,7 @@ async function _aiShotCachePut(hash, data) {
   const idx = ((await _reportCacheGet(idxKey).catch(() => null)) || []).filter(h => h !== hash);
   idx.push(hash);
   for (const old of idx.splice(0, Math.max(0, idx.length - AI_SHOT_CACHE_MAX))) _reportCacheDelete(_aiShotKey(old)).catch(() => {});
-  await _reportCachePut(_aiShotKey(hash), Object.assign({ at: Date.now() }, data)).catch(() => {});
+  await _reportCachePut(_aiShotKey(hash), Object.assign({ at: Date.now(), ver: AI_SHOT_CACHE_VER }, data)).catch(() => {});
   await _reportCachePut(idxKey, idx).catch(() => {});
 }
 
@@ -24423,14 +24434,23 @@ async function aiImageChosen(input) {
     return;
   }
   aiBusy = true;
-  const pages = [], seen = new Set();
+  // 讀圖之前先把持股抓成最新的（Howard 2026-10-24）：整張卡都是「截圖 vs 現在記著的」比出來的——
+  // 新增／更新／不變、額度還剩幾格、套用完要問哪幾檔沒出現，全都看這一份。
+  // 基準舊了，結果就會莫名其妙：在另一台裝置（或另一個分頁）把持股刪掉之後再來匯入，
+  // 這台還拿著舊的那一份比，截圖跟舊值一樣的那幾檔會被判成「不變」→ 不寫入 → 使用者看到
+  // 「讀到了卻沒跑出來」。寧可多花一次請求。
+  aiBusyNote = "先確認目前的持股…";
+  renderAssistant();
+  let baseFresh = true;
+  try { _invalidateWatchCache(); await loadWatchlist(); } catch { baseFresh = false; }
+  const pages = [], seen = new Set(), hashes = [];
   let dup = 0, cached = 0, logId = null;
   for (let i = 0; i < files.length; i++) {
     aiBusyNote = files.length > 1 ? `讀取截圖 ${i + 1}／${files.length}，每張約 10–30 秒…` : "讀取截圖中，約 10–30 秒…";
     renderAssistant();
     const hash = await _aiFileHash(files[i]);
     if (hash && seen.has(hash)) { dup += 1; continue; }   // 同一次選了兩張一樣的
-    if (hash) seen.add(hash);
+    if (hash) { seen.add(hash); hashes.push(hash); }
     const p = await _aiReadShot(files[i], hash);
     if (p.error === "update") { aiBusy = false; aiBusyNote = ""; handleUpdateRequired(p.resp); aiAfterRun(); return; }
     if (p.cached) cached += 1;
@@ -24440,10 +24460,11 @@ async function aiImageChosen(input) {
   }
   aiBusy = false;
   aiBusyNote = "";
+  _aiLastShotHashes = hashes;   // 「重新辨識」要清掉的就是這幾把鑰匙
   const ok = pages.filter(p => !p.error && p.is_holdings);
   const failed = pages.filter(p => p.error).length;
-  trackActivity("holding_import", { ok: ok.length, files: files.length, cached, failed });
   if (!ok.length) {
+    trackActivity("holding_import", { ok: 0, files: files.length, cached, failed });
     const why = pages.length && pages.every(p => p.error) ? `${pages[0].error}，再試一次。` : "";
     aiPushCard(why ? { text: why, muted: true, actions: [{ label: "再選一張", act: "image" }] }
                    : aiImportCard({ is_holdings: false, rows: [] }));
@@ -24459,6 +24480,7 @@ async function aiImageChosen(input) {
     if (g.bad) badPages.push({ no: p.no, gaps: g.gaps, noCost: g.noCost }); else usable.push(p);
   }
   if (!usable.length) {
+    trackActivity("holding_import", { ok: ok.length, files: files.length, cached, failed, bad: badPages.length });
     aiPushCard(aiImportNeedCard({ gaps: badPages.reduce((a, b) => a.concat(b.gaps), []),
                                   noCost: badPages.some(b => b.noCost), bad: true, pages: badPages }));
     aiAfterRun();
@@ -24468,7 +24490,16 @@ async function aiImageChosen(input) {
   const card = aiImportCard({ is_holdings: merged.rows.length > 0, rows: merged.rows },
                             { files: files.length, skipped: all.length - files.length, dup, cached, failed,
                               notHoldings: pages.length - ok.length - failed, overlap: merged.dropped,
-                              badPages });
+                              badPages, hashes, baseFresh });
+  // 「12 張怎麼變成 5 檔」要查得出來：每一段流失各記一個數字（2026-10-24，上一輪只記 ok／files／cached／failed，
+  // 事後完全無法分辨是缺欄位、認不出、還是「不變」）
+  const _p = card._id && aiPending[card._id] ? aiPending[card._id].plan : null;
+  trackActivity("holding_import", {
+    ok: ok.length, files: files.length, cached, failed, bad: badPages.length,
+    rows: merged.rows.length, items: _p ? _p.items.length : 0, unk: _p ? _p.unknown.length : 0,
+    same: _p ? _p.items.filter(i => i.status === "same").length : 0,
+    skip: _p ? _p.items.filter(i => i.skipped).length : 0, fresh: baseFresh ? 1 : 0,
+  });
   card.log_id = logId;
   if (card._id && aiPending[card._id]) aiPending[card._id].log_id = logId;
   aiPushCard(card, card._id);
@@ -24776,6 +24807,8 @@ function aiImportView(id, spec) {
   if (!spec.addMode && items.some(i => i.odd)) chips.push({ label: spec.oddReplace ? "零股加回原本的整股" : "零股改成取代原本的整股",
                                                             act: "imptoggle", data: { id, mode: "odd" } });
   if ((spec.plan.dups || []).length) chips.push({ label: `重新選那 ${spec.plan.dups.length} 檔重複的`, act: "imptoggle", data: { id, mode: "dup" } });
+  // 「之前讀過，直接用上次的結果」必須有出路：上次讀錯了，再傳同一張也只會拿回同一份錯的
+  if ((spec.meta || {}).cached) chips.push({ label: "重新辨識（不要用上次的結果）", act: "impfresh", data: { id } });
   const actions = n ? [{ label: `套用 ${n} 檔`, act: "confirm", data: { id }, main: true }, { label: "取消", act: "cancel", data: { id } }] : [];
   // 副標要寫得出「選了幾張、哪幾張沒用上」：使用者是照張數在數的（選 12 張就預期 12 檔）
   const m = spec.meta || {};
@@ -24783,6 +24816,18 @@ function aiImportView(id, spec) {
   return { head: n ? spec.head : "持股和截圖一樣",
            sub: `認出 ${items.length} 檔：${parts.join("、")}${left.length ? `（${left.join("、")}）` : ""}`,
            rows, text, chips, actions };
+}
+
+// 清掉這一次用到的快取，再請他重選同一批圖——瀏覽器不讓我們留著 File，所以只能請他再選一次
+async function aiImportFresh(id) {
+  const spec = aiPending[id];
+  if (!spec || spec.busy) return;
+  await _aiShotCacheForget((spec.meta || {}).hashes || _aiLastShotHashes);
+  aiReplaceCard(id, { head: "好，這次重新辨識",
+                      text: "上次讀出來的結果已經清掉了。再選一次同一批截圖，我會重新讀一遍（不會用上次的）。",
+                      actions: [{ label: "選擇截圖", act: "image", main: true }] });
+  delete aiPending[id];
+  renderAssistant();
 }
 
 function aiImportToggle(id, mode) {
