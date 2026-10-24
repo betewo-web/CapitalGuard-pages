@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="441">
+  <meta name="app-version" content="442">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=441" rel="stylesheet">
+  <link href="watchlist.css?v=442" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -21840,6 +21840,12 @@ const AI_STORE_DAYS = 7;             // 對話留在這支手機上幾天
 let _aiLast = { sid: "", at: 0 };    // 最近一次問到的那一檔（追問沿用）
 let _aiRecentSids = [];              // 最近問過的幾檔：反問「要查哪一檔」時排最前面
 const _aiCands = new Map();          // log_id → Worker 的前三名候選：按「不是我要的」之後直接給這幾個選
+let _aiScopePref = null;             // 這次對話選過的範圍（全市場／我的自選股）：同類問題不再問（第十五輪）
+let _aiStockCounts = {};             // 每一檔問過幾次（反問籤排前面；跟著對話一起存）
+let _aiIntentCounts = {};            // 每一類問過幾次（說明卡的建議籤用最常用的那一類）
+const _aiRespCache = new Map();      // 1 分鐘內同一句：直接用剛才的分類（第十五輪）
+const AI_REPEAT_MS = 60000;
+const AI_SHORT_ROWS = 5;             // 簡短模式：清單類卡最多幾列
 
 // 目錄（cloudflare/assistant-route/catalog.json）每一類對到哪一支函式、帶什麼固定參數。
 // 與目錄的 handler.fn／args 逐項相同（test_assistant_tab 釘住）：反問卡點籤時只有 intent id，要靠這張表。
@@ -22011,10 +22017,18 @@ function aiStripMarketNav(c) {
 // 列帶 act 就能點（第十五節 B3）：列出來的那一檔／那一條本身就是入口，與籤、鍵走同一個 listener
 function aiCardHtml(c) {
   if (HOME_SIMPLE_ONLY) c = aiStripMarketNav(c);
-  const head = c.head ? `<div class="ai-card-head">${ICON_AI}${escapeHtml(c.head)}</div>` : "";
+  const prefs = aiPrefs();
+  // 不顯示代號（第十五輪）：標題「台積電 2330 的持股」→「台積電 的持股」；代號仍在資料裡，只是不畫
+  const headTxt = prefs.hideCode ? String(c.head || "").replace(/ (?:\d{4}|00\d{2,4}[A-Z]?)(?= |$)/, "") : c.head;
+  const head = headTxt ? `<div class="ai-card-head">${ICON_AI}${escapeHtml(headTxt)}</div>` : "";
+  // 簡短模式（第十五輪）：清單類卡只畫前 AI_SHORT_ROWS 列，確認卡不截（要寫的每一格都要看得到）
+  const allRows = c.rows || [];
+  const cut = prefs.short && !c._id && allRows.length > AI_SHORT_ROWS;
+  c = cut ? Object.assign({}, c, { rows: allRows.slice(0, AI_SHORT_ROWS) }) : c;
   // 追問沿用了剛才那一檔：卡頂寫出來（下面有「換一檔」籤），不要讓人以為是自己說的
   const carried = c.carried ? `<div class="ai-card-ctx">沿用剛才的 ${escapeHtml(aiStockName(c.carried))}</div>` : "";
-  const sub = (c.sub ? `<div class="ai-card-sub">${escapeHtml(c.sub)}</div>` : "") + carried;
+  const sub = (c.sub ? `<div class="ai-card-sub">${escapeHtml(c.sub)}</div>` : "") + carried
+    + (cut ? `<div class="ai-card-ctx">簡短模式：還有 ${allRows.length - AI_SHORT_ROWS} 列沒畫（說「回答完整一點」就全部列出）</div>` : "");
   const rows = (c.rows || []).map(r => {
     const inner = `<b>${escapeHtml(r.label)}</b><span class="ai-val">${r.html ? r.value : escapeHtml(r.value ?? "")}</span><i>${escapeHtml(r.note ?? "")}</i>`;
     return r.act
@@ -22092,9 +22106,21 @@ function aiIntroChips() {
   const byState = aiNearTargets().length ? run("哪些快到我設的價位", "price_target_set")
     : holdingEntries().length ? run("我的持股賺多少", "holdings")
     : run(`${aiStockName(first)}支撐在哪`, "levels", { stock: first });
-  return [byTime, byState, gloss,
-          _pushSubscribed ? run("這週的回顧", "daily_brief", { period: "week" }) : run("怎麼收到通知", "push_setup")];
+  // 最常用的那一類（問過三次以上）排第一顆（第十五輪）：每天都來看持股的人，第一顆就是持股
+  const habit = Object.entries(_aiIntentCounts).filter(([k, n]) => n >= 3 && AI_HABIT_CHIP[k]).sort((a, b) => b[1] - a[1])[0];
+  const hc = habit ? AI_HABIT_CHIP[habit[0]](first) : null;
+  const list = [byTime, byState, gloss, _pushSubscribed ? run("這週的回顧", "daily_brief", { period: "week" }) : run("怎麼收到通知", "push_setup")];
+  return hc ? [hc].concat(list.filter(c => c.label !== hc.label)).slice(0, 4) : list;
 }
+const AI_HABIT_CHIP = {
+  holdings: () => ({ label: "我的持股", act: "run", data: { intent: "holdings", slots: {}, text: "我的持股" } }),
+  daily_brief: () => ({ label: "今天有什麼重點", act: "run", data: { intent: "daily_brief", slots: {}, text: "今天有什麼重點" } }),
+  price_target_set: () => ({ label: "我設了哪些到價提醒", act: "run", data: { intent: "price_target_set", slots: {}, text: "我設了哪些到價提醒" } }),
+  signals_today: () => ({ label: "今天誰有訊號", act: "run", data: { intent: "signals_today", slots: {}, text: "今天誰有訊號" } }),
+  market_strength: () => ({ label: "哪個族群最強", act: "run", data: { intent: "market_strength", slots: {}, text: "哪個族群最強" } }),
+  levels: () => ({ label: "自選股的支撐壓力", act: "run", data: { intent: "levels", slots: {}, text: "自選股的支撐壓力" } }),
+  stock_overview: sid => sid ? ({ label: `${aiStockName(sid)}整理一下`, act: "run", data: { intent: "stock_overview", slots: { stock: sid }, text: `${aiStockName(sid)}整理一下` } }) : null,
+};
 
 // 對話裡存的是卡片的「規格」不是 HTML：畫面每次重畫時才組，所以「不是我要的」按過、確認卡變結果卡，
 // 都只要改規格再重畫
@@ -22122,9 +22148,9 @@ function aiSaveLog() {
   if (!key || _aiRestored !== key) return;   // 還沒還原過就存＝把上一次的對話蓋掉
   try {
     if (!aiLog.length) { localStorage.removeItem(key); _aiSavedSig = ""; return; }
-    const body = JSON.stringify({ log: aiLog, recent: _aiRecentSids, qs: _aiRecentQs });
+    const body = JSON.stringify({ log: aiLog, recent: _aiRecentSids, qs: _aiRecentQs, sc: _aiStockCounts, ic: _aiIntentCounts });
     if (body === _aiSavedSig) return;
-    localStorage.setItem(key, JSON.stringify({ v: 1, at: Date.now(), log: aiLog, recent: _aiRecentSids, qs: _aiRecentQs }));
+    localStorage.setItem(key, JSON.stringify({ v: 1, at: Date.now(), log: aiLog, recent: _aiRecentSids, qs: _aiRecentQs, sc: _aiStockCounts, ic: _aiIntentCounts }));
     _aiSavedSig = body;
   } catch { /* 空間滿了或被關掉：這一次就不存，對話照常 */ }
 }
@@ -22141,6 +22167,8 @@ function aiRestoreLog() {
       .slice(-AI_LOG_MAX).map(aiRestoreEntry);
     _aiRecentSids = (Array.isArray(raw.recent) ? raw.recent : []).map(String).filter(isStockId).slice(0, 5);
     _aiRecentQs = (Array.isArray(raw.qs) ? raw.qs : []).filter(q => q && q.text && AI_INTENTS[q.intent]).slice(0, 8);
+    _aiStockCounts = raw.sc && typeof raw.sc === "object" ? raw.sc : {};
+    _aiIntentCounts = raw.ic && typeof raw.ic === "object" ? raw.ic : {};
   } catch { aiLog = []; }
 }
 function aiRestoreEntry(m) {
@@ -22818,6 +22846,15 @@ async function assistantSend(raw) {
     renderAssistant();
     return;
   }
+  // 1 分鐘內同一句（第十五輪）：分類一樣，直接用剛才 Worker 回的那一份——不再叫 Jev、不算進次數
+  const repeatKey = text.replace(/\s+/g, "");
+  const hit = _aiRespCache.get(repeatKey);
+  if (hit && Date.now() - hit.at < AI_REPEAT_MS) {
+    trackActivity("assistant", { intent: String(hit.r.intent || ""), decision: "repeat" });
+    await aiHandleResponse(Object.assign({}, hit.r, { quota: null }), text);
+    aiAfterRun();
+    return;
+  }
   const mentions = aiMentionsOf(text);
   aiBusy = true;
   renderAssistant();
@@ -22843,8 +22880,10 @@ async function assistantSend(raw) {
   clearTimeout(slow);
   if (aiBusyNote === AI_SLOW_NOTE) aiBusyNote = "";
   aiBusy = false;
-  if (status === 200 && r) await aiHandleResponse(r, text);
-  else aiHandleError(status, r, text, timedOut);
+  if (status === 200 && r) {
+    if (!r.code) { _aiRespCache.set(repeatKey, { at: Date.now(), r }); if (_aiRespCache.size > 20) _aiRespCache.delete(_aiRespCache.keys().next().value); }
+    await aiHandleResponse(r, text);
+  } else aiHandleError(status, r, text, timedOut);
   aiAfterRun();
 }
 
@@ -22944,6 +22983,7 @@ async function aiRun(intent, slots, opts) {
   const sid = isStockId(String(slots.stock || "")) ? String(slots.stock) : "";
   if (sid) aiNoteStock(sid);
   const said = String((opts && opts.text) || "").trim();
+  if (said) _aiIntentCounts[intent] = (Number(_aiIntentCounts[intent]) || 0) + 1;   // 說明卡的建議籤（第十五輪）
   if (card && said && !card.failed && !card._id) {   // 有答案的那一句：記進「最近問過」，卡上留來源（釘選用；第九輪）
     card._q = { text: said, intent, slots: Object.assign({}, slots) };
     aiNoteQuestion(card._q);
@@ -22996,6 +23036,8 @@ const AI_EXAMPLE_SIDS = ["2330", "2317", "2454", "0050"];
 function aiStockChoices() {
   const seen = new Set(), out = [];
   const add = s => { s = String(s || "").trim(); if (isStockId(s) && !seen.has(s)) { seen.add(s); out.push(s); } };
+  // 最常問的（問過兩次以上，前三檔）排最前面（第十五輪），再來最近問過的
+  Object.entries(_aiStockCounts).filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 3).forEach(([s]) => add(s));
   _aiRecentSids.forEach(add);
   holdingEntries().forEach(h => add(h.sid));
   (watchlistRows || []).forEach(w => add(w.stock_id));
@@ -23006,6 +23048,7 @@ function aiStockChoices() {
 
 // 問過的那一檔：追問沿用（_aiLast）＋反問籤排前面（_aiRecentSids）
 function aiNoteStock(sid) {
+  _aiStockCounts[sid] = (Number(_aiStockCounts[sid]) || 0) + 1;
   _aiLast = { sid, at: Date.now() };
   _aiRecentSids = [sid].concat(_aiRecentSids.filter(s => s !== sid)).slice(0, 5);
 }
@@ -23213,11 +23256,11 @@ function aiPassesThreshold(kind, mag, minPct, minRatio) {
 const AI_SCOPE_MARKET_RE = /全市場|大盤|整個市場|市場上|所有股票|全部股票|台股|上市|上櫃/;
 const AI_SCOPE_MINE_RE = /自選|我的|持股|分享|好友/;
 function aiScopeOf(explicit, text) {
-  if (explicit === "market" || explicit === "mine") return explicit;
+  if (explicit === "market" || explicit === "mine") { _aiScopePref = explicit; return explicit; }   // 選過一次，這次對話記住（第十五輪）
   const t = String(text || "");
   if (AI_SCOPE_MINE_RE.test(t)) return "mine";
   if (AI_SCOPE_MARKET_RE.test(t)) return "market";
-  return null;
+  return _aiScopePref;
 }
 function aiScopeAsk(slots, label, opts) {
   const said = String((opts && opts.text) || "").trim();
@@ -23250,6 +23293,42 @@ async function aiStockFacts(sid) {
 }
 const aiPosTxt = d => d == null ? "—" : Math.abs(d) < 0.05 ? "貼線" : d > 0 ? `上方 ${fmtPct(d)}%` : `下方 ${fmtPct(d)}%`;
 const aiFromHigh = f => f.h52 && f.price ? `離高點 ${f.price >= f.h52 ? "0" : "−" + fmtPct((f.h52 - f.price) / f.h52 * 100)}%` : "";
+
+// ── 個人化（第十五輪）：偏好存在這支手機上（帳號一份），讀一次就留在記憶體 ─────────────
+let _aiPrefsCache = null, _aiPrefsUser = "";
+function aiPrefs() {
+  if (_aiPrefsCache && _aiPrefsUser === state.userId) return _aiPrefsCache;
+  let p = {};
+  try { p = JSON.parse(localStorage.getItem(`cg-ai-prefs:${state.userId}`) || "{}") || {}; } catch { p = {}; }
+  _aiPrefsCache = { short: !!p.short, hideCode: !!p.hideCode, nick: String(p.nick || "").slice(0, 8) };
+  _aiPrefsUser = state.userId;
+  return _aiPrefsCache;
+}
+function aiSetPref(k, v) {
+  const p = Object.assign({}, aiPrefs(), { [k]: v });
+  _aiPrefsCache = p;
+  try { localStorage.setItem(`cg-ai-prefs:${state.userId}`, JSON.stringify(p)); } catch { /* 存不了：這次開頁有效 */ }
+  trackActivity("assistant_pref", { key: k });
+}
+// 「Howard，早安」：稱呼優先（叫我○○），沒有就用顯示名稱；時段照台北時間
+function aiGreeting(now) {
+  const h = Number(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Taipei", hour: "2-digit", hourCycle: "h23" }).format(now || new Date())) % 24;
+  const who = aiPrefs().nick || String((state && state.displayName) || "").trim().slice(0, 10);
+  const greet = h < 11 ? "早安" : h < 18 ? "午安" : "晚安";
+  return who ? `${who}，${greet}` : greet;
+}
+// 「助手的設定」：四項偏好一張卡，每一列點了就切換
+function aiPrefsCard() {
+  const p = aiPrefs();
+  let briefOff = false;
+  try { briefOff = localStorage.getItem(`cg-ai-brief-off:${state.userId}`) === "1"; } catch { briefOff = false; }
+  const run = (label, value, note, slots, text) => ({ label, value, note, act: "run", data: { intent: "ui_settings", slots, text } });
+  return { head: "助手的設定", sub: "點一列就切換",
+           rows: [run("回答長短", p.short ? "簡短" : "完整", p.short ? `清單只列前 ${AI_SHORT_ROWS} 列` : "", { short: !p.short }, p.short ? "回答完整一點" : "回答短一點"),
+                  run("股票代號", p.hideCode ? "不顯示" : "顯示", "卡片標題", { codes: p.hideCode }, p.hideCode ? "股票代號要顯示" : "不要顯示股票代號"),
+                  { label: "稱呼", value: p.nick || "（用顯示名稱）", note: "說「叫我○○」就能改" },
+                  run("每天的重點卡", briefOff ? "關" : "開", "第一次打開助手時", { brief: briefOff }, briefOff ? "把每天的重點卡打開" : "不要每天自動出重點")] };
+}
 
 // ── 學習與解釋（第十四輪）──────────────────────────────────────────────
 // 訊號的 key → 名詞（目錄 glossary 的 term）：卡上的訊號名稱點了就問「什麼是○○」
@@ -25103,6 +25182,21 @@ const ASSISTANT_ACTIONS = {
              actions: [goBtn] };
   },
   assistantUiSettings(slots) {
+    // 助手自己的偏好（第十五輪）：簡短、代號、稱呼；「助手的設定」一張卡看全部
+    if (slots.short === true || slots.short === false) {
+      aiSetPref("short", !!slots.short);
+      return { text: slots.short ? `好，清單類的卡之後只列前 ${AI_SHORT_ROWS} 列。` : "好，之後每一列都列出來。" };
+    }
+    if (slots.codes === true || slots.codes === false) {
+      aiSetPref("hideCode", !slots.codes);
+      return { text: slots.codes ? "好，卡片標題會寫股票代號。" : "好，卡片標題之後只寫名稱。" };
+    }
+    if (slots.nickname) {
+      const nk = String(slots.nickname).slice(0, 8);
+      aiSetPref("nick", nk);
+      return { text: `好，之後叫你${nk}。` };
+    }
+    if (slots.assistant) return aiPrefsCard();
     if (slots.brief === false || slots.brief === true) {   // 每天自動出的重點卡（第十三輪）
       try { if (slots.brief) localStorage.removeItem(`cg-ai-brief-off:${state.userId}`); else localStorage.setItem(`cg-ai-brief-off:${state.userId}`, "1"); } catch { /* 存不了就算了 */ }
       return slots.brief ? { text: "好，之後每天第一次打開助手會先出今天的重點。" }
@@ -25298,7 +25392,7 @@ const ASSISTANT_ACTIONS = {
       actions.push({ label: "啟用通知", act: "push", data: {}, main: true });
     }
     const head = phase === "pre" ? "開盤前的重點" : phase === "post" ? "今天收盤的重點" : phase === "weekend" ? "週末的重點" : `${day}的重點`;
-    return { head, sub: "點一列看完整的", rows, actions,
+    return { head, sub: `${aiGreeting()}・點一列看完整的`, rows, actions,
              chips: [{ label: "這週的回顧", act: "run", data: { intent: "daily_brief", slots: { period: "week" }, text: "這週的回顧" } },
                      { label: "明天有什麼要注意的", act: "run", data: { intent: "daily_brief", slots: { period: "tomorrow" }, text: "明天有什麼要注意的" } }] };
   },
