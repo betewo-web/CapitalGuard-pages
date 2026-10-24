@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="448">
+  <meta name="app-version" content="449">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=448" rel="stylesheet">
+  <link href="watchlist.css?v=449" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -10095,21 +10095,23 @@ function holdingImportPlan(rows, choices) {
            dups: items.filter(i => i.occ.length > 1).map(i => i.sid) };
 }
 
-// 好幾張截圖的列合成一份（Howard 2026-10-23：一頁截不完的持股）。每一列記住是第幾張截圖（page）。
+// 好幾張截圖的列合成一份（Howard 2026-10-23：一頁截不完的持股）。每一列記住是第幾張截圖（page；
+// nos 給真正的張號——缺欄位被剔掉的那幾張不在 pages 裡，用索引會把「第 7 張」寫成「第 5 張」）。
 // 只有**同一張圖裡**模型重複抄的列（代號／名稱、數量、單位、均價全一樣）才算抄錯、丟掉一份；
 // 跨圖的重複一律全收 —— 哪怕兩張寫得一模一樣，也要讓使用者自己說是重複上傳還是另一個帳戶
 // （Howard 2026-10-24；以前跨圖去重＋自動相加，猜錯的兩種方式都把股數算壞）。回 { rows, dropped }
-function mergeShotRows(pages) {
+function mergeShotRows(pages, nos) {
   const rows = [];
   let dropped = 0;
   (pages || []).forEach((page, pi) => {
+    const no = nos && nos[pi] != null ? Number(nos[pi]) : pi + 1;
     const seen = new Set();
     for (const r of page || []) {
       const who = String((r && r.code) || "").trim().toUpperCase() || normalizeNameForSearch(String((r && r.name) || ""));
       const key = `${who}|${Number(r && r.quantity)}|${r && r.unit}|${Number(r && r.avg_price)}`;
       if (seen.has(key)) { dropped += 1; continue; }
       seen.add(key);
-      rows.push(Object.assign({}, r, { page: pi + 1 }));
+      rows.push(Object.assign({}, r, { page: no }));
     }
   });
   return { rows, dropped };
@@ -24346,7 +24348,10 @@ async function aiShrinkImage(file) {
 // 一次可以選好幾張（持股多到一頁截不完，Howard 2026-10-23）：一張一張送、結果合在一起出一張確認卡。
 // 同一張圖（檔案內容一模一樣）讀過就不再送雲端：手機上記著上次讀出來的列（只有列，沒有圖），30 天、最多 30 張。
 // 同一次選了兩張一樣的，第二張直接略過。
-const AI_IMG_MAX_FILES = 5;
+// 上限 5 → 20（Howard 2026-10-24）：有人一檔截一張、一次選了 12 張，前 5 張讀完就出卡，
+// 剩下 7 張只在卡上一句話裡說「沒讀」——他以為 12 檔都進去了，實際上一檔都沒有。
+// 20 張序列跑約 60–100 秒（每張 2.5–5 秒），中途有「讀取截圖 i／n」的進度；每張各算一次助手每日額度。
+const AI_IMG_MAX_FILES = 20;
 const AI_SHOT_CACHE_DAYS = 30;
 const AI_SHOT_CACHE_MAX = 30;
 
@@ -24430,6 +24435,7 @@ async function aiImageChosen(input) {
     if (p.error === "update") { aiBusy = false; aiBusyNote = ""; handleUpdateRequired(p.resp); aiAfterRun(); return; }
     if (p.cached) cached += 1;
     if (p.log_id && !logId) logId = p.log_id;
+    p.no = i + 1;   // 第幾張（卡上寫「第 3 張沒有成本欄」要用；重複的那幾張沒有進來，所以不能用陣列索引）
     pages.push(p);
   }
   aiBusy = false;
@@ -24444,11 +24450,25 @@ async function aiImageChosen(input) {
     aiAfterRun();
     return;
   }
-  const merged = mergeShotRows(ok.map(p => p.rows));
+  // 三要素逐「張」檢查（Howard 2026-10-24）：缺欄位的那幾張不採用、卡上寫明是第幾張缺什麼，
+  // 其餘照常——12 張混了兩家券商，不該因為其中一張沒有成本欄就把另外 11 張一起作廢。
+  // 全部都缺才整批不做（那張「這次不更新持股」的卡）。
+  const usable = [], badPages = [];
+  for (const p of ok) {
+    const g = importFieldGaps(p.rows, p.has_cost_column === false);
+    if (g.bad) badPages.push({ no: p.no, gaps: g.gaps, noCost: g.noCost }); else usable.push(p);
+  }
+  if (!usable.length) {
+    aiPushCard(aiImportNeedCard({ gaps: badPages.reduce((a, b) => a.concat(b.gaps), []),
+                                  noCost: badPages.some(b => b.noCost), bad: true, pages: badPages }));
+    aiAfterRun();
+    return;
+  }
+  const merged = mergeShotRows(usable.map(p => p.rows), usable.map(p => p.no));
   const card = aiImportCard({ is_holdings: merged.rows.length > 0, rows: merged.rows },
                             { files: files.length, skipped: all.length - files.length, dup, cached, failed,
                               notHoldings: pages.length - ok.length - failed, overlap: merged.dropped,
-                              noCost: ok.some(p => p.has_cost_column === false) });   // 哪一張沒有成本欄，整批就不做
+                              badPages });
   card.log_id = logId;
   if (card._id && aiPending[card._id]) aiPending[card._id].log_id = logId;
   aiPushCard(card, card._id);
@@ -24464,14 +24484,16 @@ function aiImageAskCard() {
            actions: [{ label: "選擇截圖", act: "image", main: true }] };
 }
 
-// 截圖缺欄位：整批不做，並寫清楚截圖要有什麼（Howard 2026-10-24）。
+// 截圖缺欄位：那幾張不採用，並寫清楚截圖要有什麼（Howard 2026-10-24）。
 // 寧可什麼都不寫，也不要把「現價」當成本存進去——那會讓損益永遠顯示 0，而且使用者很難發現。
+// 這張卡是「連一張能用的都沒有」才出；只有部分缺的，壞的那幾張寫在確認卡上（_importBadPagesText）。
 function aiImportNeedCard(info) {
-  const why = info.noCost ? "這張截圖沒有「平均成本」那一欄。"
+  const n = (info.pages || []).length;
+  const why = info.noCost ? `${n > 1 ? `這 ${n} 張截圖都` : "這張截圖"}沒有「平均成本」那一欄。`
                           : `截圖裡有 ${info.gaps.length} 列少了必要的欄位。`;
   return {
     head: "這次不更新持股",
-    sub: why + "沒有成本就算不出損益，所以這一次整批都不寫入。",
+    sub: why + "沒有成本就算不出損益，所以這一次沒有任何東西寫進去。",
     rows: info.gaps.slice(0, 5).map(g => ({ label: g.who, value: "", note: `少了：${g.miss.join("、")}` })),
     text: "要更新持股，截圖裡每一檔都要同時看得到這三樣：① 股票名稱或代號 ② 股數（或張數）"
         + "③ 平均成本（也可能叫成本均價、持有成本、成交均價）。"
@@ -24479,6 +24501,16 @@ function aiImportNeedCard(info) {
         + "券商 App 多半在「未實現損益」那一頁，或點進個股的庫存明細，才看得到成本那一欄。",
     muted: true, actions: [{ label: "再選一張", act: "image" }],
   };
+}
+
+// 確認卡上那一句「第 3、7 張沒有成本欄，沒有採用」。壞的那幾張不能只是默默消失——
+// 使用者是照張數在數的（選了 12 張就預期 12 檔）
+function _importBadPagesText(meta) {
+  const bad = (meta && meta.badPages) || [];
+  if (!bad.length) return "";
+  const nos = bad.map(b => `第 ${b.no} 張`).join("、");
+  const why = bad.every(b => b.noCost) ? "沒有成本欄" : "少了必要的欄位（股票、股數、平均成本）";
+  return `${nos}${why}，沒有採用——那幾檔要另外截有成本的畫面再傳一次。`;
 }
 
 // 這張卡現在停在哪一關：重複（同一檔讀到好幾次）→ 帳戶（有記過的股票）→ 確認
@@ -24507,9 +24539,10 @@ function aiImportCard(resp, meta) {
     return { text: "這張圖看起來不是持股清單。請截券商 App 的「庫存」或「未實現損益」那一頁再試；也可以直接跟我說「我有 2 張台積電成本 900」。",
              muted: true, actions: [{ label: "再選一張", act: "image" }] };
   }
-  // 三要素（股名或代號、股數、均價／成本）缺一不可：少了就捨棄這一次，不出確認卡
+  // 三要素（股名或代號、股數、均價／成本）缺一不可。aiImageChosen 已經逐張篩過（壞的在 meta.badPages），
+  // 這裡是最後一道：單張那條路、以及測試直接餵列的那條路都走得到
   const need = importFieldGaps(rows, meta && meta.noCost);
-  if (need.bad) return aiImportNeedCard(need);
+  if (need.bad) return aiImportNeedCard(Object.assign({ pages: (meta && meta.badPages) || [] }, need));
   const plan = _importFit(holdingImportPlan(rows));
   if (!plan.items.length) {
     return { text: `認不出截圖裡的股票${plan.unknown.length ? `（${plan.unknown.slice(0, 5).join("、")}）` : ""}。換一張有股票代號或完整名稱的截圖試試。`,
@@ -24575,7 +24608,7 @@ function _importHowText(spec) {
                m.dup ? `${m.dup} 張重複，略過` : "", m.overlap ? `同一張圖裡重複抄的 ${m.overlap} 列只算一次` : "",
                m.failed ? `${m.failed} 張沒讀到` : "", m.notHoldings ? `${m.notHoldings} 張不是持股清單` : "",
                m.skipped ? `一次最多 ${AI_IMG_MAX_FILES} 張，後面 ${m.skipped} 張沒讀` : ""].filter(Boolean);
-  return how.length ? `${how.join("，")}。` : "";
+  return (how.length ? `${how.join("，")}。` : "") + _importBadPagesText(spec.meta);
 }
 
 // 截圖裡有已經記過的股票：先問清楚，再出確認卡（Howard 2026-10-23：原本只有一顆小籤「另一個帳戶…」，
@@ -24744,7 +24777,12 @@ function aiImportView(id, spec) {
                                                             act: "imptoggle", data: { id, mode: "odd" } });
   if ((spec.plan.dups || []).length) chips.push({ label: `重新選那 ${spec.plan.dups.length} 檔重複的`, act: "imptoggle", data: { id, mode: "dup" } });
   const actions = n ? [{ label: `套用 ${n} 檔`, act: "confirm", data: { id }, main: true }, { label: "取消", act: "cancel", data: { id } }] : [];
-  return { head: n ? spec.head : "持股和截圖一樣", sub: `認出 ${items.length} 檔：${parts.join("、")}`, rows, text, chips, actions };
+  // 副標要寫得出「選了幾張、哪幾張沒用上」：使用者是照張數在數的（選 12 張就預期 12 檔）
+  const m = spec.meta || {};
+  const left = [m.skipped ? `${m.skipped} 張沒讀` : "", (m.badPages || []).length ? `${m.badPages.length} 張沒有成本欄` : ""].filter(Boolean);
+  return { head: n ? spec.head : "持股和截圖一樣",
+           sub: `認出 ${items.length} 檔：${parts.join("、")}${left.length ? `（${left.join("、")}）` : ""}`,
+           rows, text, chips, actions };
 }
 
 function aiImportToggle(id, mode) {
