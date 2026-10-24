@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="450">
+  <meta name="app-version" content="451">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=450" rel="stylesheet">
+  <link href="watchlist.css?v=451" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -23793,7 +23793,7 @@ function aiTour() {
   trackActivity("assistant_tour", {});
   aiRunChip({ intent: "stock_overview", slots: { stock: sid }, text: `${n}整理一下` });
   setTimeout(() => {
-    aiPushCard({ head: "接下來可以試試", text: "設定、記帳、問名詞都是一句話；寫入之前一定先給你看確認卡。",
+    aiPushCard({ head: "接下來可以試試", text: "設定、記帳、問名詞都是一句話。",   // 確認卡的事等真的要寫入時那張卡自己會說
                  chips: [{ label: `${n}的到價提醒`, act: "run", data: { intent: "price_target_set", slots: { stock: sid }, text: `${n}的到價提醒` } },
                          { label: `記錄${n}的持股`, act: "run", data: { intent: "holdings_set", slots: { stock: sid, hold_action: "set" }, text: `記錄${n}的持股` } },
                          { label: "什麼是支撐", act: "gloss", data: { text: "什麼是支撐" } }] });
@@ -24506,12 +24506,12 @@ async function aiImageChosen(input) {
   aiAfterRun();
 }
 
-// 「我要上傳截圖更新持股」：選檔要使用者自己按，所以回一顆鍵
+// 「我要上傳截圖更新持股」：選檔要使用者自己按，所以回一顆鍵。
+// 只留「要選哪一種畫面」——那是他**現在**要做的判斷；之後會發生什麼等到發生再說（Howard 2026-10-24）
 function aiImageAskCard() {
   return { head: "從截圖更新持股",
            text: "選券商 App 的「庫存」或「未實現損益」截圖（一頁截不完可以一次選好幾張）。"
-               + "畫面上要同時看得到：股票名稱或代號、股數（或張數）、平均成本——只有「現值」不行，那不是成本。"
-               + "我會讀出來給你確認後才更新。截圖不會保存。",
+               + "畫面上要同時看得到：股票名稱或代號、股數（或張數）、平均成本——只有「現值」不行，那不是成本。",
            actions: [{ label: "選擇截圖", act: "image", main: true }] };
 }
 
@@ -24745,10 +24745,11 @@ function _importMissingAsk(spec, out) {
   const left = holdingEntries().filter(h => !seen.has(h.sid));
   if (!left.length) return out;
   const mid = "ac" + (++_aiCardSeq);
-  const names = left.map(h => `${aiStockName(h.sid)} ${h.sid}`);
   aiPending[mid] = {
     head: `這 ${left.length} 檔這次的截圖裡都沒有`,
-    rows: left.map(h => ({ label: `${aiStockName(h.sid)} ${h.sid}`, value: fmtLots(h.shares), note: "這次的截圖裡沒有" })),
+    // 每一列的 note 不重複副標已經講過的那句；寫成本，他才看得出是哪一筆
+    rows: left.map(h => ({ label: `${aiStockName(h.sid)} ${h.sid}`, value: fmtLots(h.shares),
+                           note: h.cost != null ? `成本 ${fmtPrice(h.cost)}` : "" })),
     run: async () => {
       let removed = 0;
       const bad = [];
@@ -24764,7 +24765,7 @@ function _importMissingAsk(spec, out) {
     head: `更新完成，還有 ${left.length} 檔要確認`,
     sub: "這幾檔帳上還記著，但這次的截圖裡都沒有出現",
     rows: aiPending[mid].rows,
-    text: out.text + `賣掉了就移除；只是這次沒截到，就保留。（${names.slice(0, 5).join("、")}${names.length > 5 ? " 等" : ""}）`,
+    text: out.text + "賣掉了就移除；只是這次沒截到，就保留。",   // 名單上面那幾列已經寫了，不再複述一次
     actions: [{ label: `移除這 ${left.length} 檔持股`, act: "confirm", data: { id: mid } },
               { label: "保留", act: "cancel", data: { id: mid } },
               { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } }],
@@ -24796,9 +24797,9 @@ function aiImportView(id, spec) {
     + (items.some(i => i.cur)
        ? (spec.addMode ? "你選了「另一個帳戶」：已經記過的那幾檔把截圖的股數加上去，均價加權。"
                        : "你選了「同一個帳戶」：已經記過的那幾檔以截圖為準，不重複加。") : "")
-    + (unknown.length ? `認不出：${unknown.slice(0, 5).join("、")}${unknown.length > 5 ? ` 等 ${unknown.length} 列` : ""}（不套用）。` : "")
-    + "截圖裡沒有、帳上卻還記著的，套用之後我再問你要留還是要移除。"
-    + "截圖不會保存；讀出來的結果記在這支手機上，同一張圖再選不必重新辨識。";
+    + (unknown.length ? `認不出：${unknown.slice(0, 5).join("、")}${unknown.length > 5 ? ` 等 ${unknown.length} 列` : ""}（不套用）。` : "");
+  // 內文只寫「這一次真的發生了什麼」。預告（套用之後會再問哪幾檔、截圖不會保存、結果記在手機上）
+  // 一律拿掉：還沒發生的事使用者不需要知道，要問的時候那張卡自己會出現（Howard 2026-10-24）
   // 兩個選項：已經有的股票「另一個帳戶 → 加上去」、只有零股那一列「取代整股」
   const held = items.filter(i => i.cur).length;
   const chips = [];
@@ -24824,7 +24825,7 @@ async function aiImportFresh(id) {
   if (!spec || spec.busy) return;
   await _aiShotCacheForget((spec.meta || {}).hashes || _aiLastShotHashes);
   aiReplaceCard(id, { head: "好，這次重新辨識",
-                      text: "上次讀出來的結果已經清掉了。再選一次同一批截圖，我會重新讀一遍（不會用上次的）。",
+                      text: "上次讀出來的結果已經清掉了。再選一次同一批截圖。",
                       actions: [{ label: "選擇截圖", act: "image", main: true }] });
   delete aiPending[id];
   renderAssistant();
