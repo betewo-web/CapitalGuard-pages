@@ -36,6 +36,12 @@
 	box-sizing: border-box;
 }
 
+/* 程式捲動預設不要動畫（v454，2026-10-24）：Bootstrap 5 的 reboot 把 :root 設成 scroll-behavior: smooth，
+   換分頁的 scrollTo 就會一路滑過去——Howard：「在助手頁和統計頁之間切換時，畫面會自動往上刷、往下刷」。
+   要滑的地方（助手的新卡、↓ 最新、捲到某一張卡）都自己寫 behavior: "smooth"，不靠這裡。
+   選擇器要跟 Bootstrap 一樣是 :root（html 的權重比較低，蓋不過）。 */
+:root { scroll-behavior: auto; }
+
 html,
 body {
 	min-height: 100%;

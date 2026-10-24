@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="453">
+  <meta name="app-version" content="454">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=453" rel="stylesheet">
+  <link href="watchlist.css?v=454" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5641,7 +5641,10 @@ function switchTab(tab, silent = false) {
   // 通知關著的那一行跟著分頁走：盤中頁與通知頁都要看得到（2026-09-27 Howard）
   placePushBar();
   renderCurrentTab();
-  if (changed) window.scrollTo({ top: 0 });
+  // 換分頁直接跳到位置、不要動畫（v454，Howard：「在助手頁和統計頁之間切換時，畫面會自動往上刷、往下刷」）：
+  // 助手是對話，停在最新那一張（底部）；其他頁停在頂端。不滑是靠 watchlist.css 的 :root { scroll-behavior: auto }
+  // （Bootstrap 預設 smooth）——這裡不寫 behavior: "instant"，舊一點的 iOS Safari 不認得這個值、整個呼叫會丟例外。
+  if (changed) window.scrollTo(0, tab === "ai" && aiLog.length ? document.documentElement.scrollHeight : 0);
 }
 
 window.addEventListener("hashchange", () => {
@@ -21901,7 +21904,8 @@ document.addEventListener("click", async e => {
 // 這一頁不產生自由文字：答案卡用記憶體裡的資料套樣板，名詞與拒答是 Worker 回的固定句（COMPLIANCE.md 第 6 條）。
 // Phase 2（2026-10-16）：唯讀類直接做；寫入類（加自選、開關、到價、進階訊號、持股）先帶到既有的頁面，
 // 由使用者在那裡按下去——Phase 3 才接確認卡＋直接執行。
-// 對話只留在記憶體（本次開頁）：助手是指令列不是聊天室，對話框功能（CHAT.md）另有自己的存法。
+// 對話存在這支手機上（每個帳號一份、最多 AI_LOG_MAX 則、AI_STORE_DAYS 天沒開就整段丟掉、登出刪除，見 aiSaveLog）；
+// 不上傳。對話框功能（CHAT.md）另有自己的存法。
 // ═══════════════════════════════════════════════════════════════
 const AI_MAX_CHARS = 200;
 const AI_LOG_MAX = 40;
@@ -22049,6 +22053,7 @@ function aiMentionsOf(text) {
 }
 
 // ── 畫面 ─────────────────────────────────────────────────────────
+let _aiScrollTail = null, _aiScrollBusy = false;   // renderAssistant 上次畫的最後一則：沒變就不滑
 function renderAssistant() {
   const log = document.getElementById("ai-log");
   if (!log) return;
@@ -22075,9 +22080,15 @@ function renderAssistant() {
   aiUpdateNavDot();
   aiComposerSync();
   aiSaveLog();
-  if (aiLog.length && currentTab === "ai") {
+  // 只在對話長出新東西時滑到底：新的一句、新的卡、最後那張換了內容、「處理中」那一行剛出現。
+  // 資料更新（renderCurrentTab）、按了舊卡上的鍵也會重畫——那時候不能把正在往上看的人拉回底部（v454）。
+  // 換分頁進來停在底部是 switchTab 直接跳的，不在這裡滑。
+  const tail = aiLog[aiLog.length - 1] || null;
+  if (aiLog.length && currentTab === "ai" && (tail !== _aiScrollTail || (aiBusy && !_aiScrollBusy))) {
     requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }));
   }
+  _aiScrollTail = tail;
+  _aiScrollBusy = aiBusy;
 }
 
 function aiUserHtml(text) {
