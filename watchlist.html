@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="442">
+  <meta name="app-version" content="443">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=442" rel="stylesheet">
+  <link href="watchlist.css?v=443" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -21866,6 +21866,7 @@ const AI_INTENTS = {
   daily_brief:      ["assistantDailyBrief", {}],
   stock_overview:   ["assistantStockOverview", {}],
   compare:          ["assistantCompare", {}],
+  calc:             ["assistantCalc", {}],
   inbox:            ["assistantInbox", {}],
   watch_add:        ["assistantWatchAdd", {}],
   watch_remove:     ["assistantWatchRemove", {}],
@@ -22082,6 +22083,7 @@ function aiIntroHtml(withChips) {
       <li>設 「跌到 900 提醒我」、「${AI_RULE_EXAMPLE}」、「盯台積電 30 天，跌 10% 通知我」</li>
       <li>記 「我買了 2 張台積電 成本 900」、「賣掉 1 張鴻海」，或按輸入列左邊的圖片鈕上傳券商的庫存截圖</li>
       <li>看 「台積電整理一下」、「台積電和聯發科比較」、「今天有什麼重點」</li>
+      <li>算 「2 張台積電值多少」、「台積電漲停價」、「900 買的台積電要多少才回本」</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
       <div class="ai-note">只整理與解釋公開資料，不提供買賣建議。用鍵盤上的麥克風也可以說話。</div></div>`,
     chips,
@@ -22472,6 +22474,38 @@ function aiRowOf(sid) {
   return (watchlistRows || []).find(w => String(w.stock_id || "").trim() === String(sid || "").trim()) || null;
 }
 function aiQuoteOf(sid) { return getQuote(sid) || getCloseQuote(sid) || null; }
+
+// ── 試算（第十六輪）────────────────────────────────────────────────────
+// 價格：最近一個收盤（盤中成交價不送到裝置）；不在自選股就讀全市場關卡檔的收盤
+const AI_FEE_RATE = 0.001425, AI_FEE_MIN = 20;
+async function aiCalcBase(sid) {
+  const q = aiQuoteOf(sid);
+  if (q && Number(q.price) > 0) return { price: Number(q.price), day: q.tradeDate ? String(q.tradeDate).slice(5).replace("-", "/") : "" };
+  const ml = await aiMarketLevels();
+  const lv = ml && ml.stocks && ml.stocks[sid];
+  if (lv && Number(lv.c) > 0) return { price: Number(lv.c), day: ml.date ? String(ml.date).slice(5).replace("-", "/") : "" };
+  return null;
+}
+function aiR2(v) { return Math.round(Number(v) * 100) / 100; }
+function aiTaxRate(sid) { return isEtfId(sid) ? 0.001 : 0.003; }
+function aiFee(amount) { return amount > 0 ? Math.max(AI_FEE_MIN, Math.floor(amount * AI_FEE_RATE)) : 0; }
+function aiTax(amount, sid) { return amount > 0 ? Math.floor(amount * aiTaxRate(sid)) : 0; }
+// 證交所的升降單位（股票六級、ETF 兩級）
+function aiTick(p, etf) {
+  if (etf) return p < 50 ? 0.01 : 0.05;
+  return p < 10 ? 0.01 : p < 50 ? 0.05 : p < 100 ? 0.1 : p < 500 ? 0.5 : p < 1000 ? 1 : 5;
+}
+// 漲跌停：基準價 ±10%，漲停往下、跌停往上取到那個價位的升降單位
+function aiLimitPrices(close, etf) {
+  const upRaw = close * 1.1, dnRaw = close * 0.9;
+  const tu = aiTick(upRaw, etf), td = aiTick(dnRaw, etf);
+  return { up: aiR2(Math.floor(upRaw / tu + 1e-9) * tu), down: aiR2(Math.ceil(dnRaw / td - 1e-9) * td) };
+}
+function aiCalcFoot(sid) {
+  const bond = /^00\d{2,4}B$/.test(String(sid || ""));
+  return `用最近一個收盤試算；手續費 0.1425%（最低 20 元，未含券商折扣）、證交稅 ${aiTaxRate(sid) * 100}%` +
+         (bond ? "（債券 ETF 停徵期間不用繳）" : "") + "。";
+}
 
 // 「盯 30 天」「30 個交易日」→ 一個日期（規則裡存的是日期，不是天數）。
 // 交易日用週一～週五數，與免費體驗的 trial_period_end 同一個算法：未來的國定假日
@@ -23010,7 +23044,7 @@ const AI_STOCK_HINT = {
   quote: "現在多少錢", levels: "支撐在哪", ma_position: "站上月線了嗎", signals_today: "今天有訊號嗎", signals_history: "這週有哪些訊號",
   events: "有什麼資料", score: "評分多少", holdings: "的持股", kline: "的 K 線", price_target_set: "的到價提醒",
   basic_signal_set: "的基礎訊號", holdings_set: "的持股設定", watch_remove: "移除", share_stock: "分享給好友",
-  stock_overview: "整理一下", compare: "跟誰比較",
+  stock_overview: "整理一下", compare: "跟誰比較", calc: "試算",
 };
 function aiNeedStock() {
   const sids = aiStockChoices();
@@ -23056,7 +23090,7 @@ function aiNoteStock(sid) {
 // 追問沿用（「台積電支撐在哪」→「那站上月線了嗎」）：句子裡沒有股票、10 分鐘內剛問過一檔。
 // 一定要指一檔才做得了的那幾類一律沿用（不然只能反問）；整份清單也答得出來的那幾類（今天的訊號、事件、評分…），
 // 要句子裡指著它（那／它／這檔）而且沒有在講整份（我的／全部／自選…）才沿用。寫入類照樣先出確認卡，股票名寫在卡上。
-const AI_NEED_ONE = new Set(["quote", "levels", "ma_position", "signals_history", "kline",
+const AI_NEED_ONE = new Set(["quote", "levels", "ma_position", "signals_history", "kline", "calc",
                              "price_target_set", "holdings_set", "watch_add", "watch_remove"]);
 const AI_CARRY_RE = /它|這檔|那檔|這支|那支|這一檔|那一檔|同一檔|剛剛那|剛才那/;
 const AI_WHOLE_RE = /我的|全部|所有|自選|每一檔|哪些|哪幾檔|誰/;
@@ -23082,6 +23116,7 @@ const AI_FOLLOWUPS = {
   signals_history: ["signals_today", "events"],
   events: ["quote", "levels"],
   score: ["levels", "events"],
+  calc: ["quote", "levels"],
 };
 function aiFollowupChip(kind, sid) {
   const name = aiStockName(sid);
@@ -23386,6 +23421,7 @@ function aiSelfHelp() {
                   run("比", "兩三檔並排", `例：${n}和${aiStockName(other)}比較`, "compare", { stock: sid }, `${n}和${aiStockName(other)}比較`),
                   run("設", "到價提醒、基礎與進階訊號", `例：${n}的到價提醒`, "price_target_set", { stock: sid }, `${n}的到價提醒`),
                   run("記", "持股、券商截圖", "例：我的持股", "holdings", {}, "我的持股"),
+                  run("算", "市值、漲跌停、手續費、回本", `例：${n}漲停價多少`, "calc", { stock: sid, calc: "limit" }, `${n}漲停價多少`),
                   run("整理", "今天的重點、這週回顧、明天", "例：今天有什麼重點", "daily_brief", {}, "今天有什麼重點"),
                   { label: "問", value: "名詞與算法", note: "例：什麼是逼近壓力", act: "gloss", data: { text: "什麼是逼近壓力" } },
                   { label: "不做", value: "買賣建議、走勢研判", note: "這類問題可以交給你自己的 AI" }] };
@@ -25415,6 +25451,126 @@ const ASSISTANT_ACTIONS = {
     return { head: "股市雷達能做什麼", sub: "點一列就過去那裡", rows,
              text: "助手這一格可以查、設定、解釋上面這些——例如「台積電今天有訊號嗎」「跌到 900 提醒我」「我買了 2 張鴻海 成本 180」「什麼是逼近壓力」。只整理與解釋公開資料，不提供買賣建議。",
              chips: aiIntroChips() };
+  },
+  // ── 試算（第十六輪）：只做算術。價格用最近一個收盤（與持股頁同一個基準），手續費 0.1425%、證交稅 0.3%（ETF 0.1%）
+  async assistantCalc(slots) {
+    const sid = slots.stock;
+    if (!sid) return aiNeedStock();
+    const name = aiStockName(sid), head = `${name} ${sid}`;
+    const said = Number(slots.shares) > 0 ? Number(slots.shares) : 0;
+    // 沒給數字、問的是自己的賺賠或成本（「我在台達電賠多少」）：那是持股，不是試算
+    const bare = !slots.calc && slots.pct == null && !slots.amount && !slots.price && !slots.cost && !said;
+    if (bare && /賺|賠|損益|成本|報酬/.test(String((_aiCurrent && _aiCurrent.text) || ""))) return ASSISTANT_ACTIONS.assistantHoldings({ stock: sid });
+    const kind = slots.calc || (slots.pct != null ? "pct" : slots.amount ? "afford" : slots.price ? "whatif" : slots.cost ? "pl" : said ? "value" : "");
+    // 手續費指定了價位就不需要收盤（「1 張 150 元的 0050 手續費」）
+    const base = await aiCalcBase(sid) || (kind === "fee" && Number(slots.price) > 0 ? { price: Number(slots.price), day: "" } : null);
+    if (!base) return aiNoData({ head, text: "拿不到這一檔最近的收盤，沒辦法試算。", actions: [aiOpenBtn(sid, "kline", "開 K 線 ›")] });
+    const p = base.price, day = base.day, etf = isEtfId(sid);
+    const hold = holdingBySid().get(sid);
+    const held = hold && Number(hold.shares) > 0 ? Number(hold.shares) : 0;
+    const cost = hold && Number(hold.cost) > 0 ? Number(hold.cost) : null;
+    const closeRow = { label: "收盤", value: fmtPrice(p), note: day };
+    const money = v => `${fmtMoney(v)} 元`;
+    const signed = v => `<span class="${plClass(v)}">${escapeHtml(fmtSignedMoney(v))} 元</span>`;
+    const card = (sub, rows, text) => ({ head, sub, rows, text: text === undefined ? aiCalcFoot(sid) : text, actions: [aiOpenBtn(sid, "radar")] });
+    if (kind === "limit") {
+      const lp = aiLimitPrices(p, etf);
+      return card(`以${day ? ` ${day} ` : ""}收盤 ${fmtPrice(p)} 為基準的下一個交易日`,
+        [{ label: "漲停", value: fmtPrice(lp.up), note: `+${fmtPrice(aiR2(lp.up - p))} 元` },
+         { label: "跌停", value: fmtPrice(lp.down), note: `-${fmtPrice(aiR2(p - lp.down))} 元` }],
+        "漲跌幅 10%，再照證交所的升降單位取到最近的一檔。" + (etf ? "國外成分 ETF 沒有漲跌幅限制。" : ""));
+    }
+    if (kind === "value") {
+      const sh = said || held;
+      if (!sh) return card("用最近一個收盤試算", [closeRow], `說幾張或幾股，例如「2 張${name}值多少」。`);
+      const amt = p * sh;
+      return card("用最近一個收盤試算", [closeRow,
+        { label: "股數", value: fmtLots(sh), note: said ? "" : "你的持股" },
+        { label: "市值", value: money(amt), note: "" },
+        { label: "賣出實收", value: money(amt - aiFee(amt) - aiTax(amt, sid)), note: "扣掉手續費與證交稅" }]);
+    }
+    if (kind === "whatif") {
+      const target = Number(slots.price);
+      if (!(target > 0)) return card("要算到哪一個價位？", [closeRow], `例如「${name}漲到 ${fmtPrice(aiR2(p * 1.1))} 我的持股是多少」。`);
+      const sh = said || held;
+      const rows = [closeRow, { label: "試算價位", value: fmtPrice(target), note: `與收盤差 ${fmtSignedPct((target - p) / p * 100)}` }];
+      if (!sh) return card(`如果到 ${fmtPrice(target)}`, rows, `沒有這一檔的持股紀錄；說「如果 2 張${name}到 ${fmtPrice(target)}」就會算市值。`);
+      rows.push({ label: "股數", value: fmtLots(sh), note: said ? "" : "你的持股" },
+                { label: "市值", value: money(target * sh), note: "" },
+                { label: "與現在比", html: true, value: signed((target - p) * sh), note: "" });
+      const c = Number(slots.cost) > 0 ? Number(slots.cost) : (said ? null : cost);
+      if (c) rows.push({ label: "損益", html: true, value: signed((target - c) * sh), note: `成本 ${fmtPrice(c)}・未扣手續費與稅` });
+      return card(`如果到 ${fmtPrice(target)}`, rows);
+    }
+    if (kind === "afford") {
+      const A = Number(slots.amount);
+      if (!(A > 0)) return card("要換算多少錢？", [closeRow], `例如「100 萬換算${name}是幾張」。`);
+      const lot = p * SHARES_PER_LOT;
+      const fits = (n, unit) => n * unit + aiFee(n * unit) <= A;
+      let lots = Math.floor(A / (lot * (1 + AI_FEE_RATE)));
+      while (lots > 0 && !fits(lots, lot)) lots -= 1;
+      let odd = Math.floor(A / (p * (1 + AI_FEE_RATE)));
+      while (odd > 0 && !fits(odd, p)) odd -= 1;
+      return card(`${fmtMoney(A)} 元換算`, [closeRow,
+        { label: "一張", value: money(lot + aiFee(lot)), note: "含手續費" },
+        { label: "整張", value: lots ? `${lots.toLocaleString()} 張` : "不到 1 張", note: lots ? `剩 ${fmtMoney(A - lots * lot - aiFee(lots * lot))} 元` : "" },
+        { label: "換成股", value: `${odd.toLocaleString()} 股`, note: "零股的最低手續費各家不同" }]);
+    }
+    if (kind === "fee") {
+      const sh = said || held || SHARES_PER_LOT;
+      const px = Number(slots.price) > 0 ? Number(slots.price) : p;
+      const amt = px * sh, fee = aiFee(amt), tax = aiTax(amt, sid);
+      const rows = [{ label: "成交金額", value: money(amt), note: `${fmtLots(sh)} × ${fmtPrice(px)}${said ? "" : held ? "・你的持股" : ""}` }];
+      if (slots.side !== "sell") rows.push({ label: "買進手續費", value: money(fee), note: "0.1425%" });
+      if (slots.side !== "buy") rows.push({ label: "賣出手續費", value: money(fee), note: "0.1425%" },
+                                           { label: "證交稅", value: money(tax), note: `${aiTaxRate(sid) * 100}%・賣出才收` });
+      if (!slots.side) rows.push({ label: "一買一賣", value: money(fee * 2 + tax), note: `約成交金額的 ${fmtPct((fee * 2 + tax) / amt * 100)}%` });
+      return card(Number(slots.price) > 0 ? `用 ${fmtPrice(px)} 試算` : "用最近一個收盤試算", rows);
+    }
+    if (kind === "breakeven") {
+      const c = Number(slots.cost) > 0 ? Number(slots.cost) : cost;
+      if (!c) return { head, text: `持股沒有記成本。說「${name}成本 900」記下來，或直接問「900 買的${name}要多少才回本」。`,
+                       actions: [{ label: "去持股頁 ›", act: "open", data: { tab: "holdings" } }] };
+      const be = c * (1 + AI_FEE_RATE) / (1 - AI_FEE_RATE - aiTaxRate(sid));
+      const tick = aiTick(be, etf), up = aiR2(Math.ceil(be / tick - 1e-9) * tick);
+      return card("含買進、賣出的手續費與證交稅", [
+        { label: "成本", value: fmtPrice(c), note: Number(slots.cost) > 0 ? "" : "你的持股" },
+        { label: "損益兩平", value: fmtPrice(up), note: `取到下一檔（${fmtPrice(aiR2(be))}）` },
+        { label: "收盤", value: fmtPrice(p), note: `${day ? `${day}・` : ""}兩平價比收盤${up >= p ? "高" : "低"} ${fmtPct(Math.abs(up - p) / p * 100)}%` }]);
+    }
+    if (kind === "avg") {
+      if (!held || !cost) return { head, text: "沒有這一檔的持股紀錄或成本，算不出加進去之後的均價。", actions: [{ label: "去持股頁 ›", act: "open", data: { tab: "holdings" } }] };
+      const now = { label: "現在", value: `${fmtLots(held)}・均價 ${fmtPrice(cost)}`, note: "" };
+      if (!said) return card("要加幾張？", [now], `例如「${name}再買 1 張均價變多少」。`);
+      const px = Number(slots.price) > 0 ? Number(slots.price) : p;
+      const avg = (cost * held + px * said) / (held + said);
+      return card("均價只用成交價算（未含手續費）", [now,
+        { label: "加上", value: `${fmtLots(said)}・${fmtPrice(px)}`, note: Number(slots.price) > 0 ? "" : `${day} 收盤` },
+        { label: "試算後", value: `${fmtLots(held + said)}・均價 ${fmtPrice(aiR2(avg))}`, note: "" },
+        { label: "這一筆的金額", value: money(px * said + aiFee(px * said)), note: "含手續費" }], "");
+    }
+    if (kind === "pct") {
+      const pc = Number(slots.pct), v = aiR2(p * (1 + pc / 100));
+      const rows = [closeRow, { label: `${pc >= 0 ? "漲" : "跌"} ${fmtPct(pc)}%`, value: fmtPrice(v), note: `差 ${fmtPrice(aiR2(Math.abs(v - p)))} 元` }];
+      if (held) rows.push({ label: "持股市值變化", html: true, value: signed((v - p) * held), note: fmtLots(held) });
+      return card("用最近一個收盤試算", rows, Math.abs(pc) > 10 ? "超過單日漲跌幅限制（10%）。" : "");
+    }
+    if (kind === "pl") {
+      const c = Number(slots.cost), sh = said;
+      const rows = [{ label: "買進價", value: fmtPrice(c), note: "" }, closeRow,
+                    { label: "漲跌", html: true, value: `<span class="${plClass(p - c)}">${escapeHtml(fmtSignedPct((p - c) / c * 100))}</span>`,
+                      note: `每股 ${p >= c ? "+" : "-"}${fmtPrice(aiR2(Math.abs(p - c)))} 元` }];
+      if (!sh) return card("用最近一個收盤試算", rows, `說張數就會算金額，例如「${fmtPrice(c)} 買的 2 張${name}」。`);
+      rows.push({ label: "損益", html: true, value: signed((p - c) * sh), note: `${fmtLots(sh)}・未扣手續費與稅` },
+                { label: "扣掉費用", html: true, value: signed((p - c) * sh - aiFee(c * sh) - aiFee(p * sh) - aiTax(p * sh, sid)), note: "買賣手續費＋證交稅" });
+      return card("用最近一個收盤試算", rows);
+    }
+    // 沒說算哪一種：給四顆最常用的
+    const run = (label, extra) => ({ label, act: "run", data: { intent: "calc", slots: Object.assign({ stock: sid }, extra), text: label } });
+    const chips = [run(`${name}漲停價多少`, { calc: "limit" }), run(`1 張${name}值多少`, { calc: "value", shares: SHARES_PER_LOT }),
+                   run(`1 張${name}的手續費`, { calc: "fee", shares: SHARES_PER_LOT })];
+    if (held && cost) chips.push(run(`${name}要多少才回本`, { calc: "breakeven" }));
+    return { head, sub: "要算哪一種？", rows: [closeRow], chips };
   },
   // 拒答與範圍外：固定句照舊，後面接「交給你自己的 AI」的籤（第十七節）
   assistantRefuse(slots, args, opts) {
