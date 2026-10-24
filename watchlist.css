@@ -173,6 +173,19 @@ body.has-bottom-nav .page-shell {
 	width: min(1140px, 100%);
 }
 
+/* 內容永遠不可以把頁面撐得比螢幕寬（v453，2026-10-24 Howard 在助手頁回報「分享那一格不見、
+   往下滑整排分頁按鈕都不見」）。Android Chrome 只要內容比螢幕寬一點點，就把 position:fixed 的
+   參考範圍（layout viewport）撐成「內容寬 × 等比例的高」，畫面卻還停在原本的寬度——底部導覽跟著
+   被拉寬拉低：最右邊那一格掉到畫面右緣外，捲動之後整條掉到畫面下方。
+   無頭 Edge 的手機模擬量過（390×844、塞一個 430 寬的元素）：layout viewport 變 441×955，
+   導覽在 x 0–441、y 893–955。
+   body／html 的 overflow-x: hidden 擋不住（同一個量測，照樣撐到 441）——要在一個不是根元素的
+   容器上 clip。clip 不會變成捲動容器，所以助手輸入列的 position: sticky 照常。
+   寬螢幕不需要：.page-shell 不再貼滿整個寬度，裁掉的會是卡片陰影。 */
+@media (max-width: 991.98px) {
+	.page-shell { overflow-x: clip; }
+}
+
 /* 通知關著的那一行（2026-09-27 放大，Howard）：它講的是「你現在收不到盤中訊號變化」，
    是整個產品的前提壞掉了，不是一句提示。所以字級從 0.78 拉到 0.98rem、加粗、
    上下留白一路從 0.65rem 拉到 1.7rem（Howard 兩次都說「再加大」——它要跟上下的
@@ -2110,9 +2123,14 @@ html.home-simple-only #home-filter { display: none !important; }
 .ai-card-body p:last-child { margin-bottom: 0; }
 .ai-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
 .ai-row:first-child { border-top: none; padding-top: 2px; }
-/* 標籤不換行、數值吃剩下的寬度（長文字如狀態列那一句會自己折行，標籤不會被擠成兩行） */
-.ai-row b { color: var(--text-0); font-weight: 600; flex: 0 0 auto; white-space: nowrap; }
-.ai-row i { font-style: normal; color: var(--text-muted); font-size: 0.86rem; white-space: nowrap; flex: 0 0 auto; }
+/* 標籤不被擠、數值吃剩下的寬度（長文字如狀態列那一句會自己折行，標籤不會被擠成兩行）。
+   v453：標籤與右邊的灰字都不可以寫死不換行——那會讓一列比卡片寬、把整頁撐寬（見 .page-shell 那條）。
+   2026-10-24 撐寬的是「股市雷達能做什麼」那張卡的「收盤價試算；買進、賣出、刪除，也能讀券商截圖」：
+   大字級在 360 寬撐到 440、特大字級連 412 寬都撐到 439。
+   標籤：不縮（短標籤照舊一行），只有長過四成的（自己取的進階訊號名稱）才折行。
+   灰字：放得下就一行；放不下才跟數值一起縮、折行。 */
+.ai-row b { color: var(--text-0); font-weight: 600; flex: 0 0 auto; max-width: 40%; overflow-wrap: anywhere; }
+.ai-row i { font-style: normal; color: var(--text-muted); font-size: 0.86rem; flex: 0 1 auto; overflow-wrap: anywhere; text-align: right; }
 .ai-row .ai-val { color: var(--text-0); font-variant-numeric: tabular-nums; flex: 1 1 auto; min-width: 0; text-align: right; word-break: break-word; }
 /* 列可以點（第十五節 B3）：列出來的那一檔／那一條本身就是入口；右邊一個 › 說它能點 */
 .ai-row.is-link { width: 100%; background: none; border: none; border-top: 1px solid var(--border); border-radius: 0;
@@ -2172,12 +2190,10 @@ html.home-simple-only #home-filter { display: none !important; }
 .ai-bar { display: flex; align-items: center; gap: 2px; min-height: 52px; padding: 5px 6px 5px 4px;
 	border-radius: 26px; border: 1px solid var(--border); background: var(--surface); }
 .ai-bar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.18); }
-/* 字級不可以小於 16px（2026-10-24 Howard 回報的連鎖反應的源頭）：
-   Android Chrome 與 iOS Safari 聚焦「小於 16px」的輸入框時會自己把整頁放大，
-   而放大狀態在鍵盤收起後還留著。放大之後 visual viewport 比 layout viewport 窄，
-   position:fixed 的底部導覽貼的是後者——最右邊那一格（分享）就被推出畫面右緣，
-   再往下滑整條導覽都離開看得見的範圍。助手的輸入框是全 App 唯一不在 modal 裡的
-   文字輸入框，所以只有助手那一頁踩得到。
+/* 字級不可以小於 16px（v452）：iOS Safari 聚焦「小於 16px」的輸入框時會自己把整頁放大，
+   而放大狀態在鍵盤收起後還留著；放大之後 position:fixed 的底部導覽會離開看得見的那一塊。
+   （v452 以為 Howard 2026-10-24 回報的「分享不見、導覽不見」就是這個，他升到 v452 之後照樣發生；
+   真正的原因是內容把頁面撐寬，見 .page-shell 那條。這一條對 iOS 仍然成立，所以留著。）
    1rem 在預設字級下是 14px（head 的 _fsMap.base），所以不能寫 1rem；用 max() 讓
    「大」「特大」兩種偏好（16／18px）照舊生效，只保證不低於 16px。
    不改 viewport 的 maximum-scale／user-scalable——那會連「使用者自己想放大」一起擋掉。 */
