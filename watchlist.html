@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="455">
+  <meta name="app-version" content="456">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=455" rel="stylesheet">
+  <link href="watchlist.css?v=456" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -703,7 +703,6 @@
     <section id="view-friends" class="app-view">
       <div class="view-head">
         <h2>分享中心</h2>
-        <span class="fr-usage" id="fr-usage" title="自選股＋好友分享給我（已接受的）。我分享出去的不算。"></span>
       </div>
 
       <!-- 邀請好友安裝（2026-10-05 Howard）：這一格的四頁都假設對方已經在用 App，
@@ -1344,9 +1343,7 @@
 <!-- ── 新增分享（分享 → 分享股票 → 我分享出去的 →「新增」開）──
      2026-10-05 Howard：從頁面裡接在清單下面的一張卡，改成跳出來的視窗。卡片排在清單下面，
      清單一長就要捲到底才看得到，按了「新增」像是沒反應。
-     最上面那一格（#fr-share-limit）只在「自選+分享」已達上限時出現，給兩條出路：管理自選股、
-     升級方案。它不擋送出——分享自己的自選股不佔用量（同一天定案）；這裡回答的是
-     「那我要怎麼再加自選股、再接受好友的分享」。
+     分享出去、好友分享給我的都不佔自選股額度（2026-10-05、2026-10-24），所以這個視窗不講額度。
      內層 id 沿用 fr-share-form：選對象、送出那些程式認的都是這個 id。 -->
 <div class="modal fade sheet-modal" id="frShareModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
@@ -1356,16 +1353,6 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
       </div>
       <div class="modal-body p-3" id="fr-share-form">
-        <div class="fr-hold" id="fr-share-limit" style="display:none">
-          <div id="fr-share-limit-text"></div>
-          <div class="fr-in-actions">
-            <button type="button" class="btn btn-sm btn-outline-light" id="fr-btn-limit-watch">管理自選股</button>
-            <!-- 2026-10-20 單一方案（免費）之後沒有「升級」這條路了：鈕還在（看得到額度與用量），
-                 但不再寫成升級。要再賣的時候改回「升級方案」。 -->
-            <button type="button" class="btn btn-sm btn-outline-light" id="fr-btn-limit-plan">方案與用量</button>
-          </div>
-        </div>
-
         <label class="fr-label" for="fr-share-stock">股票（從自選股選）</label>
         <select class="fr-input" id="fr-share-stock"></select>
         <div class="fr-hint" id="fr-share-preview"></div>
@@ -1403,7 +1390,7 @@
         </div>
         <p class="fr-hint">
           送出的是這檔目前的基礎訊號與進階訊號設定。持有股數與成本不會送出。
-          分享出去不佔你的「自選+分享」用量；對方接受後算在對方那邊。
+          分享出去不佔你的自選股額度，對方接受也不佔他的。
           一檔只會有一則分享：送出之後要增減對象、或把改過的設定同步出去，都在那一則上做。
         </p>
       </div>
@@ -3354,17 +3341,12 @@ function limitPromptHtml(kind, err) {
   const unit = kind === "watchlist" ? "檔" : "條";
   const lim = kind === "watchlist" ? "watch_limit" : "rule_limit";
   const next = nextPlanFor(kind);
-  // 自選股的額度是「自選＋好友分享給我」共用的，所以單講「最多 N 檔自選股」會讓
-  // 只放了 1 檔的人看不懂為什麼已達上限（Howard 2026-10-06）：有分享佔格子時把
-  // 兩邊的數字都寫出來，並多給一條出路（管理好友分享）。沒有分享就維持原本的一句話。
-  const share = kind === "watchlist" ? watchSlotsBreakdown() : null;
-  trackActivity("limit_hint", { kind, next: next ? next.code : "", shared: share ? share.shared : 0 });
+  // 2026-10-24 起好友分享給我的不佔自選股額度（migrate_share_free_quota.sql），
+  // 額度只算自己的自選股，一句話就講得清楚
+  trackActivity("limit_hint", { kind, next: next ? next.code : "" });
   let text;
   if (planState.ready) {
-    text = share
-      ? `${planState.plan.name}的 ${planLimitOf(kind)} 檔額度由自選股與好友分享給你的股票共用：`
-        + `目前自選股 ${share.own} 檔＋好友分享 ${share.shared} 檔＝${share.used} 檔，已達上限。`
-      : `${planState.plan.name}最多 ${planLimitOf(kind)} ${unit}${what}，已達上限。`;
+    text = `${planState.plan.name}最多 ${planLimitOf(kind)} ${unit}${what}，已達上限。`;
     if (next) text += ` ${next.name} NT$${next.price_twd}／月可放 ${next[lim]} ${unit}。`;
   } else {
     // 方案狀態沒載到但伺服器擋了：直接用伺服器的訊息
@@ -3375,35 +3357,7 @@ function limitPromptHtml(kind, err) {
   const btn = next
     ? `<button type="button" class="btn btn-xs btn-success btn-accent-sm ms-1" onclick="openPlanModal('${jsAttr(kind)}', '${jsAttr(next.code)}')">升級到${escapeHtml(next.name)} →</button>`
     : `<button type="button" class="btn btn-xs btn-outline-info ms-1" onclick="openPlanModal('${jsAttr(kind)}')">查看方案 →</button>`;
-  const shareBtn = share
-    ? ` <button type="button" class="btn btn-xs btn-outline-light ms-1" onclick="openSharedInFromLimit()">管理好友分享 →</button>`
-    : "";
-  return `<span class="text-warning plan-hint">${ICON_WARN}${escapeHtml(text)}</span> ${btn}${shareBtn}${trialHintHtml(kind)}`;
-}
-
-// 自選股額度的拆解：自選股幾檔、好友分享給我幾檔。沒有分享（或分享功能沒開、方案不限）
-// 回 null，讓所有文案退回「只有自選股」的講法——沒有分享的人不該看到「好友分享 0 檔」。
-// own 預設用畫面上的 watchlistRows 而不是伺服器的 usage.watchlist：新增自選股的預檢算的是
-// watchlistRows.length + frSlotsExtra()，兩邊用同一個數字才不會出現「說滿了但數字是 2／3」。
-// 方案面板傳 usage.watchlist 進來，那一頁的用量條用的是同一份數字，自己不能互相矛盾。
-function watchSlotsBreakdown(own) {
-  const shared = frSlotsExtra();
-  const limit = planLimitOf("watchlist");
-  if (!shared || limit === null) return null;
-  own = own === undefined ? watchlistRows.length : own;
-  return { own, shared, used: own + shared, limit };
-}
-
-// 上限提示裡的「管理好友分享」：分享分頁在底部導覽，開著的 modal（字卡、起步清單…）
-// 會整個蓋住它，所以跟方案頁一樣先收掉再跳（_closeOpenModals 上面的註解是同一個理由）。
-function openSharedInFromLimit() {
-  const jump = () => {
-    switchTab("friends");
-    frSwitchSeg("shares");
-    frSwitchShare("in");
-  };
-  if (_closeOpenModals("")) setTimeout(jump, 220);
-  else jump();
+  return `<span class="text-warning plan-hint">${ICON_WARN}${escapeHtml(text)}</span> ${btn}${trialHintHtml(kind)}`;
 }
 
 // 每個升級提示後面都接這一句（還沒體驗過的帳號才有）：上限提示、功能提示、
@@ -3676,7 +3630,7 @@ function planFeatureRows(p) {
   ].join("");
 }
 
-// note 是數字底下補的一行拆解（自選股額度由自選與好友分享共用，「3 / 3」看不出誰佔了幾格）
+// note 是數字底下補的一行說明（目前沒有人傳；2026-10-24 以前用來寫「自選幾檔＋好友分享幾檔」）
 function meterHtml(label, used, limit, note) {
   const unlimited = limit === null || limit === undefined;
   const pct = unlimited ? 0 : Math.min(100, Math.round(used / Math.max(1, limit) * 100));
@@ -3757,8 +3711,6 @@ function renderPlanModal(focus) {
   }
 
   const p = planState.plan, u = planState.usage || {};
-  // 自選股的額度拆解：用量條與提示句都讀這一份，這一頁自己的數字才不會互相矛盾
-  const slots = watchSlotsBreakdown(u.watchlist || 0);
   // 要選中的方案：上限提示或官網深連結指定的那個；已經是目前方案就不必再推
   const target = _planFocusCode && _planFocusCode !== p.code
     ? planState.plans.find(x => x.code === _planFocusCode) || null : null;
@@ -3766,12 +3718,10 @@ function renderPlanModal(focus) {
   let focusHint = {
     ai:          `${ICON_AI}AI 資料白話仍在開發，目前不包含在任何方案裡。`,
     ai_limit:    `${ICON_AI}今日 AI 使用次數已達上限，明天會重置。`,
-    // 額度是自選＋好友分享共用的，所以這裡也要寫拆解（與 limitPromptHtml 同一個理由）。
     // 出路那一句要看有沒有方案真的給得更多（同 alert_rules 那一條，2026-10-20 單一方案後
-    // 一個都沒有）：沒有的話不可以承諾「升級即可加入更多」。
+    // 一個都沒有）：沒有的話不可以承諾「升級即可加入更多」。好友分享不佔額度（2026-10-24），不提它
     watchlist:   `${ICON_STAR}自選股已達目前方案上限`
-      + (slots ? `：自選股 ${slots.own} 檔＋好友分享 ${slots.shared} 檔＝${slots.used}／${slots.limit} 檔（兩者共用同一份額度）` : "")
-      + (nextPlanFor("watchlist") ? "，升級即可加入更多。" : "。移除用不到的自選股、或不再接收某幾檔好友分享，就能空出格子。"),
+      + (nextPlanFor("watchlist") ? "，升級即可加入更多。" : "。移除用不到的自選股，就能空出格子。"),
     // 三階同額度時不說「升級即可新增更多」（2026-10-08）：沒有方案給得更多，
     // 出路是把用不到的那幾條刪掉或改寫。
     alert_rules: nextPlanFor("alert_rules")
@@ -3803,9 +3753,7 @@ function renderPlanModal(focus) {
         <span class="plan-current-price">${planPriceLabel(p)}</span>
       </div>
       <div class="plan-meters">
-        ${meterHtml(frSlotsExtra() ? `${ICON_STAR}自選股＋分享` : `${ICON_STAR}自選股`,
-                    (u.watchlist || 0) + frSlotsExtra(), p.watch_limit,
-                    slots ? `自選股 ${slots.own} 檔＋好友分享 ${slots.shared} 檔` : "")}
+        ${meterHtml(`${ICON_STAR}自選股`, u.watchlist || 0, p.watch_limit)}
         ${meterHtml(`${ICON_RULES}進階訊號`, u.rules || 0, p.rule_limit)}
         ${p.ai_enabled ? meterHtml(`${ICON_AI}今日 AI 次數`, u.ai_today || 0, p.ai_daily_limit) : ""}
       </div>
@@ -6943,7 +6891,7 @@ function openRuleEditorFromNudge() {
 // 第一次使用的人自選股是空的，而這個 App 的每一件事都從自選股長出來：沒有股票就沒有
 // 盤中訊號、沒有通知、首頁連一格都沒有。所以主動給他一份可以直接加入的清單，數量是
 // 方案上限的一半（免費 3→2、專業 10→5、旗艦 30→15）——另一半留給他自己想追的股票
-// 與好友分享的股票（分享與自選共用同一個額度，frSlotsExtra）。
+// 與好友分享的股票。
 //
 // 清單來自 web/largecap.json：市值由大到小的前 30 檔（largecap_pick.py，夜間用公開
 // 資料算出來的市值）。**不挑、不評分、不看漲跌、不看訊號**——市值排序是誰算都一樣的
@@ -6952,7 +6900,7 @@ function openRuleEditorFromNudge() {
 // 寫：「市值前段的大型股」、明寫「不是推薦名單」。
 //
 // 刻意**不自動加進自選股**（與同日上線的預設進階訊號不同）：訊號是設定，自選股是
-// 「我在看哪幾檔」，還會佔掉方案額度與分享的格子。所以一律要使用者自己按——
+// 「我在看哪幾檔」，還會佔掉方案額度。所以一律要使用者自己按——
 // 一顆「全部加入」加上每一檔的「＋加入」。
 const LARGECAP_URL = "largecap.json";
 const WATCH_SEED_SNOOZE_KEY = "cg-watch-seed-snooze-until";
@@ -7001,11 +6949,11 @@ function ensureLargecap() {
   return _largecapPromise;
 }
 
-// 剩下幾格可以加：方案上限扣掉自選股與好友分享（伺服器端 share_slots 才是真正的防線）
+// 剩下幾格可以加：方案上限扣掉自選股（好友分享不佔額度；伺服器端 trigger 才是真正的防線）
 function watchSeedRoomLeft() {
   const limit = planLimitOf("watchlist");
   if (!limit) return 0;
-  return Math.max(0, limit - watchlistRows.length - frSlotsExtra());
+  return Math.max(0, limit - watchlistRows.length);
 }
 
 // 推薦幾檔＝方案上限的一半，四捨五入（3→2、10→5、30→15），且不超過剩下的格子。
@@ -7046,7 +6994,7 @@ function watchSeedPicks(n) {
   return picks;
 }
 
-// 已經在追蹤的代號：自己的自選股，加上好友分享給我的（那幾檔也在跑訊號、也佔著額度）
+// 已經在追蹤的代號：自己的自選股，加上好友分享給我的（那幾檔也在跑訊號）
 function watchSeedAlreadyHave() {
   const have = new Set(watchlistRows.map(r => String(r.stock_id || "").trim()));
   for (const r of sharedInRows()) have.add(String(r.stock_id || "").trim());
@@ -7056,7 +7004,7 @@ function watchSeedAlreadyHave() {
 // 「第一次使用」＝一檔都沒有在追蹤。好友分享給我的也算在內：那些股票本來就在跑訊號，
 // 他不是空手，不需要起步清單。
 function watchSeedFirstUse() {
-  return planState.ready && watchlistRows.length === 0 && frSlotsExtra() === 0;
+  return planState.ready && watchlistRows.length === 0 && sharedInRows().length === 0;
 }
 
 function watchSeedSnoozed() {
@@ -9086,7 +9034,7 @@ function renderHome() {
     // 超出方案上限的那幾檔：不在 active_watchlist 裡，monitor 不追蹤、不通知。
     // 設定頁那一列掛「🔒 超出方案」，盤中與盤後以前什麼都沒有（Howard 2026-10-06）——
     // 那格數字永遠是 0，看起來像「今天沒事」，其實是根本沒在看。
-    // 2026-10-06 起分享也算在上限內：自己的列看 active_watchlist，分享的看 monitored_shares。
+    // 自己的列看 active_watchlist，分享的看 monitored_shares（2026-10-24 起分享不佔額度，正常都在監控中）。
     const locked = row._share ? !!row._share.locked : !isWatchRowActive(row);
     return { sid, name, active, counts, todayCount, total, standout, pending, locked,
              // 往左滑露出的「移除」要用它：自選列刪的是 watchlist 那一列（rowId），
@@ -9236,7 +9184,7 @@ function homeTileHtml(r) {
   // 資料的投影，所以移除刪的也是那一份，不是「只從雷達上拿掉」：
   //   · 自選那一格 → 刪自選股，走設定頁同一個確認框（openRemoveStockConfirm）
   //   · 好友分享那一格 → 移除那一則分享，跟分享頁的「移除」同一句確認、同一支 RPC
-  // 兩邊刪完都由 syncStockLists() 一起重抓（自選與分享共用同一份額度，見那支的註解）。
+  // 兩邊刪完都由 syncStockLists() 一起重抓（見那支的註解）。
   // tabindex="-1"：滑開才看得到的鈕不該進 Tab 順序；沒有觸控的人走「⋯」→ 設定 → 移除
   // （#stockActionModal 上就是這麼寫的），好友分享則在分享分頁那一則上。
   const del = r.shared
@@ -12764,7 +12712,7 @@ function renderRadarTimeline(sid) {
   // 超出方案上限（Howard 2026-10-06）：這一檔不在 active_watchlist 裡，monitor 從來沒有
   // 判斷過它的任何條件——「有 0 則訊號」是沒有人在算，不是今天沒事（同稽核 I13）。
   // 被鎖的那一列仍然可以點進來（過去在方案內的那幾天的紀錄還在），所以說明寫在這裡，
-  // 而不是把整列變成點不動。分享來的也算在上限內（2026-10-06），看的是 monitored_shares。
+  // 而不是把整列變成點不動。分享來的看 monitored_shares（2026-10-24 起不佔額度，正常都在監控中）。
   const lockedRow = shared ? !shareIsMonitored(shared.share_id) : (!!wl && !isWatchRowActive(wl));
   const lockedHtml = lockedRow
     ? ` · <span class="rtl-live-off">🔒 超出方案上限，沒有在監控中</span> <span class="hs-link" onclick="openPlanModal('watchlist')">升級方案 →</span>`
@@ -17290,10 +17238,9 @@ async function updateAlert(rowId, field, value, notifyOnError = true) {
 // 刪一檔自選股或移除一則分享之後要同步的東西（2026-10-10 Howard：「刪除需要整體同步」）。
 // 自選股與「好友分享給我」共用同一份額度（BILLING.md、FRIENDS.md），所以任何一邊少一檔，
 // 另一邊看到的東西也會跟著變：
-//   · 自選股刪一檔 → 空出一格：原本「🔒 超出自選股上限」的分享可能變成在監控中
 //     （share_state 的 monitored_shares），被擋成「保留中」（held=limit）的邀請也可能
 //     變成按一下就能接受；自選股本身超過上限時，另一列也會跟著解鎖（active_watchlist）。
-//   · 分享移除一則 → 用量那一行（自選+分享）、方案面板的拆解、加自選股的前端預檢都要跟著變。
+//   · 分享移除一則 → 首頁「好友分享」那幾列要跟著變。
 // 四個入口（首頁雷達往左滑、設定頁的 ✕、分享頁的「移除」、「不再接收」）都走這一支：
 // 各自記得要重抓哪幾份，遲早有一處會漏——2026-10-10 之前就漏了一處（設定頁移除一檔之後，
 // 分享那一側的鎖與用量要等下次進分享分頁才會更新）。
@@ -17370,8 +17317,8 @@ async function addStock() {
   name = getPreferredStockName(sid, name) || name;
 
   // 方案上限：先在前端擋（少一次必失敗的請求），伺服器端 trigger 是真正的防線
-  // 用量是「自選股＋好友分享給我」合計（frSlotsExtra）；我分享出去的不算
-  if (planState.ready && watchlistRows.length + frSlotsExtra() >= planState.plan.watch_limit
+  // 只算自選股：分享出去的、好友分享給我的都不佔額度（2026-10-24）
+  if (planState.ready && watchlistRows.length >= planState.plan.watch_limit
       && !watchlistRows.some(r => String(r.stock_id).trim() === sid)) {
     msgEl.innerHTML = limitPromptHtml("watchlist");
     return;
@@ -18683,7 +18630,7 @@ function fbLabelOf(code) {
 // CSS 類別不跟著改名——那些改了只有風險沒有好處。
 
 let frState   = null;    // lab_social_state()：好友、邀請、常用名單
-let frShare   = null;    // share_state()：我分享出去、好友分享給我、用量（自選+分享）
+let frShare   = null;    // share_state()：我分享出去、好友分享給我、用量（只算自選股）
 let frHandle  = null;    // lab_my_handle() → { handle, formatted }
 let frEnabled = false;   // 這個帳號能不能用
 let frIdMode  = null;    // "handle"（有代號表）｜"uuid"（舊 schema）
@@ -18721,7 +18668,7 @@ const FR_ERRORS = {
   no_recipients:      "請至少選一位好友或一個常用名單",
   not_in_watchlist:   "這檔不在你的自選股裡",
   expires_in_past:    "終止日期要在今天之後",
-  limit:              "「自選+分享」已達上限",
+  limit:              "自選股已達上限",
   // 一檔一則（2026-10-09 規格 2／4）：同一檔只有一份分享對象，要增減對象是在那一則上做。
   // 前端收到這個會直接帶使用者過去，所以這句話平常看不到。
   already_shared:     "這一檔已經在分享中，請在那一則上增減分享對象",
@@ -19779,16 +19726,6 @@ function frOk(res) {
   return true;
 }
 
-// 用量「自選+分享」：自選股之外，好友分享給我、已接受的那幾檔。
-// **我分享出去的不算**（2026-10-05 Howard）：能分享的只有自己的自選股，那一檔本來就算在
-// 自選股裡，分享出去不該再多算一次。
-// 加自選股的前端預檢與方案面板的用量條都要加上它——伺服器端的 trigger 才是真正的
-// 防線（share_slots），這裡只是讓畫面上的數字跟伺服器算的一致。
-function frSlotsExtra() {
-  const u = frShare && frShare.usage;
-  return u ? (Number(u.shared_in) || 0) : 0;
-}
-
 // ── 給首頁盤中雷達用的 ──
 // 「好友分享給我」裡已接受、還在進行中的那幾檔。形狀仿自選股的一列（stock_id／
 // stock_name），多一個 _share，首頁與字卡靠它知道這檔是分享來的、誰分享的、何時到期。
@@ -19821,9 +19758,8 @@ function sharedOutSids() {
   return _sharedOutCache.set;
 }
 
-// 好友分享的股票也算在自選股上限內（Howard 2026-10-06），超出的一樣鎖住：
-// 額度怎麼切是後端的事（monitor_shared_stocks：自己的自選股先佔，剩下的依接受先後），
-// share_state() 把結果當成 share_id 陣列回來。這裡只負責查表，不在瀏覽器重算排名——
+// 哪幾則分享在監控裡是後端的事（monitor_shared_stocks；2026-10-24 起好友分享不佔額度、
+// 已接受的全部進監控），share_state() 把結果當成 share_id 陣列回來。這裡只負責查表，不在瀏覽器重算排名——
 // 重算就是第二份真相，遲早跟 monitor 不一致（同 loadActiveIds 的理由）。
 // 拿不到那個鍵（舊版 DB、RPC 失敗）＝null＝一則都不鎖。
 function monitoredShareIds() {
@@ -20155,25 +20091,11 @@ function frRender() {
   // 紅點跟著畫面一起更新：只在 frReload() 裡呼叫的話，任何「換了資料但沒走
   // reload」的路徑都會讓導覽上的數字停在舊值。
   frRenderBadge();
-  frRenderUsage();
   frRenderFriends();
   frRenderGroups();
   frRenderSharesOut();
   frRenderSharesIn();
   frWatchSync();     // 資料換了：還在等待的畫面上就繼續問，不是就停
-}
-
-function frRenderUsage() {
-  const el = document.getElementById("fr-usage");
-  const u = frShare && frShare.usage;
-  if (!el) return;
-  if (!u) { el.textContent = ""; return; }
-  // 「9／10」看不出哪個是上限、哪個是已用（Howard 2026-10-05）：兩個數字都標上名字。
-  // 這一顆刻意不塞「自選 7＋分享 2」的拆解：它 margin-left:auto 貼在「分享中心」右邊、
-  // 又是 nowrap，再加 13 個字在 360px 的手機上會撐出去。拆解寫在會擋住人的那幾處
-  // （加自選股的上限提示、方案面板的用量條、「新增分享」視窗那一格），那裡有整行可用。
-  el.textContent = `自選+分享 總量 : ${u.limit} 已用 : ${u.used}`;
-  el.classList.toggle("is-full", u.used >= u.limit);
 }
 
 function frRenderFriends() {
@@ -20393,7 +20315,6 @@ function frRenderSharesIn() {
   const inc = (frShare && frShare.incoming) || [];
   const waiting = inc.filter(x => x.status === "pending" || x.status === "held");
   const accepted = inc.filter(x => x.status === "accepted");
-  const u = (frShare && frShare.usage) || {};
   const sid = s => escapeHtml(s.share_id);
 
   // 每一則共用的頭（整列可點，展開／收合）與下一層（設定摘要）。
@@ -20436,7 +20357,7 @@ function frRenderSharesIn() {
       box = `<div class="fr-hold">
           <div>你已經有這一檔，而且設定跟這則分享完全相同：</div>
           ${what}
-          <div class="fr-hint">直接接受會各算一格「自選+分享」用量；改成跟著這則分享走（對方之後更新，你也會跟著變）可以幫你移除原本的。</div>
+          <div class="fr-hint">可以兩個都留；改成跟著這則分享走（對方之後更新，你也會跟著變）可以幫你移除原本的。</div>
         </div>`;
       actions = `
         <button class="btn btn-sm btn-primary" data-fr="in-replace" data-id="${sid(s)}"
@@ -20444,14 +20365,6 @@ function frRenderSharesIn() {
                 data-from="${escapeHtml(s.from_name || "好友")}" data-holding="${c.has_holding ? "1" : ""}">${ICON_CHECK}移除並接受</button>
         <button class="btn btn-sm btn-outline-light" data-fr="in-accept" data-id="${sid(s)}">${ICON_CHECK}兩個都留</button>`;
     } else {
-      if (s.status === "held" && s.hold_reason === "limit") {
-        box = `<div class="fr-hold">
-            <div>「自選+分享」已達上限（${u.used}／${u.limit}）。移除一檔自選股或升級方案後，再按一次「接受」。</div>
-            <div class="fr-row">
-              <button class="btn btn-sm btn-outline-light" data-fr="go-watch">${ICON_GEAR}管理自選股</button>
-              <button class="btn btn-sm btn-outline-light" data-fr="go-plan">${ICON_STAR}升級方案</button>
-            </div></div>`;
-      }
       actions = `
         <button class="btn btn-sm btn-primary" data-fr="in-accept" data-id="${sid(s)}">${ICON_CHECK}接受</button>`;
     }
@@ -20493,7 +20406,7 @@ function frRenderSharesIn() {
     // 就是要可以接受收，跟我的進階訊號使用量無關」）。原本那句「其餘要先騰出額度」是
     // 從頭錯的——新帳號一登入就被預設種子發滿 6 條，每一則分享都會是 0／6 條生效。
     // 這句話剩下唯一一個用途：裡面有混和訊號（多條件）而我的方案沒有這個權限。
-    // 整則超出自選股上限的那一種由下面的 slotNote 講，同一則上不要講兩次。
+    // 整則沒進監控的那一種由下面的 slotNote 講，同一則上不要講兩次。
     // 也要我的方案真的沒有混和訊號才講。前端升版與 migration 之間有空窗（App 已經是新的、
     // 資料庫還在用舊的 rules_active 算額度），沒有這個條件的話那段空窗裡會對著一個
     // 混和訊號明明開著的人說「其餘是混和訊號」——寧願什麼都不說（2026-10-08 的教訓）。
@@ -20502,17 +20415,16 @@ function frRenderSharesIn() {
                        && !planAllows("mixed_signals"))
       ? `<div class="fr-hint fr-warn">進階訊號 ${s.rules_active}／${s.rules_total} 條生效，其餘是混和訊號`
         + `（一條放多個條件），需要${escapeHtml(cheapestPlanNameWith("mixed_signals"))}</div>` : "";
-    // 整則都沒進監控（分享也算在自選股上限內，2026-10-06）：接受的時候額度還夠，
-    // 後來降級或自選股變多才被擠出來。不講的話這一檔在首頁就只是「有 0 則訊號」。
+    // 整則都沒進監控。2026-10-24 起好友分享不佔額度、已接受的全部進監控，正常情況走不到這裡；
+    // 留著是因為 monitored_shares 是伺服器說了算——哪天真的有一則沒進去，不講的話首頁就只是「有 0 則訊號」。
     const slotNote = shareIsMonitored(s.share_id) ? ""
-      : `<div class="fr-hint fr-warn">🔒 超出自選股上限，這一檔沒有在監控中、不會通知。升級方案或減少自選股後恢復</div>`;
+      : `<div class="fr-hint fr-warn">🔒 這一檔目前沒有在監控中、不會通知</div>`;
     // 設定更新**不再需要確認**（2026-10-09 規格 2）：對方按了同步就即時生效，收件人無感。
-    // 剩下的唯一一種確認是「訊號被全部關掉」——那一則不會再通知任何事，卻還佔著一格用量，
+    // 剩下的唯一一種確認是「訊號被全部關掉」——那一則不會再通知任何事，
     // 留不留該由他決定，不是分享者單方面說了算。
     const ack = (s.needs_ack && s.empty)
       ? `<div class="fr-hold">
           <div>${escapeHtml(s.from_name || "好友")} 把這則分享的訊號全部關掉了，目前不會收到這一檔的任何通知。</div>
-          <div class="fr-hint">它還算在你的「自選+分享」用量裡。</div>
           <div class="fr-in-actions">
             <button class="btn btn-sm btn-primary" data-fr="in-ack" data-id="${sid(s)}">${ICON_CHECK}繼續留著</button>
             <button class="btn btn-sm btn-outline-light" data-fr="in-remove" data-id="${sid(s)}"
@@ -21314,24 +21226,7 @@ function frOpenShareForm(preSid) {
   document.getElementById("fr-share-forever").checked = true;
   document.getElementById("fr-share-msg").textContent = "";
   frUpdateSharePreview();
-  frRenderShareLimit();
   bootstrap.Modal.getOrCreateInstance(document.getElementById("frShareModal")).show();
-}
-
-// 「自選+分享」已達上限時，「新增分享」視窗最上面給兩條出路（管理自選股／升級方案）。
-// 不擋送出：分享自己的自選股不佔用量（2026-10-05 Howard），所以這裡講的是
-// 「想再加自選股或接受好友的分享」要怎麼騰出空間。
-function frRenderShareLimit() {
-  const u = frShare && frShare.usage;
-  const full = !!u && Number(u.limit) > 0 && Number(u.used) >= Number(u.limit);
-  frShow("fr-share-limit", full);
-  if (!full) return;
-  document.getElementById("fr-share-limit-text").textContent =
-    `「自選+分享」已達上限：自選股 ${u.watch || 0} 檔＋好友分享給你 ${u.shared_in || 0} 檔`
-    + `＝${u.used}／${u.limit} 檔（兩者共用同一份額度）。分享自己的自選股不佔用量，可以照常送出；`
-    // 有方案給得更多才說「或升級方案」（2026-10-20 單一方案之後沒有，說了就是假話）
-    + "要再加自選股或接受好友的分享，請先移除一檔自選股或一則分享"
-    + (nextPlanFor("watchlist") ? "，或升級方案。" : "。");
 }
 
 // 關掉「新增分享」視窗。then 等它真的關完才跑：接著要開另一個視窗（方案面板）時，
@@ -21614,7 +21509,7 @@ async function frAddToLiveShare(live, friends, groups) {
   }
 }
 
-// 會改到「自選+分享」那份額度的動作：收尾要連自選股那一側一起重抓（見下面的 syncStockLists）
+// 會改到股票集合的動作：收尾要連自選股那一側一起重抓（見下面的 syncStockLists）
 const SHARE_ACTS_STOCK = ["in-accept", "in-replace", "in-remove", "in-optout"];
 
 // ── 動作（事件委派；只認這一頁裡的按鈕）──
@@ -21627,8 +21522,6 @@ document.addEventListener("click", async e => {
   if (act === "share-open") { frOpenShare = frOpenShare === id ? null : id; frRenderSharesOut(); return; }
   if (act === "in-open")    { frOpenIn = frOpenIn === id ? null : id; frRenderSharesIn(); return; }
   if (act === "group-edit") { frOpenGroupForm(id); return; }
-  if (act === "go-watch")   { switchTab("watch"); return; }
-  if (act === "go-plan")    { openPlanModal(); return; }
 
   // 會毀掉東西的先問一次
   const confirms = {
@@ -21766,19 +21659,17 @@ document.addEventListener("click", async e => {
       case "in-ack":          frToast("已留著"); break;
       case "in-remove":       frToast("已移除"); break;
       case "in-replace":
-        if (res.held === "limit") frToast("「自選+分享」已達上限，沒有移除任何東西", true);
-        else frToast("已移除原有的，並接受這則分享"
+        frToast("已移除原有的，並接受這則分享"
                      + (res.rules_deleted ? `（一併移除 ${res.rules_deleted} 條只套用在這一檔的進階訊號）` : ""));
         break;
       case "in-accept":
         // 接受被擋不是失敗：邀請轉成保留，畫面上會出現原因與解法
-        if (res.held === "limit") frToast("「自選+分享」已達上限，邀請先保留著", true);
-        else if (res.held === "duplicate") frToast("你已經有設定完全相同的這一檔，邀請先保留著", true);
+        if (res.held === "duplicate") frToast("你已經有設定完全相同的這一檔，邀請先保留著", true);
         else frToast("已接受，這檔會出現在盤中「股票雷達」的「好友分享」那一格");
         break;
     }
-    // 接受／移除／不再接收／取代：股票的集合變了，而自選股與分享共用同一份額度——
-    // 自選列的鎖、用量與加自選股的預檢都要跟著變，所以收尾走 syncStockLists()
+    // 接受／移除／不再接收／取代：股票的集合變了（取代會刪掉自己那一列自選股）——
+    // 自選列、首頁的「好友分享」那幾列都要跟著變，所以收尾走 syncStockLists()
     // （首頁往左滑與設定頁的 ✕ 走的是同一支，見那裡的註解）。其餘動作（好友、常用名單、
     // 分享對象、同步設定）只動到分享這一側。
     // 兩條路都會呼叫 frSyncRadar()，分享的股票有進出時重抓雷達資料。
@@ -21816,8 +21707,6 @@ document.addEventListener("click", async e => {
   put('#fr-btn-new-share',    ICON_PLUS);
   put('#fr-btn-send-share',   ICON_SEND);
   put('#fr-btn-cancel-share', ICON_CLOSE);
-  put('#fr-btn-limit-watch',  ICON_GEAR);
-  put('#fr-btn-limit-plan',   ICON_STAR);
   put('#fr-btn-invite',       ICON_ADDUSER);
   put('#fr-btn-invite-send',  ICON_SEND);
   put('#fr-btn-invite-copy',  ICON_COPY);
@@ -21877,9 +21766,7 @@ document.addEventListener("click", async e => {
     const sid = _stockActionSid;
     closeStockActionMenu(() => goStockShare(sid));
   });
-  // 「取消」與右上的叉是 data-bs-dismiss，不必另外接。上限提示的兩顆：先關視窗再走
-  on("fr-btn-limit-watch", "click", () => frCloseShareForm(() => switchTab("watch")));
-  on("fr-btn-limit-plan", "click", () => frCloseShareForm(() => openPlanModal()));
+  // 「取消」與右上的叉是 data-bs-dismiss，不必另外接
   on("fr-btn-send-share", "click", guard(frSendShare));
   on("fr-share-stock", "change", frUpdateSharePreview);
   document.querySelectorAll('#fr-share-form .fr-seg button[data-fpick]').forEach(b =>
@@ -22965,10 +22852,10 @@ function aiFitCondParams(type, cond) {
   return notes;
 }
 function aiWatchFull() {
-  return !!(planState.ready && planState.plan && watchlistRows.length + frSlotsExtra() >= planState.plan.watch_limit);
+  return !!(planState.ready && planState.plan && watchlistRows.length >= planState.plan.watch_limit);
 }
 function aiWatchUsage() {
-  return planState.ready && planState.plan ? `${watchlistRows.length + frSlotsExtra()}／${planState.plan.watch_limit}` : String(watchlistRows.length);
+  return planState.ready && planState.plan ? `${watchlistRows.length}／${planState.plan.watch_limit}` : String(watchlistRows.length);
 }
 // 與 addStock() 同一條：預設訊號同一個物件、同一個埋點、加完重抓清單
 async function aiAddStockById(sid) {
@@ -23085,7 +22972,6 @@ function aiOpen(d) {
   if (d.alert !== undefined && d.alert !== null) { openAlertSettings(d.alert); return; }
   if (d.holdings) { openHoldingsSheet(String(d.holdings), d.mode ? String(d.mode) : undefined); return; }
   if (d.holdadd !== undefined && d.holdadd !== null) { openHoldingAdd(d.holdadd === true ? null : String(d.holdadd)); return; }
-  if (d.sharedIn) { openSharedInFromLimit(); return; }   // 好友分享給我的清單（額度不夠時要移除幾檔）
   if (d.tab === "friends" && (d.fseg || d.fadd)) {   // 分享分頁直接開到「加好友」的某一格（條碼／掃描／ID／搜尋）
     switchTab("friends");
     if (d.fseg) frSwitchSeg(String(d.fseg));
@@ -24168,7 +24054,7 @@ function aiWatchAddMany(sids) {
   const have = new Set((watchlistRows || []).map(w => String(w.stock_id || "").trim()));
   const todo = sids.filter(s => !have.has(s));
   if (!todo.length) return { text: `${sids.map(aiStockName).join("、")} 都已經在自選股裡。` };
-  const room = planState.ready && planState.plan ? Math.max(0, planState.plan.watch_limit - (watchlistRows.length + frSlotsExtra())) : todo.length;
+  const room = planState.ready && planState.plan ? Math.max(0, planState.plan.watch_limit - watchlistRows.length) : todo.length;
   if (room <= 0) return aiLimitCard("watchlist");
   const fit = todo.slice(0, room);
   const rows = sids.map(s => ({ label: aiStockName(s), value: s, note: have.has(s) ? "已在自選股" : fit.includes(s) ? "會加入" : "額度放不下" }));
@@ -24613,7 +24499,7 @@ function _importStageOf(plan, choices) {
 // 不在自選股的要先加入（持股記在自選股那一列上）；額度放不下的不套用，卡上寫明。
 // 選項改了要重算：plan 是重新算出來的，skipped 不會自己跟過來
 function _importFit(plan) {
-  let room = planState.ready && planState.plan ? planState.plan.watch_limit - (watchlistRows.length + frSlotsExtra()) : Infinity;
+  let room = planState.ready && planState.plan ? planState.plan.watch_limit - watchlistRows.length : Infinity;
   for (const it of plan.items) {
     it.skipped = false;
     if (it.status === "same" || it.inWatch) continue;
@@ -24623,22 +24509,20 @@ function _importFit(plan) {
 }
 
 // 額度不夠沒加入的那幾檔：要講明白、但一句就好（Howard 2026-10-24）。
-// Party 選了 12 張、10 格裡 5 格是好友分享佔的，7 檔加不進去——以前只有那幾列的小字，副標還寫「新增 12」，
-// 套用完也只說「已更新 5 檔」，他以為只成功了 5 張。after＝套用完那張卡（沒有逐列的名單，名字寫在句子裡）
+// Party 選了 12 張只進去 5 檔——以前只有那幾列的小字，副標還寫「新增 12」，套用完也只說「已更新 5 檔」。
+// （那一次是 10 格裡 5 格被好友分享佔掉；同一天改成好友分享不佔額度，額度只算自選股。）
+// after＝套用完那張卡（沒有逐列的名單，名字寫在句子裡）
 function _importQuotaNote(over, after) {
-  const shared = frSlotsExtra();
-  const free = `移除用不到的自選股${shared ? "或好友分享" : ""}`;
+  const free = "移除用不到的自選股";
   if (after) {
     const names = over.slice(0, 5).map(i => aiStockName(i.sid)).join("、") + (over.length > 5 ? ` 等 ${over.length} 檔` : "");
     return `自選股額度已滿，${over.length} 檔沒加入：${names}。${free}，空出格子後再傳一次截圖。`;
   }
   const lim = planLimitOf("watchlist");
-  return `自選股額度已滿（${lim} 檔${shared ? `，含好友分享 ${shared} 檔` : ""}），${over.length} 檔加不進去。${free}就能空出格子。`;
+  return `自選股額度已滿（${lim} 檔），${over.length} 檔加不進去。${free}就能空出格子。`;
 }
 function _importQuotaActs() {
-  const acts = [{ label: "移除自選股 ›", act: "open", data: { tab: "watch" } }];
-  if (frSlotsExtra()) acts.push({ label: "移除好友分享 ›", act: "open", data: { sharedIn: true } });
-  return acts;
+  return [{ label: "移除自選股 ›", act: "open", data: { tab: "watch" } }];
 }
 
 // 確認卡：一檔一列（新增／更新／不變），認不出的另外寫；截圖裡沒有的現有持股一律不動——
@@ -26086,7 +25970,7 @@ const ASSISTANT_ACTIONS = {
       rows.unshift(Object.assign({ label: "這幾天", value: `${n} 則訊號`, note: `上次來是 ${sinceDays} 天前` }, go("daily_brief", { period: "week" }, "這週的回顧")));
     }
     // 自選股額度只剩 1 檔（第十三輪）
-    if (planState.ready && planState.plan && planState.plan.watch_limit - ((watchlistRows || []).length + frSlotsExtra()) === 1) {
+    if (planState.ready && planState.plan && planState.plan.watch_limit - (watchlistRows || []).length === 1) {
       rows.push({ label: "自選股額度", value: "還剩 1 檔", note: aiWatchUsage(), act: "open", data: { plan: true, focus: "watchlist" } });
     }
     // 推播還沒開（第十三輪）：訊號送不到手機——一列＋啟用鍵（按鍵本身就是瀏覽器要的手勢）
