@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="437">
+  <meta name="app-version" content="438">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=437" rel="stylesheet">
+  <link href="watchlist.css?v=438" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -22367,7 +22367,7 @@ function aiErrorCard(e) {
 // 「打開進階訊號面板」才載的，所以沒開過面板的 session 裡它是空的——助手會把 6 條說成
 // 「還沒有進階訊號」，方案卡寫 0／6，額度滿了的出路鍵也會退化成「打開進階訊號」而不是
 // 「刪掉一條」（Howard 2026-10-18 在手機上碰到的）。問到進階訊號的那幾類，先補載一次。
-const AI_RULE_INTENTS = new Set(["rule_create", "rule_manage", "plan", "basic_signal_set"]);
+const AI_RULE_INTENTS = new Set(["rule_create", "rule_manage", "plan", "basic_signal_set", "daily_brief"]);   // 重點卡要看快到期的（第十一輪）
 let _aiRulesLoaded = false;
 async function aiEnsureRules() {
   if (_aiRulesLoaded || !state.userId) return;
@@ -23239,6 +23239,25 @@ async function aiStockFacts(sid) {
 const aiPosTxt = d => d == null ? "—" : Math.abs(d) < 0.05 ? "貼線" : d > 0 ? `上方 ${fmtPct(d)}%` : `下方 ${fmtPct(d)}%`;
 const aiFromHigh = f => f.h52 && f.price ? `離高點 ${f.price >= f.h52 ? "0" : "−" + fmtPct((f.h52 - f.price) / f.h52 * 100)}%` : "";
 
+// 「11/01・還有 8 天」（第十一輪）：日程那幾張卡共用；過去的日子只寫日期
+function aiDateWithCountdown(date, today) {
+  const d = String(date || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  const days = Math.round((Date.parse(`${d}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86400000);
+  return days > 0 ? `${mmdd(d)}・還有 ${days} 天` : days === 0 ? `${mmdd(d)}・今天` : mmdd(d);
+}
+// 一則通知是怎麼來的（第十一輪）：通知列的小字寫出來，「我沒設這個怎麼會收到」先在這裡有答案
+function aiInboxKind(r) {
+  const src = String((r && r.source) || "");
+  const t = String((r && r.title) || "");
+  if (src === "rule") return "進階訊號";
+  if (src === "reaction") return "好友回饋";
+  if (src === "post_market" || src === "postmarket") return "盤後整理";
+  if (/來自 .+ 的分享/.test(String((r && r.body) || "") + t) || (r && Array.isArray(r.share_ids) && r.share_ids.length)) return "好友分享";
+  if (/達到設定價格|達到自訂/.test(t) || /^target_/.test(String((r && r.signal) || ""))) return "到價提醒";
+  return src === "monitor" ? "基礎訊號" : "系統";
+}
+
 // 一檔的產業（universe 的 i）：沒有的寫「其他」，ETF 一律「ETF」
 function aiIndustryOf(sid) { return isEtfId(sid) ? "ETF" : String((universe[sid] || {}).i || "") || "其他"; }
 
@@ -24061,6 +24080,14 @@ const ASSISTANT_ACTIONS = {
     const ind = String((universe[sid] || {}).i || "");
     const indRow = typeof marketPayload !== "undefined" && marketPayload ? (msView(marketPayload).industries || []).find(x => x.ind === ind) : null;
     if (indRow) rows.push({ label: "族群強度", value: `${Number(indRow.score)}`, note: `${ind}・上漲 ${Number(indRow.up_pct)}%` });
+    // 有持股：這一天的漲跌換成持股市值的變化（第十一輪）——收盤價與漲跌幅都是收盤的，與持股頁同一個基準
+    const hold = holdingBySid().get(sid);
+    if (hold && Number(hold.shares) > 0 && q.changePct != null && Number(q.price) > 0) {
+      const prev = Number(q.price) / (1 + Number(q.changePct) / 100);
+      const delta = Math.round((Number(q.price) - prev) * Number(hold.shares));
+      rows.push({ label: "持股這一天", html: true, note: `${fmtLots(Number(hold.shares))}${day ? `・${day} 收盤` : ""}`,
+                  value: `<span class="${plClass(delta)}">${escapeHtml(fmtSignedMoney(delta))} 元</span>` });
+    }
     return {
       head: `${aiStockName(sid)} ${sid}`, sub: "",
       rows, actions: [aiOpenBtn(sid, "radar")],
@@ -24074,8 +24101,10 @@ const ASSISTANT_ACTIONS = {
     const price = (getQuote(sid) || getCloseQuote(sid) || {}).price;
     const lv = nearestLevels(sid, price);
     const rows = [];
-    if (lv.support != null) rows.push({ label: "支撐", value: fmtPrice(lv.support), note: `距 ${fmtPct(lv.supPct)}%` });
-    if (lv.resistance != null) rows.push({ label: "壓力", value: fmtPrice(lv.resistance), note: `距 ${fmtPct(lv.resPct)}%` });
+    // 百分比之外也寫還差幾元（第十一輪）：設到價提醒時要的是價位差
+    const gap = v => price > 0 ? `（${fmtPrice(Math.round(Math.abs(price - v) * 100) / 100)} 元）` : "";
+    if (lv.support != null) rows.push({ label: "支撐", value: fmtPrice(lv.support), note: `距 ${fmtPct(lv.supPct)}%${gap(lv.support)}` });
+    if (lv.resistance != null) rows.push({ label: "壓力", value: fmtPrice(lv.resistance), note: `距 ${fmtPct(lv.resPct)}%${gap(lv.resistance)}` });
     if (rows.length) {
       // 自選股這一條路以前只有支撐與壓力：均線與 52 週也是關卡（第五輪），讀全市場關卡檔
       const mlx = await aiMarketLevels();
@@ -24177,7 +24206,13 @@ const ASSISTANT_ACTIONS = {
       return { label: `${_mdOf(d)}（${_weekdayZh(d)}）`, value: sigs.length ? `${sigs.length} 則` : "—", note: names, act: "open", data: { sid, tab: "history" } };
     });
     const total = dates.reduce((n, d) => n + (((hist[d] && hist[d].signals) || []).length), 0);
-    return { head: `${name} ${sid}`, sub: missDay || `近 ${dates.length} 個交易日 ${total} 則訊號`, rows, actions: [aiOpenBtn(sid, "history", "看觀察紀錄 ›")] };
+    // 一句話總結（第十一輪）：這幾天最常出現的兩種
+    const cnt = new Map();
+    for (const d of dates) for (const g of ((hist[d] && hist[d].signals) || [])) cnt.set(labelOf(g.kind), (cnt.get(labelOf(g.kind)) || 0) + 1);
+    const top = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 2);
+    return { head: `${name} ${sid}`, sub: missDay || `近 ${dates.length} 個交易日 ${total} 則訊號`, rows,
+             text: top.length ? `最常出現：${top.map(([k, n]) => `${k}（${n} 次）`).join("、")}。` : "",
+             actions: [aiOpenBtn(sid, "history", "看觀察紀錄 ›")] };
   },
   async assistantEvents(slots) {
     const sid = slots.stock || null;
@@ -24194,7 +24229,7 @@ const ASSISTANT_ACTIONS = {
       if (slots.horizon === "upcoming") evs = evs.filter(e => String(e.event_date || "") > today);
       evs.sort((a, b) => String(b.event_date || "").localeCompare(String(a.event_date || "")));
       if (!evs.length) return { head: `${aiStockName(sid)} ${sid}`, text: `沒有${slots.event_type ? typeLabel(slots.event_type) : ""}${slots.horizon === "upcoming" ? "接下來的" : ""}資料。`, actions: [{ label: "開資料清單 ›", act: "open", data: { events: sid } }] };
-      const rows = evs.slice(0, 6).map(e => ({ label: typeLabel(e.event_type), value: String(e.title || "").slice(0, 28), note: String(e.event_date || ""), act: "open", data: { events: sid } }));
+      const rows = evs.slice(0, 6).map(e => ({ label: typeLabel(e.event_type), value: String(e.title || "").slice(0, 28), note: aiDateWithCountdown(e.event_date, today), act: "open", data: { events: sid } }));
       return { head: `${aiStockName(sid)} ${sid}`, sub: `${evs.length} 筆資料`, rows, actions: [{ label: "開資料清單 ›", act: "open", data: { events: sid } }] };
     }
     // 整份自選股＋好友分享的：接下來的日程（除權息、法說…）或今天的資料。分享股的事件不一定載過——先載再答
@@ -24208,7 +24243,7 @@ const ASSISTANT_ACTIONS = {
     all = upcoming ? all.filter(e => String(e.event_date || "") > today).sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)))
                    : all.filter(e => taipeiDateKey(e.created_at || e.event_date) === today);
     if (!all.length) return { text: upcoming ? "接下來 7 天沒有自選股的日程。" : "今天還沒有新資料。", actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
-    const rows = all.slice(0, 8).map(e => ({ label: aiStockName(e.sid), value: `${typeLabel(e.event_type)}：${String(e.title || "").slice(0, 22)}`, note: String(e.event_date || ""), act: "open", data: { events: e.sid } }));
+    const rows = all.slice(0, 8).map(e => ({ label: aiStockName(e.sid), value: `${typeLabel(e.event_type)}：${String(e.title || "").slice(0, 22)}`, note: aiDateWithCountdown(e.event_date, today), act: "open", data: { events: e.sid } }));
     return { head: upcoming ? "接下來的日程" : "今天的資料", sub: `${all.length} 筆`, rows, actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
   },
   async assistantScore(slots) {
@@ -24224,7 +24259,12 @@ const ASSISTANT_ACTIONS = {
       const rows = [{ label: "總分", value: fmtScoreValue(s.total_score), note: fmtScoreDelta(s.score_change) },
                     { label: "基本面", value: fmtScoreValue(s.fundamental_score_v2), note: fmtScoreDelta(s.fundamental_change) },
                     { label: "技術量能", value: fmtScoreValue(s.technical_volume_score), note: fmtScoreDelta(s.technical_change) }];
-      return { head: `${aiStockName(sid)} ${sid}`, sub: `每日評分 ${sharedReportData.date || ""}`, rows, actions: [{ label: "評分明細 ›", act: "open", data: { score: sid } }] };
+      // 這次的變化主要來自哪一項（第十一輪）：只寫數字比較大的那一邊，不下判斷
+      const parts = [["基本面", Number(s.fundamental_change)], ["技術量能", Number(s.technical_change)]].filter(([, v]) => Number.isFinite(v) && v !== 0);
+      const main = parts.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+      return { head: `${aiStockName(sid)} ${sid}`, sub: `每日評分 ${sharedReportData.date || ""}`, rows,
+               text: main && Number(s.score_change) ? `總分變化 ${fmtScoreDelta(s.score_change)}，變動比較大的是${main[0]}（${fmtScoreDelta(main[1])}）。` : "",
+               actions: [{ label: "評分明細 ›", act: "open", data: { score: sid } }] };
     }
     const sids = (watchlistRows || []).map(w => String(w.stock_id || "").trim()).filter(s => isStockId(s) && sharedReportData.investment_scores?.[s]);
     if (!sids.length) return aiNoData({ text: "自選股在今天的報告裡沒有評分。", actions: [{ label: "打開統計分頁 ›", act: "open", data: { tab: "scores" } }] });
@@ -24253,8 +24293,11 @@ const ASSISTANT_ACTIONS = {
     const limit = slots.all ? 30 : slots.sector ? 3 : 10;
     const rows = inds.slice(0, limit).map((i, n) => ({ label: `${n + 1}. ${i.ind}`, value: `${Number(i.score)}`, note: `上漲 ${Number(i.up_pct)}%・${Number(i.n)} 檔`, act: "open", data: { filter: "market" } }));
     const more = inds.length - rows.length;
+    // 問某個族群：順便寫出自選股裡屬於這個族群的那幾檔（第十一輪）
+    const mineIn = slots.sector && !miss ? aiSignalSids().filter(s => String((universe[s] || {}).i || "").includes(String(slots.sector))) : [];
     return { head: miss ? `市場強度（找不到「${miss}」這個族群）` : "市場強度",
              sub: `族群強度分數（0–100）・${rows.length}／${inds.length} 個族群${p.at ? ` · ${fmtTime(p.at)}` : ""}`, rows,
+             text: mineIn.length ? `你的自選股裡：${mineIn.slice(0, 6).map(aiStockName).join("、")}${mineIn.length > 6 ? ` 等 ${mineIn.length} 檔` : ""}。` : "",
              chips: more > 0 ? [{ label: `看全部 ${inds.length} 個族群`, act: "run",
                                   data: { intent: "market_strength", slots: { all: true }, text: "所有族群的排名" } }] : [],
              actions: [{ label: "打開市場強度 ›", act: "open", data: { filter: "market" } }] };
@@ -24355,6 +24398,19 @@ const ASSISTANT_ACTIONS = {
     const missing = sids.length - items.length;
     const sub = [`自選股 漲 ${n.up}・平 ${n.flat}・跌 ${n.down}${missing > 0 ? `（${missing} 檔還沒有今天的方向）` : ""}`,
                  mk ? `全市場 漲 ${mk.up}・平 ${mk.flat}・跌 ${mk.down}` : b ? `全市場上漲 ${Number(b.up_pct || 0)}%、下跌 ${Number(b.down_pct || 0)}%` : ""].filter(Boolean).join("；");
+    // 「誰漲最多／跌最多」（第十一輪）：盤中沒有幅度，但最近一個收盤有——照收盤漲跌幅排，卡上寫是哪一天的收盤
+    if (slots.top) {
+      // 只列真的漲（或跌）的：一檔都沒跌卻列出「跌最多：+0.5%」是誤導，那時候退回下面的方向清單
+      const ranked = sids.map(s => ({ s, q: getCloseQuote(s) }))
+        .filter(x => x.q && x.q.changePct != null && (dir === "down" ? x.q.changePct < 0 : x.q.changePct > 0))
+        .sort((a, b) => dir === "down" ? a.q.changePct - b.q.changePct : b.q.changePct - a.q.changePct);
+      if (ranked.length) {
+        const dayTxt = ranked[0].q.tradeDate ? String(ranked[0].q.tradeDate).slice(5).replace("-", "/") : "";
+        return { head: dir === "down" ? "自選股跌最多的" : "自選股漲最多的", sub: `以 ${dayTxt} 收盤的漲跌幅排・${sub}`,
+                 rows: ranked.slice(0, 10).map(x => ({ label: aiStockName(x.s), value: fmtChgHtml(x.q.changePct), html: true,
+                                                       note: fmtPrice(x.q.price), act: "open", data: { sid: x.s, tab: "radar" } })) };
+      }
+    }
     const rows = list.slice(0, 12).map(i => ({ label: aiStockName(i.sid), value: DIR_TXT[i.d], note: "", act: "open", data: { sid: i.sid, tab: "radar" } }));
     return { head, sub, rows, text: rows.length ? "" : `今天沒有${DIR_TXT[dir] || ""}的。`, actions: [{ label: "打開盤中頁 ›", act: "open", data: { tab: "home" } }] };
   },
@@ -24614,7 +24670,7 @@ const ASSISTANT_ACTIONS = {
     }
     const rows = list.slice(0, only ? 8 : 5).map(r => {
       const sid = String(r.stock_id || "").trim();
-      return { label: aiStockName(sid) || "系統", value: _titleWithoutSid(String(r.title || ""), sid), note: fmtTime(r.sent_at),
+      return { label: aiStockName(sid) || "系統", value: _titleWithoutSid(String(r.title || ""), sid), note: `${fmtTime(r.sent_at)}・${aiInboxKind(r)}`,
                act: "open", data: isStockId(sid) ? { sid, tab: "radar" } : { tab: "inbox" } };
     });
     const sub = wantMd ? (list.length ? `${dayTxt} ${list.length} 則` : `${dayTxt} 沒有${only ? "這一檔的" : ""}通知`)
@@ -24890,6 +24946,19 @@ const ASSISTANT_ACTIONS = {
       evs.sort((a, b) => a.d.localeCompare(b.d));
       rows.push(Object.assign({ label: "接下來 7 天", value: `${evs.length} 筆日程`, note: `${aiStockName(evs[0].s)} ${mmdd(evs[0].d)}` },
                               go("events", { horizon: "upcoming" }, "接下來有什麼日程")));
+    }
+    // 好友與分享邀請等你回應（第十一輪）
+    const pend = frEnabled && typeof frPendingCounts === "function" ? frPendingCounts() : null;
+    if (pend && pend.total > 0) {
+      rows.push({ label: "等你回應", value: [pend.friends ? `好友邀請 ${pend.friends}` : "", pend.shares ? `分享 ${pend.shares}` : ""].filter(Boolean).join("・"),
+                  note: "", act: "open", data: { tab: "friends" } });
+    }
+    // 3 天內到期的進階訊號（第十一輪）：到期那天過完就自動刪除，要延長的人來得及
+    const soon = (() => { const d = new Date(`${today}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 3); return taipeiDateKey(d); })();
+    const expiring = (alertRules || []).filter(r => { const u = ruleExpiresOn(r.conditions); return u && u >= today && u <= soon; });
+    if (expiring.length) {
+      rows.push(Object.assign({ label: "快到期", value: `進階訊號 ${expiring.length} 條`, note: `${ruleLabelOf(expiring[0]).slice(0, 12)} 到 ${mmdd(ruleExpiresOn(expiring[0].conditions))}` },
+                              go("rule_manage", { action: "list" }, "我有哪些進階訊號")));
     }
     const ruleHits = (inboxRows || []).filter(r => isToday(r.sent_at) && String(r.source || "") === "rule");
     if (ruleHits.length) {
