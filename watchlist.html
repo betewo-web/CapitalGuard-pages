@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="447">
+  <meta name="app-version" content="448">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=447" rel="stylesheet">
+  <link href="watchlist.css?v=448" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -23715,7 +23715,9 @@ function aiPrefsCard() {
            rows: [run("回答長短", p.short ? "簡短" : "完整", p.short ? `清單只列前 ${AI_SHORT_ROWS} 列` : "", { short: !p.short }, p.short ? "回答完整一點" : "回答短一點"),
                   run("股票代號", p.hideCode ? "不顯示" : "顯示", "卡片標題", { codes: p.hideCode }, p.hideCode ? "股票代號要顯示" : "不要顯示股票代號"),
                   { label: "稱呼", value: p.nick || "（用顯示名稱）", note: "說「叫我○○」就能改" },
-                  run("每天的重點卡", briefOff ? "關" : "開", "第一次打開助手時", { brief: briefOff }, briefOff ? "把每天的重點卡打開" : "不要每天自動出重點")] };
+                  run("每天的重點卡", briefOff ? "關" : "開", "第一次打開助手時", { brief: briefOff }, briefOff ? "把每天的重點卡打開" : "不要每天自動出重點"),
+                  // 筆記（第二十輪）：只存在這支手機，幾則一眼看得到
+                  { label: "筆記", value: `${aiNotes().length} 則`, note: "只存在這支手機", act: "run", data: { intent: "note", slots: { note_action: "list" }, text: "我的筆記" } }] };
 }
 
 // ── 學習與解釋（第十四輪）──────────────────────────────────────────────
@@ -23771,6 +23773,7 @@ function aiSelfHelp() {
   const run = (label, value, note, intent, slots, text) => ({ label, value, note, act: "run", data: { intent, slots, text } });
   return { head: "助手可以這樣用", sub: "點一列就是那一句",
            rows: [run("查", "報價、關卡、均線、訊號、日程", `例：${n}整理一下`, "stock_overview", { stock: sid }, `${n}整理一下`),
+                  run("看一段", "這週、這個月、今年以來、連漲幾天", `例：${n}這週漲多少`, "quote", { stock: sid, span: { week: 0 } }, `${n}這週漲多少`),
                   run("比", "兩三檔並排", `例：${n}和${aiStockName(other)}比較`, "compare", { stock: sid }, `${n}和${aiStockName(other)}比較`),
                   run("設", "到價提醒、基礎與進階訊號", `例：${n}的到價提醒`, "price_target_set", { stock: sid }, `${n}的到價提醒`),
                   run("記", "持股、券商截圖", "例：我的持股", "holdings", {}, "我的持股"),
