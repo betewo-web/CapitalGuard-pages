@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="460">
+  <meta name="app-version" content="461">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=460" rel="stylesheet">
+  <link href="watchlist.css?v=461" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1715,6 +1715,10 @@
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <h5 class="mb-0 fw-bold" id="rtl-name"></h5>
             <span id="rtl-tags"></span>
+            <!-- 問助手（第八輪）：這一檔的全貌，關掉字卡、切到助手、本機直接做。
+                 2026-10-25 從分頁列搬到股名這一行（Howard「按鈕大小顯示不一，看起來雜亂」）：
+                 它是動作不是分頁，混在分段控制裡就得讓五格長短不一才塞得下 -->
+            <button type="button" class="btn btn-sm btn-outline-light btn-ghost rtl-ask-btn ms-auto" onclick="aiAskAbout(radarTimelineSid, 'stock_overview', aiStockName(radarTimelineSid) + '整理一下')">問助手</button>
           </div>
           <div class="rtl-sub" id="rtl-sub"></div>
           <div class="rtl-tabs" role="tablist">
@@ -1726,8 +1730,6 @@
                     onclick="switchStockCardTab('history')">觀察紀錄</button>
             <button type="button" class="rtl-tab" id="rtl-tab-kline" role="tab"
                     onclick="switchStockCardTab('kline')">看 K 線</button>
-            <!-- 問助手（第八輪）：這一檔的全貌，關掉字卡、切到助手、本機直接做 -->
-            <button type="button" class="rtl-tab rtl-ask" onclick="aiAskAbout(radarTimelineSid, 'stock_overview', aiStockName(radarTimelineSid) + '整理一下')">問助手</button>
           </div>
         </div>
         <button type="button" class="btn-close ms-2" data-bs-dismiss="modal"></button>

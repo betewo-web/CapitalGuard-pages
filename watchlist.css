@@ -2120,7 +2120,8 @@ html.home-simple-only #home-filter { display: none !important; }
 /* 第八輪：導覽上的小點（今天的重點還沒看；橘＝唯一的強調色，不是數字所以不用紅底）、標題列的次數、字卡的「問助手」 */
 .bn-badge.bn-dot { min-width: 8px; width: 8px; height: 8px; padding: 0; top: 6px; left: calc(50% + 10px); background: var(--sig-orange); }
 .ai-quota { margin-left: auto; color: var(--sig-orange); font-size: 0.8rem; }
-.rtl-tab.rtl-ask { margin-left: auto; }
+/* 字卡的「問助手」：在股名那一行的最右邊（2026-10-25 從分頁列搬出來，見 .rtl-tab） */
+.rtl-ask-btn { padding: 3px 12px; font-size: 13.6px; line-height: 1.3; border-radius: 999px; white-space: nowrap; }
 .hd-ask { display: block; margin: 10px auto 0; }
 /* 追問沿用了剛才那一檔（「那支撐呢」）：小字寫在副標下面，同一張卡有「換一檔」籤 */
 .ai-card-ctx { color: var(--text-muted); font-size: 0.8rem; margin-top: 2px; }
@@ -4171,14 +4172,14 @@ html.home-simple-only #home-filter { display: none !important; }
 	background: rgba(146, 146, 163, 0.1);
 }
 
-/* 寬度依字數分（flex-basis: auto），不是五格等寬：2026-10-25 多了「事件」一格之後，等寬時
-   「盤中雷達」「觀察紀錄」在 360／390px 都被截掉（實測 54／60px 放不下 62px 的字），
-   而「事件」只要一半的寬度。依字數分之後五格在 360px 剛好放得下。 */
+/* 四格等寬。2026-10-25 多了「事件」一格時曾改成依字數分寬度（五格等寬會截字），
+   Howard 說長短不一看起來雜亂——真正的原因是「問助手」這個動作也擠在分頁列裡，
+   搬到股名那一行（.rtl-ask-btn）之後，四格等寬在 360px 就放得下。 */
 .rtl-tab {
 	position: relative;
-	flex: 1 1 auto;
+	flex: 1 1 0;
 	min-width: 0;
-	padding: 7px 3px;
+	padding: 7px 4px;
 	border: none;
 	border-radius: 9px;
 	background: transparent;
@@ -4189,6 +4190,12 @@ html.home-simple-only #home-filter { display: none !important; }
 	cursor: pointer;
 	white-space: nowrap;
 	transition: color 0.15s ease, background 0.15s ease;
+}
+
+/* 320px 的小手機：四格等寬 58px 放不下四個字（62px），字級小一點就放得下（實測）。
+   要寫在 .rtl-tab 之後：同一個權重，後面的才算數 */
+@media (max-width: 349px) {
+	.rtl-tab { font-size: 13px; padding: 7px 2px; }
 }
 
 .rtl-tab + .rtl-tab::before {
