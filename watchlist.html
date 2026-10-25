@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="458">
+  <meta name="app-version" content="459">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=458" rel="stylesheet">
+  <link href="watchlist.css?v=459" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -527,6 +527,7 @@
         <div class="inbox-toolbar">
           <button class="btn btn-sm btn-outline-light" onclick="markAllRead()">全部已讀</button>
           <button class="btn btn-sm btn-outline-danger" onclick="clearAlertHistory()">清空</button>
+          <button class="btn btn-sm btn-outline-light" id="np-entry-btn" style="display:none" onclick="openNoticePrefs()">公告設定</button>
         </div>
       </div>
       <div class="chip-row" id="inbox-filters">
@@ -534,6 +535,7 @@
         <button class="filter-chip" data-f="unread" onclick="setInboxFilter('unread')">未讀</button>
         <button class="filter-chip" data-f="important" onclick="setInboxFilter('important')">強訊號</button>
         <button class="filter-chip" data-f="stocks" onclick="setInboxFilter('stocks')">持股</button>
+        <button class="filter-chip" data-f="notice" onclick="setInboxFilter('notice')">公告</button>
       </div>
       <div id="inbox-migrate-hint" class="small mb-2" style="display:none;color:var(--sig-yellow)">
         ⚠ 已讀/未讀功能需先在 Supabase SQL Editor 執行 migrate_pwa_v2.sql
@@ -1536,6 +1538,30 @@
       <div class="modal-body p-3" id="events-modal-body">
         <p class="text-muted small">載入中…</p>
       </div>
+      <!-- 開放資料的授權以署名為生效條件（DATA_SOURCES.md）：重大訊息、交易所公告、日線衍生的事件都在這個面板裡 -->
+      <div class="view-source px-3 pb-2" id="events-modal-attribution">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 公告設定 Modal（NOTICES.md；migrate_notice_prefs.sql）──
+     三類各一個開關，存在帳號上（notice_prefs），換手機也一樣。開關一動就存，不用按完成：
+     這裡沒有「改到一半」的狀態（不像基礎訊號要一次套到好幾檔）。 -->
+<div class="modal fade sheet-modal" id="noticePrefsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content kline-modal-content">
+      <div class="modal-header py-2">
+        <h5 class="mb-0">公告設定</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+      </div>
+      <div class="modal-body p-3">
+        <div class="alert-group">
+          <div class="alert-group-head">公告與行事曆通知</div>
+          <div class="alert-list" id="np-list"></div>
+        </div>
+        <div id="np-msg" class="alert-msg"></div>
+        <p class="small text-muted mt-2 mb-0">每一則都只轉述官方發布的公告、時程與數字，最後一行寫資料來源。</p>
+      </div>
     </div>
   </div>
 </div>
@@ -1584,6 +1610,8 @@
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-report-btn" style="display:none" onclick="openDailyReportFromHistory()">開啟分析報告</button>
         <button type="button" class="btn btn-sm btn-outline-danger" id="alert-history-stop-rule-btn" style="display:none" onclick="stopRuleFromDetail()">停用此規則</button>
         <button type="button" class="btn btn-sm btn-outline-info" id="alert-history-open-plan-btn" style="display:none" onclick="openPlanFromHistory()">查看方案與用量</button>
+        <!-- 公告與行事曆通知（NOTICES.md）：不想收這一類就從這一則直接關，不必自己去找設定 -->
+        <button type="button" class="btn btn-sm btn-outline-light" id="alert-history-notice-prefs-btn" style="display:none" onclick="openNoticePrefsFromHistory()">公告設定</button>
         <!-- 意見回饋（FEEDBACK.md）：「這一則不準／看不懂」只有在看到它的那一刻寫得出來。
              刻意不在故事列每一則上再加一顆鈕（Howard 2026-10-10 第二輪拿掉對話鈕的那個理由）——
              故事列的每一則點下去就是這張詳情卡，所以這裡就是「某一則訊號」的那個面。 -->
@@ -2692,6 +2720,7 @@ function _collectTodayEvents() {
 
 const _EVENT_TYPE_LABEL = {
   announcement: "📢 重大訊息",
+  notice:       "🏛️ 交易所公告",   // exchange.attention / disposal / trading_halt（data/disclosures.py）
   dividend:     "💰 除權息",
   eps:          "📊 EPS",
   revenue:      "📈 月營收",
@@ -2846,6 +2875,20 @@ const _EVENT_SOURCE_PAGES = [
     page: sid => _YAHOO_TW(sid, "institutional-trading"), pageLabel: "Yahoo 股市 法人買賣" },
   { match: "twse.com.tw/rwd/zh/announcement/announcement", label: "證交所 公告",
     page: null, pageLabel: "原始資料 (JSON)" },
+  // 重大訊息與交易所公告（2026-10-25，data/disclosures.py）：都是 data.gov.tw 上的開放資料，
+  // 沒有逐檔的網頁版可連，連到資料集頁（那一頁寫著提供機關與授權方式）。
+  { match: "openapi.twse.com.tw/v1/opendata/t187ap04_L", label: "證交所 上市公司每日重大訊息",
+    page: () => "https://data.gov.tw/dataset/18415", pageLabel: "政府資料開放平臺" },
+  { match: "tpex.org.tw/openapi/v1/mopsfin_t187ap04_O", label: "櫃買中心 上櫃公司每日重大訊息",
+    page: () => "https://data.gov.tw/dataset/18418", pageLabel: "政府資料開放平臺" },
+  { match: "openapi.twse.com.tw/v1/announcement/notice", label: "證交所 當日公布注意股票",
+    page: () => "https://data.gov.tw/dataset/34000", pageLabel: "政府資料開放平臺" },
+  { match: "openapi.twse.com.tw/v1/exchangeReport/TWTAWU", label: "證交所 暫停交易證券",
+    page: () => "https://data.gov.tw/dataset/11677", pageLabel: "政府資料開放平臺" },
+  { match: "tpex.org.tw/openapi/v1/tpex_trading_warning_information", label: "櫃買中心 公布注意股票",
+    page: () => "https://data.gov.tw/dataset/11395", pageLabel: "政府資料開放平臺" },
+  { match: "tpex.org.tw/openapi/v1/tpex_disposal_information", label: "櫃買中心 處置有價證券",
+    page: () => "https://data.gov.tw/dataset/11396", pageLabel: "政府資料開放平臺" },
 ];
 
 // 「來源」本身就是連結，不再另外掛一段可見的目的地文字。
@@ -6283,11 +6326,18 @@ const SIGNAL_ICON_ART = {
   feedback: { chip: "#6f5cff", inner:
       '<g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
     + '<rect x="9" y="13" width="30" height="22" rx="3.5"/><path d="M10.5 15 24 26l13.5-11"/></g>' },
+  // 公告與行事曆（NOTICES.md）：一張公告——重大訊息摘要、美國發布、地震報告三類共用
+  notice: { inner:
+      '<g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+    + '<rect x="13" y="9" width="22" height="30" rx="3"/><path d="M18 17h12M18 23h12M18 29h7"/></g>' },
   // 其他來源：同心圓（一則通知）
   generic: { inner:
       '<circle cx="24" cy="24" r="10" fill="none" stroke="#fff" stroke-width="3"/>'
     + '<circle cx="24" cy="24" r="3.6" fill="#fff"/>' },
 };
+
+// 通知匣裡這三種 source 是後端 notify/notices.py 寫的；三者共用一個圖案與「公告」篩選籤。
+const NOTICE_SOURCES = ["notice_digest", "us_release", "quake"];
 
 // 通知匣每一列都有圖案：盤中訊號依 kind，其餘依 source。找不到就用通用圖案，
 // 從此不再退回純色圓點——方塊底色已經是等級，再放一顆同色點是重複資訊。
@@ -6302,6 +6352,7 @@ function iconArtKeyOf(row) {
   if (src === "post_market" || src === "postmarket") return "post_market";
   if (src === "post_info") return "post_info";
   if (src.startsWith("daily_report")) return "daily_report";
+  if (NOTICE_SOURCES.includes(src)) return "notice";
   return "generic";
 }
 
@@ -8451,6 +8502,9 @@ function filteredInboxRows() {
     // 橘那一級：漲停、跌停、跌破支撐、到達自訂價位、下跌方向的規則條件（ORANGE_KINDS＋後端規則等級）
     return inboxRows.filter(r => inferSeverity(r) === "orange");
   }
+  if (inboxFilter === "notice") {
+    return inboxRows.filter(r => NOTICE_SOURCES.includes(String(r.source || "")));
+  }
   if (inboxFilter === "stocks") {
     const holdSids = new Set(watchlistRows.filter(r => Number(r.shares) > 0).map(r => String(r.stock_id).trim()));
     const sids = holdSids.size ? holdSids : new Set(watchlistRows.map(r => String(r.stock_id).trim()));
@@ -8462,6 +8516,7 @@ function filteredInboxRows() {
 function renderInbox() {
   const listEl = document.getElementById("inbox-list");
   if (!listEl) return;
+  initNoticePrefs();   // 公告設定：後端有這個功能才露出入口（一個 session 只問一次）
   document.getElementById("inbox-migrate-hint").style.display = inboxSupportsRead ? "none" : "";
 
   if (inboxLoadError) {
@@ -8478,6 +8533,7 @@ function renderInbox() {
       unread: inboxSupportsRead ? "沒有未讀通知 🎉" : "已讀功能需先執行 migrate_pwa_v2.sql",
       important: "沒有漲跌停、跌破關鍵價位或達到設定價格的通知",
       stocks: "你的持股／自選股尚無通知",
+      notice: "還沒有公告與行事曆通知<br><span style='font-size:.85rem;opacity:.7'>自選股的重大訊息摘要、美國經濟數據與 FOMC 聲明、地震報告會出現在這裡</span>",
     };
     listEl.innerHTML = undo + `<div class="inbox-empty">${hints[inboxFilter] || hints.all}</div>`;
     return;
@@ -8664,7 +8720,8 @@ const INBOX_RADAR_SOURCES = ["monitor", "rule"];
 const INBOX_PLAN_SOURCES = ["trial"];
 // 來源徽章平常直接印 source（monitor／rule…）；新來源給個看得懂的字
 const INBOX_SOURCE_LABEL = { trial: "方案", share: "分享", reaction: "回饋", chat: "對話",
-                             feedback: "意見", post_info: "彙整" };
+                             feedback: "意見", post_info: "彙整",
+                             notice_digest: "公告摘要", us_release: "美國發布", quake: "地震報告" };
 
 // 這一則能不能在盤中雷達上指出來。**找得到對應的那一顆才回 true**——
 // 找不到就照舊開通知詳情，不要把人丟到一張寫著「沒有這天的紀錄」的空卡片上。
@@ -8757,6 +8814,8 @@ function openInboxDetail(rowId) {
 
   document.getElementById("alert-history-open-plan-btn").style.display =
     INBOX_PLAN_SOURCES.includes(source) ? "inline-flex" : "none";
+  document.getElementById("alert-history-notice-prefs-btn").style.display =
+    NOTICE_SOURCES.includes(source) && npEnabled !== false ? "inline-flex" : "none";
 
   // 意見回饋（FEEDBACK.md）：「回報這則」。我們自己的回覆那一類不給（回報一則回覆沒有意義）
   document.getElementById("fb-report-btn").style.display =
@@ -8820,6 +8879,100 @@ function openPlanFromHistory() {
   // 先收掉詳情卡再開方案面板：Bootstrap 疊兩層 modal 會留下吃掉點擊的背景遮罩
   bootstrap.Modal.getInstance(document.getElementById("alertHistoryDetailModal"))?.hide();
   openPlanModal("trial_notice");
+}
+
+// ── 公告與行事曆通知的個人開關（NOTICES.md；migrate_notice_prefs.sql）──────────
+const NP_ITEMS = [
+  { key: "digest",   label: "自選股重大訊息與交易所公告",
+    note: "每天早上 7:40 一則摘要：重大訊息、注意股票、處置、暫停交易" },
+  { key: "us_macro", label: "美國經濟數據與聯準會",
+    note: "CPI、就業報告、PPI 與 FOMC 聲明發布後通知；大型科技股的財報申報列在早上的摘要裡" },
+  { key: "quake",    label: "地震報告",
+    note: "科學園區所在縣市達震度 4 級時，轉發中央氣象署的地震報告" },
+];
+const NP_RPC_MISSING = Symbol("np_rpc_missing");
+let npEnabled = null;     // 後端有沒有這個功能；null＝還沒問過
+let _npTried = false;     // 這個 session 問過了沒
+let npPrefs = null;       // { digest, us_macro, quake }
+
+async function npRpc(fn, params) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: sbHeaders(state.accessToken),
+    body: JSON.stringify(params || {}),
+  });
+  const text = await r.text();
+  if (r.status === 404 && text.includes("PGRST202")) return NP_RPC_MISSING;
+  if (!r.ok) throw new Error(`RPC ${fn} HTTP ${r.status}`);
+  return text ? JSON.parse(text) : null;
+}
+
+// 打開通知匣時問一次（同一個 session 只問一次）。後端還沒跑 migration 就把入口藏起來。
+async function initNoticePrefs(force) {
+  if (_npTried && !force) return;
+  if (!state.userId) return;
+  _npTried = true;
+  try {
+    const res = await npRpc("notice_prefs_get", {});
+    if (res === NP_RPC_MISSING || !res || res.error) { npEnabled = false; }
+    else { npEnabled = true; npPrefs = res; }
+  } catch {
+    _npTried = false;     // 離線：這次不算問過
+  }
+  const btn = document.getElementById("np-entry-btn");
+  if (btn) btn.style.display = npEnabled ? "" : "none";
+}
+
+function npRenderList() {
+  const list = document.getElementById("np-list");
+  if (!list) return;
+  list.innerHTML = NP_ITEMS.map(item => `
+    <label class="alert-item">
+      <span class="alert-item-text"><span class="alert-item-label">${escapeHtml(item.label)}</span><span class="alert-item-note">${escapeHtml(item.note)}</span></span>
+      <span class="toggle-wrap form-check form-switch mb-0">
+        <input id="np-${item.key}" class="form-check-input" type="checkbox" ${npPrefs && npPrefs[item.key] === false ? "" : "checked"}
+               onchange="onNoticePrefToggle('${jsAttr(item.key)}', this.checked)">
+      </span>
+    </label>`).join("");
+}
+
+async function openNoticePrefs() {
+  const msg = document.getElementById("np-msg");
+  if (msg) msg.innerHTML = "";
+  npRenderList();
+  if (_closeOpenModals("noticePrefsModal")) setTimeout(_showNoticePrefs, 220);
+  else _showNoticePrefs();
+  // 開著的時候再拿一次最新的（另一台手機可能剛改過）
+  try {
+    const res = await npRpc("notice_prefs_get", {});
+    if (res && res !== NP_RPC_MISSING && !res.error) { npPrefs = res; npRenderList(); }
+  } catch { /* 離線就照記憶體裡那份 */ }
+}
+
+function _showNoticePrefs() {
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("noticePrefsModal")).show();
+}
+
+function openNoticePrefsFromHistory() {
+  // 先收掉詳情卡：Bootstrap 疊兩層 modal 會留下吃掉點擊的背景遮罩（同 openPlanFromHistory）
+  bootstrap.Modal.getInstance(document.getElementById("alertHistoryDetailModal"))?.hide();
+  setTimeout(openNoticePrefs, 220);
+}
+
+async function onNoticePrefToggle(key, checked) {
+  const msg = document.getElementById("np-msg");
+  if (msg) msg.innerHTML = '<span class="alert-msg-pending">儲存中…</span>';
+  try {
+    const res = await npRpc("notice_prefs_set", { [`p_${key}`]: !!checked });
+    if (!res || res === NP_RPC_MISSING || res.error) throw new Error(res && res.error ? res.error : "unavailable");
+    npPrefs = res;
+    if (msg) msg.innerHTML = '<span class="alert-msg-ok">已儲存</span>';
+    if (checked) queuePushPromptAfterSignal();
+  } catch (e) {
+    const box = document.getElementById(`np-${key}`);
+    if (box) box.checked = !checked;
+    if (msg) msg.innerHTML = `<span class="alert-msg-bad">儲存失敗：${escapeHtml(e.message)}</span>`;
+  }
 }
 
 function openStockFromDetail() {
