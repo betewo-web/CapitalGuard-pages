@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="456">
+  <meta name="app-version" content="457">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=456" rel="stylesheet">
+  <link href="watchlist.css?v=457" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -25354,32 +25354,48 @@ const ASSISTANT_ACTIONS = {
                rows: list.slice(0, 12).map(g => ({ label: g.ind, value: `${g.n} 檔`, note: total > 0 ? `佔 ${(g.value / total * 100).toFixed(1)}%` : "" })),
                actions: [pageBtn] };
     }
-    // 「哪一檔賺最多／賠最多／佔比最大」（第三輪）：照那個排，第一名寫在內文
-    let items = s.items.slice(), rankTxt = "";
-    if (slots.rank === "gain" || slots.rank === "loss") {
-      const up = slots.rank === "gain";
-      const withPl = items.filter(it => it.plPct != null).sort((a, b) => up ? b.plPct - a.plPct : a.plPct - b.plPct);
-      items = withPl.concat(items.filter(it => it.plPct == null));
-      const top = withPl[0];
-      rankTxt = !top ? "填了平均成本才排得出賺賠。"
-        : up ? `${top.plPct > 0 ? "" : "目前沒有賺錢的持股；"}報酬率最高的是 ${top.name}（${fmtSignedPct(top.plPct)}）。`
-             : `${top.plPct < 0 ? "" : "目前沒有賠錢的持股；"}報酬率最低的是 ${top.name}（${fmtSignedPct(top.plPct)}）。`;
-    } else if (slots.rank === "weight") {
-      items.sort((a, b) => (b.weight ?? -1) - (a.weight ?? -1));
-      if (items[0] && items[0].weight != null) rankTxt = `佔比最大的是 ${items[0].name}（${items[0].weight.toFixed(1)}%）。`;
+    // 「哪一檔賺最多／賠最多／佔比最大」（第三輪）：只回答被問的那一題——第一名寫在內文，列出前三名，
+    // 不再附整份持股（Howard 2026-10-25：問哪一檔賠最多卻貼出所有持股，不對）
+    if (slots.rank === "gain" || slots.rank === "loss" || slots.rank === "weight") {
+      const plNote = it => [it.pl != null ? `${fmtSignedMoney(it.pl)} 元` : "", it.value != null ? `市值 ${fmtMoney(it.value)}` : ""].filter(Boolean).join("・");
+      let list, head, text;
+      if (slots.rank === "weight") {
+        list = s.items.filter(it => it.weight != null).sort((a, b) => b.weight - a.weight);
+        head = "持股佔比最大的";
+        text = list[0] ? `佔比最大的是 ${list[0].name}（${list[0].weight.toFixed(1)}%）。` : "還沒有收盤價，算不出佔比。";
+        list = list.slice(0, 3).map(it => ({ label: it.name, value: `${it.weight.toFixed(1)}%`, note: it.value != null ? `市值 ${fmtMoney(it.value)}` : "",
+                                             act: "open", data: { holdings: it.sid } }));
+      } else {
+        const up = slots.rank === "gain";
+        const withPl = s.items.filter(it => it.plPct != null).sort((a, b) => up ? b.plPct - a.plPct : a.plPct - b.plPct);
+        // 問賺最多只列賺錢的、問賠最多只列賠錢的；一檔都沒有就說沒有，附最接近的那一檔
+        const hit = withPl.filter(it => up ? it.plPct > 0 : it.plPct < 0);
+        const top = withPl[0];
+        head = up ? "持股裡賺最多的" : "持股裡賠最多的";
+        text = !top ? "填了平均成本才排得出賺賠。"
+          : hit.length ? `${up ? "報酬率最高" : "報酬率最低"}的是 ${top.name}（${fmtSignedPct(top.plPct)}）。`
+          : up ? `目前沒有賺錢的持股；報酬率最高的是 ${top.name}（${fmtSignedPct(top.plPct)}）。`
+               : `目前沒有賠錢的持股；報酬率最低的是 ${top.name}（${fmtSignedPct(top.plPct)}）。`;
+        const missing = s.n - withPl.length;
+        if (top && missing > 0) text += `另有 ${missing} 檔沒填平均成本，沒有算進來。`;
+        list = (hit.length ? hit : withPl.slice(0, 1)).slice(0, 3).map(it => ({
+          label: it.name, value: `<span class="${plClass(it.pl)}">${escapeHtml(fmtSignedPct(it.plPct))}</span>`, html: true,
+          note: plNote(it), act: "open", data: { holdings: it.sid } }));
+      }
+      return { head, sub: dateTxt, rows: list, text, actions: [pageBtn] };
     }
     const rows = [
       { label: "總市值", value: s.value != null ? `${fmtMoney(s.value)} 元` : "—", note: s.priced < s.n ? `${s.n - s.priced} 檔沒有收盤價` : "" },
       { label: "投入成本", value: s.cost != null ? `${fmtMoney(s.cost)} 元` : "—", note: s.withPl && s.withPl < s.n ? `${s.withPl}／${s.n} 檔有成本` : "" },
       { label: "未實現損益", value: plHtml(s.pl, "填了平均成本才算得出來"), html: true, note: s.plPct != null ? fmtSignedPct(s.plPct) : "" },
-    ].concat(items.slice(0, 10).map(it => ({
+    ].concat(s.items.slice(0, 10).map(it => ({
       label: it.name, value: fmtLots(it.shares),
       note: [it.value != null ? `市值 ${fmtMoney(it.value)}` : "沒有收盤價", it.plPct != null ? fmtSignedPct(it.plPct) : ""].filter(Boolean).join("・"),
       act: "open", data: { holdings: it.sid },
     })));
     const more = s.n - Math.min(10, s.n);
     return { head: "我的持股", sub: `${s.n} 檔・${fmtLots(s.shares)}・${dateTxt}`, rows,
-             text: rankTxt + (more > 0 ? `還有 ${more} 檔沒列出來，在持股頁看得到全部。` : ""), actions: [pageBtn, addBtn] };
+             text: (more > 0 ? `還有 ${more} 檔沒列出來，在持股頁看得到全部。` : ""), actions: [pageBtn, addBtn] };
   },
   switchTab(slots, args) {
     const tab = String(args.tab || "home");
