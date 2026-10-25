@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="457">
+  <meta name="app-version" content="458">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=457" rel="stylesheet">
+  <link href="watchlist.css?v=458" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -9155,9 +9155,10 @@ function homeTileHtml(r) {
   // 剛加入、還沒拿到當日那列：那格數字還不是今天的結論，整個換成一句話。
   // 用同一個 .home-tile-stat 盒子（裡面的 <i> 本來就是灰色 nowrap），不必動 CSS。
   // 超出方案：數字會永遠是 0（monitor 不追蹤這幾檔），寫成 0 等於講錯話，
-  // 整格換成鎖——與設定頁那一列的「🔒 超出方案」同一句話
+  // 整格換成鎖——與設定頁那一列的「🔒 超出方案」同一句話。
+  // 好友分享的那一列不是方案的事（2026-10-24 起不佔額度，升級也解不開），只說沒在監控
   const lead = r.locked
-    ? `<span class="home-tile-stat home-tile-locked"><i>🔒 超出方案</i></span>`
+    ? `<span class="home-tile-stat home-tile-locked"><i>${r.shared ? "🔒 未監控" : "🔒 超出方案"}</i></span>`
     : r.pending
     ? `<span class="home-tile-stat"><i>資訊尚未同步</i></span>`
     : stat(r.todayCount, "⚡ 訊號", "sev-orange");
@@ -9196,7 +9197,8 @@ function homeTileHtml(r) {
             onclick="event.stopPropagation();openRemoveStockConfirm('${jsAttr(r.rowId)}')">${ICON_TRASH}<span>移除</span></button>`;
   return `<div class="sw-wrap home-tile-wrap">
       <div class="home-tile sw-face${r.todayCount ? " is-hot" : ""}${r.locked ? " is-locked" : ""}" title="${
-      r.locked ? ("超出目前方案的自選股上限，不再產生通知；" + overLimitRecoveryText("watchlist")) : ""}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
+      !r.locked ? "" : r.shared ? "這則分享目前沒有在監控中，不會通知"
+      : ("超出目前方案的自選股上限，不再產生通知；" + overLimitRecoveryText("watchlist"))}" onclick="openRadarTimeline('${jsAttr(r.sid)}', null, '${jsAttr(r.shared ? r.shared.share_id : "")}')">
       <div class="home-tile-head">
         <span class="home-tile-title"><span class="home-tile-name">${escapeHtml(r.name)}</span>${r.shared
           ? `<span class="home-tile-shared" title="好友分享給我">${ICON_SHARE}${escapeHtml(r.shared.from_name || "好友")}</span>`
@@ -9693,10 +9695,11 @@ async function goStockShare(sid) {
 function homeStatusText() {
   const sharedN = sharedInRows().length;
   const ownN = watchlistRows.length;
-  // 兩邊共用同一份額度，所以自選與好友分享各自的檔數都要看得見，後面再給合計；
+  // 好友分享不佔自選股額度（2026-10-24），兩個數字各寫各的、不給合計——
+  // 「共 10 檔」放在 10 格的方案旁邊，讀起來就是「額度滿了」。
   // 沒有分享的人只看到「自選 N 檔」，不該冒出一個「好友分享 0 檔」
   const n = sharedN
-    ? `自選（${ownN} 檔）＋好友分享（${sharedN} 檔）：共 ${ownN + sharedN} 檔`
+    ? `自選 ${ownN} 檔、好友分享 ${sharedN} 檔`
     : `自選 ${ownN} 檔`;
   let latestQuoteAt = null, latestAt = null;
   for (const iq of Object.values(intradayQuoteMap || {})) {
@@ -12714,9 +12717,11 @@ function renderRadarTimeline(sid) {
   // 被鎖的那一列仍然可以點進來（過去在方案內的那幾天的紀錄還在），所以說明寫在這裡，
   // 而不是把整列變成點不動。分享來的看 monitored_shares（2026-10-24 起不佔額度，正常都在監控中）。
   const lockedRow = shared ? !shareIsMonitored(shared.share_id) : (!!wl && !isWatchRowActive(wl));
-  const lockedHtml = lockedRow
-    ? ` · <span class="rtl-live-off">🔒 超出方案上限，沒有在監控中</span> <span class="hs-link" onclick="openPlanModal('watchlist')">升級方案 →</span>`
-    : "";
+  // 分享那一則沒在監控不是方案造成的：不寫「超出方案」、不給升級出口（升級也解不開）
+  const lockedShare = lockedRow && !!shared;
+  const lockedHtml = !lockedRow ? ""
+    : lockedShare ? ` · <span class="rtl-live-off">🔒 這則分享沒有在監控中</span>`
+    : ` · <span class="rtl-live-off">🔒 超出方案上限，沒有在監控中</span> <span class="hs-link" onclick="openPlanModal('watchlist')">升級方案 →</span>`;
   // 免費版（plans.live_radar=false）：說明這頁的價與時間軸停在什麼時候，並給一步升級的出口。
   // 不寫「資料異常」之類的字——它沒有異常，是方案就這樣。
   // 這一檔被鎖住時不寫這句：一行裡兩個「升級」連結，而且「沒有在監控中」已經把
@@ -12744,14 +12749,14 @@ function renderRadarTimeline(sid) {
   // 開盤那一段，手一放就被拉回去了）。換股票／換日期時 _rtlScrollKey 不同＝回到最右邊。
   const prevScroll = _rtlReadScroll(`${sid}|${date}`);
   document.getElementById("rtl-chart-wrap").innerHTML =
-    radarTimelineChartHtml(sid, intraday, ref, { past, covered, pending, locked: lockedRow, close: closeV });
+    radarTimelineChartHtml(sid, intraday, ref, { past, covered, pending, locked: lockedRow, lockedShare, close: closeV });
   _rtlApplyScroll(prevScroll);
   const headEl = document.getElementById("rtl-story-head");
   if (headEl) headEl.textContent = past ? `${_mdOf(date)} 盤中發生了什麼` : "盤中發生了什麼";
   // 分享鈕要能把這張圖重畫成一張圖片：它要的東西跟時間軸一模一樣（哪一檔、哪一天、
   // 那天的參考價位）。在這裡原封不動存一份，而不是等按下去再重算一次——重算就是
   // 第二份真相，而分享出去的圖片沒人會回來核對（unknown-treated-as-known 那一類）。
-  _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending, locked: lockedRow, close: closeV };
+  _rtlShareCtx = { sid, date, name, story, intraday, ref, past, covered, pending, locked: lockedRow, lockedShare, close: closeV };
   const storyOpts = { past, covered };
   storyOpts.rx = rxRadarRowsByEid(story, sid, date);   // 回饋貼圖：分享來的那幾顆掛一排貼圖（REACTIONS.md）
   // 分享者那一側：我收到的回饋掛回那一顆訊號底下（唯讀）。rxMarks 由下面那支在背景補
@@ -12973,7 +12978,7 @@ function radarTimelineChartHtml(sid, entries, iq, opts = {}) {
     }).join("");
     // 「還沒納入監控」不等於「今天沒有訊號」：剛加入的那幾分鐘沒有任何條件被判斷過，
     // 把缺資料說成「所有條件都沒成立」是同一類錯（稽核 I13；2026-10-02 光聖 6442）
-    const emptyLabel = !opts.past ? (opts.locked ? "沒有在監控中（超出方案）"
+    const emptyLabel = !opts.past ? (opts.locked ? (opts.lockedShare ? "沒有在監控中" : "沒有在監控中（超出方案）")
                                     : opts.pending ? "資訊尚未同步" : "今天還沒有訊號")
                      : (opts.covered ? "這天沒有訊號" : "沒有這天的紀錄");
     emptySvg = `<text class="rtl-empty" x="${(x0 + x1) / 2}" y="${midY + 4}" text-anchor="middle">${emptyLabel}</text>`;
@@ -13225,7 +13230,7 @@ function _sigShareWrap(text, maxW, fs, maxLines) {
 function signalShareSvg(ctx, e) {
   const { pad, gap, foot, minW, descLines } = SIGNAL_SHARE;
   const chart = radarTimelineChartHtml(ctx.sid, ctx.intraday, ctx.ref, {
-    past: ctx.past, covered: ctx.covered, pending: ctx.pending, locked: ctx.locked, close: ctx.close, export: true,
+    past: ctx.past, covered: ctx.covered, pending: ctx.pending, locked: ctx.locked, lockedShare: ctx.lockedShare, close: ctx.close, export: true,
     highlight: ctx.intraday.findIndex(x => rtlEntryId(x) === rtlEntryId(e)),
   });
   const textX = pad + 58;                                 // 圖示 34 ＋ 左右間距
@@ -17236,10 +17241,10 @@ async function updateAlert(rowId, field, value, notifyOnError = true) {
 }
 
 // 刪一檔自選股或移除一則分享之後要同步的東西（2026-10-10 Howard：「刪除需要整體同步」）。
-// 自選股與「好友分享給我」共用同一份額度（BILLING.md、FRIENDS.md），所以任何一邊少一檔，
-// 另一邊看到的東西也會跟著變：
-//     （share_state 的 monitored_shares），被擋成「保留中」（held=limit）的邀請也可能
-//     變成按一下就能接受；自選股本身超過上限時，另一列也會跟著解鎖（active_watchlist）。
+// 2026-10-24 起好友分享不佔自選股額度（FRIENDS.md「好友分享不佔額度」），兩邊的額度已經
+// 互不相干；仍要兩邊一起重抓，是因為兩份清單畫在同一個地方：
+//   · 自選股刪一檔 → 用量與 active_watchlist 跟著變（自選股本身超過上限時，另一列會解鎖）；
+//     「移除並接受」這類動作也會同時動到兩邊。
 //   · 分享移除一則 → 首頁「好友分享」那幾列要跟著變。
 // 四個入口（首頁雷達往左滑、設定頁的 ✕、分享頁的「移除」、「不再接收」）都走這一支：
 // 各自記得要重抓哪幾份，遲早有一處會漏——2026-10-10 之前就漏了一處（設定頁移除一檔之後，
@@ -19799,7 +19804,7 @@ async function removeSharedStock(shareId) {
     if (!frOk(res)) return;
     trackActivity("share_remove", { source: "radar" });
     frToast("已移除");
-    await syncStockLists();     // 分享少一則＝自選股那一側空出一格，兩邊一起重抓
+    await syncStockLists();     // 首頁的分享列與自選列畫在一起，兩邊一起重抓
   } catch (err) {
     frToast(String(err.message || err), true);
   }
@@ -25431,7 +25436,9 @@ const ASSISTANT_ACTIONS = {
     const full = room !== null && room <= 0;
     const planBtn = { label: SINGLE_PLAN_MODE ? "看方案與用量 ›" : "看方案與升級 ›", act: "open", data: { plan: true } };
     return { head: "方案與用量", sub: p.name || planTierLabel(),
-             rows: [{ label: "自選股", value: aiWatchUsage(), note: "含好友分享", act: "open", data: { tab: "watch" } },
+             // 好友分享不佔自選股額度（2026-10-24）：有分享的人才提一句，沒分享的人不多讀一句無關的話
+             rows: [{ label: "自選股", value: aiWatchUsage(), note: sharedInSids().length ? `好友分享 ${sharedInSids().length} 檔不佔額度` : "",
+                      act: "open", data: { tab: "watch" } },
                     { label: "進階訊號", value: `${(alertRules || []).length}／${p.rule_limit ?? "—"}`,
                       note: room === null ? "" : full ? "已達上限" : `還能設 ${room} 條`, act: "open", data: { rules: true } }],
              text: full ? aiLimitWayOut("alert_rules") : "",

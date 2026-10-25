@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 與 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）；每個請求帶 X-App-Version（S31） -->
-  <meta name="app-version" content="457">
+  <meta name="app-version" content="458">
   <title>管理儀表板 — CapitalGuard-股市雷達</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1045,7 +1045,8 @@ function renderAll(s) {
   const rc = so.recipients || {}, rx = so.reactions || {};
   document.getElementById("social-tiles").innerHTML = [
     tile("進行中的分享", fmtInt(so.shares_live), { text: `${fmtInt(so.sharers)} 人分享 · 期間新建 ${fmtInt(so.shares_range)}` }),
-    tile("接受中的收件", fmtInt(rc.accepted), { text: `${fmtInt(rc.users_accepted)} 人 · 待回應 ${fmtInt(rc.pending)} · 被額度擋住 ${fmtInt(rc.held)}`, cls: rc.held ? "warn" : "" }),
+    // 保留中（held）：2026-10-24 起好友分享不佔額度，已經沒有路會把收件擋成保留；有的話才講，而且要查
+    tile("接受中的收件", fmtInt(rc.accepted), { text: `${fmtInt(rc.users_accepted)} 人 · 待回應 ${fmtInt(rc.pending)}${rc.held ? ` · 保留中 ${fmtInt(rc.held)}` : ""}`, cls: rc.held ? "warn" : "" }),
     tile("拒絕／移除", fmtInt(Number(rc.declined || 0) + Number(rc.removed || 0)), { text: `拒絕 ${fmtInt(rc.declined)} · 移除 ${fmtInt(rc.removed)}` }),
     tile("分享訊號通知", fmtInt(so.share_alerts_range), { text: "期間內來源為好友分享的通知" }),
     tile("回饋貼圖累計", fmtInt(rx.total), { text: `期間 ${fmtInt(rx.range)} · ${fmtInt(rx.givers)} 人給、${fmtInt(rx.receivers)} 人收` }),
