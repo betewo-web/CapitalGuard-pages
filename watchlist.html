@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="459">
+  <meta name="app-version" content="460">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=459" rel="stylesheet">
+  <link href="watchlist.css?v=460" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -1702,8 +1702,8 @@
   </div>
 </div>
 
-<!-- ═══ 個股字卡：三個分頁 ═══
-     盤中雷達（預設，09:00–13:30 的訊號序列）／觀察紀錄（這一檔的長期紀錄＋近 10 個交易日）／看 K 線。
+<!-- ═══ 個股字卡：四個分頁 ═══
+     盤中雷達（預設，09:00–13:30 的訊號序列）／事件（近 90 天的 stock_events，2026-10-25）／觀察紀錄（這一檔的長期紀錄＋近 10 個交易日）／看 K 線。
      2026-09-22 三版（Howard）：K 線本來是另一張 modal，同一檔股票被拆成兩張卡片、還會互相蓋掉；
      現在併成一張——首頁方塊、雷達列、自選列的 K 線鈕都開這一張，只是進來時停在不同分頁。
      K 線的圖表要有可見容器才量得到高度，所以切到那一頁才載（switchStockCardTab）。 -->
@@ -1720,6 +1720,8 @@
           <div class="rtl-tabs" role="tablist">
             <button type="button" class="rtl-tab is-active" id="rtl-tab-radar" role="tab"
                     onclick="switchStockCardTab('radar')">盤中雷達</button>
+            <button type="button" class="rtl-tab" id="rtl-tab-events" role="tab"
+                    onclick="switchStockCardTab('events')">事件</button>
             <button type="button" class="rtl-tab" id="rtl-tab-history" role="tab"
                     onclick="switchStockCardTab('history')">觀察紀錄</button>
             <button type="button" class="rtl-tab" id="rtl-tab-kline" role="tab"
@@ -1741,6 +1743,14 @@
           <div id="cv-bar"></div>
           <div class="rtl-story-head" id="rtl-story-head">盤中發生了什麼</div>
           <div id="rtl-story"></div>
+        </div>
+
+        <!-- 事件（2026-10-25 Howard：插在盤中雷達與觀察紀錄之間）：這一檔近 90 天的 stock_events——
+             重大訊息、交易所公告（注意／處置／暫停交易）、法說會、月營收、價格與量能。
+             以前只在藏起來的盤後分頁與助手裡看得到（NOTICES.md）。內容與「事件彙整」面板同一套卡片。 -->
+        <div class="rtl-pane" id="rtl-pane-events" style="display:none">
+          <div id="rtl-events"></div>
+          <div class="view-source">資料來源：臺灣證券交易所、證券櫃檯買賣中心，依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第 1 版</a>提供。</div>
         </div>
 
         <!-- 分頁二：觀察紀錄（OBSERVATION.md，2026-10-23 Howard「像信用監控一樣追蹤股票」）——
@@ -11928,10 +11938,11 @@ function _sessionMinutesOf(ts) {
   return (part("hour") - 9) * 60 + part("minute");
 }
 
-// ── 個股字卡（三個分頁：盤中雷達／觀察紀錄／看 K 線）────────────────────────
+// ── 個股字卡（四個分頁：盤中雷達／事件／觀察紀錄／看 K 線）──────────────────
+// 「事件」2026-10-25 插在第二格（Howard）：重大訊息與交易所公告上線後，原本只有盤後分頁（藏著）看得到。
 // 2026-09-22 三版（Howard）：K 線從獨立 modal 併進來當第三個分頁。所有入口都開這一張卡，
 // 差別只在停在哪一頁：首頁方塊與雷達列停在「盤中雷達」，自選列的 K 線鈕停在「看 K 線」。
-const STOCK_CARD_TABS = ["radar", "history", "kline"];
+const STOCK_CARD_TABS = ["radar", "events", "history", "kline"];
 let stockCardTab = "radar";
 
 function openStockCard(sid, opts = {}) {
@@ -11974,10 +11985,58 @@ function switchStockCardTab(tab) {
   // K 線那一頁在桌機要寬（圖才有解析度）；手機本來就滿版
   document.getElementById("rtl-dialog")?.classList.toggle("is-kline", tab === "kline");
   if (tab === "history") trackActivity("radar_history_open", { stock: radarTimelineSid || "" });
+  if (tab === "events" && radarTimelineSid) renderStockCardEvents(radarTimelineSid);
   if (tab === "kline" && radarTimelineSid) {
     // plans.kline_enabled：免費版整頁換成說明卡、不載圖（也就不會為看不到的圖抓 K 線分片）
     if (!planAllows("kline_enabled")) renderKLineLocked();
     else { clearKLineLocked(); loadKLineIntoCard(radarTimelineSid); }
+  }
+}
+
+// ── 字卡的「事件」分頁 ────────────────────────────────────────────────────────
+// 自選股的事件早就在記憶體裡（loadStockEvents）。不在自選裡的那一檔（好友分享、雷達上點進來的）
+// 單獨問一次、只留在這一頁：**不能**呼叫 loadStockEvents([sid])——它會把清單換成只有這一檔，
+// 其餘自選股的事件跟著被丟掉。
+const _cardEventsExtra = {};
+
+async function _cardEventsOf(sid) {
+  if (stockEvents[sid]) return stockEvents[sid];
+  if (watchlistRows.some(r => String(r.stock_id).trim() === sid)) return [];   // 自選股：沒有就是沒有
+  if (_cardEventsExtra[sid]) return _cardEventsExtra[sid];
+  const { start, end } = _eventsWindow();
+  const cols = `${EVENT_LIST_COLS},content,ai_analysis,score_breakdown,metrics`;
+  const rows = await _eventsFetch(cols, [sid], { event_date: [`gte.${start}`, `lte.${end}`] });
+  _cardEventsExtra[sid] = (rows || []).filter(r => !isPausedEventSource(r));
+  return _cardEventsExtra[sid];
+}
+
+function _cardEventsHtml(sid, events) {
+  if (!events.length) {
+    return `<div class="events-empty-guide"><div class="events-empty-title">近 90 天沒有這一檔的事件</div>
+      <div class="events-empty-desc">重大訊息、交易所公告（注意股票、處置、暫停交易）、法說會、月營收、價格與量能的紀錄會列在這裡。</div></div>`;
+  }
+  return eventLegendHtml("", true) + renderEventSections(sid, events);
+}
+
+async function renderStockCardEvents(sid) {
+  const el = document.getElementById("rtl-events");
+  if (!el) return;
+  trackActivity("card_events_open", { stock: sid });
+  const isMine = !!stockEvents[sid];
+  if (!isMine) el.innerHTML = `<p class="text-muted small p-2">載入中…</p>`;
+  let events;
+  try { events = await _cardEventsOf(sid); }
+  catch { events = null; }
+  if (radarTimelineSid !== sid || stockCardTab !== "events") return;   // 等的時候換了股票或分頁
+  if (events === null) { el.innerHTML = `<p class="text-muted small p-2">暫時讀不到，稍後再試。</p>`; return; }
+  el.innerHTML = _cardEventsHtml(sid, events);
+  // 內文與指標只有打開才抓（同事件彙整面板），補到之後重畫
+  if (isMine) {
+    ensureEventDetails(sid)
+      .then(() => {
+        if (radarTimelineSid === sid && stockCardTab === "events") el.innerHTML = _cardEventsHtml(sid, stockEvents[sid] || []);
+      })
+      .catch(() => {});
   }
 }
 
@@ -25035,7 +25094,8 @@ const ASSISTANT_ACTIONS = {
   openStockCard(slots, args) {
     if (!slots.stock) return aiNeedStock();
     aiNav(() => openStockCard(slots.stock, { tab: args.tab || "radar" }));
-    const label = args.tab === "kline" ? "K 線" : args.tab === "history" ? "觀察紀錄" : "盤中雷達";
+    const label = args.tab === "kline" ? "K 線" : args.tab === "history" ? "觀察紀錄"
+      : args.tab === "events" ? "事件" : "盤中雷達";
     return { text: `已打開 ${aiStockName(slots.stock)} 的個股字卡（${label}）。`, actions: [aiOpenBtn(slots.stock, args.tab || "radar", "再開一次 ›")] };
   },
   async assistantQuote(slots) {

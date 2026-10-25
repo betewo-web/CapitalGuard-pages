@@ -4171,11 +4171,14 @@ html.home-simple-only #home-filter { display: none !important; }
 	background: rgba(146, 146, 163, 0.1);
 }
 
+/* 寬度依字數分（flex-basis: auto），不是五格等寬：2026-10-25 多了「事件」一格之後，等寬時
+   「盤中雷達」「觀察紀錄」在 360／390px 都被截掉（實測 54／60px 放不下 62px 的字），
+   而「事件」只要一半的寬度。依字數分之後五格在 360px 剛好放得下。 */
 .rtl-tab {
 	position: relative;
-	flex: 1 1 0;
+	flex: 1 1 auto;
 	min-width: 0;
-	padding: 7px 4px;
+	padding: 7px 3px;
 	border: none;
 	border-radius: 9px;
 	background: transparent;
