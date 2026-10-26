@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="463">
+  <meta name="app-version" content="464">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=463" rel="stylesheet">
+  <link href="watchlist.css?v=464" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5239,7 +5239,7 @@ function logout() {
     _reportCacheDelete(_inboxCacheKey()).catch(() => {});
     _reportCacheDelete(_eventsCacheKey()).catch(() => {});
     try { localStorage.removeItem(`cg-ai-log:${state.userId}`); } catch { /* 助手的對話（問過哪幾檔、持股數字）也是個人資料 */ }
-    // 助手的授權與操作紀錄（目錄 v37）：同一支手機換人登入，不能沿用上一個人給的授權
+    // 助手的操作紀錄（目錄 v37）；cg-ai-grants 是 v462／v463 限時授權留下的，v464 拿掉功能之後照樣清掉
     try { localStorage.removeItem(`cg-ai-grants:${state.userId}`); localStorage.removeItem(`cg-ai-actions:${state.userId}`); } catch { /* 存不了就沒有 */ }
   }
   localStorage.removeItem("sma_session");
@@ -22529,19 +22529,12 @@ async function aiRunConfirm(id) {
   let result;
   try { result = await spec.run(); } catch (e) { console.error("assistant confirm failed:", e); result = aiErrorCard(e); }
   delete aiPending[id];
-  // 依授權直接做的（目錄 v37）：結果卡上寫出來，並給一顆「取消這個授權」
-  if (spec.auto && result && !result.failed) {
-    result = Object.assign({}, result, { sub: `依你的授權直接做了（到 ${mmdd(spec.auto)} 止）`,
-      chips: (result.chips || []).concat([{ label: "取消這個授權", act: "run",
-        data: { intent: "permission", slots: { perm_action: "revoke", perm_intent: spec.grant }, text: "取消這個授權" } }]) });
-  }
   aiReplaceCard(id, result || { text: "完成。" });
   aiOutcome(spec.log_id, null, !!result && !result.failed);
   if (result && !result.failed) aiActionLogAdd(spec, result);   // 操作紀錄（目錄 v37）
   renderAssistant();
   aiFlushNav();   // run() 裡排的跳頁，結果卡畫出來之後才跳
-  // 一句話好幾件事：這一件做完了，做下一件（目錄 v37）。授權直接做的那一件由 aiNextStep 自己接下去
-  if (_aiSteps && !spec.auto) { await aiNextStep(); aiAfterRun(); }
+  if (_aiSteps) { await aiNextStep(); aiAfterRun(); }   // 一句話好幾件事：這一件做完了，做下一件（目錄 v37）
 }
 
 function aiCancelConfirm(id) {
@@ -22667,27 +22660,9 @@ function aiCollapseConfirm(id) {
   _aiSteps = null;
 }
 
-// ── 限時授權與操作紀錄（目錄 v37，2026-10-26）───────────────────────────────────
-// 「接下來 7 天設到價提醒不用再問我」：那幾種確認卡在期限內由助手直接按下去（結果卡照樣有復原、寫在操作紀錄）。
-// 只有這四種可以授權——都只動自己的資料、按一下就能改回去；目錄裡標 risk: "low"（test_assistant_catalog 釘住兩邊一致）。
-// 移除自選股、持股、刪除、分享、好友這些（risk: "high"）一律照舊出確認卡，授權也蓋不過。
-// 授權存在這支手機（cg-ai-grants:<user>，登出就刪）；最長 30 天，到期那一天過完就不算。
-const AI_GRANTABLE = { price_target_set: "到價提醒", basic_signal_set: "基礎訊號開關", watch_add: "加入自選股", rule_create: "新增進階訊號" };
-const AI_GRANT_DAYS = 7, AI_GRANT_MAX_DAYS = 30;
-function _aiGrantKey() { return `cg-ai-grants:${state.userId || ""}`; }
-function aiGrants() {
-  let g = {};
-  try { g = JSON.parse(localStorage.getItem(_aiGrantKey()) || "{}") || {}; } catch { g = {}; }
-  const today = taipeiDateKey(new Date()), out = {};
-  for (const [k, v] of Object.entries(g)) if (AI_GRANTABLE[k] && /^\d{4}-\d{2}-\d{2}$/.test(String(v)) && String(v) >= today) out[k] = String(v);
-  return out;
-}
-function aiSaveGrants(g) {
-  try { localStorage.setItem(_aiGrantKey(), JSON.stringify(g)); return true; } catch { return false; }
-}
-function aiGrantUntil(intent) { return AI_GRANTABLE[intent] ? (aiGrants()[intent] || "") : ""; }
-
-// 操作紀錄：助手做過的每一筆寫入（確認卡按下去、或依授權直接做的），最多 100 筆、30 天，存在這支手機（登出就刪）。
+// ── 操作紀錄（目錄 v37；限時授權 v464 移除）──────────────────────────────────────
+// 每一次寫入都先出確認卡、按了才做（Howard 2026-10-26：「把限時授權功能移除，都讓用戶確認即可」）。
+// 操作紀錄：確認卡按下去的每一筆寫入，最多 100 筆、30 天，存在這支手機（登出就刪）。
 // 復原鍵是函式，存不進去：App 重開之前那一筆的「復原」還按得到，之後就寫「要改回去直接跟我說」
 const AI_ACTIONS_MAX = 100, AI_ACTIONS_DAYS = 30;
 // 這一次開 App 的代號：復原鍵的 id（u1、u2…）每次開 App 從頭數，舊紀錄的 id 會撞到這一次新的復原——只認同一次開 App 的
@@ -22704,75 +22679,26 @@ function aiActionLogAdd(spec, result) {
   const undo = (result.chips || []).find(ch => ch && ch.act === "undo");
   const plain = v => String(v == null ? "" : v).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
   const entry = { at: new Date().toISOString(), intent: String(spec.intent || ""), head: plain(spec.head).slice(0, 40),
-                  text: plain(result.text || result.head).slice(0, 80), auto: spec.auto ? 1 : 0, undo: undo ? undo.data.id : null, sess: AI_SESSION };
+                  text: plain(result.text || result.head).slice(0, 80), undo: undo ? undo.data.id : null, sess: AI_SESSION };
   try { localStorage.setItem(_aiActionsKey(), JSON.stringify([entry].concat(aiActionLog()).slice(0, AI_ACTIONS_MAX))); } catch { /* 存不了就沒有紀錄 */ }
 }
-function aiPermLabel(intent) { return AI_GRANTABLE[intent] || intent; }
 async function aiPermission(slots) {
-  const action = String(slots.perm_action || "list");
-  // 哪幾種：給授權要說清楚（沒說就問）；取消沒說哪一種＝全部取消
-  const pi = String(slots.perm_intent || "");
-  const which = pi === "all" || (!pi && action === "revoke") ? Object.keys(AI_GRANTABLE) : AI_GRANTABLE[pi] ? [pi] : [];
   const run = (label, s) => ({ label, act: "run", data: { intent: "permission", slots: s, text: label } });
-  if (action === "log") {
-    const log = aiActionLog();
-    if (!log.length) return { head: "助手做過的事", text: `最近 ${AI_ACTIONS_DAYS} 天助手沒有替你改過任何設定。` };
-    return { head: "助手做過的事", sub: `最近 ${AI_ACTIONS_DAYS} 天・${log.length} 筆・存在這支手機`,
-             rows: log.slice(0, 20).map(x => {
-               const live = x.undo && x.sess === AI_SESSION && aiUndo[x.undo];
-               return { label: `${fmtTime(x.at, taipeiDateKey(new Date(x.at)) !== taipeiDateKey(new Date()))}${x.auto ? "・依授權" : ""}`,
-                        value: x.text || x.head, note: live ? "復原 ›" : "", cls: "ai-note-row",
-                        act: live ? "undo" : null, data: live ? { id: x.undo } : null };
-             }),
-             text: "「復原 ›」那幾筆在這次打開 App 之前都還按得到；其他的要改回去，直接跟我說（例如「台積電的到價提醒取消」）。",
-             chips: Object.keys(aiGrants()).length ? [run("我給了哪些授權", { perm_action: "list" })] : [] };
+  // 「接下來 7 天不用再問我」：v464 起沒有免確認這回事，講清楚（不出任何設定）
+  if (String(slots.perm_action || "log") !== "log") {
+    return { text: "助手的每一次寫入都會先出確認卡，按了才做；這一項不能關掉。", muted: true,
+             chips: [run("助手做過哪些事", { perm_action: "log" })] };
   }
-  const grants = aiGrants();
-  if (action === "revoke") {
-    const had = which.filter(k => grants[k]);
-    if (!had.length) return { text: which.length === 1 ? `${aiPermLabel(which[0])}本來就沒有授權，照常會先問你。` : "現在沒有任何授權，每一次都會先問你。" };
-    const before = Object.assign({}, grants);
-    for (const k of had) delete grants[k];
-    aiSaveGrants(grants);
-    trackActivity("assistant_grant", { op: "revoke", n: had.length });
-    return { text: `已取消：${had.map(aiPermLabel).join("、")}。之後每一次都會先問你。`,
-             chips: [aiUndoChip(async () => { aiSaveGrants(Object.assign(aiGrants(), Object.fromEntries(had.map(k => [k, before[k]])))); return "已把授權改回原本的。"; })] };
-  }
-  if (action === "grant") {
-    if (!which.length) {
-      return { head: "要授權哪一種？", text: "只有這四種可以不用確認、直接做（都能復原）；移除自選股、持股、刪除、分享一律還是會先問。",
-               chips: Object.entries(AI_GRANTABLE).map(([k, lb]) => run(`${lb}不用問我`, { perm_action: "grant", perm_intent: k, duration: slots.duration })) };
-    }
-    const asked = slots.duration && Number(slots.duration.days) > 0 ? Math.round(Number(slots.duration.days))
-      : slots.duration && Number(slots.duration.sessions) > 0 ? Math.round(Number(slots.duration.sessions) * 7 / 5) : AI_GRANT_DAYS;
-    const days = Math.min(AI_GRANT_MAX_DAYS, Math.max(1, asked));
-    const until = aiDaysAhead(days - 1);   // 含今天共 N 天
-    return aiConfirmCard({
-      head: "授權助手直接做？", sub: "期限內這幾種不再出確認卡，按一下就能改回去",
-      rows: [{ label: "範圍", value: which.map(aiPermLabel).join("、"), note: "" },
-             { label: "期限", value: `到 ${mmdd(until)} 止`, note: asked > AI_GRANT_MAX_DAYS ? `最長 ${AI_GRANT_MAX_DAYS} 天` : `${days} 天` },
-             { label: "照樣會有", value: "結果卡與復原", note: "也記在操作紀錄" },
-             { label: "一律還是會問", value: "移除自選股、持股、刪除、分享、好友", note: "" }],
-      mainLabel: "授權",
-      run: async () => {
-        const g = aiGrants(), before = Object.assign({}, g);
-        for (const k of which) g[k] = until;
-        if (!aiSaveGrants(g)) return { text: "這支手機沒辦法存授權（私密瀏覽或儲存空間被關掉）。", muted: true, failed: true };
-        trackActivity("assistant_grant", { op: "grant", n: which.length, days });
-        return { text: `已授權到 ${mmdd(until)}：${which.map(aiPermLabel).join("、")}不再出確認卡。`,
-                 chips: [run("取消所有授權", { perm_action: "revoke", perm_intent: "all" }),
-                         aiUndoChip(async () => { aiSaveGrants(before); return "已把授權改回原本的。"; })] };
-      },
-    });
-  }
-  // 我給了哪些授權
-  const keys = Object.keys(grants);
-  if (!keys.length) return { head: "助手的授權", text: "現在沒有任何授權：每一次寫入都會先出確認卡。",
-                             chips: [run("接下來 7 天到價提醒不用問我", { perm_action: "grant", perm_intent: "price_target_set" })] };
-  return { head: "助手的授權", sub: "期限內這幾種直接做、不出確認卡",
-           rows: keys.map(k => ({ label: aiPermLabel(k), value: `到 ${mmdd(grants[k])} 止`, note: "點了取消", act: "run",
-                                  data: { intent: "permission", slots: { perm_action: "revoke", perm_intent: k }, text: `取消${aiPermLabel(k)}的授權` } })),
-           chips: [run("取消所有授權", { perm_action: "revoke", perm_intent: "all" }), run("助手做過哪些事", { perm_action: "log" })] };
+  const log = aiActionLog();
+  if (!log.length) return { head: "助手做過的事", text: `最近 ${AI_ACTIONS_DAYS} 天助手沒有替你改過任何設定。` };
+  return { head: "助手做過的事", sub: `最近 ${AI_ACTIONS_DAYS} 天・${log.length} 筆・存在這支手機`,
+           rows: log.slice(0, 20).map(x => {
+             const live = x.undo && x.sess === AI_SESSION && aiUndo[x.undo];
+             return { label: fmtTime(x.at, taipeiDateKey(new Date(x.at)) !== taipeiDateKey(new Date())),
+                      value: x.text || x.head, note: live ? "復原 ›" : "", cls: "ai-note-row",
+                      act: live ? "undo" : null, data: live ? { id: x.undo } : null };
+           }),
+           text: "「復原 ›」那幾筆在這次打開 App 之前都還按得到；其他的要改回去，直接跟我說（例如「台積電的到價提醒取消」）。" };
 }
 
 // ── 一句話好幾件事（目錄 v37）：「把聯發科加進自選，再設跌到 900 提醒我」───────────────────
@@ -23492,7 +23418,6 @@ async function aiRuleCreateMany(slots, conds) {
     head: sid && !aiRowOf(sid) ? "加入並建立進階訊號？" : "建立進階訊號？",
     sub: sid && !aiRowOf(sid) ? `${name} 不在自選股，會先加入` : `${built.length} 個條件一條訊號`,
     rows, mainLabel: dup ? "還是建立" : "建立",
-    grant: !dup && !fitted.length && (!sid || aiRowOf(sid)) ? "rule_create" : null,   // 限時授權
     alt: { label: "改一下", act: "open", data: { rules: true, prefill: { name: ruleName, stock_id: sid, conds: built } } },
     run: async () => {
       if (sid && !aiRowOf(sid)) await aiAddStockById(sid);
@@ -24447,10 +24372,6 @@ async function aiRun(intent, slots, opts) {
   else aiOutcome(opts && opts.log_id, null, true);
   renderAssistant();
   aiFlushNav();   // handler 裡排的跳頁：卡先畫出來，再跳
-  // 限時授權（目錄 v37）：這一張確認卡是授權範圍內的那一種，就替他按下去——結果卡照樣有復原
-  const pend = card && card._id ? aiPending[card._id] : null;
-  const until = pend && pend.grant ? aiGrantUntil(pend.grant) : "";
-  if (until) { pend.auto = until; await aiRunConfirm(card._id); }
 }
 
 // 沒說哪一檔：自選股做成籤，點一下就等於把股票名接上這一類的問法——不叫人重打
@@ -24798,9 +24719,9 @@ function aiPrefsCard() {
                   run("每天的重點卡", briefOff ? "關" : "開", "第一次打開助手時", { brief: briefOff }, briefOff ? "把每天的重點卡打開" : "不要每天自動出重點"),
                   // 筆記（第二十輪）：只存在這支手機，幾則一眼看得到
                   { label: "筆記", value: `${aiNotes().length} 則`, note: "只存在這支手機", act: "run", data: { intent: "note", slots: { note_action: "list" }, text: "我的筆記" } },
-                  // 限時授權（目錄 v37）：幾種不用確認、到哪一天
-                  { label: "授權", value: Object.keys(aiGrants()).length ? `${Object.keys(aiGrants()).length} 種` : "沒有", note: "不用確認就直接做的",
-                    act: "run", data: { intent: "permission", slots: { perm_action: "list" }, text: "我給了哪些授權" } }] };
+                  // 操作紀錄（目錄 v37）：助手替你做過的寫入
+                  { label: "操作紀錄", value: `${aiActionLog().length} 筆`, note: "助手替你做過的",
+                    act: "run", data: { intent: "permission", slots: { perm_action: "log" }, text: "助手做過哪些事" } }] };
 }
 
 // ── 學習與解釋（第十四輪）──────────────────────────────────────────────
@@ -24863,11 +24784,11 @@ function aiSelfHelp() {
                   run("算", "市值、漲跌停、手續費、回本", `例：${n}漲停價多少`, "calc", { stock: sid, calc: "limit" }, `${n}漲停價多少`),
                   run("筆記", "記下要看的事，那天放進重點", "例：我的筆記", "note", { note_action: "list" }, "我的筆記"),
                   run("整理", "今天的重點、這週回顧、明天", "例：今天有什麼重點", "daily_brief", {}, "今天有什麼重點"),
-                  // 目錄 v37：大盤、健檢、交易紀錄、授權
+                  // 目錄 v37：大盤、健檢、交易紀錄、操作紀錄
                   run("大盤", "加權指數的收盤、這週漲跌", "例：大盤這週漲多少", "index_quote", { span: { week: 0 } }, "大盤這週漲多少"),
                   run("健檢", "持股集中度、重複或過期的訊號", "例：幫我做持股健檢", "checkup", {}, "幫我做一次全面健檢"),
                   run("帳", "交易紀錄、已實現損益、報稅整理", "例：今年的已實現損益", "trades", { trade_view: "realized", span: { ytd: true } }, "今年的已實現損益"),
-                  run("授權", "幾種小動作不用每次確認（限時）", "例：我給了哪些授權", "permission", { perm_action: "list" }, "我給了哪些授權"),
+                  run("紀錄", "助手替你做過、改過的設定", "例：我剛剛改了什麼", "permission", { perm_action: "log" }, "我剛剛改了什麼"),
                   { label: "問", value: "名詞與算法", note: "例：什麼是逼近壓力", act: "gloss", data: { text: "什麼是逼近壓力" } },
                   { label: "不做", value: "買賣建議、走勢研判、代為下單", note: "建議與研判可以交給你自己的 AI" }] };
 }
@@ -25079,7 +25000,7 @@ const AI_WHATS_NEW = { since: 462, items: [
   ["健檢", "持股集中在哪、低於成本沒設提醒、重複或過期的進階訊號、股利預估", "checkup", {}],
   ["交易紀錄", "記買賣時一起留下：已實現損益、手續費與證交稅、報稅整理、匯出", "trades", {}],
   ["一句話好幾件", "「把聯發科加進自選，再設跌到 900 提醒我」「跌破月線而且爆量通知我」", "", null],
-  ["限時授權", "「接下來 7 天到價提醒不用再問我」，之後一樣能復原", "permission", { perm_action: "list" }],
+  ["操作紀錄", "「我剛剛改了什麼」：助手替你做過的每一筆，這次打開 App 之前的還能復原", "permission", { perm_action: "log" }],
 ] };
 function aiMaybeAutoCards() {
   if (currentTab !== "ai" || !state.userId || aiBusy || !aiEnabled || !planState.ready) return;
@@ -27401,7 +27322,6 @@ const ASSISTANT_ACTIONS = {
       rows: [{ label: "股票", value: `${name} ${sid}`, note: universe[sid]?.i || "" },
              { label: "自選股", value: aiWatchUsage(), note: "加入後 +1" }],
       mainLabel: "加入",
-      grant: "watch_add",   // 限時授權（目錄 v37）
       run: async () => {
         await aiAddStockById(sid);
         return { text: `已加入 ${name}，基礎訊號預設全開。`, actions: [aiOpenBtn(sid, "radar")], chips: aiAfterAddChips(sid) };
@@ -27530,8 +27450,6 @@ const ASSISTANT_ACTIONS = {
       head: row ? "設定到價提醒？" : "加入並設定到價提醒？",
       sub: [row ? "" : `${name} 不在自選股，會先加入`, inferred].filter(Boolean).join("；"),
       rows, mainLabel: "設定",
-      // 限時授權（目錄 v37）：只有單純的那一種——已經在自選股、價位沒有穿過、方向不是猜的
-      grant: row && !inferred && !rows.some(r => r.label === "注意" || r.act) ? "price_target_set" : null,
       alt: row ? { label: "改一下", act: "open", data: { alert: row.id } } : null,
       run: async () => {
         const r = row || await aiAddStockById(sid);
@@ -27600,7 +27518,6 @@ const ASSISTANT_ACTIONS = {
                   { label: "改成", value: on ? "開" : "關", note: row && field ? `目前 ${row[field] ? "開" : "關"}` : "" }];
     return aiConfirmCard({
       head: `${on ? "打開" : "關掉"}基礎訊號？`, rows, mainLabel: on ? "打開" : "關掉",
-      grant: "basic_signal_set",   // 限時授權（目錄 v37）
       alt: { label: "改一下", act: "open", data: { alert: row ? row.id : ALERT_SCOPE_ALL } },
       run: async () => {
         const patch = {};
@@ -27700,7 +27617,6 @@ const ASSISTANT_ACTIONS = {
       head: sid && !aiRowOf(sid) ? "加入並建立進階訊號？" : "建立進階訊號？",
       sub: sid && !aiRowOf(sid) ? `${name} 不在自選股，會先加入` : "",
       rows, mainLabel: dup ? "還是建立" : "建立",
-      grant: !dup && !fitted.length && (!sid || aiRowOf(sid)) ? "rule_create" : null,   // 限時授權（目錄 v37）
       alt: { label: "改一下", act: "open", data: { rules: true, prefill: { name: desc.slice(0, 60), stock_id: sid, cond } } },
       run: async () => {
         if (sid && !aiRowOf(sid)) await aiAddStockById(sid);
