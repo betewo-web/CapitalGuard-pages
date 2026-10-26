@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="461">
+  <meta name="app-version" content="462">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=461" rel="stylesheet">
+  <link href="watchlist.css?v=462" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -5239,6 +5239,8 @@ function logout() {
     _reportCacheDelete(_inboxCacheKey()).catch(() => {});
     _reportCacheDelete(_eventsCacheKey()).catch(() => {});
     try { localStorage.removeItem(`cg-ai-log:${state.userId}`); } catch { /* 助手的對話（問過哪幾檔、持股數字）也是個人資料 */ }
+    // 助手的授權與操作紀錄（目錄 v37）：同一支手機換人登入，不能沿用上一個人給的授權
+    try { localStorage.removeItem(`cg-ai-grants:${state.userId}`); localStorage.removeItem(`cg-ai-actions:${state.userId}`); } catch { /* 存不了就沒有 */ }
   }
   localStorage.removeItem("sma_session");
   location.reload();
@@ -10193,8 +10195,60 @@ async function applyHoldingChange(sid, op) {
   row.shares = next.shares;
   row.avg_cost = next.cost;
   trackActivity("holding_save", { stock: key, op: String(op.kind), removed: next.removed ? 1 : 0 });
+  // 買進與賣出多留一列交易紀錄（2026-10-26，migrate_trade_log.sql）：失敗不影響持股——那一份是附帶的
+  const trade = op.kind === "buy" || op.kind === "sell" ? await tradeLogAdd(key, op, before).catch(() => null) : null;
   renderCurrentTab();
-  return Object.assign({}, next, { before, row });
+  return Object.assign({}, next, { before, row, trade });
+}
+
+// ── 交易紀錄（2026-10-26，migrate_trade_log.sql）──────────────────────────────
+// 記錄買進／賣出時多留一列：哪一天、幾股、成交價、賣出那一刻的平均成本、手續費與證交稅。
+// 是使用者自己記的帳，不是券商的成交回報（沒記的就不在裡面）。表鎖著、只走三支 RPC；
+// 還沒跑 migration（404／PGRST202）就這一次開 App 不再記、也不報錯——持股照常寫。
+// 手續費 0.1425%（最低 20 元、未含券商折扣）、證交稅 0.3%（ETF 0.1%）：與試算同一組（aiFee／aiTax）
+let _tradeLogMissing = false;
+async function tradeRpc(fn, params) {
+  if (_tradeLogMissing || !state.accessToken) return null;
+  try { return await sbRpc(fn, params, state.accessToken); }
+  catch (e) {
+    if (/PGRST202/.test(String((e && e.message) || ""))) { _tradeLogMissing = true; return null; }
+    throw e;
+  }
+}
+function tradeFeeTax(sid, side, shares, price) {
+  if (!(Number(price) > 0) || !(Number(shares) > 0)) return { fee: 0, tax: 0 };
+  const amount = Number(shares) * Number(price);
+  return { fee: aiFee(amount), tax: side === "sell" ? aiTax(amount, sid) : 0 };
+}
+// op＝applyHoldingChange 收到的那一個（buy／sell，可帶 price、tradedOn、source）；before＝寫入之前的股數與成本
+async function tradeLogAdd(sid, op, before) {
+  const side = op.kind === "sell" ? "sell" : "buy";
+  const shares = Math.round(Number(op.shares) || 0);
+  if (!(shares > 0)) return null;
+  const price = Number(op.price) > 0 ? Number(op.price) : null;
+  const { fee, tax } = tradeFeeTax(sid, side, shares, price);
+  const r = await tradeRpc("trade_log_add", {
+    p_client_key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    p_stock_id: sid, p_side: side, p_shares: shares, p_price: price,
+    p_cost_basis: side === "sell" && before && before.cost != null ? before.cost : null,
+    p_fee: fee, p_tax: tax, p_traded_on: /^\d{4}-\d{2}-\d{2}$/.test(String(op.tradedOn || "")) ? op.tradedOn : null,
+    p_source: op.source === "assistant" ? "assistant" : "sheet",
+  });
+  return r && r.ok ? { id: r.id, side, shares, price, fee, tax } : null;
+}
+async function tradeLogList(from, to) {
+  const r = await tradeRpc("trade_log_list", { p_from: from || null, p_to: to || null, p_limit: 2000 });
+  return Array.isArray(r) ? r : null;
+}
+async function tradeLogDelete(id) {
+  const r = await tradeRpc("trade_log_delete", { p_id: id });
+  return !!(r && r.ok);
+}
+// 一筆賣出的已實現損益：（成交價 − 賣出那一刻的平均成本）× 股數 − 手續費 − 證交稅；少一個數字就是 null
+function tradeRealized(t) {
+  const p = Number(t.price), c = Number(t.cost_basis), n = Number(t.shares);
+  if (t.side !== "sell" || !(p > 0) || !(c > 0) || !(n > 0)) return null;
+  return Math.round((p - c) * n - (Number(t.fee) || 0) - (Number(t.tax) || 0));
 }
 
 // ── 持股截圖 → 要怎麼更新（助手第二十六節，Howard 2026-10-23）───────────────────────────
@@ -15433,7 +15487,7 @@ function _holdOp() {
   if (m === "delete") return { kind: "delete" };
   const qty = _holdQtyInput(), price = _holdPriceInput();
   if (m === "buy" || m === "add") return { kind: "buy", shares: qty, price };
-  if (m === "sell") return { kind: "sell", shares: qty };
+  if (m === "sell") return { kind: "sell", shares: qty, price };   // 成交價選填：交易紀錄算已實現損益用
   if (m === "edit") {
     if (brokerHoldings.length > 0) return { kind: "cost", price };
     return { kind: "set", shares: qty, price, clearCost: price == null };
@@ -15576,6 +15630,7 @@ function holdSheetRender() {
            <button type="button" class="hold-chip" onclick="holdFillQty('${jsAttr(String(cur.shares))}')">全部 ${escapeHtml(fmtLots(cur.shares))}</button>
            ${cur.shares > SHARES_PER_LOT ? `<button type="button" class="hold-chip" onclick="holdFillQty('${jsAttr(String(SHARES_PER_LOT))}')">1 張</button>` : ""}
          </div>
+         ${_holdPriceFieldHtml("成交價（元）", null, "選填，填了交易紀錄才算得出已實現損益")}
          <div class="hold-hint">賣出不改平均成本（剩下那些的成本沒有變）。賣到 0 股，這一檔就從持股移除。</div>`;
   } else if (broker) {
     fields = _holdPriceFieldHtml("平均成本（元）", cur.cost, "如 580.5");
@@ -22076,9 +22131,14 @@ const AI_INTENTS = {
   friend:           ["assistantFriend", {}],
   ui_settings:      ["assistantUiSettings", {}],
   advice:           ["assistantRefuse", {}],
-  // 走勢研判與大盤指數（目錄 v17 起是正式的兩類）：固定句由 Worker 給，卡上接四個 AI 籤
+  // 走勢研判（目錄 v17 起是正式的一類）：固定句由 Worker 給，卡上接四個 AI 籤
   trend_judgement:  ["assistantOutOfScope", {}],
-  index_quote:      ["assistantOutOfScope", {}],
+  // 大盤指數：v17～v36 是「沒有資料」的固定句；目錄 v37 起讀加權指數的收盤序列回答（aiIndexBars）
+  index_quote:      ["assistantIndexQuote", {}],
+  checkup:          ["assistantCheckup", {}],
+  trades:           ["assistantTrades", {}],
+  permission:       ["assistantPermission", {}],
+  order_draft:      ["assistantOrderDraft", {}],
   out_of_scope:     ["assistantOutOfScope", {}],
 };
 
@@ -22302,6 +22362,8 @@ function aiIntroHtml(withChips) {
       <li>看 「台積電整理一下」、「台積電和聯發科比較」、「今天有什麼重點」</li>
       <li>算 「2 張台積電值多少」、「台積電漲停價」、「900 買的台積電要多少才回本」</li>
       <li>筆記 「記一下：台積電等法說會」、「提醒我明天看鴻海」、「我的筆記」</li>
+      <li>健檢 「幫我做持股健檢」、「大盤這週漲多少」、「今年的已實現損益」</li>
+      <li>備單 「幫我掛 2 張台積電 1000 的買單」（整理好讓你自己到券商下，不代為下單）</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
       <div class="ai-note">只整理與解釋公開資料，不提供買賣建議。用鍵盤上的麥克風也可以說話。</div></div>`,
     chips,
@@ -22469,10 +22531,19 @@ async function aiRunConfirm(id) {
   let result;
   try { result = await spec.run(); } catch (e) { console.error("assistant confirm failed:", e); result = aiErrorCard(e); }
   delete aiPending[id];
+  // 依授權直接做的（目錄 v37）：結果卡上寫出來，並給一顆「取消這個授權」
+  if (spec.auto && result && !result.failed) {
+    result = Object.assign({}, result, { sub: `依你的授權直接做了（到 ${mmdd(spec.auto)} 止）`,
+      chips: (result.chips || []).concat([{ label: "取消這個授權", act: "run",
+        data: { intent: "permission", slots: { perm_action: "revoke", perm_intent: spec.grant }, text: "取消這個授權" } }]) });
+  }
   aiReplaceCard(id, result || { text: "完成。" });
   aiOutcome(spec.log_id, null, !!result && !result.failed);
+  if (result && !result.failed) aiActionLogAdd(spec, result);   // 操作紀錄（目錄 v37）
   renderAssistant();
   aiFlushNav();   // run() 裡排的跳頁，結果卡畫出來之後才跳
+  // 一句話好幾件事：這一件做完了，做下一件（目錄 v37）。授權直接做的那一件由 aiNextStep 自己接下去
+  if (_aiSteps && !spec.auto) { await aiNextStep(); aiAfterRun(); }
 }
 
 function aiCancelConfirm(id) {
@@ -22482,10 +22553,15 @@ function aiCancelConfirm(id) {
   aiReplaceCard(id, { text: "已取消。", muted: true });
   aiOutcome(spec.log_id, null, false);
   renderAssistant();
+  if (_aiSteps) aiNextStep().then(aiAfterRun);   // 這一件不做，下一件照樣問（目錄 v37）
 }
 
 // 送了新的一句（或點了籤）：上一句留下、還沒按的確認卡作廢（第十五節 B1）——留著只會對舊資料執行
 function aiSkipPending() {
+  if (_aiSteps && _aiSteps.list.length) {   // 一句話好幾件事還沒做完的那幾件：新的一句進來就不做了
+    aiPushCard({ text: `剩下的 ${_aiSteps.list.length} 件沒有做（你送了新的一句）。`, muted: true });
+  }
+  _aiSteps = null;
   for (const id of Object.keys(aiPending)) {
     const spec = aiPending[id];
     if (spec.busy) continue;
@@ -22589,6 +22665,234 @@ function aiCollapseConfirm(id) {
   delete aiPending[id];
   aiReplaceCard(id, { text: "改在面板裡。", muted: true });
   aiOutcome(spec.log_id, null, null);
+  if (_aiSteps && _aiSteps.list.length) aiPushCard({ text: `剩下的 ${_aiSteps.list.length} 件沒有做（改到面板裡了），回來再跟我說一次。`, muted: true });
+  _aiSteps = null;
+}
+
+// ── 委託單草稿（目錄 v37，2026-10-26）────────────────────────────────────────
+// 「幫我掛 2 張台積電 1000 的買單」：本服務不代為下單（不是券商，也沒有替使用者送單的授權），這一張只是把那一句
+// 整理成委託的樣子——股票、買賣、數量、價格、金額、手續費與證交稅、漲跌停範圍、升降單位、零股時段——
+// 讓他到自己的券商 App 下單。按「成交了，記下這筆」才走記錄持股那一張確認卡（holdings_set，與持股面板同一條）。
+// 只做算術與檢查（價位合不合升降單位、在不在漲跌停之內、賣的比記錄的持股多），不對這一筆該不該下表示任何意見。
+function aiOrderText(name, sid, side, shares, market, price) {
+  return `${side === "buy" ? "買進" : "賣出"} ${name}（${sid}） ${fmtLots(shares)} ${market ? "市價" : `限價 ${fmtPrice(price)}`}`;
+}
+async function aiOrderDraft(slots) {
+  const sid = slots.stock;
+  if (!sid) return aiNeedStock();
+  const name = aiStockName(sid), head = `${name} ${sid}`;
+  const again = (label, extra) => ({ label, act: "run", data: { intent: "order_draft", slots: Object.assign({}, slots, extra), text: label } });
+  const side = slots.side === "sell" ? "sell" : slots.side === "buy" ? "buy" : null;
+  if (!side) return { head: `${name}：買進還是賣出？`, chips: [again(`買進${name}`, { side: "buy" }), again(`賣出${name}`, { side: "sell" })] };
+  const word = side === "buy" ? "買進" : "賣出";
+  let q = aiQuoteOf(sid);
+  if (!(q && q.price > 0)) { await aiMarketLevels(); q = aiQuoteOf(sid); }
+  const ref = q && q.price > 0 ? Number(q.price) : null;   // 最近一個收盤：下一個交易日的漲跌停以它為準
+  const etf = isEtfId(sid);
+  const hold = holdingBySid().get(sid);
+  const have = hold ? Math.max(0, Number(hold.shares) || 0) : 0;
+  const cost = hold && Number(hold.cost) > 0 ? Number(hold.cost) : null;
+  const shares = Number(slots.shares) > 0 ? Math.round(Number(slots.shares)) : null;
+  if (!shares) {
+    const chips = [again("1 張", { shares: SHARES_PER_LOT })];
+    if (side === "sell" && have > 0) chips.unshift(again(`全部（${fmtLots(have)}）`, { shares: have }));
+    return { head: `${word}多少${name}？`, text: "點一個，或打「2 張」「500 股」。", chips };
+  }
+  const market = !!slots.market;
+  const price = Number(slots.price) > 0 ? Number(slots.price) : null;
+  if (!market && !price) {
+    const chips = [];
+    if (ref) chips.push(again(`以收盤 ${fmtPrice(ref)} 掛`, { price: ref }));
+    chips.push(again("市價", { market: true }));
+    return { head: `${word} ${fmtLots(shares)} ${name}，掛多少？`, text: "點一個，或打「1000 元」。", chips };
+  }
+  const px = market ? ref : price;
+  const rows = [{ label: "委託", value: aiOrderText(name, sid, side, shares, market, price), note: "" }];
+  // 零股：不到一張、或整張之外多出來的那幾股，要在零股時段另外下
+  const odd = shares % SHARES_PER_LOT;
+  if (odd) rows.push({ label: "零股", value: shares < SHARES_PER_LOT ? `${shares} 股` : `另外 ${odd} 股`, note: shares > SHARES_PER_LOT ? "分兩筆下" : "零股時段" });
+  if (!market && price) {
+    const tick = aiTick(price, etf);
+    const k = price / tick;
+    if (Math.abs(k - Math.round(k)) > 1e-6) {
+      const lo = aiR2(Math.floor(k) * tick), hi = aiR2(Math.ceil(k) * tick);
+      rows.push({ label: "升降單位", value: `每檔 ${fmtPrice(tick)} 元`, note: `改成 ${fmtPrice(lo)} 或 ${fmtPrice(hi)}` });
+    }
+    if (ref) {
+      const lim = aiLimitPrices(ref, etf);
+      if (price > lim.up || price < lim.down) rows.push({ label: "漲跌停", value: `${fmtPrice(lim.down)}～${fmtPrice(lim.up)}`, note: "範圍外，券商會退單" });
+    }
+  }
+  if (px) {
+    const amount = Math.round(px * shares), fee = aiFee(amount), tax = side === "sell" ? aiTax(amount, sid) : 0;
+    rows.push({ label: "金額", value: `${fmtMoney(amount)} 元`, note: market ? `以收盤 ${fmtPrice(px)} 估算` : "" },
+              { label: "手續費", value: `${fmtMoney(fee)} 元`, note: "未含券商折扣" });
+    if (side === "sell") rows.push({ label: "證交稅", value: `${fmtMoney(tax)} 元`, note: etf ? "ETF 0.1%" : "0.3%" });
+    rows.push({ label: side === "buy" ? "要付" : "實收", value: `${fmtMoney(side === "buy" ? amount + fee : amount - fee - tax)} 元`, note: "" });
+    if (side === "sell" && cost != null) {
+      const pl = tradeRealized({ side: "sell", price: px, cost_basis: cost, shares, fee, tax });
+      rows.push({ label: "這一筆損益", html: true, value: `<span class="${plClass(pl)}">${escapeHtml(fmtSignedMoney(pl))} 元</span>`, note: `平均成本 ${fmtPrice(cost)}・試算` });
+    }
+    if (side === "buy" && have > 0 && cost != null && !market) {
+      const nx = holdingNext({ shares: have, cost }, { kind: "buy", shares, price });
+      if (!nx.error && nx.cost != null) rows.push({ label: "買進後均價", value: fmtPrice(Math.round(nx.cost * 100) / 100), note: `原本 ${fmtPrice(cost)}` });
+    }
+  } else rows.push({ label: "金額", value: "拿不到收盤價", note: "沒辦法估算" });
+  if (side === "sell" && shares > have) rows.push({ label: "注意", value: `記錄的持股只有 ${fmtLots(have)}`, note: "融券、借券不在持股紀錄裡" });
+  rows.push({ label: "時間", value: _isMarketOpenNow() ? "現在是盤中" : "現在不是盤中", note: _isMarketOpenNow() ? "" : "可以掛預約單（各券商時段不同），或下一個交易日再下" });
+  const record = { label: "成交了，記下這筆", act: "run",
+    data: { intent: "holdings_set", slots: Object.assign({ stock: sid, hold_action: side, shares }, !market && price ? { avg_cost: price } : {}),
+            text: `${word}了 ${fmtLots(shares)}${name}${!market && price ? ` ${price} 元` : ""}` } };
+  const chips = [record];
+  if (!market && price) chips.push({ label: `設 ${fmtPrice(price)} 的到價提醒`, act: "run",
+    data: { intent: "price_target_set", slots: { stock: sid, price, direction: ref && price < ref ? "down" : "up" }, text: `${name}${ref && price < ref ? "跌到" : "漲到"} ${price} 提醒我` } });
+  // 價位不對、漲跌停之外、零股時段：右邊灰字放不下的說明寫在內文
+  const notes = [];
+  if (!market && price && rows.some(r => r.label === "升降單位")) notes.push(`${fmtPrice(price)} 不是有效價位。`);
+  if (rows.some(r => r.label === "漲跌停")) notes.push(`漲跌停以 ${q && q.tradeDate ? mmdd(q.tradeDate) : "最近一個"}收盤 ${fmtPrice(ref)} 算。`);
+  if (odd) notes.push(`零股在盤中 9:00–13:30、盤後 13:40–14:30 交易${shares > SHARES_PER_LOT ? "，整張與零股要分兩筆下" : ""}。`);
+  return { head: `${word}委託草稿・${head}`, sub: "整理好了，請到你的券商 App 下單", rows, chips,
+           text: `${notes.join("")}本服務不代為下單；這一張只是把你說的整理好。`,
+           actions: [{ label: "複製委託內容", act: "copyorder", data: { text: aiOrderText(name, sid, side, shares, market, price) }, main: true }] };
+}
+async function aiCopyOrder(text) {
+  try {
+    await navigator.clipboard.writeText(String(text || ""));
+    trackActivity("assistant_copy", { what: "order" });
+    aiPushCard({ text: "已複製委託內容，到券商 App 貼上或照著填。", muted: true });
+  } catch {
+    aiPushCard({ text: "沒有複製成功：這個瀏覽器不讓網頁寫剪貼簿。", muted: true });
+  }
+  renderAssistant();
+}
+
+// ── 限時授權與操作紀錄（目錄 v37，2026-10-26）───────────────────────────────────
+// 「接下來 7 天設到價提醒不用再問我」：那幾種確認卡在期限內由助手直接按下去（結果卡照樣有復原、寫在操作紀錄）。
+// 只有這四種可以授權——都只動自己的資料、按一下就能改回去；目錄裡標 risk: "low"（test_assistant_catalog 釘住兩邊一致）。
+// 移除自選股、持股、刪除、分享、好友這些（risk: "high"）一律照舊出確認卡，授權也蓋不過。
+// 授權存在這支手機（cg-ai-grants:<user>，登出就刪）；最長 30 天，到期那一天過完就不算。
+const AI_GRANTABLE = { price_target_set: "到價提醒", basic_signal_set: "基礎訊號開關", watch_add: "加入自選股", rule_create: "新增進階訊號" };
+const AI_GRANT_DAYS = 7, AI_GRANT_MAX_DAYS = 30;
+function _aiGrantKey() { return `cg-ai-grants:${state.userId || ""}`; }
+function aiGrants() {
+  let g = {};
+  try { g = JSON.parse(localStorage.getItem(_aiGrantKey()) || "{}") || {}; } catch { g = {}; }
+  const today = taipeiDateKey(new Date()), out = {};
+  for (const [k, v] of Object.entries(g)) if (AI_GRANTABLE[k] && /^\d{4}-\d{2}-\d{2}$/.test(String(v)) && String(v) >= today) out[k] = String(v);
+  return out;
+}
+function aiSaveGrants(g) {
+  try { localStorage.setItem(_aiGrantKey(), JSON.stringify(g)); return true; } catch { return false; }
+}
+function aiGrantUntil(intent) { return AI_GRANTABLE[intent] ? (aiGrants()[intent] || "") : ""; }
+
+// 操作紀錄：助手做過的每一筆寫入（確認卡按下去、或依授權直接做的），最多 100 筆、30 天，存在這支手機（登出就刪）。
+// 復原鍵是函式，存不進去：App 重開之前那一筆的「復原」還按得到，之後就寫「要改回去直接跟我說」
+const AI_ACTIONS_MAX = 100, AI_ACTIONS_DAYS = 30;
+// 這一次開 App 的代號：復原鍵的 id（u1、u2…）每次開 App 從頭數，舊紀錄的 id 會撞到這一次新的復原——只認同一次開 App 的
+const AI_SESSION = Math.random().toString(36).slice(2, 10);
+function _aiActionsKey() { return `cg-ai-actions:${state.userId || ""}`; }
+function aiActionLog() {
+  try {
+    const v = JSON.parse(localStorage.getItem(_aiActionsKey()) || "[]");
+    const since = Date.now() - AI_ACTIONS_DAYS * 864e5;
+    return Array.isArray(v) ? v.filter(x => x && x.at && Date.parse(x.at) >= since) : [];
+  } catch { return []; }
+}
+function aiActionLogAdd(spec, result) {
+  const undo = (result.chips || []).find(ch => ch && ch.act === "undo");
+  const plain = v => String(v == null ? "" : v).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const entry = { at: new Date().toISOString(), intent: String(spec.intent || ""), head: plain(spec.head).slice(0, 40),
+                  text: plain(result.text || result.head).slice(0, 80), auto: spec.auto ? 1 : 0, undo: undo ? undo.data.id : null, sess: AI_SESSION };
+  try { localStorage.setItem(_aiActionsKey(), JSON.stringify([entry].concat(aiActionLog()).slice(0, AI_ACTIONS_MAX))); } catch { /* 存不了就沒有紀錄 */ }
+}
+function aiPermLabel(intent) { return AI_GRANTABLE[intent] || intent; }
+async function aiPermission(slots) {
+  const action = String(slots.perm_action || "list");
+  // 哪幾種：給授權要說清楚（沒說就問）；取消沒說哪一種＝全部取消
+  const pi = String(slots.perm_intent || "");
+  const which = pi === "all" || (!pi && action === "revoke") ? Object.keys(AI_GRANTABLE) : AI_GRANTABLE[pi] ? [pi] : [];
+  const run = (label, s) => ({ label, act: "run", data: { intent: "permission", slots: s, text: label } });
+  if (action === "log") {
+    const log = aiActionLog();
+    if (!log.length) return { head: "助手做過的事", text: `最近 ${AI_ACTIONS_DAYS} 天助手沒有替你改過任何設定。` };
+    return { head: "助手做過的事", sub: `最近 ${AI_ACTIONS_DAYS} 天・${log.length} 筆・存在這支手機`,
+             rows: log.slice(0, 20).map(x => {
+               const live = x.undo && x.sess === AI_SESSION && aiUndo[x.undo];
+               return { label: `${fmtTime(x.at, taipeiDateKey(new Date(x.at)) !== taipeiDateKey(new Date()))}${x.auto ? "・依授權" : ""}`,
+                        value: x.text || x.head, note: live ? "復原 ›" : "", cls: "ai-note-row",
+                        act: live ? "undo" : null, data: live ? { id: x.undo } : null };
+             }),
+             text: "「復原 ›」那幾筆在這次打開 App 之前都還按得到；其他的要改回去，直接跟我說（例如「台積電的到價提醒取消」）。",
+             chips: Object.keys(aiGrants()).length ? [run("我給了哪些授權", { perm_action: "list" })] : [] };
+  }
+  const grants = aiGrants();
+  if (action === "revoke") {
+    const had = which.filter(k => grants[k]);
+    if (!had.length) return { text: which.length === 1 ? `${aiPermLabel(which[0])}本來就沒有授權，照常會先問你。` : "現在沒有任何授權，每一次都會先問你。" };
+    const before = Object.assign({}, grants);
+    for (const k of had) delete grants[k];
+    aiSaveGrants(grants);
+    trackActivity("assistant_grant", { op: "revoke", n: had.length });
+    return { text: `已取消：${had.map(aiPermLabel).join("、")}。之後每一次都會先問你。`,
+             chips: [aiUndoChip(async () => { aiSaveGrants(Object.assign(aiGrants(), Object.fromEntries(had.map(k => [k, before[k]])))); return "已把授權改回原本的。"; })] };
+  }
+  if (action === "grant") {
+    if (!which.length) {
+      return { head: "要授權哪一種？", text: "只有這四種可以不用確認、直接做（都能復原）；移除自選股、持股、刪除、分享一律還是會先問。",
+               chips: Object.entries(AI_GRANTABLE).map(([k, lb]) => run(`${lb}不用問我`, { perm_action: "grant", perm_intent: k, duration: slots.duration })) };
+    }
+    const asked = slots.duration && Number(slots.duration.days) > 0 ? Math.round(Number(slots.duration.days))
+      : slots.duration && Number(slots.duration.sessions) > 0 ? Math.round(Number(slots.duration.sessions) * 7 / 5) : AI_GRANT_DAYS;
+    const days = Math.min(AI_GRANT_MAX_DAYS, Math.max(1, asked));
+    const until = aiDaysAhead(days - 1);   // 含今天共 N 天
+    return aiConfirmCard({
+      head: "授權助手直接做？", sub: "期限內這幾種不再出確認卡，按一下就能改回去",
+      rows: [{ label: "範圍", value: which.map(aiPermLabel).join("、"), note: "" },
+             { label: "期限", value: `到 ${mmdd(until)} 止`, note: asked > AI_GRANT_MAX_DAYS ? `最長 ${AI_GRANT_MAX_DAYS} 天` : `${days} 天` },
+             { label: "照樣會有", value: "結果卡與復原", note: "也記在操作紀錄" },
+             { label: "一律還是會問", value: "移除自選股、持股、刪除、分享、好友", note: "" }],
+      mainLabel: "授權",
+      run: async () => {
+        const g = aiGrants(), before = Object.assign({}, g);
+        for (const k of which) g[k] = until;
+        if (!aiSaveGrants(g)) return { text: "這支手機沒辦法存授權（私密瀏覽或儲存空間被關掉）。", muted: true, failed: true };
+        trackActivity("assistant_grant", { op: "grant", n: which.length, days });
+        return { text: `已授權到 ${mmdd(until)}：${which.map(aiPermLabel).join("、")}不再出確認卡。`,
+                 chips: [run("取消所有授權", { perm_action: "revoke", perm_intent: "all" }),
+                         aiUndoChip(async () => { aiSaveGrants(before); return "已把授權改回原本的。"; })] };
+      },
+    });
+  }
+  // 我給了哪些授權
+  const keys = Object.keys(grants);
+  if (!keys.length) return { head: "助手的授權", text: "現在沒有任何授權：每一次寫入都會先出確認卡。",
+                             chips: [run("接下來 7 天到價提醒不用問我", { perm_action: "grant", perm_intent: "price_target_set" })] };
+  return { head: "助手的授權", sub: "期限內這幾種直接做、不出確認卡",
+           rows: keys.map(k => ({ label: aiPermLabel(k), value: `到 ${mmdd(grants[k])} 止`, note: "點了取消", act: "run",
+                                  data: { intent: "permission", slots: { perm_action: "revoke", perm_intent: k }, text: `取消${aiPermLabel(k)}的授權` } })),
+           chips: [run("取消所有授權", { perm_action: "revoke", perm_intent: "all" }), run("助手做過哪些事", { perm_action: "log" })] };
+}
+
+// ── 一句話好幾件事（目錄 v37）：「把聯發科加進自選，再設跌到 900 提醒我」───────────────────
+// Worker 把每一件分好類放在 steps。一件做完（直接做的）或確認卡按了／取消了，才做下一件——
+// 下一件的卡要用前一件做完之後的狀態（「加進自選，再設到價」：第二張卡要知道那一檔已經在自選股裡，
+// 不能再問一次「加入並設定」）。每一件照舊走自己那一類的確認卡；新的一句話進來，剩下的就不做了。
+let _aiSteps = null;   // { list: [剩下的 step], log_id, text }
+async function aiRunSteps(steps, logId, text) {
+  aiPushCard({ text: `這句話有 ${steps.length} 件事，一件一件來：${steps.map((x, i) => `${i + 1}. ${x.label || x.intent}`).join("　")}`, muted: true });
+  _aiSteps = { list: steps.slice(), log_id: logId, text };
+  await aiNextStep();
+}
+async function aiNextStep() {
+  const q = _aiSteps;
+  if (!q || !q.list.length) { _aiSteps = null; return; }
+  const st = q.list.shift();
+  if (!q.list.length) _aiSteps = null;   // 最後一件：之後的確認卡按下去不必再找下一件
+  await aiRun(String(st.intent || ""), st.slots || {}, { log_id: q.log_id, args: (st.action && st.action.args) || null, text: st.text || q.text, say: st.say });
+  const last = aiLog[aiLog.length - 1];
+  // 不是確認卡（直接做完的）：接著做下一件；確認卡：等按了主鍵或取消（aiRunConfirm／aiCancelConfirm 會接下去）
+  if (_aiSteps && !(last && last.id && aiPending[last.id])) await aiNextStep();
 }
 
 // 先留卡再跳頁（第十五節 B5）：handler 裡所有跳頁都排進佇列，卡畫出來之後才跳，回來時那一行已經在
@@ -22665,7 +22969,8 @@ function aiErrorCard(e) {
 // 「打開進階訊號面板」才載的，所以沒開過面板的 session 裡它是空的——助手會把 6 條說成
 // 「還沒有進階訊號」，方案卡寫 0／6，額度滿了的出路鍵也會退化成「打開進階訊號」而不是
 // 「刪掉一條」（Howard 2026-10-18 在手機上碰到的）。問到進階訊號的那幾類，先補載一次。
-const AI_RULE_INTENTS = new Set(["rule_create", "rule_manage", "plan", "basic_signal_set", "daily_brief"]);   // 重點卡要看快到期的（第十一輪）
+const AI_RULE_INTENTS = new Set(["rule_create", "rule_manage", "plan", "basic_signal_set", "daily_brief",   // 重點卡要看快到期的（第十一輪）
+                                 "checkup"]);   // 健檢要數重複、過期的（目錄 v37）
 let _aiRulesLoaded = false;
 async function aiEnsureRules() {
   if (_aiRulesLoaded || !state.userId) return;
@@ -22885,6 +23190,682 @@ async function aiHoldingsSpan(span) {
            sub: `合計 ${fmtSignedMoney(total)} 元・以收盤計算${res.length < hs.length ? `（${hs.length - res.length} 檔拿不到日線）` : ""}`,
            rows: res.sort((a, b) => b.delta - a.delta).map(x => ({ label: x.h.name || aiStockName(x.h.sid), html: true,
              value: `<span class="${plClass(x.delta)}">${escapeHtml(fmtSignedMoney(x.delta))} 元</span>`, note: fmtSignedPct((x.end - x.base) / x.base * 100) })) };
+}
+
+// ── 大盤指數（目錄 v37，2026-10-26）────────────────────────────────────
+// 加權指數的收盤一直跟著日 K 檔送到手機：每一檔的個股檔案（prof）帶著近 180 天每一個交易日的收盤指數
+// （mi＝基準那一根在 b 裡的序號，mc[k] 是 b[mi+k] 那一天的指數；DATA_SOURCES.md 第十四節、證交所 MI_INDEX）。
+// 指數自己不輸出成一個檔，所以讀 0050 那一份（ETF 每個交易日都有成交，日期最齊），讀不到再試 2330。
+// 只有收盤後的值：沒有開高低、沒有成交量，也沒有盤中的點數——卡上照實寫
+const AI_INDEX_SRC = ["0050", "2330"];
+async function aiIndexBars() {
+  for (const sid of AI_INDEX_SRC) {
+    const json = await fetchOhlcJson(sid).catch(() => null);
+    const p = json && json.prof, b = json && json.b;
+    if (!p || !Array.isArray(p.mc) || !Array.isArray(b)) continue;
+    const mi = Number(p.mi), out = [];
+    p.mc.forEach((c, k) => {
+      const bar = b[mi + k];
+      if (!bar || !(Number(c) > 0)) return;
+      const n = Number(bar[0]);
+      const d = `${Math.floor(n / 10000)}-${String(Math.floor(n / 100) % 100).padStart(2, "0")}-${String(n % 100).padStart(2, "0")}`;
+      out.push({ d, o: Number(c), h: Number(c), l: Number(c), c: Number(c), v: 0 });
+    });
+    if (out.length >= 5) return out;
+  }
+  return null;
+}
+function aiPts(v) { const n = Number(v); return Number.isFinite(n) ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"; }
+function aiPtsDelta(a, b) {   // 兩個收盤之間：漲跌點數（帶色）與百分比
+  const d = b - a;
+  return { html: `<span class="${plClass(d)}">${d > 0 ? "+" : d < 0 ? "−" : ""}${escapeHtml(aiPts(Math.abs(d)))} 點</span>`, pct: fmtSignedPct(d / a * 100) };
+}
+// 最近一個收盤那一列（重點卡也用）
+function aiIndexLastRow(bars) {
+  const last = bars[bars.length - 1], prev = bars[bars.length - 2];
+  const dl = aiPtsDelta(prev.c, last.c);
+  return { label: "加權指數", value: aiPts(last.c), note: `${mmdd(last.d)} 收盤 ${dl.pct}` };
+}
+async function aiIndexAnswer(slots) {
+  const head = "加權指數";
+  const bars = await aiIndexBars();
+  if (!bars || bars.length < 2) return aiNoData({ head, text: "拿不到加權指數的收盤資料（跟著日 K 檔每天 15:30 後更新）。" });
+  const lastIdx = bars.length - 1, last = bars[lastIdx];
+  const today = taipeiDateKey(new Date());
+  const foot = "收盤後的值（證交所開放資料），沒有盤中點數";
+  const run = (label, s) => ({ label, act: "run", data: { intent: "index_quote", slots: s, text: label } });
+  // 某一天（10/15、昨天、上週五）：那天沒開市就給前一個交易日
+  if (slots.date || slots.day) {
+    let key = slots.date ? `${today.slice(0, 4)}-${slots.date}` : aiDayKey(slots.day);
+    if (slots.date && key > today) key = `${Number(today.slice(0, 4)) - 1}-${slots.date}`;
+    let i = bars.findIndex(b => b.d === key), sub = "";
+    if (i < 0) {
+      for (let k = 0; k < bars.length && bars[k].d < key; k++) i = k;
+      if (i < 0) return aiNoData({ head, text: `手上的指數從 ${mmdd(bars[0].d)} 開始，沒有 ${mmdd(key)} 那一天。` });
+      sub = key > last.d ? `${mmdd(key)} 還沒有收盤，最近一個是 ${mmdd(bars[i].d)}` : `${mmdd(key)} 沒有交易，前一個交易日是 ${mmdd(bars[i].d)}`;
+    }
+    const rows = [{ label: "收盤", value: aiPts(bars[i].c), note: mmdd(bars[i].d) }];
+    if (i > 0) { const dl = aiPtsDelta(bars[i - 1].c, bars[i].c); rows.push({ label: "漲跌", value: dl.html, html: true, note: dl.pct }); }
+    return { head, sub: sub || `${mmdd(bars[i].d)}（${_weekdayZh(bars[i].d)}）・${foot}`, rows };
+  }
+  // 連漲連跌：從最後一個收盤往回數
+  if (slots.streak) {
+    const dir = Math.sign(last.c - bars[lastIdx - 1].c);
+    let n = 0;
+    while (dir && lastIdx - n - 1 >= 0 && Math.sign(bars[lastIdx - n].c - bars[lastIdx - n - 1].c) === dir) n += 1;
+    const base = bars[lastIdx - n], dl = aiPtsDelta(base.c, last.c);
+    return { head, sub: `到 ${mmdd(last.d)} 收盤・${foot}`,
+             rows: dir ? [{ label: dir > 0 ? `連漲 ${n} 天` : `連跌 ${n} 天`, value: dl.html, html: true, note: `${dl.pct}・${aiPts(base.c)} → ${aiPts(last.c)}` },
+                          { label: "從", value: mmdd(bars[lastIdx - n + 1].d), note: `${mmdd(base.d)} 收盤起算` }]
+                        : [{ label: "最近一天", value: "平盤", note: aiPts(last.c) }] };
+  }
+  // 一段時間（這週、這個月、今年以來、近 N 日）：起點是前一段最後一個收盤；最高最低用每天的收盤（指數沒有開高低）
+  if (slots.span || slots.hilo) {
+    const r = aiSpanRange(bars, slots.span || { days: lastIdx });
+    if (!r || r.to < 0) return aiNoData({ head, text: "這一段時間沒有指數的收盤。" });
+    if (r.to <= r.from) return { head, text: `${r.label}還沒有收盤（最近一個收盤是 ${mmdd(last.d)} 的 ${aiPts(last.c)}）。` };
+    const from = Math.max(0, r.from), seg = bars.slice(from + 1, r.to + 1);
+    const hi = seg.reduce((a, b) => (b.c > a.c ? b : a), seg[0]), lo = seg.reduce((a, b) => (b.c < a.c ? b : a), seg[0]);
+    const base = bars[from], end = bars[r.to], dl = aiPtsDelta(base.c, end.c);
+    const rows = [{ label: r.label, value: dl.html, html: true, note: `${dl.pct}・${aiPts(base.c)} → ${aiPts(end.c)}` },
+                  { label: "最高收盤", value: aiPts(hi.c), note: mmdd(hi.d) },
+                  { label: "最低收盤", value: aiPts(lo.c), note: mmdd(lo.d) }];
+    if (slots.hilo) rows.push(rows.splice(0, 1)[0]);   // 問的是最高最低：那兩列放前面
+    // 年初那幾天可能不在手上（只帶近 180 天）：從第一根算起，寫出來
+    const cut = r.from < 0 ? `（手上的指數從 ${mmdd(bars[0].d)} 開始）` : "";
+    return { head, sub: `${mmdd(bars[from + 1].d)}～${mmdd(end.d)}・${seg.length} 個交易日${cut}・${foot}`, rows };
+  }
+  // 沒說哪一段：最近一個收盤、漲跌、近 5／20 日，再加全市場的漲跌家數（盤中的點數沒有，那一列是現在的方向）
+  const prev = bars[lastIdx - 1], dl = aiPtsDelta(prev.c, last.c);
+  const rows = [{ label: "收盤", value: aiPts(last.c), note: `${mmdd(last.d)}（${_weekdayZh(last.d)}）` },
+                { label: "漲跌", value: dl.html, html: true, note: dl.pct }];
+  for (const n of [5, 20]) {
+    if (lastIdx - n < 0) continue;
+    const d = aiPtsDelta(bars[lastIdx - n].c, last.c);
+    rows.push({ label: `近 ${n} 日`, value: d.html, html: true, note: d.pct });
+  }
+  const mt = await aiMarketToday();
+  if (mt && aiTodayIsCurrent(mt)) {
+    const dirs = Object.values(mt.dir || {});
+    rows.push({ label: _isMarketOpenNow() ? "盤中漲跌家數" : "漲跌家數", value: `漲 ${dirs.filter(v => v === 1).length}・跌 ${dirs.filter(v => v === -1).length}`,
+                note: `平 ${dirs.filter(v => v === 0).length}`, act: "run", data: { intent: "market_strength", slots: {}, text: "現在市場上漲家數比例" } });
+  }
+  return { head, sub: _isMarketOpenNow() ? `盤中的點數這裡沒有，這是 ${mmdd(last.d)} 的收盤` : `${mmdd(last.d)} 收盤・${foot}`, rows,
+           chips: [run("大盤這週漲多少", { span: { week: 0 } }), run("大盤連漲幾天", { streak: true }),
+                   { label: "哪個族群最強", act: "run", data: { intent: "market_strength", slots: {}, text: "哪個族群最強" } }] };
+}
+
+// ── 健檢（目錄 v37，2026-10-26）──────────────────────────────────────────
+// 「幫我做持股健檢」「檢查一下我的設定」：持股、進階訊號、提醒與通知三段，一張卡（target 槽位只看其中一段）。
+// 只寫事實——佔比幾 %、哪幾檔、哪幾條——不評價持股本身（「集中在哪裡」是數字，不是「太集中」）。
+// 要動手的（刪重複、清過期）一律再出一張確認卡、可以復原；健檢這一步本身不寫入任何東西。
+// 股利只用事件標題裡的「現金股利 N 元」（data/events.py 寫的格式）× 現在的股數：卡上寫明是估算。
+const AI_NHI_RATE = 0.0211, AI_NHI_MIN = 20000;   // 二代健保補充保費：單次給付 2 萬元以上扣 2.11%
+const AI_CHECK_DIV_DAYS = 60;                      // 接下來幾天的除權息算進預估
+function aiCashDividendOf(ev) {
+  const m = String((ev && ev.title) || "").match(/現金股利\s*([\d.]+)\s*元/);
+  const v = m ? Number(m[1]) : NaN;
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+function aiDaysAhead(n) { const d = new Date(`${taipeiDateKey(new Date())}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return taipeiDateKey(d); }
+// 接下來 days 天除權息的持股：[{sid, name, date, cash（每股）, shares, amount}]，照日期
+async function aiHoldingDividends(days) {
+  const hs = holdingEntries().filter(h => Number(h.shares) > 0);
+  if (!hs.length) return [];
+  const missing = hs.map(h => h.sid).filter(s => !stockEvents[s]);
+  if (missing.length) await loadStockEvents(missing).catch(() => {});
+  const today = taipeiDateKey(new Date()), until = aiDaysAhead(days);
+  const out = [];
+  for (const h of hs) {
+    for (const e of stockEvents[h.sid] || []) {
+      const d = String(e.event_date || "");
+      if (e.event_type !== "dividend" || d < today || d > until) continue;
+      const cash = aiCashDividendOf(e);
+      out.push({ sid: h.sid, name: h.name || aiStockName(h.sid), date: d, cash, shares: Number(h.shares),
+                 amount: cash != null ? Math.round(cash * Number(h.shares)) : null });
+    }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+// 股利那幾列（健檢與「我的持股會領多少股利」共用）：合計、每一筆、補充保費
+function aiDividendRows(divs) {
+  const known = divs.filter(x => x.amount != null);
+  const rows = [];
+  if (!divs.length) return rows;
+  rows.push({ label: "接下來除權息", value: `${divs.length} 筆`, note: `${divs[0].name} ${mmdd(divs[0].date)}`, act: "run",
+              data: { intent: "events", slots: { event_type: "dividend", horizon: "upcoming" }, text: "接下來的除權息" } });
+  if (known.length) {
+    const total = known.reduce((a, x) => a + x.amount, 0);
+    rows.push({ label: "預估現金股利", value: `${fmtMoney(total)} 元`, note: `以現在的股數估算${known.length < divs.length ? `・${divs.length - known.length} 筆金額待公告` : ""}` });
+    const big = known.filter(x => x.amount >= AI_NHI_MIN);
+    if (big.length) {
+      rows.push({ label: "補充保費", value: `約 ${fmtMoney(big.reduce((a, x) => a + Math.round(x.amount * AI_NHI_RATE), 0))} 元`,
+                  note: `${big.map(x => x.name).slice(0, 2).join("、")}・2.11%` });
+    }
+  }
+  return rows;
+}
+// 進階訊號裡「一樣的」：同一檔、同一組條件（期限、一次性、基準價不算），多於一條的那幾組；每組留最早的那一條
+function aiRuleDupGroups(rules) {
+  const sig = r => JSON.stringify([String(r.stock_id || ""), (r.conditions || []).map(c => Object.entries(c || {})
+    .filter(([k]) => !["expires_on", "once", "base", "base_date"].includes(k)).sort())]);
+  const groups = new Map();
+  for (const r of rules) { const k = sig(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  return [...groups.values()].filter(g => g.length > 1).map(g => g.slice().sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true })));
+}
+// 刪掉幾條進階訊號的確認卡（健檢的「刪掉重複的」「清掉過期的」）：與 rule_manage 的刪除同一條 sbDelete，復原＝用同一組條件建回來
+function aiRulesDeleteCard(targets, head, why) {
+  const rulesBtn = { label: "打開進階訊號 ›", act: "open", data: { rules: true } };
+  return aiConfirmCard({
+    head, text: why,
+    rows: targets.map(r => ({ label: ruleLabelOf(r), value: r.enabled ? "開" : "關", note: r.stock_id ? aiStockName(String(r.stock_id)) : "全部自選股" })),
+    mainLabel: `刪掉 ${targets.length} 條`,
+    run: async () => {
+      for (const r of targets) await sbDelete("alert_rules", { id: `eq.${r.id}` }, state.accessToken);
+      trackActivity("rule_delete", { enabled: false });
+      await refreshRules().catch(() => {});
+      const left = aiRuleRoom();
+      const undo = aiUndoChip(async () => {
+        const had = new Set((alertRules || []).map(x => x.id));
+        for (const r of targets) await insertRuleTemplates([{ name: r.name, conditions: r.conditions }], r.stock_id || null);
+        await refreshRules().catch(() => {});
+        for (const r of targets.filter(x => !x.enabled)) {
+          const fresh = (alertRules || []).find(x => !had.has(x.id) && x.name === r.name && String(x.stock_id || "") === String(r.stock_id || ""));
+          if (fresh) await sbPatch("alert_rules", { id: `eq.${fresh.id}` }, { enabled: false }, state.accessToken);
+        }
+        await refreshRules().catch(() => {});
+        return `已把 ${targets.length} 條進階訊號建回來。`;
+      });
+      return { text: `已刪掉 ${targets.length} 條進階訊號。${left !== null ? `現在還能設 ${left} 條。` : ""}`, actions: [rulesBtn], chips: [undo] };
+    },
+  });
+}
+// 段落標題列（健檢卡分三段）
+function aiSecRow(label, value, note) { return { label, value: value || "", note: note || "", cls: "ai-sec-row" }; }
+async function aiCheckupHoldings(rows, fixes) {
+  const hs0 = holdingEntries().filter(h => Number(h.shares) > 0);
+  if (!hs0.length) return 0;
+  await Promise.race([ensureHoldingCloses().catch(() => false), new Promise(r => setTimeout(r, 3000))]);
+  const hs = holdingsSummary();
+  rows.push(aiSecRow("持股", `${hs.n} 檔`, hs.value != null ? `市值 ${fmtMoney(hs.value)} 元・以收盤計算` : "還沒有收盤價"));
+  let todo = 0;
+  const priced = hs.items.filter(it => it.weight != null);
+  if (priced.length) {
+    const top = priced[0];
+    rows.push({ label: "最大一檔", value: `${fmtPct(top.weight)}%`, note: top.name || aiStockName(top.sid), act: "run",
+                data: { intent: "holdings", slots: { rank: "weight" }, text: "持股裡佔最多的是哪一檔" } });
+    if (priced.length >= 4) rows.push({ label: "前三檔合計", value: `${fmtPct(priced.slice(0, 3).reduce((a, it) => a + it.weight, 0))}%`, note: priced.slice(0, 3).map(it => it.name || aiStockName(it.sid)).join("、") });
+    const byInd = new Map();
+    for (const it of priced) byInd.set(aiIndustryOf(it.sid), (byInd.get(aiIndustryOf(it.sid)) || 0) + it.weight);
+    const ind = [...byInd.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (ind && byInd.size > 1) rows.push({ label: "最大產業", value: `${fmtPct(ind[1])}%`, note: `${ind[0]}・共 ${byInd.size} 個產業`, act: "run",
+                                          data: { intent: "holdings", slots: { by_industry: true }, text: "我的持股集中在哪些產業" } });
+  }
+  const noCost = hs.items.filter(it => it.cost == null);
+  if (noCost.length) {
+    todo += 1;
+    rows.push({ label: "沒填成本", value: `${noCost.length} 檔`, note: `${noCost.slice(0, 3).map(it => it.name || aiStockName(it.sid)).join("、")}・損益算不出來`,
+                act: "open", data: { holdings: noCost[0].sid, mode: "edit" } });
+  }
+  // 收盤低於成本、這一檔沒有任何到價提醒或進階訊號：寫出來就好，要不要設是他的事（籤只是入口）
+  const ruled = new Set((alertRules || []).filter(r => r.enabled).map(r => String(r.stock_id || "")));
+  const below = hs.items.filter(it => it.price != null && it.cost != null && it.price < it.cost).filter(it => {
+    const row = aiRowOf(it.sid);
+    const hasTarget = row && ((row.target_price_low != null && row.target_price_low !== "") || (row.target_price_high != null && row.target_price_high !== ""));
+    return !hasTarget && !ruled.has(it.sid) && !ruled.has("");
+  });
+  if (below.length) {
+    todo += 1;
+    rows.push({ label: "低於成本、沒設提醒", value: `${below.length} 檔`, note: below.slice(0, 3).map(it => `${it.name || aiStockName(it.sid)} ${fmtSignedPct(it.plPct)}`).join("、") });
+    fixes.push(...below.slice(0, 2).map(it => ({ label: `設${it.name || aiStockName(it.sid)}的到價提醒`, act: "run",
+      data: { intent: "price_target_set", slots: { stock: it.sid }, text: `${it.name || aiStockName(it.sid)}的到價提醒` } })));
+  }
+  rows.push(...aiDividendRows(await aiHoldingDividends(AI_CHECK_DIV_DAYS)));
+  return todo;
+}
+function aiCheckupRules(rows, fixes) {
+  const rules = alertRules || [];
+  const lim = planLimitOf("alert_rules");
+  rows.push(aiSecRow("進階訊號", `${rules.length}${lim != null ? `／${lim}` : ""} 條`, rules.length ? `開著 ${rules.filter(r => r.enabled).length} 條` : "還沒有"));
+  if (!rules.length) return 0;
+  let todo = 0;
+  const today = taipeiDateKey(new Date());
+  const watched = new Set(aiSignalSids());
+  const dups = aiRuleDupGroups(rules);
+  if (dups.length) {
+    todo += 1;
+    const extra = dups.flatMap(g => g.slice(1));
+    rows.push({ label: "一樣的", value: `${extra.length + dups.length} 條`, note: `${dups.length} 組同一檔、同一組條件` });
+    fixes.push({ label: `刪掉重複的 ${extra.length} 條`, act: "run", data: { intent: "checkup", slots: { target: "rules", fix: "dups" }, text: "刪掉重複的進階訊號" } });
+  }
+  const expired = rules.filter(r => { const u = ruleExpiresOn(r.conditions); return u && u < today; });
+  if (expired.length) {
+    todo += 1;
+    rows.push({ label: "已過期", value: `${expired.length} 條`, note: "過了期限就不再評估" });
+    fixes.push({ label: `清掉過期的 ${expired.length} 條`, act: "run", data: { intent: "checkup", slots: { target: "rules", fix: "expired" }, text: "清掉過期的進階訊號" } });
+  }
+  const soon = rules.filter(r => { const u = ruleExpiresOn(r.conditions); return u && u >= today && u <= aiDaysAhead(3); });
+  if (soon.length) rows.push({ label: "3 天內到期", value: `${soon.length} 條`, note: `${ruleLabelOf(soon[0]).slice(0, 12)} 到 ${mmdd(ruleExpiresOn(soon[0].conditions))}`,
+                               act: "run", data: { intent: "rule_manage", slots: { action: "extend", rule_id: soon[0].id }, text: `${ruleLabelOf(soon[0])}延長` } });
+  const paused = rules.filter(r => r.enabled && (r.conditions || []).some(c => isPausedRuleType(String((c || {}).type || ""))));
+  if (paused.length) {
+    todo += 1;
+    rows.push({ label: "暫時不會成立", value: `${paused.length} 條`, note: "法人資料暫停提供" });
+  }
+  const outside = rules.filter(r => r.enabled && r.stock_id && !watched.has(String(r.stock_id)));
+  if (outside.length) {
+    todo += 1;
+    rows.push({ label: "不在自選股", value: `${outside.length} 條`, note: `${aiStockName(String(outside[0].stock_id))}・不會評估` });
+    fixes.push(aiAddChip(String(outside[0].stock_id)));
+  }
+  const off = rules.filter(r => !r.enabled);
+  if (off.length) rows.push({ label: "關著", value: `${off.length} 條`, note: ruleLabelOf(off[0]).slice(0, 16), act: "open", data: { rules: true } });
+  return todo;
+}
+function aiCheckupAlerts(rows, fixes) {
+  const all = watchlistRows || [];
+  rows.push(aiSecRow("提醒與通知", `自選股 ${aiWatchUsage()}`, ""));
+  let todo = 0;
+  // 到價提醒已經在收盤的另一邊：盤中一碰到就成立（多半是設的時候價位就穿過了）
+  const crossed = [];
+  for (const r of all) {
+    const sid = String(r.stock_id || "").trim();
+    const q = aiQuoteOf(sid), cur = q && q.price > 0 ? Number(q.price) : null;
+    if (!cur) continue;
+    if (r.target_price_low != null && r.target_price_low !== "" && Number(r.target_price_low) >= cur) crossed.push({ sid, word: "跌到", v: Number(r.target_price_low), cur });
+    if (r.target_price_high != null && r.target_price_high !== "" && Number(r.target_price_high) <= cur) crossed.push({ sid, word: "漲到", v: Number(r.target_price_high), cur });
+  }
+  if (crossed.length) {
+    todo += 1;
+    rows.push({ label: "到價已在另一邊", value: `${crossed.length} 個`, note: crossed.slice(0, 2).map(x => `${aiStockName(x.sid)} ${x.word} ${fmtPrice(x.v)}（收盤 ${fmtPrice(x.cur)}）`).join("、"),
+                act: "run", data: { intent: "price_target_set", slots: { stock: crossed[0].sid }, text: `${aiStockName(crossed[0].sid)}的到價提醒` } });
+  }
+  // 一個訊號都沒開、也沒有到價提醒與自己的進階訊號：這幾檔不會收到任何通知
+  const ruledSids = new Set((alertRules || []).filter(r => r.enabled).map(r => String(r.stock_id || "")));
+  const silent = all.filter(r => {
+    const sid = String(r.stock_id || "").trim();
+    const anyField = ALERT_FIELDS.some(f => !!r[f]);
+    const anyTarget = (r.target_price_low != null && r.target_price_low !== "") || (r.target_price_high != null && r.target_price_high !== "");
+    return !anyField && !anyTarget && !ruledSids.has(sid) && !ruledSids.has("");
+  });
+  if (silent.length) {
+    todo += 1;
+    rows.push({ label: "不會收到通知", value: `${silent.length} 檔`, note: `${silent.slice(0, 3).map(r => aiStockName(String(r.stock_id).trim())).join("、")}・訊號全關`,
+                act: "open", data: { alert: silent[0].id } });
+  }
+  if (!_pushSubscribed) {
+    todo += 1;
+    rows.push({ label: "推播", value: "還沒開", note: "訊號只進通知匣，送不到手機" });
+  }
+  return todo;
+}
+async function aiCheckup(slots) {
+  const target = String(slots.target || "");
+  // 健檢卡上的「刪掉重複的」「清掉過期的」：再出一張確認卡（健檢本身不寫入）
+  if (slots.fix === "dups") {
+    const extra = aiRuleDupGroups(alertRules || []).flatMap(g => g.slice(1));
+    if (!extra.length) return { text: "沒有一樣的進階訊號了。", muted: true };
+    return aiRulesDeleteCard(extra, "刪掉重複的進階訊號？", "同一檔、同一組條件的，每一組留最早建的那一條，其餘刪掉，空出額度。");
+  }
+  if (slots.fix === "expired") {
+    const today = taipeiDateKey(new Date());
+    const ex = (alertRules || []).filter(r => { const u = ruleExpiresOn(r.conditions); return u && u < today; });
+    if (!ex.length) return { text: "沒有過期的進階訊號了。", muted: true };
+    return aiRulesDeleteCard(ex, "清掉過期的進階訊號？", "過了期限的進階訊號已經不再評估，刪掉就空出額度。");
+  }
+  const rows = [], fixes = [];
+  let todo = 0;
+  if (!target || target === "holdings") todo += await aiCheckupHoldings(rows, fixes);
+  if (!target || target === "rules") todo += aiCheckupRules(rows, fixes);
+  if (!target || target === "watch") todo += aiCheckupAlerts(rows, fixes);
+  if (!rows.length) return target === "holdings"
+    ? { head: "持股健檢", text: "還沒有持股紀錄。", chips: [{ label: "怎麼記錄持股", act: "run", data: { intent: "holdings_set", slots: { hold_action: "set" }, text: "記錄持股" } }] }
+    : { head: "健檢", text: "還沒有自選股，先加一檔再來。", actions: [{ label: "新增自選股 ›", act: "open", data: { tab: "watch" } }] };
+  const head = { holdings: "持股健檢", rules: "進階訊號健檢", watch: "提醒與通知健檢" }[target] || "健檢";
+  const actions = !_pushSubscribed && (!target || target === "watch") ? [{ label: "啟用通知", act: "push", data: {}, main: true }] : [];
+  return { head, sub: todo ? `${todo} 項設定可以看一下・點一列看完整的` : "沒有要處理的設定・只整理資料，不評價個股", rows, actions,
+           chips: fixes.slice(0, 4) };
+}
+
+// ── 進階訊號：一句話好幾個條件、具體價位、離成立還差多少（目錄 v37，2026-10-26）────────────────
+// 「跌破 900」：進階訊號沒有價位條件，換成自基準價漲跌（基準＝建立當下的收盤價），與到價提醒「改用進階訊號」同一個算法。
+// 價位已經在收盤的那一邊（跌破 900、收盤 880）：一建立就成立——不建，指回到價提醒
+function aiLevelToPct(price, dir, cur, sid) {
+  const name = aiStockName(sid);
+  const passed = dir === "up" ? price <= cur : price >= cur;
+  const value = Math.round(Math.abs(price - cur) / cur * 10000) / 100;
+  if (passed || value < 0.1) {
+    return { card: { head: `${name} ${sid}`, muted: true,
+      text: `收盤 ${fmtPrice(cur)} 已經在 ${fmtPrice(price)} 的${dir === "up" ? "上方" : "下方"}（或就在那裡），這一條一建立就會成立。`,
+      chips: [{ label: `設${name}${dir === "up" ? "漲到" : "跌到"} ${fmtPrice(price)} 的到價提醒`, act: "run",
+                data: { intent: "price_target_set", slots: { stock: sid, price, direction: dir }, text: `${name}${dir === "up" ? "漲到" : "跌到"} ${price} 提醒我` } }] } };
+  }
+  return { dir: price < cur ? "down" : "up", value };
+}
+// 好幾個條件一條進階訊號（全部成立才通知，monitor/rules.py 的 AND）。每一個條件的做法與只有一個條件時相同：
+// 自基準價要一檔與收盤價、參數夾進目錄的範圍；期限與一次性寫在每一個條件裡（後端取最早的期限、任一條一次性就算）
+async function aiRuleCreateMany(slots, conds) {
+  const sid = slots.stock || null;
+  const name = sid ? aiStockName(sid) : "";
+  const paused = conds.find(c => isPausedRuleType(String(c.cond_type || "")));
+  if (paused) return aiPausedSourceCard(paused.cond_type, _aiCurrent.text, "，這一條進階訊號建立了也不會成立");
+  let q = sid ? aiQuoteOf(sid) : null;
+  if (sid && !(q && q.price > 0)) { await aiMarketLevels(); q = aiQuoteOf(sid); }
+  const cur = q && q.price > 0 ? q.price : null;
+  const built = [], fitted = [];
+  for (const c of conds) {
+    const cond = { type: String(c.cond_type), ...(c.params_defaults || {}), ...(c.params || {}) };
+    if (cond.type === "pct_from_base") {
+      if (!sid) return aiNeedStock();
+      if (!cur) return { text: `拿不到${name || sid}的收盤價，沒辦法定基準價。`, muted: true };
+      cond.base = cur;
+      cond.base_date = q.tradeDate || "";
+      if (cond.price_level != null) {
+        const lv = aiLevelToPct(Number(cond.price_level), cond.dir, cur, sid);
+        delete cond.price_level;
+        if (lv.card) return lv.card;
+        cond.dir = lv.dir; cond.value = lv.value;
+      }
+    }
+    fitted.push(...aiFitCondParams(cond.type, cond));   // 兩三個條件一起時不逐一反問：夾進範圍、寫在卡上
+    built.push(cond);
+  }
+  const until = aiExpiryDate(slots.duration);
+  const once = slots.once === undefined ? built.some(c => c.type === "pct_from_base") : !!slots.once;
+  for (const c of built) { if (until) c.expires_on = until; if (once) c.once = true; }
+  const descs = built.map(describeCondition);
+  const ruleName = descs.join("＋").slice(0, 60);
+  if (aiRuleFull()) return aiLimitCard("alert_rules");
+  if (sid && !aiRowOf(sid) && aiWatchFull()) return aiLimitCard("watchlist");
+  const rows = built.map((c, i) => ({ label: `條件 ${i + 1}`, value: descs[i], note: "" }));
+  if (fitted.length) rows.push({ label: "已調整", value: fitted.join("、"), note: "" });
+  rows.push({ label: "成立方式", value: "全部成立才通知", note: `${built.length} 個條件` },
+            { label: "範圍", value: sid ? `${name} ${sid}` : "全部自選股", note: "" });
+  if (until) rows.push({ label: "期限", value: `到 ${mmdd(until)} 止`, note: "那一天過完自動刪除" });
+  if (once) rows.push({ label: "通知次數", value: "一次", note: "通知後自動刪除" });
+  rows.push({ label: "進階訊號", value: `${(alertRules || []).length}／${planLimitOf("alert_rules") ?? "—"}`, note: "建立後 +1" });
+  const sigOf = list => JSON.stringify((list || []).map(c => JSON.stringify(Object.entries(c || {}).filter(([k]) => !["expires_on", "once", "base", "base_date"].includes(k)).sort())).sort());
+  const dup = (alertRules || []).find(r => String(r.stock_id || "") === String(sid || "") && sigOf(r.conditions) === sigOf(built));
+  if (dup) rows.unshift({ label: "已經有一條", value: ruleLabelOf(dup), note: dup.enabled ? "開著" : "關著" });
+  return aiConfirmCard({
+    head: sid && !aiRowOf(sid) ? "加入並建立進階訊號？" : "建立進階訊號？",
+    sub: sid && !aiRowOf(sid) ? `${name} 不在自選股，會先加入` : `${built.length} 個條件一條訊號`,
+    rows, mainLabel: dup ? "還是建立" : "建立",
+    grant: !dup && !fitted.length && (!sid || aiRowOf(sid)) ? "rule_create" : null,   // 限時授權
+    alt: { label: "改一下", act: "open", data: { rules: true, prefill: { name: ruleName, stock_id: sid, conds: built } } },
+    run: async () => {
+      if (sid && !aiRowOf(sid)) await aiAddStockById(sid);
+      const had = new Set((alertRules || []).map(r => r.id));
+      const { limitHit } = await insertRuleTemplates([{ name: ruleName, conditions: built }], sid);
+      if (limitHit) return aiLimitCard("alert_rules");
+      await refreshRules().catch(() => {});
+      queuePushPromptAfterSignal();
+      const made = (alertRules || []).find(r => !had.has(r.id) && r.name === ruleName);
+      const left = aiRuleRoom();
+      return { text: `已建立進階訊號：${descs.join("，而且")}（${sid ? name : "全部自選股"}）。${left !== null ? `現在還能設 ${left} 條。` : ""}`,
+               actions: [{ label: "看進階訊號 ›", act: "open", data: { rules: true } }],
+               chips: [{ label: "這條還差多少", act: "run", data: { intent: "rule_manage", slots: { action: "progress", stock: sid || undefined }, text: "進階訊號還差多少" } }]
+                 .concat(made ? [aiUndoChip(async () => {
+                   await sbDelete("alert_rules", { id: `eq.${made.id}` }, state.accessToken);
+                   await refreshRules().catch(() => {});
+                   return "已刪掉剛建的那一條進階訊號。";
+                 })] : []) };
+    },
+  });
+}
+
+// 離成立還差多少：一個條件 × 一檔 → { txt, dist }（dist＝還差幾 %，0＝以最近收盤已經在成立的那一邊，null＝估不出來）。
+// 用的是最近一個收盤（盤中成交價不送到裝置）、全市場關卡檔的均線與 52 週、日 K 檔的前高前低、均量與 RSI。
+// RSI 與 monitor 同一個算法（最近 period 天漲跌的平均，analysis/indicators.rsi 的 SMA 近似）。只寫距離，不說會不會成立
+function aiRsiOf(closes, period) {
+  if (closes.length <= period) return null;
+  let gain = 0, loss = 0;
+  for (let i = closes.length - period; i < closes.length; i++) { const d = closes[i] - closes[i - 1]; if (d > 0) gain += d; else loss -= d; }
+  return loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+}
+function aiSmaOf(closes, n) { if (closes.length < n) return null; return closes.slice(-n).reduce((a, b) => a + b, 0) / n; }
+const AI_MA_LABEL = { 5: "週線", 20: "月線", 60: "季線", 120: "半年線", 240: "年線" };
+async function aiCondProgress(c, sid) {
+  const type = String((c && c.type) || "");
+  if (isPausedRuleType(type)) return { txt: "法人籌碼資料暫停提供，這一條目前不會成立", dist: null };
+  const spec = RULE_CATALOG_BY_TYPE[type] || {};
+  if (spec.tier === "chips") return { txt: "法人買賣超收盤後才公布，那時才判斷", dist: null };
+  if (spec.tier === "fundamental") return { txt: "公布新一期的營收或財報時才判斷", dist: null };
+  if (type === "gap_up" || type === "gap_down") return { txt: "開盤那一刻才知道", dist: null };
+  const q = aiQuoteOf(sid);
+  const cur = q && q.price > 0 ? Number(q.price) : null;
+  if (type === "change_pct_above" || type === "change_pct_below") {
+    const chg = q && q.changePct != null ? `最近一天 ${fmtSignedPct(q.changePct)}` : "";
+    return { txt: `當天的漲跌幅，盤中才知道${chg ? `；${chg}` : ""}（門檻 ${type === "change_pct_above" ? "+" : "−"}${c.value}%）`, dist: null };
+  }
+  if (!cur) return { txt: "拿不到收盤價", dist: null };
+  const away = (target, need) => need ? { dist: 0, tail: "已經在成立的那一邊" } : { dist: Math.abs(target - cur) / cur * 100, tail: `還差 ${fmtPct(Math.abs(target - cur) / cur * 100)}%` };
+  if (type === "pct_from_base") {
+    const base = Number(c.base), v = Number(c.value);
+    if (!(base > 0) || !(v > 0)) return { txt: "沒有基準價", dist: null };
+    const target = c.dir === "up" ? base * (1 + v / 100) : base * (1 - v / 100);
+    const a = away(target, c.dir === "up" ? cur >= target : cur <= target);
+    return { txt: `目標 ${fmtPrice(Math.round(target * 100) / 100)}（${c.base_date ? `${mmdd(c.base_date)} ` : ""}收盤 ${fmtPrice(base)} ${c.dir === "up" ? "漲" : "跌"} ${v}%），收盤 ${fmtPrice(cur)}・${a.tail}`, dist: a.dist };
+  }
+  const ml = await aiMarketLevels();
+  const lv = (ml && ml.stocks && ml.stocks[sid]) || null;
+  const bars = ["break_prior_high", "break_prior_low", "volume_vs_ma", "rsi_above", "rsi_below", "ma_cross", "price_vs_ma", "macd_cross"].includes(type) ? await aiBars(sid) : null;
+  const closes = (bars || []).map(b => b.c);
+  if (type === "price_vs_ma") {
+    const per = Number(c.period) || 20;
+    const ma = (lv && lv.ma && Number(lv.ma[`MA${per}`])) || aiSmaOf(closes, per);
+    if (!ma) return { txt: "算不出均線", dist: null };
+    const a = away(ma, c.dir === "down" ? cur < ma : cur > ma);
+    return { txt: `${AI_MA_LABEL[per] || `${per} 日線`} ${fmtPrice(Math.round(ma * 100) / 100)}，收盤 ${fmtPrice(cur)} 在${cur >= ma ? "上方" : "下方"}・${a.tail}`, dist: a.dist };
+  }
+  if (type === "break_52w_high" || type === "break_52w_low") {
+    const hi = type === "break_52w_high", ref = lv ? Number(hi ? lv.h52 : lv.l52) : null;
+    if (!(ref > 0)) return { txt: "沒有 52 週高低", dist: null };
+    const a = away(ref, hi ? cur > ref : cur < ref);
+    return { txt: `52 週${hi ? "高點" : "低點"} ${fmtPrice(ref)}，收盤 ${fmtPrice(cur)}・${a.tail}`, dist: a.dist };
+  }
+  if (type === "break_prior_high" || type === "break_prior_low") {
+    const w = Number(c.window) || 20;
+    if (!bars || bars.length < w + 1) return { txt: "日線不夠", dist: null };
+    const seg = bars.slice(-w - 1, -1), hi = type === "break_prior_high";
+    const ref = hi ? Math.max(...seg.map(b => b.h)) : Math.min(...seg.map(b => b.l));
+    const a = away(ref, hi ? cur > ref : cur < ref);
+    return { txt: `前 ${w} 日${hi ? "高點" : "低點"} ${fmtPrice(ref)}，收盤 ${fmtPrice(cur)}・${a.tail}`, dist: a.dist };
+  }
+  if (type === "volume_vs_ma") {
+    const w = Number(c.window) || 20, r = Number(c.ratio) || 2;
+    if (!bars || bars.length < w + 1) return { txt: "日線不夠", dist: null };
+    const avg = bars.slice(-w - 1, -1).reduce((x, b) => x + b.v, 0) / w, last = bars[bars.length - 1].v;
+    return { txt: `最近一天是 ${w} 日均量的 ${avg > 0 ? (last / avg).toFixed(1) : "—"} 倍（門檻${c.op === "below" ? "低於" : ""} ${r} 倍）・當天的量盤中才知道`, dist: null };
+  }
+  if (type === "rsi_above" || type === "rsi_below") {
+    const rsi = aiRsiOf(closes, Number(c.period) || 14);
+    if (rsi == null) return { txt: "日線不夠", dist: null };
+    const need = type === "rsi_above" ? rsi >= Number(c.value) : rsi <= Number(c.value);
+    return { txt: `RSI ${rsi.toFixed(0)}（門檻 ${type === "rsi_above" ? "≥" : "≤"} ${c.value}）${need ? "・已經在成立的那一邊" : ""}`, dist: need ? 0 : null };
+  }
+  if (type === "ma_cross") {
+    const f = aiSmaOf(closes, Number(c.fast) || 5), s = aiSmaOf(closes, Number(c.slow) || 20);
+    if (!f || !s) return { txt: "日線不夠", dist: null };
+    const above = f > s;
+    return { txt: `MA${c.fast} ${fmtPrice(Math.round(f * 100) / 100)}、MA${c.slow} ${fmtPrice(Math.round(s * 100) / 100)}，短的在${above ? "上方" : "下方"}・相差 ${fmtPct(Math.abs(f - s) / s * 100)}%`,
+             dist: (c.dir === "down") === above ? Math.abs(f - s) / s * 100 : null };
+  }
+  return { txt: "收盤後由日線判斷", dist: null };
+}
+async function aiRuleProgress(slots) {
+  const rulesBtn = { label: "打開進階訊號 ›", act: "open", data: { rules: true } };
+  let rules = (alertRules || []).slice();
+  if (!rules.length) return { text: "還沒有進階訊號。", actions: [rulesBtn] };
+  const which = String(slots.which || "").trim();
+  if (slots.rule_id != null) rules = rules.filter(r => String(r.id) === String(slots.rule_id));
+  else if (which) rules = rules.filter(r => String(r.name || "").includes(which) || (r.conditions || []).some(c => describeCondition(c).includes(which)));
+  else if (slots.stock) rules = rules.filter(r => !r.stock_id || String(r.stock_id) === String(slots.stock));
+  if (!rules.length) return { head: which ? `找不到「${which}」這一條` : "沒有對得上的進階訊號", actions: [rulesBtn],
+                              chips: [{ label: "全部的進度", act: "run", data: { intent: "rule_manage", slots: { action: "progress" }, text: "我的進階訊號進度" } }] };
+  rules.sort((a, b) => Number(!!b.enabled) - Number(!!a.enabled));
+  const rows = [];
+  let dateTxt = "";
+  for (const r of rules.slice(0, 6)) {
+    const conds = (r.conditions || []).filter(c => c && c.type);
+    // 全部自選股的那一條：每一檔都算，寫最接近的那一檔（最多看 10 檔）
+    const sids = r.stock_id ? [String(r.stock_id)] : (slots.stock ? [String(slots.stock)] : aiSignalSids().slice(0, 10));
+    const per = [];
+    for (const sid of sids) {
+      const ps = [];
+      for (const c of conds) ps.push(await aiCondProgress(c, sid));
+      const ds = ps.map(p => p.dist);
+      const worst = ds.every(d => d != null) ? Math.max(...ds) : null;   // 全部成立才算：離得最遠的那個條件決定還差多少
+      per.push({ sid, ps, worst });
+      const q = aiQuoteOf(sid);
+      if (q && q.tradeDate && !dateTxt) dateTxt = q.tradeDate;
+    }
+    const best = per.filter(x => x.worst != null).sort((a, b) => a.worst - b.worst)[0] || per[0];
+    const until = ruleExpiresOn(r.conditions);
+    const scope = r.stock_id ? aiStockName(String(r.stock_id)) : best && best.worst != null ? `全部・最接近 ${aiStockName(best.sid)}` : "全部自選股";
+    const head = best && best.worst != null ? (best.worst === 0 ? "都在成立那一邊" : `還差 ${fmtPct(best.worst)}%`) : "—";
+    rows.push({ label: `${ruleLabelOf(r)}${r.enabled ? "" : "（關著）"}`, value: head,
+                note: [scope, until ? `到 ${mmdd(until)} 止` : ""].filter(Boolean).join("・"), act: "open", data: { rules: true } });
+    if (best) best.ps.forEach((p, i) => rows.push({ label: conds.length > 1 ? `條件 ${i + 1}` : "目前", value: p.txt, note: "", cls: "ai-note-row" }));
+  }
+  return { head: "進階訊號離成立還差多少", sub: `${dateTxt ? `以 ${mmdd(dateTxt)} 收盤估算` : "以最近一個收盤估算"}・只寫距離，不代表會不會成立`, rows,
+           text: rules.length > 6 ? `還有 ${rules.length - 6} 條沒列，說「○○那條還差多少」看那一條。` : "", actions: [rulesBtn] };
+}
+
+// ── 交易紀錄與報稅整理（目錄 v37，2026-10-26）────────────────────────────────
+// 讀的是 trade_log（持股面板與助手記錄買進／賣出時多留的那一列，applyHoldingChange）。是自己記的帳，
+// 不是券商的成交回報：卡上一律寫「依你記錄的」，報稅以對帳單、集保與扣繳憑單為準。
+// 「哪一天成交」：「10/20 買的」「昨天賣了」；未來的日期一律當今天（交易紀錄不收未來）
+function aiTradeDay(slots) {
+  const today = taipeiDateKey(new Date());
+  let key = "";
+  if (slots && slots.date) {
+    key = `${today.slice(0, 4)}-${slots.date}`;
+    if (key > today) key = `${Number(today.slice(0, 4)) - 1}-${slots.date}`;
+  } else if (slots && slots.day) key = aiDayKey(slots.day);
+  return key && key <= today ? key : today;
+}
+function aiTradeRange(slots) {
+  const today = taipeiDateKey(new Date()), y = Number(today.slice(0, 4));
+  const shift = (key, days) => { const d = new Date(`${key}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + days); return taipeiDateKey(d); };
+  if (Number(slots.year) === -1) return { from: `${y - 1}-01-01`, to: `${y - 1}-12-31`, label: `${y - 1} 年` };
+  const sp = slots.span || null;
+  if (!sp) return { from: null, to: null, label: "" };
+  if (sp.ytd) return { from: `${y}-01-01`, to: today, label: "今年" };
+  if (sp.month !== undefined) {
+    const first = `${today.slice(0, 7)}-01`;
+    if (Number(sp.month) < 0) { const last = shift(first, -1); return { from: `${last.slice(0, 7)}-01`, to: last, label: `${Number(last.slice(5, 7))} 月` }; }
+    return { from: first, to: today, label: "這個月" };
+  }
+  if (sp.week !== undefined) {
+    const wd = new Date(`${today}T12:00:00Z`).getUTCDay() || 7, mon = shift(today, 1 - wd);
+    return Number(sp.week) < 0 ? { from: shift(mon, -7), to: shift(mon, -1), label: "上週" } : { from: mon, to: today, label: "這週" };
+  }
+  if (sp.days) return { from: shift(today, -Math.round(Number(sp.days) * 7 / 5)), to: today, label: `近 ${sp.days} 個交易日` };
+  return { from: null, to: null, label: "" };
+}
+function aiTradeLine(t) {
+  return `${t.side === "buy" ? "買進" : "賣出"} ${fmtLots(Number(t.shares))}${Number(t.price) > 0 ? ` @ ${fmtPrice(Number(t.price))}` : ""}`;
+}
+const AI_TRADE_FOOT = "依你記錄的買進與賣出整理；報稅以券商對帳單、集保與公司寄的扣繳憑單為準。";
+async function aiTrades(slots) {
+  const view = String(slots.trade_view || "list");
+  const pageBtn = { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } };
+  const rng = aiTradeRange(slots);
+  const all = await tradeLogList(rng.from, rng.to);
+  if (all == null) {
+    return _tradeLogMissing ? { text: "交易紀錄這一版還沒開通（資料庫那一張表還沒建好）；持股照常記。", muted: true }
+                            : aiNoData({ text: "交易紀錄暫時讀不到，再試一次。" });
+  }
+  const list = slots.stock ? all.filter(t => t.stock_id === String(slots.stock)) : all;
+  const scope = `${rng.label}${slots.stock ? aiStockName(String(slots.stock)) : ""}`;
+  const run = (label, s) => ({ label, act: "run", data: { intent: "trades", slots: Object.assign({}, slots, s), text: label } });
+  const gloss = term => ({ label: `什麼是${term}`, act: "gloss", data: { text: `什麼是${term}` } });
+  if (!list.length) {
+    return { head: "交易紀錄", text: `${scope}還沒有記錄的買進或賣出。在持股面板記，或跟我說「我買了 2 張台積電 均價 900」「賣掉 1 張鴻海 200 元」就會留下來。`, actions: [pageBtn] };
+  }
+  // 刪一筆記錯的（最新的那一筆；有股票就是那一檔最新的）：只刪紀錄，持股不跟著改
+  if (view === "delete") {
+    const t = list[0];
+    return aiConfirmCard({
+      head: "刪掉這一筆交易紀錄？", text: "只刪這一筆紀錄，持股的股數與成本不會跟著改（要改持股請說「台積電持股改成 3 張」）。",
+      rows: [{ label: "日期", value: mmdd(String(t.traded_on)), note: "" }, { label: "股票", value: `${aiStockName(t.stock_id)} ${t.stock_id}`, note: "" },
+             { label: "內容", value: aiTradeLine(t), note: "" }],
+      mainLabel: "刪掉",
+      run: async () => {
+        if (!(await tradeLogDelete(t.id))) return { text: "沒有刪成功，再試一次。", muted: true, failed: true };
+        return { text: `已刪掉 ${mmdd(String(t.traded_on))} ${aiStockName(t.stock_id)} ${aiTradeLine(t)} 那一筆。`,
+                 chips: [aiUndoChip(async () => {
+                   const r = await tradeRpc("trade_log_add", { p_client_key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+                     p_stock_id: t.stock_id, p_side: t.side, p_shares: Number(t.shares), p_price: t.price, p_cost_basis: t.cost_basis,
+                     p_fee: Number(t.fee) || 0, p_tax: Number(t.tax) || 0, p_traded_on: String(t.traded_on), p_source: t.source || "app" });
+                   if (!(r && r.ok)) throw new Error("那一筆沒有建回來");
+                   return "已把那一筆交易紀錄建回來。";
+                 })] };
+      },
+    });
+  }
+  // 匯出：複製成 CSV（逗號分隔），貼到試算表就是一張表
+  if (view === "export") {
+    return { head: "匯出交易紀錄", sub: `${scope ? `${scope}・` : ""}${list.length} 筆`,
+             text: "按「複製 CSV」把每一筆複製起來（日期、代號、名稱、買賣、股數、成交價、手續費、證交稅、已實現損益），貼到 Excel 或 Google 試算表就是一張表。",
+             actions: [{ label: "複製 CSV", act: "tradecsv", data: { from: rng.from, to: rng.to, stock: slots.stock || "" }, main: true }] };
+  }
+  const sells = list.filter(t => t.side === "sell");
+  const realized = sells.map(t => ({ t, pl: tradeRealized(t) })).filter(x => x.pl != null);
+  const plTotal = realized.reduce((a, x) => a + x.pl, 0);
+  const plHtml = v => `<span class="${plClass(v)}">${escapeHtml(fmtSignedMoney(v))} 元</span>`;
+  if (view === "realized") {
+    if (!sells.length) return { head: `${scope}已實現損益`, text: `${scope}沒有記錄的賣出，沒有已實現損益。`, chips: [run("我的交易紀錄", { trade_view: "list" })] };
+    const by = new Map();
+    for (const x of realized) by.set(x.t.stock_id, (by.get(x.t.stock_id) || 0) + x.pl);
+    const miss = sells.length - realized.length;
+    return { head: `${scope}已實現損益`, sub: `依你記錄的 ${sells.length} 筆賣出${miss ? `・${miss} 筆沒有成交價或成本，沒算進去` : ""}`,
+             rows: [{ label: "合計", value: plHtml(plTotal), html: true, note: `${realized.length} 筆` }]
+               .concat([...by.entries()].sort((a, b) => b[1] - a[1]).map(([sid, v]) => ({ label: aiStockName(sid), value: plHtml(v), html: true, note: "",
+                 act: "run", data: { intent: "trades", slots: Object.assign({}, slots, { stock: sid, trade_view: "list" }), text: `${aiStockName(sid)}的交易紀錄` } }))),
+             text: `已實現損益＝（成交價 − 賣出時的平均成本）× 股數 − 手續費 − 證交稅。${AI_TRADE_FOOT}`,
+             chips: [gloss("證券交易所得稅"), run("手續費付了多少", { trade_view: "fees" })] };
+  }
+  const fee = list.reduce((a, t) => a + (Number(t.fee) || 0), 0), tax = list.reduce((a, t) => a + (Number(t.tax) || 0), 0);
+  const priced = list.filter(t => Number(t.price) > 0);
+  if (view === "fees" || view === "tax") {
+    const rows = [{ label: "手續費", value: `${fmtMoney(fee)} 元`, note: `${priced.length} 筆有成交價` },
+                  { label: "證交稅", value: `${fmtMoney(tax)} 元`, note: `${sells.filter(t => Number(t.price) > 0).length} 筆賣出` },
+                  { label: "合計", value: `${fmtMoney(fee + tax)} 元`, note: "未含券商折扣" }];
+    if (view === "fees") return { head: `${scope}付了多少手續費與證交稅`, sub: `依你記錄的 ${list.length} 筆`, rows, text: AI_TRADE_FOOT };
+    if (sells.length) rows.unshift({ label: "已實現損益", value: plHtml(plTotal), html: true, note: `${realized.length}／${sells.length} 筆賣出算得出來` });
+    const divRows = aiDividendRows(await aiHoldingDividends(AI_CHECK_DIV_DAYS));
+    return { head: `${scope || ""}報稅用的整理`, sub: `依你記錄的 ${list.length} 筆交易・股利是接下來 ${AI_CHECK_DIV_DAYS} 天的預估`, rows: rows.concat(divRows),
+             text: `證券交易所得目前停徵所得稅；股利要算進所得（可以選合併計稅或分開計稅）。${AI_TRADE_FOOT}`,
+             chips: [gloss("股利所得稅"), gloss("二代健保補充保費"), run("匯出交易紀錄", { trade_view: "export" })] };
+  }
+  return { head: `${scope}交易紀錄`, sub: `依你記錄的 ${list.length} 筆${list.length > 20 ? "・列最新的 20 筆" : ""}`,
+           rows: list.slice(0, 20).map(t => {
+             const pl = tradeRealized(t);
+             return { label: `${mmdd(String(t.traded_on))} ${aiStockName(t.stock_id)}`, value: aiTradeLine(t),
+                      note: pl != null ? `損益 ${fmtSignedMoney(pl)}` : t.side === "sell" && !(Number(t.price) > 0) ? "沒填成交價" : "" };
+           }),
+           chips: [run("已實現損益", { trade_view: "realized" }), run("手續費付了多少", { trade_view: "fees" }), run("匯出交易紀錄", { trade_view: "export" })],
+           actions: [pageBtn] };
+}
+// 「複製 CSV」：再讀一次同一段期間（卡上沒有存整份），一筆一行；名稱、成本那幾格照原樣，沒有的留空
+async function aiCopyTradesCsv(d) {
+  const all = await tradeLogList(d.from || null, d.to || null).catch(() => null);
+  const list = (all || []).filter(t => !d.stock || t.stock_id === String(d.stock));
+  if (!list.length) { aiPushCard({ text: "沒有可以匯出的交易紀錄。", muted: true }); renderAssistant(); return; }
+  const esc = v => { const t = String(v == null ? "" : v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const lines = [["日期", "代號", "名稱", "買賣", "股數", "成交價", "賣出時平均成本", "手續費", "證交稅", "已實現損益"].join(",")]
+    .concat(list.slice().reverse().map(t => [t.traded_on, t.stock_id, aiStockName(t.stock_id), t.side === "buy" ? "買進" : "賣出", t.shares,
+      t.price ?? "", t.cost_basis ?? "", t.fee ?? 0, t.tax ?? 0, tradeRealized(t) ?? ""].map(esc).join(",")));
+  try {
+    await navigator.clipboard.writeText(lines.join("\n"));
+    trackActivity("assistant_copy", { what: "trades" });
+    aiPushCard({ text: `已複製 ${list.length} 筆（CSV），貼到試算表就可以。`, muted: true });
+  } catch {
+    aiPushCard({ text: "沒有複製成功：這個瀏覽器不讓網頁寫剪貼簿。", muted: true });
+  }
+  renderAssistant();
 }
 
 // ── 筆記（第十七輪）────────────────────────────────────────────────────
@@ -23133,6 +24114,8 @@ function aiAct(act, data) {
   if (act === "undo") { aiRunUndo(String(data.id || "")); return; }   // 剛才那一筆寫入改回去（第六輪）
   if (act === "sharecard") { aiShareCard(String(data.k || "")); return; }   // 把這張卡傳給朋友（手機的分享面板；第七輪）
   if (act === "copy") { aiCopyCard(String(data.k || "")); return; }   // 這張卡的文字複製起來（第十七輪）
+  if (act === "tradecsv") { aiCopyTradesCsv(data || {}); return; }   // 交易紀錄複製成 CSV（目錄 v37；按鍵本身就是剪貼簿要的手勢）
+  if (act === "copyorder") { aiCopyOrder(String(data.text || "")); return; }   // 委託單草稿的內容（目錄 v37）
   if (act === "keepnote") { aiKeepCardNote(String(data.k || "")); return; }   // 這張卡存成一則筆記（第十九輪）
   if (act === "pin") { aiTogglePin(String(data.k || "")); return; }   // 這一句釘到輸入框的建議裡（第九輪）
   if (act === "gloss") { assistantSend(String(data.text || "")); return; }   // 訊號名稱點了就解釋：名詞的固定句在目錄裡，經 Worker（第十四輪）
@@ -23219,8 +24202,10 @@ function aiPrefillRuleEditor(p) {
       if (nameEl) nameEl.value = String(p.name || "").slice(0, 60);
       const scopeEl = document.getElementById("rule-scope");
       if (scopeEl) scopeEl.value = p.stock_id ? String(p.stock_id) : "";
-      if (p.cond && p.cond.type) {
-        editorConditions = [JSON.parse(JSON.stringify(p.cond))];
+      // 一個條件（cond）或好幾個（conds，目錄 v37）：編輯器的狀態本來就是一組條件
+      const list = Array.isArray(p.conds) && p.conds.length ? p.conds : p.cond && p.cond.type ? [p.cond] : null;
+      if (list) {
+        editorConditions = JSON.parse(JSON.stringify(list));
         // 期限與一次性存在條件的 JSON 裡，而編輯器那兩格是 openRuleEditor(null) 清空的：
         // 不同步的話「改一下」會把助手填好的期限悄悄丟掉（存檔時以那兩格為準）。
         const expEl = document.getElementById("rule-expires");
@@ -23512,6 +24497,11 @@ async function aiHandleResponse(r, text) {
     aiPushCard({ head: r.say || "你想要的是哪一種？", chips, log_id: r.log_id });
     return;
   }
+  // 一句話好幾件事（目錄 v37）：Worker 分好的每一件，一件一件做
+  if (Array.isArray(r.steps) && r.steps.length >= 2 && r.steps.every(x => x && AI_INTENTS[String(x.intent || "")])) {
+    await aiRunSteps(r.steps, r.log_id, text);
+    return;
+  }
   await aiRun(String(r.intent || ""), r.slots || {}, { log_id: r.log_id, say: r.say, args: (r.action && r.action.args) || null, text });
 }
 
@@ -23553,10 +24543,14 @@ async function aiRun(intent, slots, opts) {
   }
   if (card) { card.log_id = card.log_id || (opts && opts.log_id) || null; aiPushCard(card, card._id); }
   // 確認卡：executed 等按了主鍵／取消才回寫；其餘現在就算執行過
-  if (card && card._id && aiPending[card._id]) aiPending[card._id].log_id = opts && opts.log_id;
+  if (card && card._id && aiPending[card._id]) { aiPending[card._id].log_id = opts && opts.log_id; aiPending[card._id].intent = intent; }
   else aiOutcome(opts && opts.log_id, null, true);
   renderAssistant();
   aiFlushNav();   // handler 裡排的跳頁：卡先畫出來，再跳
+  // 限時授權（目錄 v37）：這一張確認卡是授權範圍內的那一種，就替他按下去——結果卡照樣有復原
+  const pend = card && card._id ? aiPending[card._id] : null;
+  const until = pend && pend.grant ? aiGrantUntil(pend.grant) : "";
+  if (until) { pend.auto = until; await aiRunConfirm(card._id); }
 }
 
 // 沒說哪一檔：自選股做成籤，點一下就等於把股票名接上這一類的問法——不叫人重打
@@ -23565,7 +24559,7 @@ const AI_STOCK_HINT = {
   quote: "現在多少錢", levels: "支撐在哪", ma_position: "站上月線了嗎", signals_today: "今天有訊號嗎", signals_history: "這週有哪些訊號",
   events: "有什麼資料", score: "評分多少", holdings: "的持股", kline: "的 K 線", price_target_set: "的到價提醒",
   basic_signal_set: "的基礎訊號", holdings_set: "的持股設定", watch_remove: "移除", share_stock: "分享給好友",
-  stock_overview: "整理一下", compare: "跟誰比較", calc: "試算",
+  stock_overview: "整理一下", compare: "跟誰比較", calc: "試算", order_draft: "的委託草稿",
 };
 function aiNeedStock() {
   const sids = aiStockChoices();
@@ -23612,7 +24606,7 @@ function aiNoteStock(sid) {
 // 一定要指一檔才做得了的那幾類一律沿用（不然只能反問）；整份清單也答得出來的那幾類（今天的訊號、事件、評分…），
 // 要句子裡指著它（那／它／這檔）而且沒有在講整份（我的／全部／自選…）才沿用。寫入類照樣先出確認卡，股票名寫在卡上。
 const AI_NEED_ONE = new Set(["quote", "levels", "ma_position", "signals_history", "kline", "calc",
-                             "price_target_set", "holdings_set", "watch_add", "watch_remove"]);
+                             "price_target_set", "holdings_set", "watch_add", "watch_remove", "order_draft"]);
 const AI_CARRY_RE = /它|這檔|那檔|這支|那支|這一檔|那一檔|同一檔|剛剛那|剛才那/;
 const AI_WHOLE_RE = /我的|全部|所有|自選|每一檔|哪些|哪幾檔|誰/;
 // 寫入類的「自選」「持股」是動作的對象（「加進自選」），不是在講整份；只有全部／所有才算
@@ -23847,6 +24841,22 @@ async function aiStockFacts(sid) {
            v20: m && m.v20 != null ? Number(m.v20) : null, today, ind: aiIndustryOf(sid), indScore: indRow ? Number(indRow.score) : null,
            indUp: indRow ? Number(indRow.up_pct) : null };
 }
+// 最近幾天的公告（目錄 v37）：重大訊息（announcement）與交易所公告（notice：注意、處置、暫停交易；data/disclosures.py，v459）。
+// 公告的 event_date 是發布那一天，所以看的是「過去」幾天，不是接下來的日程。同一份 stockEvents，不多打資料庫
+const AI_NOTICE_TYPES = new Set(["announcement", "notice"]);
+function aiRecentNotices(sids, days, only) {
+  const today = taipeiDateKey(new Date());
+  const from = (() => { const d = new Date(`${today}T12:00:00Z`); d.setUTCDate(d.getUTCDate() - days); return taipeiDateKey(d); })();
+  const out = [];
+  for (const sid of sids) {
+    for (const e of stockEvents[sid] || []) {
+      if (only ? e.event_type !== only : !AI_NOTICE_TYPES.has(e.event_type)) continue;
+      const d = String(e.event_date || "").slice(0, 10) || taipeiDateKey(e.created_at);
+      if (d >= from && d <= today) out.push({ sid, e, d });
+    }
+  }
+  return out.sort((a, b) => b.d.localeCompare(a.d));
+}
 const aiPosTxt = d => d == null ? "—" : Math.abs(d) < 0.05 ? "貼線" : d > 0 ? `上方 ${fmtPct(d)}%` : `下方 ${fmtPct(d)}%`;
 const aiFromHigh = f => f.h52 && f.price ? `離高點 ${f.price >= f.h52 ? "0" : "−" + fmtPct((f.h52 - f.price) / f.h52 * 100)}%` : "";
 
@@ -23885,7 +24895,10 @@ function aiPrefsCard() {
                   { label: "稱呼", value: p.nick || "（用顯示名稱）", note: "說「叫我○○」就能改" },
                   run("每天的重點卡", briefOff ? "關" : "開", "第一次打開助手時", { brief: briefOff }, briefOff ? "把每天的重點卡打開" : "不要每天自動出重點"),
                   // 筆記（第二十輪）：只存在這支手機，幾則一眼看得到
-                  { label: "筆記", value: `${aiNotes().length} 則`, note: "只存在這支手機", act: "run", data: { intent: "note", slots: { note_action: "list" }, text: "我的筆記" } }] };
+                  { label: "筆記", value: `${aiNotes().length} 則`, note: "只存在這支手機", act: "run", data: { intent: "note", slots: { note_action: "list" }, text: "我的筆記" } },
+                  // 限時授權（目錄 v37）：幾種不用確認、到哪一天
+                  { label: "授權", value: Object.keys(aiGrants()).length ? `${Object.keys(aiGrants()).length} 種` : "沒有", note: "不用確認就直接做的",
+                    act: "run", data: { intent: "permission", slots: { perm_action: "list" }, text: "我給了哪些授權" } }] };
 }
 
 // ── 學習與解釋（第十四輪）──────────────────────────────────────────────
@@ -23948,8 +24961,14 @@ function aiSelfHelp() {
                   run("算", "市值、漲跌停、手續費、回本", `例：${n}漲停價多少`, "calc", { stock: sid, calc: "limit" }, `${n}漲停價多少`),
                   run("筆記", "記下要看的事，那天放進重點", "例：我的筆記", "note", { note_action: "list" }, "我的筆記"),
                   run("整理", "今天的重點、這週回顧、明天", "例：今天有什麼重點", "daily_brief", {}, "今天有什麼重點"),
+                  // 目錄 v37：大盤、健檢、交易紀錄、委託單草稿、授權
+                  run("大盤", "加權指數的收盤、這週漲跌", "例：大盤這週漲多少", "index_quote", { span: { week: 0 } }, "大盤這週漲多少"),
+                  run("健檢", "持股集中度、重複或過期的訊號", "例：幫我做持股健檢", "checkup", {}, "幫我做一次全面健檢"),
+                  run("帳", "交易紀錄、已實現損益、報稅整理", "例：今年的已實現損益", "trades", { trade_view: "realized", span: { ytd: true } }, "今年的已實現損益"),
+                  run("備單", "整理成委託單草稿，你自己去券商下", `例：幫我掛 1 張${n}的買單`, "order_draft", { stock: sid, side: "buy", shares: 1000 }, `幫我掛 1 張${n}的買單`),
+                  run("授權", "幾種小動作不用每次確認（限時）", "例：我給了哪些授權", "permission", { perm_action: "list" }, "我給了哪些授權"),
                   { label: "問", value: "名詞與算法", note: "例：什麼是逼近壓力", act: "gloss", data: { text: "什麼是逼近壓力" } },
-                  { label: "不做", value: "買賣建議、走勢研判", note: "這類問題可以交給你自己的 AI" }] };
+                  { label: "不做", value: "買賣建議、走勢研判、代為下單", note: "建議與研判可以交給你自己的 AI" }] };
 }
 // 新手導覽：看一檔 → 接下來可以設、記、問（每一顆都是本機直接做或名詞）
 function aiTour() {
@@ -24154,11 +25173,13 @@ function aiPlaceholder() {
 // 每天第一次打開助手：自動出「今天的重點」（本機組、不叫 Jev、不算次數）；這一版第一次打開：新功能卡（一個版本一次）。
 // 兩個都記在 localStorage（帳號一份），清不掉也不會壞——最多就是多出一次。
 // 第十九輪（v446）換成第二個一百項：試算、筆記、一段時間、助手的設定
-const AI_WHATS_NEW = { since: 446, items: [
-  ["試算", "「2 張台積電值多少」「台積電漲停價」「900 買的要多少才回本」", "", null],
-  ["筆記", "「記一下：台積電等法說會」「提醒我明天看鴻海」，那天放進重點", "note", { note_action: "list" }],
-  ["一段時間", "「台積電這週漲多少」「自選股這週誰漲最多」", "movers", { span: { week: 0 }, direction: "up", top: true }],
-  ["助手的設定", "回答短一點、不顯示代號、叫我…", "ui_settings", { assistant: true }],
+const AI_WHATS_NEW = { since: 462, items: [
+  ["大盤指數", "「加權指數收幾點」「大盤這週漲多少」「大盤連漲幾天」", "index_quote", {}],
+  ["健檢", "持股集中在哪、低於成本沒設提醒、重複或過期的進階訊號、股利預估", "checkup", {}],
+  ["交易紀錄", "記買賣時一起留下：已實現損益、手續費與證交稅、報稅整理、匯出", "trades", {}],
+  ["一句話好幾件", "「把聯發科加進自選，再設跌到 900 提醒我」「跌破月線而且爆量通知我」", "", null],
+  ["委託單草稿", "「幫我掛 2 張台積電 1000 的買單」：整理好、檢查價位，你自己去券商下", "", null],
+  ["限時授權", "「接下來 7 天到價提醒不用再問我」，之後一樣能復原", "permission", { perm_action: "list" }],
 ] };
 function aiMaybeAutoCards() {
   if (currentTab !== "ai" || !state.userId || aiBusy || !aiEnabled || !planState.ready) return;
@@ -25289,7 +26310,9 @@ const ASSISTANT_ACTIONS = {
         aiNav(() => openEventsPanel(sid));
         return aiNoData({ head: `${aiStockName(sid)} ${sid}`, text: "目前沒有這一檔的資料，已打開資料清單。" });
       }
-      if (slots.event_type) evs = evs.filter(e => e.event_type === slots.event_type);
+      // 「公告」（重大訊息）連交易所公告一起算；兩種都是發布了才有，看的是過去 30 天（目錄 v37）
+      if (slots.event_type === "announcement") evs = evs.filter(e => AI_NOTICE_TYPES.has(e.event_type));
+      else if (slots.event_type) evs = evs.filter(e => e.event_type === slots.event_type);
       if (slots.horizon === "upcoming") evs = evs.filter(e => String(e.event_date || "") > today);
       evs.sort((a, b) => String(b.event_date || "").localeCompare(String(a.event_date || "")));
       if (!evs.length) return { head: `${aiStockName(sid)} ${sid}`, text: `沒有${slots.event_type ? typeLabel(slots.event_type) : ""}${slots.horizon === "upcoming" ? "接下來的" : ""}資料。`, actions: [{ label: "開資料清單 ›", act: "open", data: { events: sid } }] };
@@ -25300,6 +26323,17 @@ const ASSISTANT_ACTIONS = {
     const sids = aiSignalSids();
     const missing = sids.filter(s => !stockEvents[s]);
     if (missing.length) await loadStockEvents(missing).catch(() => {});
+    // 自選股的公告（目錄 v37）：過去 7 天的重大訊息與交易所公告，持股排前面——發布了才有，不是接下來的日程
+    if (AI_NOTICE_TYPES.has(String(slots.event_type || "")) && slots.horizon !== "upcoming") {
+      const held = new Set(holdingEntries().map(h => h.sid));
+      const list = aiRecentNotices(sids, 7, slots.event_type === "notice" ? "notice" : null)
+        .sort((a, b) => Number(held.has(b.sid)) - Number(held.has(a.sid)) || b.d.localeCompare(a.d));
+      if (!list.length) return { text: `最近 7 天自選股沒有${slots.event_type === "notice" ? "交易所公告（注意、處置、暫停交易）" : "重大訊息或交易所公告"}。`,
+                                 actions: [{ label: "打開通知匣 ›", act: "open", data: { tab: "inbox" } }] };
+      return { head: "最近的公告", sub: `${list.length} 則・過去 7 天・持股在前`, actions: [{ label: "打開通知匣 ›", act: "open", data: { tab: "inbox" } }],
+               rows: list.slice(0, 8).map(x => ({ label: `${aiStockName(x.sid)}${held.has(x.sid) ? "・持股" : ""}`, value: String(x.e.title || "").slice(0, 22),
+                                                  note: mmdd(x.d), act: "open", data: { events: x.sid } })) };
+    }
     let all = [];
     for (const s of sids) for (const e of (stockEvents[s] || [])) all.push({ ...e, sid: s });
     if (slots.event_type) all = all.filter(e => e.event_type === slots.event_type);
@@ -25366,6 +26400,16 @@ const ASSISTANT_ACTIONS = {
                                   data: { intent: "market_strength", slots: { all: true }, text: "所有族群的排名" } }] : [],
              actions: [{ label: "打開市場強度 ›", act: "open", data: { filter: "market" } }] };
   },
+  // 大盤指數（目錄 v37）：加權指數的收盤、漲跌、一段時間、連漲連跌、某一天；盤中的點數沒有（aiIndexAnswer）
+  async assistantIndexQuote(slots) { return aiIndexAnswer(slots || {}); },
+  // 健檢（目錄 v37）：持股、進階訊號、提醒與通知；只整理，要動手的再出確認卡（aiCheckup）
+  async assistantCheckup(slots) { return aiCheckup(slots || {}); },
+  // 交易紀錄與報稅整理（目錄 v37）：自己記的買進賣出、已實現損益、手續費與證交稅、匯出、刪一筆（aiTrades）
+  async assistantTrades(slots) { return aiTrades(slots || {}); },
+  // 限時授權與操作紀錄（目錄 v37）：授權哪幾種不用確認、取消、看授權、看助手做過的事（aiPermission）
+  async assistantPermission(slots) { return aiPermission(slots || {}); },
+  // 委託單草稿（目錄 v37）：不代為下單，只把那一句整理好、做算術與檢查（aiOrderDraft）
+  async assistantOrderDraft(slots) { return aiOrderDraft(slots || {}); },
   // 全市場訊號脈動（monitor/market_pulse.py）：20 種自動偵測訊號今天各有幾檔出現過。
   // 問某一種（漲停、跳空…）就答那一種：全市場幾檔＋自選股哪幾檔；沒指定就列今天最多的幾種（第十六節）
   async assistantMarketSignals(slots, args, opts) {
@@ -25520,6 +26564,17 @@ const ASSISTANT_ACTIONS = {
   async assistantHoldings(slots) {
     if (slots.from_image) return aiImageAskCard();   // 「幫我讀這張庫存截圖」
     if (slots.span) return aiHoldingsSpan(slots.span);   // 「我的持股這週賺多少」（第十八輪）
+    // 「我的持股接下來會領多少股利」（目錄 v37）：接下來 60 天除權息的那幾檔 × 現在的股數，寫明是估算
+    if (slots.dividend) {
+      const pageBtn0 = { label: "打開持股頁 ›", act: "open", data: { tab: "holdings" } };
+      if (!holdingEntries().some(h => Number(h.shares) > 0)) return { text: "還沒有持股紀錄。", actions: [pageBtn0] };
+      const divs = await aiHoldingDividends(AI_CHECK_DIV_DAYS);
+      if (!divs.length) return { head: "持股的股利", text: `接下來 ${AI_CHECK_DIV_DAYS} 天沒有持股要除權息。`, actions: [pageBtn0] };
+      const rows = divs.slice(0, 8).map(x => ({ label: x.name, value: x.amount != null ? `${fmtMoney(x.amount)} 元` : "金額待公告",
+        note: `${aiDateWithCountdown(x.date, taipeiDateKey(new Date()))}${x.cash != null ? `・每股 ${x.cash} 元 × ${fmtLots(x.shares)}` : ""}`,
+        act: "open", data: { events: x.sid } }));
+      return { head: "持股的股利", sub: `接下來 ${AI_CHECK_DIV_DAYS} 天・以現在的股數估算`, rows: aiDividendRows(divs).slice(1).concat(rows), actions: [pageBtn0] };
+    }
     // 收盤價先補今天的（開放資料日 K，15:30 後就有；報告要到隔天 06:15）。最多等 4 秒，拿不到就用手上的
     await Promise.race([ensureHoldingCloses().catch(() => false), new Promise(r => setTimeout(r, 4000))]);
     const s = holdingsSummary();
@@ -25663,6 +26718,7 @@ const ASSISTANT_ACTIONS = {
     const rules = alertRules || [];
     const action = slots.action || "list";
     const rulesBtn = { label: "打開進階訊號 ›", act: "open", data: { rules: true } };
+    if (action === "progress") return aiRuleProgress(slots);   // 「跌破月線那條還差多少」（目錄 v37）
     if (action === "auto") {   // 讓系統幫我選：與面板那顆鈕同一條（範本補滿剩下的額度）
       const room = ruleRoomLeft();
       const tpls = ruleTemplateSuggestions(room, null);
@@ -26068,6 +27124,9 @@ const ASSISTANT_ACTIONS = {
     const next = (stockEvents[sid] || []).filter(e => String(e.event_date || "") > todayKey).sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)))[0];
     if (next) rows.push(Object.assign({ label: "下一個日程", value: String(next.title || "").slice(0, 16), note: mmdd(next.event_date) },
       go("events", { horizon: "upcoming" }, `${f.name}接下來有什麼日程`)));
+    const notice = aiRecentNotices([sid], 7)[0];   // 最近 7 天的重大訊息與交易所公告（目錄 v37）
+    if (notice) rows.push(Object.assign({ label: "最近公告", value: String(notice.e.title || "").slice(0, 18), note: mmdd(notice.d) },
+      go("events", { event_type: "announcement" }, `${f.name}最近有什麼公告`)));
     const h = holdingBySid().get(sid);
     if (h && Number(h.shares) > 0) rows.push(Object.assign({ label: "持股", value: fmtLots(Number(h.shares)), note: Number(h.cost) > 0 ? `成本 ${fmtPrice(Number(h.cost))}` : "" },
       go("holdings", {}, `${f.name}的持股`)));
@@ -26170,6 +27229,14 @@ const ASSISTANT_ACTIONS = {
       rows.push(Object.assign({ label: phase === "weekend" ? "下週日程" : "接下來 7 天", value: `${evs.length} 筆日程`, note: `${aiStockName(evs[0].s)} ${mmdd(evs[0].d)}` },
                               go("events", { horizon: "upcoming" }, "接下來有什麼日程")));
     }
+    // 持股與自選股的公告（目錄 v37）：昨天與今天的重大訊息、交易所公告（07:40 的公告摘要推過一次，這裡是點得進去的那一列）
+    const notices = aiRecentNotices(sids, 1);
+    if (notices.length) {
+      const heldSet = new Set(holdingEntries().map(h => h.sid));
+      const heldN = notices.filter(x => heldSet.has(x.sid)).length;
+      rows.push(Object.assign({ label: "公告", value: `${notices.length} 則${heldN ? `（持股 ${heldN} 則）` : ""}`, note: aiStockName(notices[0].sid) },
+                              go("events", { event_type: "announcement" }, "自選股最近有什麼公告")));
+    }
     // 好友與分享邀請等你回應（第十一輪）
     const pend = frEnabled && typeof frPendingCounts === "function" ? frPendingCounts() : null;
     if (pend && pend.total > 0) {
@@ -26194,6 +27261,9 @@ const ASSISTANT_ACTIONS = {
       rows.push(Object.assign({ label: "全市場", value: `漲 ${dirs.filter(v => v === 1).length}・跌 ${dirs.filter(v => v === -1).length}`,
                                 note: `平 ${dirs.filter(v => v === 0).length}` }, go("movers", { direction: "any" }, "自選股今天的漲跌")));
     }
+    // 加權指數最近一個收盤（目錄 v37）：0050 那一份日 K 檔一天抓一次，等不到 3 秒就不放這一列
+    const ib = await Promise.race([aiIndexBars().catch(() => null), new Promise(r => setTimeout(() => r(null), 3000))]);
+    if (ib && ib.length >= 2) rows.push(Object.assign(aiIndexLastRow(ib), go("index_quote", {}, "大盤收在幾點")));
     // 自己記的、今天要看的（第十七輪）：放最上面，點了是筆記
     const dueToday = aiNotes().filter(n => n.due === today);
     if (dueToday.length) {
@@ -26433,6 +27503,7 @@ const ASSISTANT_ACTIONS = {
       rows: [{ label: "股票", value: `${name} ${sid}`, note: universe[sid]?.i || "" },
              { label: "自選股", value: aiWatchUsage(), note: "加入後 +1" }],
       mainLabel: "加入",
+      grant: "watch_add",   // 限時授權（目錄 v37）
       run: async () => {
         await aiAddStockById(sid);
         return { text: `已加入 ${name}，基礎訊號預設全開。`, actions: [aiOpenBtn(sid, "radar")], chips: aiAfterAddChips(sid) };
@@ -26561,6 +27632,8 @@ const ASSISTANT_ACTIONS = {
       head: row ? "設定到價提醒？" : "加入並設定到價提醒？",
       sub: [row ? "" : `${name} 不在自選股，會先加入`, inferred].filter(Boolean).join("；"),
       rows, mainLabel: "設定",
+      // 限時授權（目錄 v37）：只有單純的那一種——已經在自選股、價位沒有穿過、方向不是猜的
+      grant: row && !inferred && !rows.some(r => r.label === "注意" || r.act) ? "price_target_set" : null,
       alt: row ? { label: "改一下", act: "open", data: { alert: row.id } } : null,
       run: async () => {
         const r = row || await aiAddStockById(sid);
@@ -26629,6 +27702,7 @@ const ASSISTANT_ACTIONS = {
                   { label: "改成", value: on ? "開" : "關", note: row && field ? `目前 ${row[field] ? "開" : "關"}` : "" }];
     return aiConfirmCard({
       head: `${on ? "打開" : "關掉"}基礎訊號？`, rows, mainLabel: on ? "打開" : "關掉",
+      grant: "basic_signal_set",   // 限時授權（目錄 v37）
       alt: { label: "改一下", act: "open", data: { alert: row ? row.id : ALERT_SCOPE_ALL } },
       run: async () => {
         const patch = {};
@@ -26650,6 +27724,8 @@ const ASSISTANT_ACTIONS = {
     });
   },
   async openRuleEditorPrefilled(slots) {
+    // 一句話好幾個條件（目錄 v37）：Worker 把每一段的條件放在 conds，一條進階訊號、全部成立才通知
+    if (Array.isArray(slots.conds) && slots.conds.length >= 2) return aiRuleCreateMany(slots, slots.conds);
     const ct = slots.cond_type;
     if (!ct || ct === "none") {
       aiNav(() => openRulesModal());
@@ -26692,6 +27768,13 @@ const ASSISTANT_ACTIONS = {
       if (!cur) return { text: `拿不到${name || sid}的收盤價，沒辦法定基準價。`, muted: true };
       cond.base = cur;
       cond.base_date = q.tradeDate || "";
+      // 「跌破 900」（目錄 v37）：Worker 給的是價位，換成自收盤價起算的百分比
+      if (cond.price_level != null) {
+        const lv = aiLevelToPct(Number(cond.price_level), cond.dir, cur, sid);
+        delete cond.price_level;
+        if (lv.card) return lv.card;
+        cond.dir = lv.dir; cond.value = lv.value;
+      }
     }
     const fitted = aiFitCondParams(ct, cond);
 
@@ -26719,6 +27802,7 @@ const ASSISTANT_ACTIONS = {
       head: sid && !aiRowOf(sid) ? "加入並建立進階訊號？" : "建立進階訊號？",
       sub: sid && !aiRowOf(sid) ? `${name} 不在自選股，會先加入` : "",
       rows, mainLabel: dup ? "還是建立" : "建立",
+      grant: !dup && !fitted.length && (!sid || aiRowOf(sid)) ? "rule_create" : null,   // 限時授權（目錄 v37）
       alt: { label: "改一下", act: "open", data: { rules: true, prefill: { name: desc.slice(0, 60), stock_id: sid, cond } } },
       run: async () => {
         if (sid && !aiRowOf(sid)) await aiAddStockById(sid);
@@ -26796,12 +27880,15 @@ const ASSISTANT_ACTIONS = {
                          : `已打開「新增持股」，選好了${name}，填股數就好。` };
     }
     if (!row && aiWatchFull()) return aiLimitCard("watchlist");
-    const op = act === "sell" && slots.all ? { kind: "sell", shares: cur.shares }
+    // 賣出也收成交價（交易紀錄算已實現損益用；不改平均成本）。哪一天成交：「10/20 買的」「昨天賣了」（目錄 v37）
+    const op = act === "sell" && slots.all ? { kind: "sell", shares: cur.shares, price }
       : act === "buy" ? { kind: "buy", shares, price }
-      : act === "sell" ? { kind: "sell", shares }
+      : act === "sell" ? { kind: "sell", shares, price }
       : act === "cost" ? { kind: "cost", price }
       : act === "delete" ? { kind: "delete" }
       : { kind: "set", shares, price };
+    const tradedOn = aiTradeDay(slots);
+    if (op.kind === "buy" || op.kind === "sell") Object.assign(op, { tradedOn, source: "assistant" });
     const next = holdingNext(cur, op);
     if (next.error) {
       return { head: `${name} ${sid}`, text: next.error, muted: true,
@@ -26809,7 +27896,7 @@ const ASSISTANT_ACTIONS = {
     }
     const what = {
       buy: `買進 ${fmtLots(op.shares)}${price != null ? `，成交價 ${fmtPrice(price)}` : ""}`,
-      sell: `賣出 ${fmtLots(op.shares)}`,
+      sell: `賣出 ${fmtLots(op.shares)}${price != null ? `，成交價 ${fmtPrice(price)}` : ""}`,
       delete: "刪除這一檔的持股",
       cost: `平均成本改成 ${fmtPrice(price)}`,
       set: `股數改成 ${fmtLots(op.shares)}${price != null ? `，平均成本 ${fmtPrice(price)}` : ""}`,
@@ -26821,6 +27908,14 @@ const ASSISTANT_ACTIONS = {
     else rows.push({ label: "平均成本", value: next.cost != null ? fmtPrice(next.cost) : "未填",
                      note: cur.cost != null && cur.cost !== next.cost ? `原本 ${fmtPrice(cur.cost)}` : "" });
     if (act === "buy" && cur.shares > 0 && cur.cost == null && price != null) rows.push({ label: "平均成本", value: "算不出來", note: "原本沒有成本，之後在持股面板直接填" });
+    // 賣出有成交價又有成本：這一筆的已實現損益（扣手續費與證交稅），與交易紀錄同一個算法（目錄 v37）
+    if (op.kind === "sell" && price != null && cur.cost != null) {
+      const ft = tradeFeeTax(sid, "sell", op.shares, price);
+      const pl = tradeRealized({ side: "sell", price, cost_basis: cur.cost, shares: op.shares, fee: ft.fee, tax: ft.tax });
+      rows.push({ label: "已實現損益", html: true, value: `<span class="${plClass(pl)}">${escapeHtml(fmtSignedMoney(pl))} 元</span>`,
+                  note: `已扣費稅 ${fmtMoney(ft.fee + ft.tax)}` });
+    }
+    if ((op.kind === "buy" || op.kind === "sell") && tradedOn && tradedOn !== taipeiDateKey(new Date())) rows.push({ label: "成交日", value: mmdd(tradedOn), note: "記在交易紀錄" });
     const head = { buy: "記錄買進？", sell: next.removed ? "全部賣出？" : "記錄賣出？", delete: "刪除持股？", cost: "改平均成本？", set: "記錄持股？" }[act];
     return aiConfirmCard({
       head: row ? head : "加入並記錄持股？",
@@ -26838,6 +27933,7 @@ const ASSISTANT_ACTIONS = {
           const back = cur.shares > 0 ? { kind: "set", shares: cur.shares, price: cur.cost, clearCost: cur.cost == null } : { kind: "delete" };
           const r2 = await applyHoldingChange(sid, back);
           if (r2 && r2.error) throw new Error(r2.error);
+          if (res.trade && res.trade.id) await tradeLogDelete(res.trade.id).catch(() => {});   // 那一筆交易紀錄也拿掉
           return `已把 ${name} 的持股改回原本的${cur.shares > 0 ? `（${fmtLots(cur.shares)}）` : ""}。`;
         });
         if (res.removed) {

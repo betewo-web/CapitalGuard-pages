@@ -2162,6 +2162,11 @@ html.home-simple-only #home-filter { display: none !important; }
 /* 筆記那一列：內容是自己寫的一句話，靠左、可以折行（第十七輪） */
 .ai-row.ai-note-row .ai-val { text-align: left; }
 .ai-row.ai-note-row i { white-space: normal; text-align: right; }
+/* 健檢卡的段落標題（持股／進階訊號／提醒與通知）：比資料列小一號、灰字，上面多留一點空 */
+.ai-row.ai-sec-row { padding-top: 12px; }
+.ai-row.ai-sec-row:first-child { padding-top: 2px; }
+.ai-row.ai-sec-row b { color: var(--text-muted); font-size: 0.84rem; }
+.ai-row.ai-sec-row .ai-val { color: var(--text-muted); font-size: 0.86rem; }
 .ai-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .ai-chip { padding: 9px 13px; border-radius: 999px; border: 1px solid rgba(139, 124, 255, 0.45); background: rgba(139, 124, 255, 0.12);
 	color: var(--text-0); font-size: 0.92rem; line-height: 1.2; cursor: pointer; }
