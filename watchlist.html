@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="462">
+  <meta name="app-version" content="463">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=462" rel="stylesheet">
+  <link href="watchlist.css?v=463" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -22138,7 +22138,6 @@ const AI_INTENTS = {
   checkup:          ["assistantCheckup", {}],
   trades:           ["assistantTrades", {}],
   permission:       ["assistantPermission", {}],
-  order_draft:      ["assistantOrderDraft", {}],
   out_of_scope:     ["assistantOutOfScope", {}],
 };
 
@@ -22363,7 +22362,6 @@ function aiIntroHtml(withChips) {
       <li>算 「2 張台積電值多少」、「台積電漲停價」、「900 買的台積電要多少才回本」</li>
       <li>筆記 「記一下：台積電等法說會」、「提醒我明天看鴻海」、「我的筆記」</li>
       <li>健檢 「幫我做持股健檢」、「大盤這週漲多少」、「今年的已實現損益」</li>
-      <li>備單 「幫我掛 2 張台積電 1000 的買單」（整理好讓你自己到券商下，不代為下單）</li>
       <li>問 「什麼是逼近壓力」、「我是什麼方案」</li></ul>
       <div class="ai-note">只整理與解釋公開資料，不提供買賣建議。用鍵盤上的麥克風也可以說話。</div></div>`,
     chips,
@@ -22667,103 +22665,6 @@ function aiCollapseConfirm(id) {
   aiOutcome(spec.log_id, null, null);
   if (_aiSteps && _aiSteps.list.length) aiPushCard({ text: `剩下的 ${_aiSteps.list.length} 件沒有做（改到面板裡了），回來再跟我說一次。`, muted: true });
   _aiSteps = null;
-}
-
-// ── 委託單草稿（目錄 v37，2026-10-26）────────────────────────────────────────
-// 「幫我掛 2 張台積電 1000 的買單」：本服務不代為下單（不是券商，也沒有替使用者送單的授權），這一張只是把那一句
-// 整理成委託的樣子——股票、買賣、數量、價格、金額、手續費與證交稅、漲跌停範圍、升降單位、零股時段——
-// 讓他到自己的券商 App 下單。按「成交了，記下這筆」才走記錄持股那一張確認卡（holdings_set，與持股面板同一條）。
-// 只做算術與檢查（價位合不合升降單位、在不在漲跌停之內、賣的比記錄的持股多），不對這一筆該不該下表示任何意見。
-function aiOrderText(name, sid, side, shares, market, price) {
-  return `${side === "buy" ? "買進" : "賣出"} ${name}（${sid}） ${fmtLots(shares)} ${market ? "市價" : `限價 ${fmtPrice(price)}`}`;
-}
-async function aiOrderDraft(slots) {
-  const sid = slots.stock;
-  if (!sid) return aiNeedStock();
-  const name = aiStockName(sid), head = `${name} ${sid}`;
-  const again = (label, extra) => ({ label, act: "run", data: { intent: "order_draft", slots: Object.assign({}, slots, extra), text: label } });
-  const side = slots.side === "sell" ? "sell" : slots.side === "buy" ? "buy" : null;
-  if (!side) return { head: `${name}：買進還是賣出？`, chips: [again(`買進${name}`, { side: "buy" }), again(`賣出${name}`, { side: "sell" })] };
-  const word = side === "buy" ? "買進" : "賣出";
-  let q = aiQuoteOf(sid);
-  if (!(q && q.price > 0)) { await aiMarketLevels(); q = aiQuoteOf(sid); }
-  const ref = q && q.price > 0 ? Number(q.price) : null;   // 最近一個收盤：下一個交易日的漲跌停以它為準
-  const etf = isEtfId(sid);
-  const hold = holdingBySid().get(sid);
-  const have = hold ? Math.max(0, Number(hold.shares) || 0) : 0;
-  const cost = hold && Number(hold.cost) > 0 ? Number(hold.cost) : null;
-  const shares = Number(slots.shares) > 0 ? Math.round(Number(slots.shares)) : null;
-  if (!shares) {
-    const chips = [again("1 張", { shares: SHARES_PER_LOT })];
-    if (side === "sell" && have > 0) chips.unshift(again(`全部（${fmtLots(have)}）`, { shares: have }));
-    return { head: `${word}多少${name}？`, text: "點一個，或打「2 張」「500 股」。", chips };
-  }
-  const market = !!slots.market;
-  const price = Number(slots.price) > 0 ? Number(slots.price) : null;
-  if (!market && !price) {
-    const chips = [];
-    if (ref) chips.push(again(`以收盤 ${fmtPrice(ref)} 掛`, { price: ref }));
-    chips.push(again("市價", { market: true }));
-    return { head: `${word} ${fmtLots(shares)} ${name}，掛多少？`, text: "點一個，或打「1000 元」。", chips };
-  }
-  const px = market ? ref : price;
-  const rows = [{ label: "委託", value: aiOrderText(name, sid, side, shares, market, price), note: "" }];
-  // 零股：不到一張、或整張之外多出來的那幾股，要在零股時段另外下
-  const odd = shares % SHARES_PER_LOT;
-  if (odd) rows.push({ label: "零股", value: shares < SHARES_PER_LOT ? `${shares} 股` : `另外 ${odd} 股`, note: shares > SHARES_PER_LOT ? "分兩筆下" : "零股時段" });
-  if (!market && price) {
-    const tick = aiTick(price, etf);
-    const k = price / tick;
-    if (Math.abs(k - Math.round(k)) > 1e-6) {
-      const lo = aiR2(Math.floor(k) * tick), hi = aiR2(Math.ceil(k) * tick);
-      rows.push({ label: "升降單位", value: `每檔 ${fmtPrice(tick)} 元`, note: `改成 ${fmtPrice(lo)} 或 ${fmtPrice(hi)}` });
-    }
-    if (ref) {
-      const lim = aiLimitPrices(ref, etf);
-      if (price > lim.up || price < lim.down) rows.push({ label: "漲跌停", value: `${fmtPrice(lim.down)}～${fmtPrice(lim.up)}`, note: "範圍外，券商會退單" });
-    }
-  }
-  if (px) {
-    const amount = Math.round(px * shares), fee = aiFee(amount), tax = side === "sell" ? aiTax(amount, sid) : 0;
-    rows.push({ label: "金額", value: `${fmtMoney(amount)} 元`, note: market ? `以收盤 ${fmtPrice(px)} 估算` : "" },
-              { label: "手續費", value: `${fmtMoney(fee)} 元`, note: "未含券商折扣" });
-    if (side === "sell") rows.push({ label: "證交稅", value: `${fmtMoney(tax)} 元`, note: etf ? "ETF 0.1%" : "0.3%" });
-    rows.push({ label: side === "buy" ? "要付" : "實收", value: `${fmtMoney(side === "buy" ? amount + fee : amount - fee - tax)} 元`, note: "" });
-    if (side === "sell" && cost != null) {
-      const pl = tradeRealized({ side: "sell", price: px, cost_basis: cost, shares, fee, tax });
-      rows.push({ label: "這一筆損益", html: true, value: `<span class="${plClass(pl)}">${escapeHtml(fmtSignedMoney(pl))} 元</span>`, note: `平均成本 ${fmtPrice(cost)}・試算` });
-    }
-    if (side === "buy" && have > 0 && cost != null && !market) {
-      const nx = holdingNext({ shares: have, cost }, { kind: "buy", shares, price });
-      if (!nx.error && nx.cost != null) rows.push({ label: "買進後均價", value: fmtPrice(Math.round(nx.cost * 100) / 100), note: `原本 ${fmtPrice(cost)}` });
-    }
-  } else rows.push({ label: "金額", value: "拿不到收盤價", note: "沒辦法估算" });
-  if (side === "sell" && shares > have) rows.push({ label: "注意", value: `記錄的持股只有 ${fmtLots(have)}`, note: "融券、借券不在持股紀錄裡" });
-  rows.push({ label: "時間", value: _isMarketOpenNow() ? "現在是盤中" : "現在不是盤中", note: _isMarketOpenNow() ? "" : "可以掛預約單（各券商時段不同），或下一個交易日再下" });
-  const record = { label: "成交了，記下這筆", act: "run",
-    data: { intent: "holdings_set", slots: Object.assign({ stock: sid, hold_action: side, shares }, !market && price ? { avg_cost: price } : {}),
-            text: `${word}了 ${fmtLots(shares)}${name}${!market && price ? ` ${price} 元` : ""}` } };
-  const chips = [record];
-  if (!market && price) chips.push({ label: `設 ${fmtPrice(price)} 的到價提醒`, act: "run",
-    data: { intent: "price_target_set", slots: { stock: sid, price, direction: ref && price < ref ? "down" : "up" }, text: `${name}${ref && price < ref ? "跌到" : "漲到"} ${price} 提醒我` } });
-  // 價位不對、漲跌停之外、零股時段：右邊灰字放不下的說明寫在內文
-  const notes = [];
-  if (!market && price && rows.some(r => r.label === "升降單位")) notes.push(`${fmtPrice(price)} 不是有效價位。`);
-  if (rows.some(r => r.label === "漲跌停")) notes.push(`漲跌停以 ${q && q.tradeDate ? mmdd(q.tradeDate) : "最近一個"}收盤 ${fmtPrice(ref)} 算。`);
-  if (odd) notes.push(`零股在盤中 9:00–13:30、盤後 13:40–14:30 交易${shares > SHARES_PER_LOT ? "，整張與零股要分兩筆下" : ""}。`);
-  return { head: `${word}委託草稿・${head}`, sub: "整理好了，請到你的券商 App 下單", rows, chips,
-           text: `${notes.join("")}本服務不代為下單；這一張只是把你說的整理好。`,
-           actions: [{ label: "複製委託內容", act: "copyorder", data: { text: aiOrderText(name, sid, side, shares, market, price) }, main: true }] };
-}
-async function aiCopyOrder(text) {
-  try {
-    await navigator.clipboard.writeText(String(text || ""));
-    trackActivity("assistant_copy", { what: "order" });
-    aiPushCard({ text: "已複製委託內容，到券商 App 貼上或照著填。", muted: true });
-  } catch {
-    aiPushCard({ text: "沒有複製成功：這個瀏覽器不讓網頁寫剪貼簿。", muted: true });
-  }
-  renderAssistant();
 }
 
 // ── 限時授權與操作紀錄（目錄 v37，2026-10-26）───────────────────────────────────
@@ -24115,7 +24016,6 @@ function aiAct(act, data) {
   if (act === "sharecard") { aiShareCard(String(data.k || "")); return; }   // 把這張卡傳給朋友（手機的分享面板；第七輪）
   if (act === "copy") { aiCopyCard(String(data.k || "")); return; }   // 這張卡的文字複製起來（第十七輪）
   if (act === "tradecsv") { aiCopyTradesCsv(data || {}); return; }   // 交易紀錄複製成 CSV（目錄 v37；按鍵本身就是剪貼簿要的手勢）
-  if (act === "copyorder") { aiCopyOrder(String(data.text || "")); return; }   // 委託單草稿的內容（目錄 v37）
   if (act === "keepnote") { aiKeepCardNote(String(data.k || "")); return; }   // 這張卡存成一則筆記（第十九輪）
   if (act === "pin") { aiTogglePin(String(data.k || "")); return; }   // 這一句釘到輸入框的建議裡（第九輪）
   if (act === "gloss") { assistantSend(String(data.text || "")); return; }   // 訊號名稱點了就解釋：名詞的固定句在目錄裡，經 Worker（第十四輪）
@@ -24559,7 +24459,7 @@ const AI_STOCK_HINT = {
   quote: "現在多少錢", levels: "支撐在哪", ma_position: "站上月線了嗎", signals_today: "今天有訊號嗎", signals_history: "這週有哪些訊號",
   events: "有什麼資料", score: "評分多少", holdings: "的持股", kline: "的 K 線", price_target_set: "的到價提醒",
   basic_signal_set: "的基礎訊號", holdings_set: "的持股設定", watch_remove: "移除", share_stock: "分享給好友",
-  stock_overview: "整理一下", compare: "跟誰比較", calc: "試算", order_draft: "的委託草稿",
+  stock_overview: "整理一下", compare: "跟誰比較", calc: "試算",
 };
 function aiNeedStock() {
   const sids = aiStockChoices();
@@ -24605,8 +24505,10 @@ function aiNoteStock(sid) {
 // 追問沿用（「台積電支撐在哪」→「那站上月線了嗎」）：句子裡沒有股票、10 分鐘內剛問過一檔。
 // 一定要指一檔才做得了的那幾類一律沿用（不然只能反問）；整份清單也答得出來的那幾類（今天的訊號、事件、評分…），
 // 要句子裡指著它（那／它／這檔）而且沒有在講整份（我的／全部／自選…）才沿用。寫入類照樣先出確認卡，股票名寫在卡上。
+// 下單用語（v463）：要送出去的委託，不是記帳——記錄持股那一類看到它就先講「不代為下單」
+const AI_ORDER_WORDS = /下單|掛單|掛\s*\d|委託|買單|賣單|市價/;
 const AI_NEED_ONE = new Set(["quote", "levels", "ma_position", "signals_history", "kline", "calc",
-                             "price_target_set", "holdings_set", "watch_add", "watch_remove", "order_draft"]);
+                             "price_target_set", "holdings_set", "watch_add", "watch_remove"]);
 const AI_CARRY_RE = /它|這檔|那檔|這支|那支|這一檔|那一檔|同一檔|剛剛那|剛才那/;
 const AI_WHOLE_RE = /我的|全部|所有|自選|每一檔|哪些|哪幾檔|誰/;
 // 寫入類的「自選」「持股」是動作的對象（「加進自選」），不是在講整份；只有全部／所有才算
@@ -24961,11 +24863,10 @@ function aiSelfHelp() {
                   run("算", "市值、漲跌停、手續費、回本", `例：${n}漲停價多少`, "calc", { stock: sid, calc: "limit" }, `${n}漲停價多少`),
                   run("筆記", "記下要看的事，那天放進重點", "例：我的筆記", "note", { note_action: "list" }, "我的筆記"),
                   run("整理", "今天的重點、這週回顧、明天", "例：今天有什麼重點", "daily_brief", {}, "今天有什麼重點"),
-                  // 目錄 v37：大盤、健檢、交易紀錄、委託單草稿、授權
+                  // 目錄 v37：大盤、健檢、交易紀錄、授權
                   run("大盤", "加權指數的收盤、這週漲跌", "例：大盤這週漲多少", "index_quote", { span: { week: 0 } }, "大盤這週漲多少"),
                   run("健檢", "持股集中度、重複或過期的訊號", "例：幫我做持股健檢", "checkup", {}, "幫我做一次全面健檢"),
                   run("帳", "交易紀錄、已實現損益、報稅整理", "例：今年的已實現損益", "trades", { trade_view: "realized", span: { ytd: true } }, "今年的已實現損益"),
-                  run("備單", "整理成委託單草稿，你自己去券商下", `例：幫我掛 1 張${n}的買單`, "order_draft", { stock: sid, side: "buy", shares: 1000 }, `幫我掛 1 張${n}的買單`),
                   run("授權", "幾種小動作不用每次確認（限時）", "例：我給了哪些授權", "permission", { perm_action: "list" }, "我給了哪些授權"),
                   { label: "問", value: "名詞與算法", note: "例：什麼是逼近壓力", act: "gloss", data: { text: "什麼是逼近壓力" } },
                   { label: "不做", value: "買賣建議、走勢研判、代為下單", note: "建議與研判可以交給你自己的 AI" }] };
@@ -25178,7 +25079,6 @@ const AI_WHATS_NEW = { since: 462, items: [
   ["健檢", "持股集中在哪、低於成本沒設提醒、重複或過期的進階訊號、股利預估", "checkup", {}],
   ["交易紀錄", "記買賣時一起留下：已實現損益、手續費與證交稅、報稅整理、匯出", "trades", {}],
   ["一句話好幾件", "「把聯發科加進自選，再設跌到 900 提醒我」「跌破月線而且爆量通知我」", "", null],
-  ["委託單草稿", "「幫我掛 2 張台積電 1000 的買單」：整理好、檢查價位，你自己去券商下", "", null],
   ["限時授權", "「接下來 7 天到價提醒不用再問我」，之後一樣能復原", "permission", { perm_action: "list" }],
 ] };
 function aiMaybeAutoCards() {
@@ -26408,8 +26308,6 @@ const ASSISTANT_ACTIONS = {
   async assistantTrades(slots) { return aiTrades(slots || {}); },
   // 限時授權與操作紀錄（目錄 v37）：授權哪幾種不用確認、取消、看授權、看助手做過的事（aiPermission）
   async assistantPermission(slots) { return aiPermission(slots || {}); },
-  // 委託單草稿（目錄 v37）：不代為下單，只把那一句整理好、做算術與檢查（aiOrderDraft）
-  async assistantOrderDraft(slots) { return aiOrderDraft(slots || {}); },
   // 全市場訊號脈動（monitor/market_pulse.py）：20 種自動偵測訊號今天各有幾檔出現過。
   // 問某一種（漲停、跳空…）就答那一種：全市場幾檔＋自選股哪幾檔；沒指定就列今天最多的幾種（第十六節）
   async assistantMarketSignals(slots, args, opts) {
@@ -27832,6 +27730,19 @@ const ASSISTANT_ACTIONS = {
   // 缺一格只問那一格（賣出沒說多少 → 全部／1 張兩顆籤）；什麼數字都沒有就直接開那一檔的面板（第十四節的三條原則）。
   assistantHoldingsSet(slots) {
     if (slots.from_image) return aiImageAskCard();   // 「我要上傳庫存截圖更新持股」（第二十六節）
+    // 要送出去的委託（「我要下單賣掉 500 股長榮」「台積電掛 1050 買 1 張」）不是記帳：本服務不代為下單（v463 移除委託單草稿）。
+    // 分類器偶爾把這種句子分到這一類——有下單用語、又沒有「了」這種已經成交的字，就不出記帳卡，講清楚、給一顆記帳的籤
+    const said = String(_aiCurrent.text || "");
+    if (AI_ORDER_WORDS.test(said) && !/了|過|成交/.test(said)) {
+      const nm = slots.stock ? aiStockName(slots.stock) : "";
+      const verb = slots.hold_action === "sell" ? "賣" : "買";
+      const qty = Number(slots.shares) > 0 ? fmtLots(Number(slots.shares)) : "";
+      const px = Number(slots.avg_cost) > 0 ? ` ${slots.avg_cost} 元` : "";
+      return { text: "本服務不代為下單——買賣請到你的券商 App。已經成交了的話，可以把這一筆記進持股。", muted: true,
+               chips: slots.stock && qty ? [{ label: `已經${verb}了，記下來`, act: "run",
+                 data: { intent: "holdings_set", slots: Object.assign({}, slots, { hold_action: slots.hold_action === "sell" ? "sell" : "buy" }),
+                         text: `${verb}了 ${qty}${nm}${px}` } }] : [] };
+    }
     if (!slots.stock && slots.all && slots.hold_action === "delete") return aiClearAllHoldings();   // 「持股全部刪掉」（第十二輪）
     const sid = slots.stock;
     if (!sid) return aiNeedStock();
