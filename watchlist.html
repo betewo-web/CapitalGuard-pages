@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="464">
+  <meta name="app-version" content="465">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=464" rel="stylesheet">
+  <link href="watchlist.css?v=465" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -8469,6 +8469,7 @@ function updateInboxBadge() {
     el.textContent = n > 99 ? "99+" : String(n);
   }
   _setAppBadge(n);   // 桌面／主畫面的 PWA 圖示未讀數
+  _closeReadSystemNotifications(n);
   _syncInboxUnreadChip(n);
   rxRenderBadge();   // 帳號旁那顆籤的未讀點看的是通知匣裡的「回饋」列
 }
@@ -8494,6 +8495,27 @@ function _setAppBadge(n) {
   try {
     navigator.serviceWorker?.controller?.postMessage({ type: "badge-sync", count: n });
   } catch { /* 還沒有 controller：下次 updateInboxBadge 會再同步 */ }
+}
+
+// 讀過的通知從系統通知列收掉（2026-10-28）。Android 的 Chrome 沒有 Badging API，
+// 桌面圖示上的數字是啟動器數「通知列裡還留著幾則」——App 裡讀完、通知列沒清，
+// 圖示就一直掛著那個數字（Howard 回報讀完仍顯示 8，倉庫未讀 0）。
+// 推播的 tag 就是通知匣那一列的 event_key（見 focusInboxAlert 上面那段）：
+// 對得到且已讀的收掉；通知匣全部讀完時，對不到列的那幾種（每日報告、盤後摘要、
+// 到期提醒）也一併收掉——人已經看過整個通知匣了，留著只是讓圖示說謊。
+// 還沒讀的那幾則保留，數字仍然是對的。
+function _closeReadSystemNotifications(unread) {
+  // 這次開機還沒從倉庫抓過通知匣：清單可能是空的或舊快取，「0 則未讀」不可信
+  if (!inboxSupportsRead || !inboxLoadedAt) return;
+  navigator.serviceWorker?.getRegistration?.().then(reg => {
+    if (!reg || !reg.getNotifications) return null;
+    return reg.getNotifications().then(list => {
+      for (const nt of list) {
+        const row = nt.tag ? inboxRows.find(r => r.event_key === nt.tag) : null;
+        if (row ? !!row.read_at : unread === 0) nt.close();
+      }
+    });
+  }).catch(() => { /* 平台不支援：通知列維持原狀 */ });
 }
 
 // 一排篩選籤裡只有一顆亮著。switchTab 回到預設時也要同一組外觀，所以抽出來共用
