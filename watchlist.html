@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="467">
+  <meta name="app-version" content="468">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=467" rel="stylesheet">
+  <link href="watchlist.css?v=468" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7765,9 +7765,9 @@ function alertTypeLabel(row) {
       source: "post_info", event_key: todayInfoEventKey(date), stock_id: null,
       title: `今日股票資訊彙整：${newsRows.length} 則`,
       body: todayInfoBodyLines(newsRows).join("\n"),
-      // 同一天只有第一次寫入算「這一則的時間」。16:30 的 fetch-events 是分批寫的，
-      // 後面幾件事陸續進來時只更新內容（件數與前三則），不重排到清單最上面、也不把
-      // 已讀改回未讀——通知本身一天也只發一次（todayImportantInfoKey）。
+      // 內容變了只更新內容（件數與前三則），時間與已讀不動。真的再跳一次通知的時候，
+      // 由 _touchTodayInfoInbox 把時間改成那一刻、改回未讀——通知列與通知匣講同一件事
+      // （2026-10-28 Howard：下午收到的彙整，通知匣裡還寫 08:32）。
       sent_at: prev ? prev.sent_at : new Date().toISOString(),
       read_at: prev ? (prev.read_at || null) : null,
     };
@@ -7812,9 +7812,25 @@ function alertTypeLabel(row) {
                              window.location.href).toString() },
       });
       localStorage.setItem(key, "1");
+      if (inboxRow) _touchTodayInfoInbox(inboxRow.id);
     } catch (e) {
       console.warn("[Notification] 無法發送今日股票資訊彙整通知:", e);
     }
+  }
+
+  // 通知又跳了一次（內容變了，todayImportantInfoKey 換了一把）：通知匣那一列跟著換成
+  // 這一刻、改回未讀、排回最上面。只在真的發出通知時做——內容默默更新、沒跳通知的
+  // 那幾次不動，否則每次重畫首頁都可能把使用者讀過的那則翻回未讀。
+  function _touchTodayInfoInbox(id) {
+    const now = new Date().toISOString();
+    _localInboxPatch(id, { sent_at: now, read_at: null });
+    const row = inboxRows.find(r => String(r.id) === String(id));
+    if (!row) return;
+    row.sent_at = now;
+    row.read_at = null;
+    inboxRows = _inboxSortRows(inboxRows);
+    updateInboxBadge();
+    if (currentTab === "inbox") renderInbox();
   }
 
 // 時間一律以台北時區顯示。使用者關心的是台股的時間，不是裝置所在地的時間：
