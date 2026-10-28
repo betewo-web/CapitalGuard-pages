@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="468">
+  <meta name="app-version" content="469">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=468" rel="stylesheet">
+  <link href="watchlist.css?v=469" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -7722,17 +7722,45 @@ function alertTypeLabel(row) {
 }
   // 內容簽章：哪幾檔的哪幾件事。它變了才算「新的一份彙整」——通知再發一次（tag 相同，
   // 系統會蓋掉前一則），通知匣那一則也更新成新的內容。
-  function todayImportantInfoSig(rows) {
-    const sig = (rows || [])
+  //
+  // 2026-10-28 改成整串內容的雜湊（Howard：「要修改正確」）。以前是 base64 再截 24 個字元，
+  // 只看得到開頭約 18 個位元組——差不多就是第一件事的代號與類別——之後任何一件的增減、
+  // 換標題都不算內容有變，通知不會再跳。件數也放進去，雜湊之外多一道直觀的保險。
+  function _todayInfoSigText(rows) {
+    return (rows || [])
       .map(({ sid, ev }) => `${sid}:${ev.event_type || ""}:${ev.title || ""}`)
       .join("|");
-    return btoa(unescape(encodeURIComponent(sig))).slice(0, 24);
+  }
+
+  // cyrb53：53 位元的字串雜湊，同一天這幾件事撞號的機率可以不計
+  function _hash53(str) {
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < str.length; i++) {
+      const c = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 2654435761);
+      h2 = Math.imul(h2 ^ c, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
+
+  function todayImportantInfoSig(rows) {
+    return `${(rows || []).length}-${_hash53(_todayInfoSigText(rows))}`;
   }
 
   function todayImportantInfoKey(rows) {
     // 用台北日期，不要用 UTC：早上 8 點前 toISOString() 還停在昨天，
     // 會讓「今天」的判斷比使用者早一天翻頁
     return `home_important_info_notified_${taipeiDateKey(new Date())}_${todayImportantInfoSig(rows)}`;
+  }
+
+  // 換簽章格式的那一天（2026-10-28）：舊格式已經發過的同一份內容，不要因為鑰匙換了
+  // 再跳一次。鑰匙帶日期，過了這一天這段就不會再命中，之後可以整段拿掉。
+  function _todayInfoNotifiedLegacy(rows) {
+    if (taipeiDateKey(new Date()) !== "2026-10-28") return false;
+    const old = btoa(unescape(encodeURIComponent(_todayInfoSigText(rows)))).slice(0, 24);
+    return localStorage.getItem(`home_important_info_notified_2026-10-28_${old}`) === "1";
   }
 
   // 通知內文與通知匣內文同一份：前三則「代號 名稱：標題」
@@ -7754,9 +7782,8 @@ function alertTypeLabel(row) {
     if (!state.userId) return null;   // 本機列的 localStorage 鍵跟著帳號走
     const date = taipeiDateKey(new Date());
     const id = todayInfoInboxId(date);
-    // 件數也進簽章：todayImportantInfoSig 截到 24 個字元，而「原本那幾件再多一件」的
-    // base64 前綴是一樣的——只看它的話，盤後陸續進來的事件不算內容有變
-    const sig = `${newsRows.length}:${todayImportantInfoSig(newsRows)}`;
+    // 與通知的鑰匙同一個簽章：通知匣認定「內容變了」與通知認定「要再跳一次」不能各說各話
+    const sig = todayImportantInfoSig(newsRows);
     const prev = inboxRows.find(r => String(r.id) === id) || _localInboxGet(id);
     // renderHome 每次重畫都會走到這裡：內容沒變就什麼都不做，否則清單一直重畫
     if (prev && prev.info_sig === sig) return prev;
@@ -7791,6 +7818,7 @@ function alertTypeLabel(row) {
 
     const key = todayImportantInfoKey(newsRows);
     if (localStorage.getItem(key) === "1") return;
+    if (_todayInfoNotifiedLegacy(newsRows)) { localStorage.setItem(key, "1"); return; }
 
     const topRows = todayInfoBodyLines(newsRows);
     const eventKey = inboxRow ? String(inboxRow.event_key)
