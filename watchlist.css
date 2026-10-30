@@ -1109,6 +1109,9 @@ body.has-bottom-nav .page-shell {
 /* 整段「來源：⋯ ↗」現在是同一個連結，長度比原本那截目的地文字長，
    窄螢幕要讓它換行（↗ 用 &nbsp; 黏住最後一個字，不會自己掉到下一行）。 */
 .event-source-link { font-size: 0.8rem; color: #7eb0f8; }
+/* 盤後頁的美股收盤連結（外部網站，只連結不轉述）與通知詳情內文裡的網址：與來源連結同一個藍 */
+.post-us-link { display: inline-block; margin-top: 0.5rem; font-size: 0.86rem; color: #7eb0f8; }
+.inbox-body-link { color: #7eb0f8; overflow-wrap: anywhere; }
 .event-actions {
 	display: flex;
 	align-items: center;
