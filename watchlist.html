@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="469">
+  <meta name="app-version" content="470">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=469" rel="stylesheet">
+  <link href="watchlist.css?v=470" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2934,6 +2934,64 @@ function eventSourceHtml(sid, ev) {
     + ` title="${escapeHtml(title)}">來源：${escapeHtml(label + note)}&nbsp;↗</a>`;
 }
 
+// 重大訊息的「說明」是法定填空表（取得資產一則 31 項，一半以上填「不適用」）。
+// 與 data/disclosures.py::tidy_description 同一套規則（test_notices 用同一則樣本釘住兩邊）：
+// 只刪空欄位與欄名裡的填表說明，留下來的字都是原文。後端 2026-10-30 起寫入前就整理，
+// 這一份是給在那之前寫進事件表的列（2026-10-30 Howard：台積電公告「很多繁瑣的文字」）。
+function _squashDisclosureLines(text) {
+  return String(text || "").trim()
+    .replace(/(\S)[ \t]*\n\s*(\S)/g, (m, a, b) => (/^[A-Za-z0-9]$/.test(a) && /^[A-Za-z0-9]$/.test(b) ? `${a} ${b}` : a + b))
+    .replace(/[ \t]{2,}/g, " ").trim();
+}
+function _isEmptyDisclosureValue(value) {
+  const v = String(value || "").trim().replace(/[。.]+$/, "").trim().toLowerCase();
+  return ["", "不適用", "無", "否或不適用", "na", "n/a", "none", "-", "—"].includes(v);
+}
+function tidyDisclosureText(text) {
+  const raw = String(text || "").replace(/\r\n?/g, "\n").trim();
+  const items = [];
+  let expected = 1;
+  for (const line of raw.split("\n")) {
+    const m = line.match(/^\s*(\d{1,2})\s*[.．、]\s*(.*)$/);
+    if (m && Number(m[1]) === expected) { items.push([m[2]]); expected += 1; }
+    else if (items.length) items[items.length - 1].push(line);
+    else if (line.trim()) return raw;
+  }
+  if (items.length < 3) return raw;
+  const out = [];
+  for (const lines of items) {
+    const body = lines.join("\n");
+    const split = body.search(/[:：]/);
+    if (split < 0) {
+      const value = _squashDisclosureLines(body);
+      if (!_isEmptyDisclosureValue(value)) out.push(value);
+      continue;
+    }
+    const label = _squashDisclosureLines(body.slice(0, split))
+      .replace(/[（(][^（）()]*(?:如|者|應|得免|ＸＸ)[^（）()]*[）)]/g, "").trim();
+    const value = body.slice(split + 1).split("\n").map(s => s.trim()).filter(Boolean).join(" ");
+    if (_isEmptyDisclosureValue(value)) continue;
+    out.push(label ? `${label}：${value}` : value);
+  }
+  return out.join("\n");
+}
+
+// 重大訊息的內文：一項一行，前四項直接看得到，其餘收在「其餘 N 項」裡
+const DISCLOSURE_SHOWN_ITEMS = 4;
+function eventContentHtml(ev) {
+  if (!ev.content) return "";
+  if (ev.event_code !== "company.material_info") {
+    return `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>`;
+  }
+  const lines = tidyDisclosureText(ev.content).split("\n").filter(s => s.trim());
+  const line = s => `<div class="event-content-item">${escapeHtml(s)}</div>`;
+  const shown = lines.slice(0, DISCLOSURE_SHOWN_ITEMS).map(line).join("");
+  const rest = lines.slice(DISCLOSURE_SHOWN_ITEMS);
+  return `<div class="event-content event-content-items text-muted small">${shown}`
+    + (rest.length ? `<details class="event-content-more"><summary>其餘 ${rest.length} 項</summary>${rest.map(line).join("")}</details>` : "")
+    + `</div>`;
+}
+
 function renderEventCard(sid, ev, options = {}) {
   const typeLabel = _EVENT_TYPE_LABEL[ev.event_type] || ev.event_type || "事件";
   const direction = _EVENT_DIRECTION_META[ev.direction] || null;
@@ -2970,7 +3028,7 @@ function renderEventCard(sid, ev, options = {}) {
         ${dateChip}
       </div>
       <div class="event-title">${titlePrefix}${escapeHtml(ev.title || "")}</div>
-      ${ev.content ? `<div class="event-content text-muted small">${escapeHtml(ev.content)}</div>` : ""}
+      ${eventContentHtml(ev)}
       ${renderEventMetrics(ev)}
       ${renderEventSignificance(ev)}
       <div class="event-actions">${linkHtml}${actionHtml}</div>
