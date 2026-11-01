@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- App 版本：與 sw.js 的 CACHE_VERSION、watchlist.css?v= 同號（test_sw_cache_version 會擋）。
        每個 Supabase 請求都帶 X-App-Version，伺服器低於 min_app_version 就拒絕（SECURITY.md S31）。 -->
-  <meta name="app-version" content="471">
+  <meta name="app-version" content="472">
   <title>CapitalGuard-股市雷達 — 個人投資助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <!-- ?v= 必須跟 sw.js 的 CACHE_VERSION 同號（test_sw_cache_version 會擋）。
        換版就換 URL，舊的 service worker、瀏覽器 HTTP 快取都一定 miss，
        只能去拿新的——不必等新 sw 裝好接管，也就沒有「新 HTML 配舊 CSS」。 -->
-  <link href="watchlist.css?v=471" rel="stylesheet">
+  <link href="watchlist.css?v=472" rel="stylesheet">
   <!-- 文字大小：要在第一次繪製之前就套上，不然開頁會先閃一下標準字級再跳大。
        所以這一小段直接寫在 head，不等主程式（主程式在檔案最後面才載入）。
        對應的 UI 與常數在下面的 APP_FONT_SIZES／setAppFontSize。
@@ -2330,6 +2330,9 @@ let _inboxTargetAt = 0;
 const INBOX_TARGET_FLASH_MS = 4000;
 let inboxLoadedAt = 0;
 let inboxSupportsRead = true;   // migrate_pwa_v2.sql 未執行時自動降級
+// alert_history.hidden_at 存在（migrate_alert_history_hidden.sql 跑過）：直接查表的退路要排除隱藏列。
+// 看倉庫回來的列有沒有這個鍵就知道；不確定時不帶條件——帶了不存在的欄位整個請求 400。
+let _inboxHasHiddenCol = false;
 let intradaySupportsLevels = true;   // migrate_intraday_levels.sql 未執行時自動降級（PostgREST 對不存在的欄位回 400）
 // intraday_state 的選配欄位（各自有 migration，舊到新）：levels（migrate_intraday_levels.sql）、
 // quote_at（migrate_intraday_quote_at.sql：報價有效時刻＝MIS 快照 sysTime 或富果抓取時間，
@@ -8209,6 +8212,8 @@ function _inboxSince(cursor, windowStart) {
   return new Date(Math.max(_inboxTs(cursor) - INBOX_OVERLAP_MS, _inboxTs(windowStart))).toISOString();
 }
 
+function _inboxDirectParams(p) { return _inboxHasHiddenCol ? { ...p, hidden_at: "is.null" } : p; }
+
 function _inboxQueryParams(cursor, readCursor, windowStart) {
   const p = { order: "sent_at.desc", sent_at: `gte.${windowStart}`, limit: String(INBOX_HISTORY_LIMIT) };
   if (!cursor) return p;
@@ -8359,7 +8364,7 @@ async function refreshInbox(force = true) {
     const windowStart = _inboxWindowStart();
     const params = _inboxQueryParams(_inboxCursor, _inboxReadCursor, windowStart);
     const delta = await _inboxDeltaRpc(_inboxCursor, _inboxReadCursor, windowStart);
-    const fresh = delta ? delta.rows : ((await sbGet("alert_history", params, state.accessToken)) || []);
+    const fresh = delta ? delta.rows : ((await sbGet("alert_history", _inboxDirectParams(params), state.accessToken)) || []);
     let rows;
     if (params.or) {
       rows = _inboxMergeRows(inboxRows, fresh, windowStart);
@@ -8370,12 +8375,12 @@ async function refreshInbox(force = true) {
       let total = null;
       if (localN < INBOX_HISTORY_LIMIT) {
         total = delta ? delta.total
-          : await sbCount("alert_history", { sent_at: `gte.${windowStart}` }, state.accessToken).catch(() => null);
+          : await sbCount("alert_history", _inboxDirectParams({ sent_at: `gte.${windowStart}` }), state.accessToken).catch(() => null);
       }
       if (total !== null && total !== localN) {
         const again = await _inboxDeltaRpc(null, null, windowStart);
         const all = again ? again.rows
-          : ((await sbGet("alert_history", _inboxQueryParams(null, null, windowStart), state.accessToken)) || []);
+          : ((await sbGet("alert_history", _inboxDirectParams(_inboxQueryParams(null, null, windowStart)), state.accessToken)) || []);
         rows = _inboxMergeRows(inboxRows.filter(r => r.pending), all, windowStart);
       }
     } else {
@@ -8394,6 +8399,7 @@ async function refreshInbox(force = true) {
     // migrate_pwa_v2.sql 還沒跑的帳號上誤判成「已讀功能可用」
     const readProbe = inboxRows.find(r => !r.local);
     inboxSupportsRead = !readProbe || ("read_at" in readProbe);
+    if (readProbe && "hidden_at" in readProbe) _inboxHasHiddenCol = true;
     inboxLoadError = null;
     updateInboxBadge();
     renderCurrentTab();
@@ -9192,10 +9198,33 @@ function openDailyReportFromHistory() {
   window.open(url.toString(), "_blank");
 }
 
+// 清空／刪除改成隱藏（2026-11-01，migrate_alert_history_hidden.sql）。
+// 以前直接 DELETE：吳寶清按了清空，倉庫裡他就一列不剩，管理儀表板看起來像從沒收過通知，
+// 而且清空本身沒有任何痕跡。現在只填 hidden_at，使用者看不到（inbox_delta 排除），
+// 營運端的數字還在。那支 migration 還沒跑（欄位不存在，PATCH 回 400）就退回原本的 DELETE，
+// 記住之後這次開著的期間不再先試。
+let _inboxHideMissing = false;
+async function _inboxHideServer(filter) {
+  if (!_inboxHideMissing) {
+    try {
+      await sbPatch("alert_history", { ...filter, hidden_at: "is.null" },
+                    { hidden_at: new Date().toISOString() }, state.accessToken);
+      _inboxHasHiddenCol = true;
+      return;
+    } catch (e) {
+      if (!/: 400\b/.test(String((e && e.message) || ""))) throw e;
+      _inboxHideMissing = true;
+    }
+  }
+  await sbDelete("alert_history", filter, state.accessToken);
+}
+
 async function clearAlertHistory() {
   if (!confirm("確定清空全部通知紀錄？")) return;
   try {
-    await sbDelete("alert_history", { "user_id": `eq.${state.userId}` }, state.accessToken);
+    const n = inboxRows.length;
+    await _inboxHideServer({ "user_id": `eq.${state.userId}` });
+    trackActivity("inbox_clear", { n });
     inboxRows = [];
     _localInboxClear();      // 本機列（今日股票資訊彙整）也是「全部通知」的一部分
     // 還在復原寬限內的那一則也沒了（倉庫整個清空了，再送一次 DELETE 沒有意義）
@@ -9283,15 +9312,14 @@ async function _inboxDeleteServer(row, userId) {
   // 一個 400（id 不是倉庫的 uuid），然後 _inboxCommitDelete 會把那一則放回清單
   if (row.local) { _localInboxDrop(row.id); return; }
   if (!row.pending) {
-    await sbDelete("alert_history", { "user_id": `eq.${userId}`, "id": `eq.${row.id}` }, state.accessToken);
+    await _inboxHideServer({ "user_id": `eq.${userId}`, "id": `eq.${row.id}` });
     return;
   }
   // 暫存列（推播先到、倉庫那列還沒抓到）沒有倉庫 id。倉庫那列多半已經寫進去了，用
   // event_key 刪；守門員留在 Cache 的那一份也要拿掉，否則回前景又被 _consumePendingSignalsFromCache
   // 撿回來。雷達那邊不動——內建訊號在 intraday_state 裡，刪倉庫列也不會讓它從雷達消失。
   if (!row.event_key) return;
-  await sbDelete("alert_history",
-    { "user_id": `eq.${userId}`, "event_key": `eq.${row.event_key}` }, state.accessToken);
+  await _inboxHideServer({ "user_id": `eq.${userId}`, "event_key": `eq.${row.event_key}` });
   await _dropPendingSignalCache(row.event_key);
 }
 
